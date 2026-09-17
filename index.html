@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>web-node — Node.js in the browser</title>
+    <link rel="stylesheet" href="/src/ui/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">▣</span>
+        <div>
+          <strong>web-node</strong>
+          <span class="sub">Node.js core running in your browser tab</span>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="run" class="primary">▶ Run</button>
+        <button id="clear">Clear</button>
+        <button id="reset">Reset project</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="pane files">
+        <div class="pane-head">Files <span class="hint">(virtual VFS → OPFS)</span></div>
+        <ul id="file-tree" class="file-tree"></ul>
+      </section>
+
+      <section class="pane editor">
+        <div class="pane-head"><span id="active-file">—</span><span id="dirty" class="dirty"></span></div>
+        <textarea id="editor" spellcheck="false"></textarea>
+      </section>
+
+      <section class="pane output">
+        <div class="pane-head">Output <span id="status" class="status"></span></div>
+        <pre id="terminal"></pre>
+      </section>
+    </main>
+
+    <footer class="statusbar">
+      <span id="boot">booting runtime…</span>
+      <span id="facts"></span>
+    </footer>
+
+    <script type="module" src="/src/ui/main.ts"></script>
+  </body>
+</html>
