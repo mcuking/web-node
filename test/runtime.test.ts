@@ -62,6 +62,29 @@ describe('NodeRuntime — core', () => {
     expect(stdout).toBe('stdin-ok false null object\n');
   });
 
+  it('fs.watch surfaces VFS writes (the hook a dev server watches with)', () => {
+    const { stdout, error } = run({
+      '/project/index.js': `
+        const fs = require('fs');
+        fs.mkdirSync('/project/src/nested', { recursive: true });
+        const seen = [];
+        const w = fs.watch('/project/src', { recursive: true }, (event, filename) => {
+          seen.push(event + ':' + filename);
+        });
+        fs.writeFileSync('/project/src/a.js', 'x');
+        fs.writeFileSync('/project/src/nested/b.js', 'y');
+        fs.writeFileSync('/project/outside.js', 'z');
+        fs.rmSync('/project/src/a.js');
+        w.close();
+        fs.writeFileSync('/project/src/c.js', 'w');
+        console.log(seen.join(' '));
+      `,
+    });
+    expect(error).toBeNull();
+    // create and delete both map to Node's 'rename'; edits to 'change'.
+    expect(stdout).toBe('rename:a.js rename:nested/b.js rename:a.js\n');
+  });
+
   it('runs real vendored node path.js', () => {
     const { stdout, error } = run({
       '/project/index.js': `

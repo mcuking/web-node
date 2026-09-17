@@ -50,6 +50,20 @@ export interface ReaddirOptions {
   recursive?: boolean;
 }
 
+/**
+ * A change observed on the VFS, handed to `subscribe()` listeners.
+ *
+ * The VFS is the only place that knows when a file is written, so this is where
+ * watching has to start: `fs.watch` is a thin projection of these events, and a
+ * dev server (or any tool that reacts to edits) sits on top of that.
+ */
+export interface VfsChange {
+  /** `create` (path did not exist), `change` (content/metadata) or `delete`. */
+  type: 'create' | 'change' | 'delete';
+  /** Absolute path that changed. */
+  path: string;
+}
+
 /** Thrown by VFS operations; carries a POSIX errno code so bindings can map to Node errors. */
 export class VfsError extends Error {
   code: string;
@@ -130,4 +144,13 @@ export interface Vfs {
 
   /** Resolve a (possibly relative) path against the current working directory. */
   resolve(p: PathLike): string;
+
+  /**
+   * Observe changes to the tree. Returns an unsubscribe function.
+   *
+   * A browser tab has no inotify, so watching is only as live as the writes that
+   * go through this VFS — which, for everything running inside the runtime, is
+   * all of them.
+   */
+  subscribe(listener: (change: VfsChange) => void): () => void;
 }

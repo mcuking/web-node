@@ -18,6 +18,7 @@ const buildBtn = $<HTMLButtonElement>('build');
 const bundleBtn = $<HTMLButtonElement>('bundle');
 const viteBtn = $<HTMLButtonElement>('vite');
 const viteDevBtn = $<HTMLButtonElement>('vitedev');
+const hmrEditBtn = $<HTMLButtonElement>('hmred');
 const installBtn = $<HTMLButtonElement>('install');
 const clearBtn = $<HTMLButtonElement>('clear');
 const resetBtn = $<HTMLButtonElement>('reset');
@@ -134,6 +135,25 @@ async function viteBuildProject(): Promise<void> {
 async function viteDevProject(): Promise<void> {
   await runEntry('/project/vite-dev.mjs', 'node /project/vite-dev.mjs', viteDevBtn);
 }
+
+// A VFS write is what the dev server watches, so saving a source file makes the
+// running preview hot-update. This button does exactly that write, on the file
+// the demo app accepts, ready for when no dev server is open to react.
+let hmrEdits = 0;
+async function hmrEdit(): Promise<void> {
+  hmrEdits += 1;
+  const source = [
+    'export function greet(who) {',
+    `  return 'Hello from ' + who + ', hot-updated #${hmrEdits}';`,
+    '}',
+    '',
+  ].join('\n');
+  await client.writeFile('/project/site/src/message.js', source);
+  writeTerminal(`\n[hmr] wrote site/src/message.js (#${hmrEdits}) — watch the Preview\n`, 'sys');
+  if (activeFile === '/project/site/src/message.js') editorEl.value = source;
+}
+
+hmrEditBtn.addEventListener('click', () => void hmrEdit());
 
 // --- preview ---------------------------------------------------------------
 
