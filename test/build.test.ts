@@ -85,4 +85,67 @@ describe('demo build script', () => {
     expect(out.join('')).toContain('not installed yet');
     expect(out.join('')).not.toContain('build failed');
   });
+
+  it('explains how to install rollup when it is missing', async () => {
+    const { run, out } = boot(DEMO_FILES, '/project/bundle.js');
+    run();
+    await tick(20);
+    expect(out.join('')).toContain('not installed yet');
+    expect(out.join('')).not.toContain('bundle failed');
+  });
+});
+
+describe('fs/promises, perf_hooks and url builtins', () => {
+  it('exposes fs/promises with the same functions as fs.promises', () => {
+    const { run, out } = boot(
+      {
+        '/project/index.js': `
+          const fsp = require('fs/promises');
+          const fs = require('fs');
+          console.log('same ' + (fsp === fs.promises));
+          console.log('types ' + [typeof fsp.readFile, typeof fsp.writeFile, typeof fsp.stat, typeof fsp.mkdir].join(','));
+        `,
+      },
+      '/project/index.js',
+    );
+    run();
+    expect(out.join('')).toContain('same true');
+    expect(out.join('')).toContain('types function,function,function,function');
+  });
+
+  it('exposes perf_hooks.performance and url helpers', () => {
+    const { run, out } = boot(
+      {
+        '/project/index.js': `
+          const perf = require('perf_hooks');
+          const url = require('url');
+          console.log('now ' + (typeof perf.performance.now()));
+          console.log('toPath ' + url.fileURLToPath('file:///project/dist/app.esm.js'));
+          console.log('toURL ' + url.pathToFileURL('/project/a b.js').href);
+        `,
+      },
+      '/project/index.js',
+    );
+    run();
+    expect(out.join('')).toContain('now number');
+    expect(out.join('')).toContain('toPath /project/dist/app.esm.js');
+    expect(out.join('')).toContain('toURL file:///project/a%20b.js');
+  });
+
+  it('does not inject host-identical globals into CommonJS wrappers', () => {
+    // A module may declare its own top-level `const btoa`; injecting the host
+    // btoa as a wrapper parameter would collide ("already been declared").
+    const { run, out } = boot(
+      {
+        '/project/index.js': `
+          const btoa = function (s) { return 'mine:' + s; };
+          const performance = { now: function () { return 1; } };
+          console.log(btoa('x') + ' ' + performance.now());
+        `,
+      },
+      '/project/index.js',
+    );
+    run();
+    expect(out.join('')).toBe('mine:x 1\n');
+  });
 });

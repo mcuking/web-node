@@ -15,6 +15,7 @@ const bootEl = $<HTMLSpanElement>('boot');
 const factsEl = $<HTMLSpanElement>('facts');
 const runBtn = $<HTMLButtonElement>('run');
 const buildBtn = $<HTMLButtonElement>('build');
+const bundleBtn = $<HTMLButtonElement>('bundle');
 const installBtn = $<HTMLButtonElement>('install');
 const clearBtn = $<HTMLButtonElement>('clear');
 const resetBtn = $<HTMLButtonElement>('reset');
@@ -120,6 +121,10 @@ async function buildProject(): Promise<void> {
   await runEntry('/project/build.js', 'node /project/build.js', buildBtn);
 }
 
+async function bundleProject(): Promise<void> {
+  await runEntry('/project/bundle.js', 'node /project/bundle.js', bundleBtn);
+}
+
 // --- preview ---------------------------------------------------------------
 
 async function refreshPorts(): Promise<void> {
@@ -200,6 +205,7 @@ client.on('ready', (runtimeInfo) => {
 });
 runBtn.addEventListener('click', () => void runProject());
 buildBtn.addEventListener('click', () => void buildProject());
+bundleBtn.addEventListener('click', () => void bundleProject());
 
 async function installDeps(): Promise<void> {
   await save();

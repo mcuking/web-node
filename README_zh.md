@@ -113,7 +113,22 @@ written     : /project/dist/app.js
 ```
 
 为支持它顺带补齐了：`package.json` 的 **`browser` 字段**（字符串/对象形式，`false` → 空模块）和
-模块级 **`require.resolve()`**。Vite / webpack 本体是下一步（M5b）。
+模块级 **`require.resolve()`**。
+
+### 用 rollup 打包（M5b）
+
+点 **⧉ Bundle**：在页内跑 **rollup 的官方 WASM 构建**，直接从虚拟文件系统读项目 ES 模块
+（**无需插件** —— 我们的 `fs` 就是 VFS），做 tree-shaking 后写回 `/project/dist/app.esm.js`：
+
+```
+tool        : rollup v4.63.3 (official WASM build)
+bundle      : 339 bytes in 13ms
+tree-shaken : yes (dead export dropped)
+written     : /project/dist/app.esm.js
+```
+
+Vite / webpack 本体是下一步（M5c）。注意 Vite 8 已改用 rolldown（Rust 原生二进制），
+浏览器里跑要钉 **Vite 5.x**。
 
 ## 里程碑
 
@@ -129,7 +144,8 @@ written     : /project/dist/app.js
 | M3.5c | https（http 同名壳） | ✅ |
 | M3.5d | 子域名路由（`<port>.localhost`） | ⏸ 暂缓（跨源 runtime/OPFS） |
 | M5 | 真实构建工具 —— esbuild WASM：安装→初始化→打包→写回 | ✅ |
-| M5b | Vite / webpack 本体 | ⬜ 下一步 |
+| M5b | 真实打包器 —— rollup WASM：ESM 图 + tree-shaking → VFS | ✅ |
+| M5c | Vite / webpack 本体 | ⬜ 下一步 |
 
 ## 改动约定
 
