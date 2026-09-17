@@ -30,14 +30,24 @@ src/
     bindings/     TS 实现的 internalBinding
     builtins/     node:* 模块实现（真源码 + TS 实现）
     loader/       CJS resolver + ESM→CJS 转换
+    net/          虚拟 TCP（VirtualNetwork / VirtualSocket）
     vfs/          虚拟文件系统（内存树 + OPFS 持久化）
   worker/         Dedicated Worker 入口
-  client/         主线程 Runtime Client API
-  ui/             Demo UI
+  client/         主线程 Runtime Client API（含 ServiceWorker 桥）
+  ui/             Demo UI（文件树 / 编辑器 / 终端 / 预览）
+public/sw.js      ServiceWorker：/preview/<port>/ → 虚拟网络
 vendor/node-lib/  从 Node.js 源码复制的真实文件（含来源记录 MANIFEST.json）
 tools/            依赖扫描 / vendoring 工具
 docs/             设计文档 + 开发日志
 test/             Vitest 单测 / 集成测试
+```
+
+## 网络（M3）
+
+`http.createServer().listen(3000)` 后，在 UI 的 **Preview** tab 或 `/preview/3000/` 访问：
+
+```
+浏览器 URL → ServiceWorker → 主线程 → runtime worker → VirtualNetwork → 你的 handler
 ```
 
 ## 改动约定

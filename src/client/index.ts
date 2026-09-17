@@ -9,6 +9,22 @@ export interface RuntimeEvents {
   ready: (info: RuntimeInfo) => void;
 }
 
+interface BridgeHttpRequest {
+  type: 'web-node:http';
+  port: number;
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  body: ArrayBuffer | null;
+}
+
+interface VirtualHttpResult {
+  status: number;
+  statusMessage: string;
+  headers: Record<string, string | string[]>;
+  body: Uint8Array;
+}
+
 /**
  * Main-thread facade over the runtime worker.
  *
@@ -96,8 +112,54 @@ export class RuntimeClient {
     return this.#request({ type: 'reset' });
   }
 
-  describe(): Promise<{ bindings: string[]; modules: Array<{ id: string; origin: string; state: string }> }> {
+  describe(): Promise<{
+    bindings: string[];
+    modules: Array<{ id: string; origin: string; state: string }>;
+    ports: number[];
+  }> {
     return this.#request({ type: 'describe' });
+  }
+
+  /**
+   * Register the ServiceWorker that turns browser requests to
+   * `/preview/<port>/…` into virtual connections inside the runtime worker.
+   * Safe to call when ServiceWorkers are unavailable — it just resolves false.
+   */
+  async installServiceWorkerBridge(): Promise<boolean> {
+    if (!('serviceWorker' in navigator)) return false;
+    navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
+      const data = event.data as BridgeHttpRequest | undefined;
+      if (!data || data.type !== 'web-node:http') return;
+      const reply = event.ports[0];
+      if (!reply) return;
+      void this.#serveViaBridge(data).then(
+        (result) => reply.postMessage(result),
+        (err: unknown) => reply.postMessage({ error: err instanceof Error ? err.message : String(err) }),
+      );
+    });
+
+    try {
+      await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      await navigator.serviceWorker.ready;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async #serveViaBridge(req: BridgeHttpRequest): Promise<VirtualHttpResult | { error: string }> {
+    try {
+      return await this.#request<VirtualHttpResult>({
+        type: 'http',
+        port: req.port,
+        method: req.method,
+        path: req.path,
+        headers: req.headers,
+        body: req.body,
+      });
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   terminate(): void {

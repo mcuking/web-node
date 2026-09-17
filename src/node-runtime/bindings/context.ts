@@ -1,4 +1,5 @@
 import type { Vfs } from '../vfs';
+import type { VirtualNetwork } from '../net/network';
 
 /**
  * Everything a binding is allowed to see about the host. Bindings never reach
@@ -7,6 +8,12 @@ import type { Vfs } from '../vfs';
  */
 export interface BindingContext {
   vfs: Vfs;
+  /**
+   * The virtual TCP layer. Node talks to the OS through `tcp_wrap`; we talk to
+   * this instead. `net`/`http` are written against it, and the ServiceWorker
+   * bridge dials it from outside the worker.
+   */
+  network: VirtualNetwork;
   env: Record<string, string>;
   argv: string[];
   execPath: string;

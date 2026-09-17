@@ -24,7 +24,7 @@
 
     <main class="layout">
       <section class="pane files">
-        <div class="pane-head">Files <span class="hint">(virtual VFS → OPFS)</span></div>
+        <div class="pane-head">Files <span class="hint">(VFS → OPFS)</span></div>
         <ul id="file-tree" class="file-tree"></ul>
       </section>
 
@@ -34,8 +34,30 @@
       </section>
 
       <section class="pane output">
-        <div class="pane-head">Output <span id="status" class="status"></span></div>
-        <pre id="terminal"></pre>
+        <div class="pane-head">
+          <div class="tabs">
+            <button class="tab active" data-tab="output">Output</button>
+            <button class="tab" data-tab="preview">Preview</button>
+          </div>
+          <span id="status" class="status"></span>
+        </div>
+
+        <div class="view" id="view-output">
+          <pre id="terminal"></pre>
+        </div>
+
+        <div class="view hidden" id="view-preview">
+          <div class="preview-bar">
+            <label for="port-select">:&nbsp;</label>
+            <select id="port-select"></select>
+            <button id="refresh" title="Reload the preview">⟳</button>
+            <a id="open-tab" href="#" target="_blank" rel="noopener">open ↗</a>
+          </div>
+          <iframe id="preview-frame" title="preview" src="about:blank"></iframe>
+          <div id="preview-empty" class="preview-empty">
+            No port bound yet. <code>http.createServer(…).listen(3000)</code> then hit ▶ Run.
+          </div>
+        </div>
       </section>
     </main>
 

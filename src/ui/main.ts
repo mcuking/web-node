@@ -16,6 +16,13 @@ const factsEl = $<HTMLSpanElement>('facts');
 const runBtn = $<HTMLButtonElement>('run');
 const clearBtn = $<HTMLButtonElement>('clear');
 const resetBtn = $<HTMLButtonElement>('reset');
+const portSelect = $<HTMLSelectElement>('port-select');
+const refreshBtn = $<HTMLButtonElement>('refresh');
+const openTab = $<HTMLAnchorElement>('open-tab');
+const previewFrame = $<HTMLIFrameElement>('preview-frame');
+const previewEmpty = $<HTMLDivElement>('preview-empty');
+const viewOutput = $<HTMLDivElement>('view-output');
+const viewPreview = $<HTMLDivElement>('view-preview');
 
 let files: string[] = [];
 let activeFile = '';
@@ -92,8 +99,67 @@ async function runProject(): Promise<void> {
     setStatus('error', 'err');
   } finally {
     runBtn.disabled = false;
+    await refreshPorts();
   }
 }
+
+// --- preview ---------------------------------------------------------------
+
+async function refreshPorts(): Promise<void> {
+  const { ports } = await client.describe();
+  const previous = portSelect.value;
+  portSelect.innerHTML = '';
+
+  if (ports.length === 0) {
+    previewEmpty.classList.remove('hidden');
+    previewFrame.classList.add('hidden');
+    portSelect.disabled = true;
+    return;
+  }
+
+  previewEmpty.classList.add('hidden');
+  previewFrame.classList.remove('hidden');
+  portSelect.disabled = false;
+  for (const port of ports) {
+    const option = document.createElement('option');
+    option.value = String(port);
+    option.textContent = ':' + port;
+    portSelect.appendChild(option);
+  }
+  portSelect.value = ports.includes(Number(previous)) ? previous : String(ports[0]);
+  loadPreview();
+}
+
+function previewUrl(): string {
+  const port = portSelect.value;
+  return `${location.origin}/preview/${port}/`;
+}
+
+function loadPreview(): void {
+  const url = previewUrl();
+  openTab.href = url;
+  previewFrame.src = url;
+  writeTerminal(`[preview] ${url}\n`, 'sys');
+}
+
+function showTab(name: 'output' | 'preview'): void {
+  for (const tab of document.querySelectorAll<HTMLButtonElement>('.tab')) {
+    tab.classList.toggle('active', tab.dataset.tab === name);
+  }
+  viewOutput.classList.toggle('hidden', name !== 'output');
+  viewPreview.classList.toggle('hidden', name !== 'preview');
+}
+
+for (const tab of document.querySelectorAll<HTMLButtonElement>('.tab')) {
+  tab.addEventListener('click', () => {
+    const name = tab.dataset.tab === 'preview' ? 'preview' : 'output';
+    showTab(name);
+    if (name === 'preview' && portSelect.value) loadPreview();
+  });
+}
+
+portSelect.addEventListener('change', () => loadPreview());
+refreshBtn.addEventListener('click', () => loadPreview());
 
 client.on('stdout', (data) => writeTerminal(data));
 client.on('stderr', (data) => writeTerminal(data, 'err'));
@@ -115,7 +181,6 @@ client.on('ready', (runtimeInfo) => {
   }
   writeTerminal('internalBindings: ' + runtimeInfo.bindings.join(', ') + '\n\n', 'sys');
 });
-
 runBtn.addEventListener('click', () => void runProject());
 clearBtn.addEventListener('click', () => {
   terminalEl.innerHTML = '';
@@ -125,6 +190,7 @@ resetBtn.addEventListener('click', async () => {
   files = await client.reset();
   renderTree();
   await openFile('/project/index.js');
+  await refreshPorts();
   writeTerminal('\n[project reset to demo files]\n', 'sys');
 });
 
@@ -140,6 +206,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 async function boot(): Promise<void> {
+  const bridged = await client.installServiceWorkerBridge();
   await client.init();
   // The ready payload populated `files` via the 'ready' handler; a no-op mount
   // re-reads the current tree so ordering is deterministic.
@@ -148,7 +215,14 @@ async function boot(): Promise<void> {
   renderTree();
   const entry = files.find((f) => f.endsWith('index.js')) ?? files[0];
   if (entry) await openFile(entry);
+  writeTerminal(
+    bridged
+      ? 'service worker bridge ready — /preview/<port>/ routes into the virtual network.\n'
+      : 'service worker unavailable — preview routing disabled.\n',
+    bridged ? 'sys' : 'err',
+  );
   writeTerminal('\nPress ▶ Run (or ⌘/Ctrl+Enter).\n\n', 'sys');
+  await refreshPorts();
 }
 
 void boot().catch((err: unknown) => {
