@@ -141,7 +141,9 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 **测试**：仍 **100/100**（本里程碑为集成行为，主要靠 `tools/e2e-subdomain-hmr.mjs` 端到端验证）。
 
-**新增验证工具**：`tools/e2e-subdomain-hmr.mjs` 扩到 JS+CSS 两阶段（含端口发现、每步超时、SW 重注册）；`tools/probe-hmr-ports.mjs`（端口隔离计数）。
+**线上验证（GitHub Pages / 路径前缀模式）**：`npm run deploy` 后跑 `tools/e2e-pages-hmr.mjs`——预览 src 为 `https://mcuking.github.io/web-node/preview/5173/`；JS HMR 原地变 `#1`、CSS 颜色 `rgb(94,241,165)` → `rgb(124,196,255)`，两次 marker 均存活。同源模式下 shim 直接用 BroadcastChannel（不经中继），验证了两条路径。
+
+**新增验证工具**：`tools/e2e-subdomain-hmr.mjs` 扩到 JS+CSS 两阶段（含端口发现、每步超时、SW 重注册）；`tools/probe-hmr-ports.mjs`（端口隔离计数）；`tools/e2e-pages-hmr.mjs`（线上路径前缀模式）。
 
 **涉及文件**：`public/sw.js`、`src/demo-project.ts`、`src/ui/main.ts`、`index.html`、`README.md`、`README_zh.md`、`tools/e2e-subdomain-hmr.mjs`、`tools/probe-hmr-ports.mjs`（新）
 
