@@ -6,3 +6,6 @@ export { createRegistry } from './registry';
 export type { RegistryClient, PackageManifest, Packument, FetchLike, FetchResponseLike, Dist } from './registry';
 export { installProject } from './install';
 export type { InstallOptions, InstallResult, InstalledPackage } from './install';
+export { verifyIntegrity, parseSri, toHex } from './integrity';
+export { readLockfile, buildLockfile, LOCKFILE_NAME, nameFromLockPath } from './lockfile';
+export type { LockedPackage, LockRoot } from './lockfile';

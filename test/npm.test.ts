@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryVfs } from '../src/node-runtime/vfs';
+import { encodeBase64 } from '../src/node-runtime/vfs/base64';
 import { NodeRuntime } from '../src/node-runtime/runtime';
 import { compare, maxSatisfying, satisfies } from '../src/node-runtime/npm/semver';
 import { gunzip, untar } from '../src/node-runtime/npm/tarball';
+import { nameFromLockPath, parseSri, verifyIntegrity } from '../src/node-runtime/npm';
 import type { FetchLike, FetchResponseLike } from '../src/node-runtime/npm/registry';
 
 // ---------------------------------------------------------------------------
@@ -354,5 +356,180 @@ describe('npm installer', () => {
     const result = await runtime.installDependencies({ fetch: fakeRegistry(packuments, {}) });
     expect(result.packages).toBe(0);
     expect(result.warnings.join()).toContain('no version of alpha satisfies');
+  });
+
+  it('writes a lockfile and reuses it without re-resolving', async () => {
+    const tarballs: Record<string, Uint8Array> = {
+      'https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz': await alphaTarball(),
+      'https://registry.npmjs.org/beta/-/beta-1.0.1.tgz': await betaTarball('1.0.1', 'beta'),
+    };
+    const packuments = {
+      alpha: { name: 'alpha', 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': alphaManifest() } },
+      beta: { name: 'beta', 'dist-tags': { latest: '1.0.1' }, versions: { '1.0.0': betaManifest('1.0.0'), '1.0.1': betaManifest('1.0.1') } },
+    };
+    let packumentFetches = 0;
+    const inner = fakeRegistry(packuments, tarballs);
+    const counting: FetchLike = async (url, init) => {
+      if (!/\/\/registry\.npmjs\.org\/[^/]+$/.test(url)) return inner(url, init);
+      packumentFetches += 1;
+      return inner(url, init);
+    };
+
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', version: '2.0.0', dependencies: { alpha: '^1.0.0' } }),
+    });
+    const { runtime } = bootRuntime(vfs);
+
+    const first = await runtime.installDependencies({ fetch: counting });
+    expect(first.fromLockfile).toBe(0);
+    expect(vfs.exists('/project/package-lock.json')).toBe(true);
+    const lock = JSON.parse(new TextDecoder().decode(vfs.readFile('/project/package-lock.json'))) as {
+      lockfileVersion: number;
+      packages: Record<string, { version: string; resolved?: string; dependencies?: Record<string, string> }>;
+    };
+    expect(lock.lockfileVersion).toBe(3);
+    expect(lock.packages['node_modules/alpha'].version).toBe('1.0.0');
+    expect(lock.packages['node_modules/beta'].version).toBe('1.0.1');
+    expect(lock.packages['node_modules/beta'].resolved).toContain('beta-1.0.1.tgz');
+
+    const afterFirst = packumentFetches;
+    const second = await runtime.installDependencies({ fetch: counting });
+    expect(second.fromLockfile).toBe(2); // alpha + beta, both reused
+    expect(second.packages).toBe(first.packages);
+    expect(packumentFetches).toBe(afterFirst); // no resolution attempts
+  });
+
+  it('verifies tarball integrity and rejects a mismatch', async () => {
+    const bytes = await betaTarball('1.0.1', 'beta');
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-512', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer));
+    const good = `sha512-${encodeBase64(digest)}`;
+    expect(parseSri(good)[0].algorithm).toBe('sha512');
+    await expect(verifyIntegrity(bytes, { tarball: 'x', integrity: good })).resolves.toBe(good);
+    await expect(verifyIntegrity(bytes, { tarball: 'x', integrity: 'sha512-AAAA' })).rejects.toThrow(/integrity check failed/);
+    // shasum (sha1 hex) is the legacy fallback
+    const sha1 = new Uint8Array(await crypto.subtle.digest('SHA-1', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer));
+    const hex = [...sha1].map((b) => b.toString(16).padStart(2, '0')).join('');
+    await expect(verifyIntegrity(bytes, { tarball: 'x', shasum: hex })).resolves.toBe(`sha1-${encodeBase64(sha1)}`);
+    await expect(verifyIntegrity(bytes, { tarball: 'x', shasum: 'deadbeef' })).rejects.toThrow(/shasum check failed/);
+  });
+
+  it('refuses to install a package whose registry integrity does not match', async () => {
+    const packuments = {
+      beta: {
+        name: 'beta',
+        'dist-tags': { latest: '1.0.1' },
+        versions: { '1.0.1': { ...(betaManifest('1.0.1') as object), dist: { tarball: 'https://registry.npmjs.org/beta/-/beta-1.0.1.tgz', integrity: 'sha512-not-the-real-one' } } },
+      },
+    };
+    const tarballs = { 'https://registry.npmjs.org/beta/-/beta-1.0.1.tgz': await betaTarball('1.0.1', 'beta') };
+    const vfs = makeProject({ '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { beta: '1.0.1' } }) });
+    const { runtime } = bootRuntime(vfs);
+    await expect(runtime.installDependencies({ fetch: fakeRegistry(packuments, tarballs) })).rejects.toThrow(/integrity check failed/);
+    // Nothing should have been written for the bad package.
+    expect(vfs.exists('/project/node_modules/beta/package.json')).toBe(false);
+  });
+
+  it('auto-installs a missing peer dependency at the root', async () => {
+    const needsGamma = () =>
+      gzip(
+        makeTar([
+          { path: 'package/package.json', data: JSON.stringify({ name: 'alpha', version: '1.0.0', main: 'index.js', peerDependencies: { gamma: '^1.0.0' } }) },
+          { path: 'package/index.js', data: `module.exports = () => 'alpha+' + require('gamma')();` },
+        ]),
+      );
+    const gammaTarball = () =>
+      gzip(makeTar([
+        { path: 'package/package.json', data: JSON.stringify({ name: 'gamma', version: '1.0.0', main: 'index.js' }) },
+        { path: 'package/index.js', data: `module.exports = () => 'gamma';` },
+      ]));
+    const tarballs: Record<string, Uint8Array> = {
+      'https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz': await needsGamma(),
+      'https://registry.npmjs.org/gamma/-/gamma-1.0.0.tgz': await gammaTarball(),
+    };
+    const packuments = {
+      alpha: {
+        name: 'alpha',
+        'dist-tags': { latest: '1.0.0' },
+        versions: { '1.0.0': { name: 'alpha', version: '1.0.0', peerDependencies: { gamma: '^1.0.0' }, dist: { tarball: 'https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz' } } },
+      },
+      gamma: { name: 'gamma', 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': { name: 'gamma', version: '1.0.0', dist: { tarball: 'https://registry.npmjs.org/gamma/-/gamma-1.0.0.tgz' } } } },
+    };
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { alpha: '^1.0.0' } }),
+      '/project/index.js': `console.log(require('alpha')());`,
+    });
+    const { runtime, out } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: fakeRegistry(packuments, tarballs) });
+    expect(result.warnings).toEqual([]);
+    expect(result.packages).toBe(2);
+    expect(vfs.exists('/project/node_modules/gamma/index.js')).toBe(true);
+    runtime.runMain('/project/index.js');
+    expect(out.join('')).toBe('alpha+gamma\n');
+  });
+
+  it('stays silent when an optional dependency cannot be resolved', async () => {    const withOptional = () =>
+      gzip(
+        makeTar([
+          { path: 'package/package.json', data: JSON.stringify({ name: 'alpha', version: '1.0.0', main: 'index.js', optionalDependencies: { 'native-thing': '^1.0.0' } }) },
+          { path: 'package/index.js', data: `module.exports = () => 'alpha';` },
+        ]),
+      );
+    const tarballs = { 'https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz': await withOptional() };
+    const packuments = {
+      alpha: {
+        name: 'alpha',
+        'dist-tags': { latest: '1.0.0' },
+        versions: { '1.0.0': { name: 'alpha', version: '1.0.0', optionalDependencies: { 'native-thing': '^1.0.0' }, dist: { tarball: 'https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz' } } },
+      },
+    };
+    const vfs = makeProject({ '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { alpha: '^1.0.0' } }) });
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: fakeRegistry(packuments, tarballs) });
+    expect(result.packages).toBe(1);
+    expect(result.warnings).toEqual([]); // optional failures are silent, like npm
+  });
+
+  it('skips an optional dependency for another platform (like npm does)', async () => {
+    const withNative = () =>
+      gzip(
+        makeTar([
+          { path: 'package/package.json', data: JSON.stringify({ name: 'alpha', version: '1.0.0', main: 'index.js', optionalDependencies: { 'native-thing': '^1.0.0' } }) },
+          { path: 'package/index.js', data: `module.exports = () => 'alpha';` },
+        ]),
+      );
+    const tarballs = {
+      'https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz': await withNative(),
+      'https://registry.npmjs.org/native-thing/-/native-thing-1.0.0.tgz': await betaTarball('1.0.0', 'native'),
+    };
+    const packuments = {
+      alpha: {
+        name: 'alpha',
+        'dist-tags': { latest: '1.0.0' },
+        versions: { '1.0.0': { name: 'alpha', version: '1.0.0', optionalDependencies: { 'native-thing': '^1.0.0' }, dist: { tarball: 'https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz' } } },
+      },
+      'native-thing': {
+        name: 'native-thing',
+        'dist-tags': { latest: '1.0.0' },
+        versions: {
+          '1.0.0': { name: 'native-thing', version: '1.0.0', os: ['darwin'], cpu: ['arm64'], dist: { tarball: 'https://registry.npmjs.org/native-thing/-/native-thing-1.0.0.tgz' } },
+        },
+      },
+    };
+    const vfs = makeProject({ '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { alpha: '^1.0.0' } }) });
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: fakeRegistry(packuments, tarballs) });
+    expect(result.packages).toBe(1); // the darwin-only optional dep is not installed
+    expect(result.warnings).toEqual([]);
+    expect(vfs.exists('/project/node_modules/native-thing')).toBe(false);
+  });
+});
+
+describe('lockfile paths', () => {
+  it('extracts the package name from a node_modules path', () => {
+    expect(nameFromLockPath('node_modules/ms')).toBe('ms');
+    expect(nameFromLockPath('node_modules/a/node_modules/b')).toBe('b');
+    expect(nameFromLockPath('node_modules/@scope/pkg')).toBe('@scope/pkg');
+    expect(nameFromLockPath('node_modules/a/node_modules/@scope/pkg')).toBe('@scope/pkg');
+    expect(nameFromLockPath('')).toBeNull();
   });
 });

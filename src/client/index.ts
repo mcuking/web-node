@@ -33,6 +33,8 @@ export interface InstallResult {
   packages: number;
   installed: Array<{ name: string; version: string; path: string }>;
   warnings: string[];
+  /** Packages reused from `package-lock.json` without re-resolving. */
+  fromLockfile?: number;
 }
 
 /**
