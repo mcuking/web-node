@@ -200,7 +200,7 @@ listening   : http://127.0.0.1:5173
 | M3.5a | keep-alive（持久连接 + pipelining + 连接池） | ✅ |
 | M3.5b | 浏览器侧真流式（SW 直转 ReadableStream） | ✅ |
 | M3.5c | https（http 同名壳） | ✅ |
-| M3.5d | 子域名路由（`<port>.localhost`） | ⏸ 暂缓（跨源 runtime/OPFS） |
+| M3.5d | 子域名路由（`<port>.localhost`） | ✅ 完成（dev server） |
 | M5 | 真实构建工具 —— esbuild WASM：安装→初始化→打包→写回 | ✅ |
 | M5b | 真实打包器 —— rollup WASM：ESM 图 + tree-shaking → VFS | ✅ |
 | M5c | 真实构建工具链 —— Vite 本体：production build → VFS | ✅ |

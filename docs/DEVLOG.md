@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
@@ -21,7 +21,7 @@
 | M3.5a | **keep-alive**（持久连接 + pipelining + 客户端连接池） | ✅ 完成 |
 | M3.5b | **浏览器侧真流式**（SW 直转 ReadableStream） | ✅ 完成 |
 | M3.5c | **https**（http 同名壳，无 TLS） | ✅ 完成 |
-| M3.5d | 子域名路由（`<port>.localhost`） | ⏸ 暂缓（见下） |
+| M3.5d | 子域名路由（`<port>.localhost`） | ✅ 完成（dev server） |
 | M5 | **构建工具：esbuild WASM**（安装→初始化→打包→写回） | ✅ 完成 |
 | M5b | **真实打包器：rollup WASM**（ESM + tree-shaking → VFS） | ✅ 完成 |
 | M5c | **Vite 本体**（真实 production build → VFS） | ✅ 完成 |
@@ -31,7 +31,7 @@
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **95/95 通过** · `vite build` 绿（worker ~264KB / index ~8.5KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **100/100 通过** · `vite build` 绿（worker ~264KB / index ~8.5KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -57,8 +57,8 @@
 - **预览 UI**：右侧面板 Output / Preview 双 tab，自动发现监听端口，iframe 加载 `/preview/<port>/`。
 
 **MVP 限制**（已知）：
-- 预览走路径前缀 `/preview/<port>/`，不是 `<port>.localhost`。绝对路径资源（`/app.js`）会落在前缀外；HTML 响应会注入 `<base>` 修正**相对路径**资源。
-- **子域名路由暂缓**：`<port>.localhost:5199` 是**另一个源**，而 runtime worker、VFS 与 OPFS（按源隔离）都在 `localhost:5199`。要让子域名预览工作，得重新安排「runtime 住哪」：要么每个子域名各自跑一份 runtime（OPFS 看不到主源项目、且出现双 runtime），要么让子域名的 SW 经 `postMessage` 转发给主源页面里的 runtime（需新增跨源中继层 + Vite `server.allowedHosts` + 子域名 bootstrap 页）。后者可行但属架构改动，暂不做；路径前缀方案继续保留。
+- **子域名路由仅在 dev server 可用**：`<port>.localhost:5199` 需要 dev 中间件与 `<port>.localhost` 的 wildcard DNS（浏览器把 `*.localhost` 解析到 loopback）。构建产物 / `vite preview` / GitHub Pages 没有这个 wildcard，自动回退到路径前缀 `/preview/<port>/`（`src/ui/preview-url.ts` 按环境选）。
+- 路径前缀模式下：绝对路径资源（`/app.js`）会落在前缀外；HTML 响应会注入 `<base>` 修正**相对路径**资源。dev 子域名模式没有此限制（每个预览是真实源）。
 - `Readable.read(n)` 字节模式下是「整块交付」而非精确切 n 字节（`data`/`pipe()` 路径是精确的）；objectMode 只支持基本形态。
 
 ### stream 层怎么走通的（前置）
@@ -110,15 +110,37 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **子域名路由（M3.5d，暂缓项）**：若要捡起来，推荐方案：子域名 SW 经 `postMessage` 中继到主源页面里的 runtime（主源保留 OPFS 与单例 worker）。需要 Vite `server.allowedHosts: ['.localhost']` + 一个子域名 bootstrap 页 + 跨源 MessagePort 中继。
-3. **npm 收尾**：lockfile 读写、`.bin` shim、peer 依赖自动安装、integrity 校验、生命周期脚本、`file:`/`git+` 说明符。
-4. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
-5. **stream 收尾**：`read(n)` 字节精确切分、`autoDestroy` 细节、`objectMode` 边界。
-6. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
+1. **HMR 收尾**：CSS HMR（`updateStyle` 路径）与**多端口隔离**（一个端口一个 HMR 通道，不能共用一个 BroadcastChannel 把更新广播给所有预览）。
+2. **npm 收尾**：lockfile 读写、`.bin` shim、peer 依赖自动安装、integrity 校验、生命周期脚本、`file:`/`git+` 说明符。
+3. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
+4. **stream 收尾**：`read(n)` 字节精确切分、`autoDestroy` 细节、`objectMode` 边界。
+5. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
 
 ---
 
 ## 变更记录
+
+### 2026-09-17 · M3.5d 子域名路由：每个预览一个真实源（`<port>.localhost`）
+
+**目标**：把 M3 长期挂账的「预览走路径前缀」换成 WebContainer 形态的真源隔离——`<port>.localhost:<devport>`（浏览器把 `*.localhost` 解析到 loopback），这样绝对路径、cookie、storage 都按真实站点行为。
+
+**方案**：runtime/VFS/OPFS 仍单例住在主源（`localhost:5199`）；子域名只托一个 bootstrap 壳，经 `postMessage` 把请求中继回主源页面。
+- **dev 中间件**（`plugins/dev-subdomains.ts`，新）：拦 `<port>.localhost` 上的 `/__webnode__/`，回一个 bootstrap 壳：注册子域名 SW → 把 SW 的每个虚拟请求 `window.top.postMessage(data, '*', ports)`（MessagePort 跨源转移）→ 同源子帧 `src='/'` 加载真应用（由 worker 从 VFS 供给）。其余路径一律放行给应用。
+- **`public/sw.js` 新增 SUBDOMAIN_MODE**：shell 路径（`SUBDOMAIN_SHELL_PATH`）直接放行，不当作预览资源；按 `event.clientId → port` 记账 + referrer 兜底的路由保持。
+- **HMR 跨源中继**：子域名是别的源，`BroadcastChannel` 听不到。上行：app 帧 → `window.top`（=主页面）→ 主页面的 `installHmrRelay` 进 BroadcastChannel；下行：runtime → 主页面 → 壳（`previewFrame.contentWindow`）→ app 帧（壳里新增一个 `__wnHmr` 监听转发）。
+- **`src/ui/preview-url.ts`**（新，纯函数）：`previewUrl()` 按环境选——dev + `base==='/'` + loopback → 子域名壳；否则回退路径前缀。`prefixPreviewUrl()` 专供 pop-out 链接。
+
+**踩过的坑（重要，别重犯）**：
+1. **被 iframe 嵌入的文档必须自带 COEP，光有 CORP 不够**。主壳是 `COEP: require-corp`，子域名壳文档必须自己也发 `Cross-Origin-Embedder-Policy: require-corp`，否则 Chrome 直接拒加载（`coep-frame-resource-needs-coep-header`，而不仅是空白）。
+2. **导航请求不能被预览路由劫持**。按 `clientId→port` 兜底的路由会把主壳的**导航**抢成预览（出现 `base href=/preview/3000/` 的错页）。修复：`request.mode === 'navigate'` 直接放行。
+3. **`demo-project.ts` 的反引号陷阱又中一次**（这次在 `plugins/dev-subdomains.ts` 的 bootstrap 字符串里）：注释里写 `window.top` 用了反引号，直接让模板字面量提前闭合 → dev server 编译报 `Expected ";" but found "window"`。约定重申：内嵌源码字符串里禁用反引号 / `${` / 反斜杠。
+4. 调试时注意：`Runtime.evaluate` 的 **isolated world 与主世界不共享 `window`**（共享 DOM）；用 `createIsolatedWorld` 插桩，通过 script 元素跑在主世界的计数器要写到 DOM 上才能从 isolated world 读回。
+
+**演示**：dev server 下预览 URL 变为 `http://<port>.localhost:5199/__webnode__/`。已验：3000（demo 服务器，含 `/api/info`）与 5173（Vite dev + **HMR 原地热更、marker 存活不刷新**）。构建 / Pages 仍走路径前缀（已 Regression 验证）。
+
+**测试**：95 → **100**。新增 `test/preview-url.test.ts`（5：dev 子域名、非 loopback 回退、子路径构建回退、带 devport 原样拼接、`prefixPreviewUrl`）。
+
+**涉及文件**：`plugins/dev-subdomains.ts`（新）、`src/ui/preview-url.ts`（新）、`test/preview-url.test.ts`（新）、`public/sw.js`、`src/client/index.ts`、`src/ui/main.ts`、`vite.config.ts`、`tsconfig.json`、`tools/e2e-subdomain-hmr.mjs`、`tools/probe-hmr-relay.mjs`
 
 ### 2026-09-17 · M5e HMR 走非 WebSocket 通道（+ 一个把 HMR 静默搞坏的 loader bug）
 

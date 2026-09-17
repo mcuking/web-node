@@ -8,41 +8,82 @@
  *                                     ↓
  *                          user's http.createServer
  *
- * Preview URLs are same-origin paths: `<base>/preview/<port>/<path>`. We use a
- * path prefix (not `<port>.localhost`) because it needs no DNS or dev-server
- * host configuration; the trade-off is that absolute-path assets (`/app.js`)
- * resolve outside the prefix, so HTML responses get a `<base>` tag injected to
- * fix the far more common *relative* asset case.
+ * A preview can be addressed two ways, and this worker serves both:
  *
- * The app may be served from a sub-path (GitHub Pages uses `/web-node/`), so the
- * prefix is derived from where this worker actually lives instead of assuming
- * the origin root. In dev that is `/`, on Pages `/web-node/`.
+ *   1. Path prefix — `<base>preview/<port>/<path>` on the main origin.
+ *      Needs no DNS or dev-server host config, so it works on a static host
+ *      (GitHub Pages). The trade-off is that absolute-path assets (`/app.js`)
+ *      resolve outside the prefix; HTML responses get a `<base>` tag injected to
+ *      fix the far more common *relative* asset case.
+ *
+ *   2. Subdomain — `<port>.localhost:<devport>/<path>` (dev only).
+ *      `*.localhost` resolves to loopback in every modern browser, so this gives
+ *      each preview a *real origin*: absolute paths, cookies and storage all
+ *      behave exactly as they would on a real host. Requires the dev-server
+ *      middleware in `plugins/dev-subdomains.ts` (a static host has no DNS
+ *      wildcard) and a relay, because the runtime — and the VFS and OPFS it
+ *      owns — lives on the main origin, not on the subdomain.
+ *
+ * The app itself may be served from a sub-path (GitHub Pages uses `/web-node/`),
+ * so the prefix is derived from where this worker actually lives instead of
+ * assuming the origin root. In dev that is `/`, on Pages `/web-node/`.
  *
  * Responses are streamed: the runtime posts the head and then each body chunk
  * as `res.write()` produces it, and we hand the browser a `ReadableStream` — so
  * SSE and large downloads arrive incrementally. HTML is the one exception: it is
- * buffered so the `<base>` tag can be injected before the first byte is sent.
+ * buffered so the `<base>` / WebSocket shim can be injected before the first
+ * byte is sent.
  */
 
 const BASE = new URL('./', self.location).pathname;
 const PREVIEW_PREFIX = BASE + 'preview/';
 
 /**
+ * The port this worker serves when it lives on a `<port>.localhost` subdomain,
+ * or null on the main origin. Set by the dev-server bootstrap page, which is the
+ * only thing that ever registers this file cross-origin.
+ */
+const HOST_PORT = portFromHost(self.location.hostname);
+const SUBDOMAIN_MODE = HOST_PORT !== null;
+
+/**
+ * The bootstrap shell's path on a preview subdomain.
+ *
+ * It must be a *distinct* URL from the app: the worker wraps every request on
+ * this origin, so if the shell lived at `/` the worker would intercept its own
+ * bootstrap document — and fail, because the relay client it needs is that very
+ * document. Both this file and `src/ui/preview-url.ts` know the path.
+ */
+const SUBDOMAIN_SHELL_PATH = '/__webnode__/';
+
+/**
+ * Requests that belong to the page, not the virtual server: the shell itself and
+ * the worker script. Everything else on a preview subdomain is the app's.
+ */
+function isShellRequest(pathname) {
+  return pathname === SUBDOMAIN_SHELL_PATH || pathname === '/sw.js';
+}
+
+/**
  * Injected into every preview document, ahead of the app's own scripts.
  *
  * A ServiceWorker cannot proxy a WebSocket — `fetch` never sees the upgrade — so
  * a dev server running inside the runtime is unreachable over the wire. It *is*
- * reachable over a same-origin `BroadcastChannel`, though (the browser ignores
- * it, but worker and page are one origin), so we swap `WebSocket` for a shim
- * that speaks a tiny JSON protocol on that channel instead.
+ * reachable over a channel the browser ignores: a same-origin
+ * `BroadcastChannel` (worker and page share an origin), or, for a preview on its
+ * own subdomain, a `postMessage` hop through the top-level page, which does
+ * share that origin. So we swap `WebSocket` for a shim that speaks a tiny JSON
+ * protocol on that channel instead.
  *
- * Only loopback URLs are diverted: the preview's Vite HMR socket (
- * `ws://127.0.0.1:5173/`). Every other WebSocket is left untouched for the real
- * browser implementation.
+ * Only Vite's HMR socket is diverted (it is recognisable by its `vite-hmr`
+ * subprotocol); every other WebSocket is left to the real implementation.
  */
 const WS_SHIM = `<script>(function () {
   var CH = 'web-node-hmr';
   var Native = window.WebSocket;
+  // A <port>.localhost preview is a different origin from the runtime, so the
+  // BroadcastChannel below is unreachable; relay through the top page instead.
+  var SUB = /^\\d+\\.localhost$/.test(location.hostname);
   function isLoopback(host) {
     return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
   }
@@ -53,6 +94,17 @@ const WS_SHIM = `<script>(function () {
     var list = Array.isArray(protocols) ? protocols.join(',') : String(protocols == null ? '' : protocols);
     if (list.indexOf('vite-hmr') !== -1) return true;
     try { return isLoopback(new URL(url, location.href).hostname); } catch (e) { return false; }
+  }
+  function makeTransport(onFrame) {
+    if (SUB) {
+      window.addEventListener('message', function (e) {
+        if (e.data && e.data.__wnHmr) onFrame(e.data.__wnHmr);
+      });
+      return function (frame) { try { window.top.postMessage({ __wnHmr: frame }, '*'); } catch (e) {} };
+    }
+    var ch = new BroadcastChannel(CH);
+    ch.onmessage = function (e) { onFrame(e.data); };
+    return function (frame) { try { ch.postMessage(frame); } catch (e) {} };
   }
   function fire(ws, type, extra) {
     var ev;
@@ -76,15 +128,13 @@ const WS_SHIM = `<script>(function () {
     this._ls = {};
     var self = this;
     this._id = 'c' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-    this._ch = new BroadcastChannel(CH);
-    this._ch.onmessage = function (e) {
-      var m = e.data;
-      if (!m || m.id !== self._id) return;
-      if (m.t === 'open') { self.readyState = 1; fire(self, 'open', {}); }
-      else if (m.t === 'message') { fire(self, 'message', { data: m.data }); }
-      else if (m.t === 'close') { self.readyState = 3; fire(self, 'close', { code: 1000, wasClean: true }); }
-    };
-    setTimeout(function () { self._ch.postMessage({ t: 'open', id: self._id, url: self.url }); }, 0);
+    this._send = makeTransport(function (frame) {
+      if (!frame || frame.id !== self._id) return;
+      if (frame.t === 'open') { self.readyState = 1; fire(self, 'open', {}); }
+      else if (frame.t === 'message') { fire(self, 'message', { data: frame.data }); }
+      else if (frame.t === 'close') { self.readyState = 3; fire(self, 'close', { code: 1000, wasClean: true }); }
+    });
+    setTimeout(function () { self._send({ t: 'open', id: self._id, url: self.url }); }, 0);
   }
   Bridged.prototype.addEventListener = function (t, fn) { (this._ls[t] = this._ls[t] || []).push(fn); };
   Bridged.prototype.removeEventListener = function (t, fn) {
@@ -93,12 +143,11 @@ const WS_SHIM = `<script>(function () {
   };
   Bridged.prototype.send = function (d) {
     if (this.readyState !== 1) return;
-    this._ch.postMessage({ t: 'send', id: this._id, data: String(d) });
+    this._send({ t: 'send', id: this._id, data: String(d) });
   };
   Bridged.prototype.close = function () {
     this.readyState = 2;
-    try { this._ch.postMessage({ t: 'close', id: this._id }); } catch (e) {}
-    this._ch.close();
+    try { this._send({ t: 'close', id: this._id }); } catch (e) {}
   };
   function Shim(url, protocols) {
     if (isHmr(url, protocols)) return new Bridged(url);
@@ -135,23 +184,43 @@ self.addEventListener('fetch', (event) => {
   // Only our own origin.
   if (url.origin !== self.location.origin) return;
 
+  // Subdomain mode: this whole origin *is* one virtual server. No prefix to
+  // strip — every path is the app's own, except the shell that bootstraps us.
+  if (SUBDOMAIN_MODE) {
+    if (isShellRequest(url.pathname)) return;
+    event.respondWith(handle(event, HOST_PORT, url, 'subdomain'));
+    return;
+  }
+
   const previewPort = portFromPreviewPath(url.pathname);
   if (previewPort !== null) {
     // A preview navigation or one of its in-namespace requests: bind the owning
     // client so its later absolute-path assets can be routed too.
     const owner = event.resultingClientId || event.clientId;
     if (owner) previewPortByClient.set(owner, previewPort);
-    event.respondWith(handle(event, previewPort, url));
+    event.respondWith(handle(event, previewPort, url, 'prefix'));
     return;
   }
 
   // Not a preview path: an absolute-path asset (e.g. Vite's `/@vite/client`),
   // which resolves to the origin root. Route it back to the preview that asked
   // for it — by client id first, then by referrer as a fallback.
+  //
+  // Navigations are excluded on purpose: the app shell owns its own document,
+  // and a stale client→port entry must never hijack it into a preview.
+  if (event.request.mode === 'navigate') return;
   const port = previewPortByClient.get(event.clientId) ?? portFromReferrer(event.request.referrer);
   if (port == null) return;
-  event.respondWith(handle(event, port, url));
+  event.respondWith(handle(event, port, url, 'prefix'));
 });
+
+/** Port encoded in `/<port>.localhost`, or null if this is not a preview subdomain. */
+function portFromHost(hostname) {
+  const m = /^(\d+)\.localhost$/.exec(hostname);
+  if (!m) return null;
+  const port = Number(m[1]);
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
+}
 
 /** Port encoded in `/<base>preview/<port>/…`, or null if the path is not a preview path. */
 function portFromPreviewPath(pathname) {
@@ -203,6 +272,19 @@ async function resolveClient(event) {
   }
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: false });
   return windows.find(isRuntimeHost) || null;
+}
+
+/**
+ * Find the bridge page on this subdomain origin.
+ *
+ * The bootstrap shell relays every request on to the top-level page, which
+ * shares an origin with the runtime. It must be the *shell* that gets the
+ * message — the app frame has no relay listener, so picking it would deadlock —
+ * which is why the shell keeps its own path.
+ */
+async function resolveSubdomainClient() {
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  return windows.find((c) => new URL(c.url).pathname === SUBDOMAIN_SHELL_PATH) || windows[0] || null;
 }
 
 const HOP_BY_HOP = ['connection', 'content-length', 'transfer-encoding', 'keep-alive', 'te', 'trailer', 'upgrade'];
@@ -271,19 +353,24 @@ function makeInbox(port) {
 function bridgeError(message) {
   return new Response('web-node: ' + message, {
     status: 502,
-    headers: { 'content-type': 'text/plain' },
+    headers: {
+      'content-type': 'text/plain',
+      // An error inside a COEP: require-corp page must still opt in, or the
+      // browser replaces our diagnostic with a blank "blocked" page.
+      'cross-origin-resource-policy': 'cross-origin',
+    },
   });
 }
 
-async function handle(event, port, url) {
-  const { path } = parsePortAndPath(url.pathname);
+async function handle(event, port, url, mode) {
   const request = event.request;
+  const path = mode === 'subdomain' ? url.pathname + url.search : parsePortAndPath(url.pathname).path + url.search;
 
-  const client = await resolveClient(event);
+  const client = mode === 'subdomain' ? await resolveSubdomainClient() : await resolveClient(event);
   if (!client) {
     return new Response('web-node: no controlling page for this request', {
       status: 503,
-      headers: { 'content-type': 'text/plain' },
+      headers: { 'content-type': 'text/plain', 'cross-origin-resource-policy': 'cross-origin' },
     });
   }
 
@@ -304,7 +391,7 @@ async function handle(event, port, url) {
       type: 'web-node:http',
       port,
       method: request.method,
-      path: path + url.search,
+      path,
       headers,
       body,
       stream: true,
@@ -325,7 +412,8 @@ async function handle(event, port, url) {
   const responseHeaders = buildHeaders(head.headers);
   const contentType = String(responseHeaders.get('content-type') || '');
 
-  // HTML needs its `<base>` tag injected, which means buffering it first.
+  // HTML needs the WebSocket shim injected (and, in prefix mode, a `<base>` tag),
+  // which means buffering it first.
   if (contentType.includes('text/html')) {
     const parts = [];
     for (;;) {
@@ -347,8 +435,10 @@ async function handle(event, port, url) {
       offset += c.length;
     }
     const html = new TextDecoder().decode(merged);
-    const base = `<base href="${PREVIEW_PREFIX}${port}/">`;
-    const patched = html.includes('<head>') ? html.replace('<head>', '<head>' + base + WS_SHIM) : base + WS_SHIM + html;
+    // In subdomain mode the document already sits at the origin root, so its
+    // absolute paths are correct and no `<base>` is needed — only the shim.
+    const inject = mode === 'subdomain' ? WS_SHIM : `<base href="${PREVIEW_PREFIX}${port}/">` + WS_SHIM;
+    const patched = html.includes('<head>') ? html.replace('<head>', '<head>' + inject) : inject + html;
     return new Response(new TextEncoder().encode(patched), {
       status: head.status,
       statusText: head.statusMessage || '',
@@ -389,4 +479,3 @@ function toBytes(data) {
   if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   return new Uint8Array(0);
 }
-

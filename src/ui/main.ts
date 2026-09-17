@@ -1,5 +1,6 @@
 import { RuntimeClient } from '../client';
 import type { RuntimeInfo } from '../worker/runtime.worker';
+import { previewUrl as buildPreviewUrl, prefixPreviewUrl } from './preview-url';
 
 const client = new RuntimeClient();
 
@@ -141,16 +142,27 @@ async function viteDevProject(): Promise<void> {
 // the demo app accepts, ready for when no dev server is open to react.
 let hmrEdits = 0;
 async function hmrEdit(): Promise<void> {
-  hmrEdits += 1;
+  const path = '/project/site/src/message.js';
+  // Continue from the number already in the file so the edit is visibly
+  // monotonic even after a page reload (the in-memory counter would reset).
+  let n = hmrEdits + 1;
+  try {
+    const current = await client.readFile(path);
+    const match = /hot-updated #(\d+)/.exec(current);
+    if (match) n = Number(match[1]) + 1;
+  } catch {
+    // not written yet
+  }
+  hmrEdits = n;
   const source = [
     'export function greet(who) {',
-    `  return 'Hello from ' + who + ', hot-updated #${hmrEdits}';`,
+    `  return 'Hello from ' + who + ', hot-updated #${n}';`,
     '}',
     '',
   ].join('\n');
-  await client.writeFile('/project/site/src/message.js', source);
-  writeTerminal(`\n[hmr] wrote site/src/message.js (#${hmrEdits}) — watch the Preview\n`, 'sys');
-  if (activeFile === '/project/site/src/message.js') editorEl.value = source;
+  await client.writeFile(path, source);
+  writeTerminal(`\n[hmr] wrote site/src/message.js (#${n}) — watch the Preview\n`, 'sys');
+  if (activeFile === path) editorEl.value = source;
 }
 
 hmrEditBtn.addEventListener('click', () => void hmrEdit());
@@ -182,15 +194,25 @@ async function refreshPorts(): Promise<void> {
   loadPreview();
 }
 
+function previewEnv() {
+  return {
+    dev: import.meta.env.DEV,
+    base: import.meta.env.BASE_URL,
+    origin: location.origin,
+    hostname: location.hostname,
+    port: location.port,
+  };
+}
+
 function previewUrl(): string {
-  const port = portSelect.value;
-  // BASE_URL keeps this correct when the app is served from a sub-path.
-  return `${location.origin}${import.meta.env.BASE_URL}preview/${port}/`;
+  return buildPreviewUrl(portSelect.value, previewEnv());
 }
 
 function loadPreview(): void {
   const url = previewUrl();
-  openTab.href = url;
+  // The pop-out link uses the prefix bridge, not the subdomain: a subdomain
+  // preview relays through this page, so it cannot stand alone in a new tab.
+  openTab.href = prefixPreviewUrl(portSelect.value, previewEnv());
   previewFrame.src = url;
   writeTerminal(`[preview] ${url}\n`, 'sys');
 }
@@ -289,6 +311,7 @@ window.addEventListener('keydown', (e) => {
 
 async function boot(): Promise<void> {
   const bridged = await client.installServiceWorkerBridge();
+  installHmrRelay();
   await client.init();
   // The ready payload populated `files` via the 'ready' handler; a no-op mount
   // re-reads the current tree so ordering is deterministic.
@@ -317,3 +340,22 @@ window.addEventListener('error', (e) => writeTerminal(`\n[window error] ${e.mess
 window.addEventListener('unhandledrejection', (e) =>
   writeTerminal(`\n[unhandled rejection] ${String((e as PromiseRejectionEvent).reason)}\n`, 'err'),
 );
+
+/**
+ * Route Vite HMR frames to a preview that lives on its own subdomain.
+ *
+ * HMR frames travel on a same-origin `BroadcastChannel` (see `public/sw.js`).
+ * A `<port>.localhost` preview is a different origin, so it cannot hear that
+ * channel; its WebSocket shim posts frames to this page instead, and this page
+ * — which does share the runtime's origin — relays them both ways.
+ */
+function installHmrRelay(): void {
+  const channel = new BroadcastChannel('web-node-hmr');
+  channel.onmessage = (event) => {
+    previewFrame.contentWindow?.postMessage({ __wnHmr: event.data }, '*');
+  };
+  window.addEventListener('message', (event) => {
+    const frame = (event.data as { __wnHmr?: unknown } | null)?.__wnHmr;
+    if (frame) channel.postMessage(frame);
+  });
+}
