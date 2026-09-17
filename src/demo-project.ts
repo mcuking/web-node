@@ -283,7 +283,7 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 ## Not yet
 
 - Subdomain preview routing (3000.localhost) — currently a /preview/<port>/ path prefix
-- keep-alive, TLS (https)
+- Real TLS (the https module is the http surface under a TLS-shaped name)
 - Object-mode objectMode edge cases, byte-exact read(n) splitting
 - npm lifecycle scripts, .bin shims, peer-dependency auto-install, lockfile, integrity checks
 - Real build tools (milestone 5)

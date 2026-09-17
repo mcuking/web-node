@@ -81,6 +81,10 @@ pipeline(fs.createReadStream('/project/a.txt'), new Transform({
 `finished()`、`stream/promises`、`fs.createReadStream` / `fs.createWriteStream` 均已实现，
 高水位之上的 `write()`/`push()` 返回 `false` 并在排空后发 `'drain'`（背压真实生效）。
 
+响应到浏览器也是**真流式**：SW 直接把 `ReadableStream` 交给浏览器，`res.write()` / SSE / 大文件
+边产生边到达（HTML 例外，为注入 `<base>` 先缓冲）。连接默认 keep-alive，服务端支持 pipelining，
+客户端按端口做连接池。`https` 是 `http` 的同名壳（虚拟网络无 TLS）。
+
 ## npm（M4）
 
 点顶栏 **⬇ Install deps**：客户端会读项目 `package.json`，向 npm registry 解析依赖版本，
@@ -103,7 +107,10 @@ ms(60000); // '1m'
 | M3 | 网络（虚拟 TCP + SW 桥 + 预览） | ✅ |
 | S | stream 前置 | ✅ |
 | M4 | npm client | ✅ |
-| M3.5 | 网络收敛（子域名路由 / keep-alive / https） | ⬜ |
+| M3.5a | keep-alive（持久连接 + pipelining + 连接池） | ✅ |
+| M3.5b | 浏览器侧真流式（SW 直转 ReadableStream） | ✅ |
+| M3.5c | https（http 同名壳） | ✅ |
+| M3.5d | 子域名路由（`<port>.localhost`） | ⏸ 暂缓（跨源 runtime/OPFS） |
 | M5 | 真实构建工具（vite / webpack） | ⬜ |
 
 ## 改动约定
