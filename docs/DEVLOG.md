@@ -24,7 +24,7 @@
 | M3.5d | 子域名路由（`<port>.localhost`） | ⏸ 暂缓（见下） |
 | M5 | 真实构建工具（vite / webpack） | ⬜ 未开始 |
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **67/67 通过** · `vite build` 绿（worker ~233KB / index ~7.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **69/69 通过** · `vite build` 绿（worker ~233KB / index ~7.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -113,6 +113,16 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-17 · http 健壮性：handler 抛异常不再卡死 keep-alive 连接
+
+验收 M4/M3.5 时发现：请求 handler **同步抛异常**（如 `fs.readdirSync('/nope')` 抛 ENOENT）时，异常穿透 `emit('request')`，连接被卡死 —— 客户端等 15s 才超时，且该池化连接后续请求全部失效。
+
+- **handler 抛异常**：`Server.#serveConnection` 用 try/catch 包住 `emit('request')`。若响应还没刷出（`#flushed=false`）→ 用 `ServerResponse._fail()` 把状态行/头换成 **500** 并发回，连接保持可用；若已经写了字节（响应中途抛）→ 销毁 socket。
+- **客户端感知断链**：`Connection` 的 `socket.onClose` 之前只 `destroy()` 不通知等待中的响应，而 `_stream`/`_request` 只认 `onError`。现在 close 时若仍有 pending 响应，向上报 `socket hang up`，SW 立即返回 502 而不是挂到 15s。
+- **测试**：68 → **69**（net-http 18 → 19）。新增：handler 同步抛 → 500 且同连接后续请求仍可用；响应中途抛（已 flush）→ 客户端收到 error（hang up）而非挂起，新连接仍正常。
+- **文件**：`src/node-runtime/builtins/http.ts`、`test/net-http.test.ts`
+- **浏览器实测**：`/preview/3000/api/ls?dir=<不存在>` 从 502/15s 超时 → **500 Internal Server Error / 1ms**，之后 `/api/info` 仍 200。
 
 ### 2026-09-17 · M3.5 网络收敛：keep-alive + 浏览器侧真流式 + https（子域名路由暂缓）
 
