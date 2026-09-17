@@ -34,18 +34,43 @@ export class ModuleLoader {
   #cache = new Map<string, UserModule>();
   /** Extra names injected into every user module's scope (a sandbox global). */
   #globals: Record<string, unknown>;
-  #paramNames: string[];
+  #globalNames!: string[];
+  #globalValues!: unknown[];
+  #paramNames!: string[];
 
   constructor(realm: Realm, vfs: Vfs, globals: Record<string, unknown> = {}) {
     this.#realm = realm;
     this.#vfs = vfs;
     this.#globals = globals;
-    this.#paramNames = [...USER_CJS_PARAMS, ...Object.keys(globals)];
+    this.#syncGlobals();
   }
 
   setGlobals(globals: Record<string, unknown>): void {
     this.#globals = globals;
-    this.#paramNames = [...USER_CJS_PARAMS, ...Object.keys(globals)];
+    this.#syncGlobals();
+  }
+
+  /**
+   * Recompute the globals injected into every CommonJS wrapper.
+   *
+   * Only globals whose sandbox value *differs* from the host's are injected.
+   * Identical ones (btoa, performance, TextEncoder, …) are reachable through
+   * the real global scope anyway, and injecting them as parameters would clash
+   * with a module's own top-level `const btoa = …` (`Identifier 'btoa' has
+   * already been declared`) — a real failure seen with rollup.
+   */
+  #syncGlobals(): void {
+    const host = globalThis as unknown as Record<string, unknown>;
+    const names: string[] = [];
+    const values: unknown[] = [];
+    for (const [name, value] of Object.entries(this.#globals)) {
+      if (value === host[name]) continue;
+      names.push(name);
+      values.push(value);
+    }
+    this.#globalNames = names;
+    this.#globalValues = values;
+    this.#paramNames = [...USER_CJS_PARAMS, ...names];
   }
 
   get realm(): Realm {
@@ -162,8 +187,8 @@ export class ModuleLoader {
         }
       }
     }
-    if (json.module) candidates.push(json.module);
     if (json.main) candidates.push(json.main);
+    if (json.module) candidates.push(json.module);
     candidates.push('index.js', 'index.cjs', 'index.mjs', 'index.json');
 
     for (const candidate of candidates) {
@@ -257,7 +282,7 @@ export class ModuleLoader {
         },
       },
     );
-    const globalValues = Object.keys(this.#globals).map((k) => this.#globals[k]);
+    const globalValues = this.#globalValues;
     try {
       fn(moduleObj.exports, requireFn, moduleObj, absPath, dirname, ...globalValues);
     } catch (err) {

@@ -10,6 +10,9 @@ import { vendoredBuiltins } from './vendored-builtins';
 import { bufferSpec } from './buffer';
 import { eventsSpec } from './events';
 import { fsSpec } from './fs';
+import { fsPromisesSpec } from './fs-promises';
+import { perfHooksSpec } from './perf-hooks';
+import { urlSpec } from './url';
 import { utilSpec } from './util';
 import { consoleSpec } from './console';
 import { timersSpec } from './timers';
@@ -49,6 +52,9 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   streamSpec,
   streamPromisesSpec,
   fsSpec,
+  fsPromisesSpec,
+  perfHooksSpec,
+  urlSpec,
   httpSpec,
   httpsSpec,
 ];
