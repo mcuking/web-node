@@ -20,6 +20,7 @@ const bundleBtn = $<HTMLButtonElement>('bundle');
 const viteBtn = $<HTMLButtonElement>('vite');
 const viteDevBtn = $<HTMLButtonElement>('vitedev');
 const hmrEditBtn = $<HTMLButtonElement>('hmred');
+const hmrCssBtn = $<HTMLButtonElement>('hmrcss');
 const installBtn = $<HTMLButtonElement>('install');
 const clearBtn = $<HTMLButtonElement>('clear');
 const resetBtn = $<HTMLButtonElement>('reset');
@@ -167,10 +168,49 @@ async function hmrEdit(): Promise<void> {
 
 hmrEditBtn.addEventListener('click', () => void hmrEdit());
 
+// CSS HMR takes the other Vite update path: editing the stylesheet produces a
+// `css-update`, which Vite applies by swapping the injected `<style>` in place
+// (no reload, and JS module state stays put).
+const CSS_COLORS = ['#5ef1a5', '#7cc4ff', '#ffd166', '#ff7b72', '#c792ea'];
+let hmrCssEdits = 0;
+function styleCss(color: string): string {
+  return [
+    '/* Edited by the HMR CSS button: Vite sends a css-update and the preview',
+    '   restyles in place - no reload, no lost page state. */',
+    '#app {',
+    `  color: ${color};`,
+    '  font: 600 22px/1.4 ui-monospace, Menlo, monospace;',
+    '}',
+    '',
+  ].join('\n');
+}
+async function hmrCssEdit(): Promise<void> {
+  const path = '/project/site/src/style.css';
+  // Advance past the colour already in the file, so the change is visible even
+  // after a reload (the in-memory counter would reset).
+  let next = CSS_COLORS[(hmrCssEdits + 1) % CSS_COLORS.length];
+  try {
+    const current = await client.readFile(path);
+    const match = /#([0-9a-f]{6})/i.exec(current);
+    const idx = match ? CSS_COLORS.indexOf(match[0].toLowerCase()) : -1;
+    next = CSS_COLORS[(idx + 1) % CSS_COLORS.length];
+  } catch {
+    // stylesheet not written yet
+  }
+  hmrCssEdits += 1;
+  const source = styleCss(next);
+  await client.writeFile(path, source);
+  writeTerminal(`\n[hmr] wrote site/src/style.css (${next}) — watch the Preview\n`, 'sys');
+  if (activeFile === path) editorEl.value = source;
+}
+
+hmrCssBtn.addEventListener('click', () => void hmrCssEdit());
+
 // --- preview ---------------------------------------------------------------
 
 async function refreshPorts(): Promise<void> {
   const { ports } = await client.describe();
+  knownPorts = ports.join(',');
   const previous = portSelect.value;
   portSelect.innerHTML = '';
 
@@ -194,6 +234,24 @@ async function refreshPorts(): Promise<void> {
   loadPreview();
 }
 
+/**
+ * A server started with `listen()` keeps the entry alive, so `client.run` never
+ * resolves and the port list would stay stale until a manual refresh. Poll
+ * lightly instead, and reload the preview only when the set actually changes.
+ */
+let knownPorts = '';
+function startPortWatch(): void {
+  setInterval(() => {
+    void client
+      .describe()
+      .then(({ ports }) => {
+        if (ports.join(',') === knownPorts) return;
+        void refreshPorts();
+      })
+      .catch(() => {});
+  }, 1500);
+}
+
 function previewEnv() {
   return {
     dev: import.meta.env.DEV,
@@ -214,6 +272,7 @@ function loadPreview(): void {
   // preview relays through this page, so it cannot stand alone in a new tab.
   openTab.href = prefixPreviewUrl(portSelect.value, previewEnv());
   previewFrame.src = url;
+  hmrRelay.follow(Number(portSelect.value) || null);
   writeTerminal(`[preview] ${url}\n`, 'sys');
 }
 
@@ -312,6 +371,7 @@ window.addEventListener('keydown', (e) => {
 async function boot(): Promise<void> {
   const bridged = await client.installServiceWorkerBridge();
   installHmrRelay();
+  startPortWatch();
   await client.init();
   // The ready payload populated `files` via the 'ready' handler; a no-op mount
   // re-reads the current tree so ordering is deterministic.
@@ -349,13 +409,50 @@ window.addEventListener('unhandledrejection', (e) =>
  * channel; its WebSocket shim posts frames to this page instead, and this page
  * — which does share the runtime's origin — relays them both ways.
  */
+type HmrRelay = { follow: (port: number | null) => void };
+let hmrRelay: HmrRelay = { follow: () => {} };
+
+/**
+ * Route Vite HMR frames to a preview that lives on its own subdomain.
+ *
+ * HMR frames travel on a same-origin `BroadcastChannel` (see `public/sw.js`).
+ * A `<port>.localhost` preview is a different origin, so it cannot hear that
+ * channel; its WebSocket shim posts frames to this page instead, and this page
+ * — which does share the runtime's origin — relays them both ways.
+ *
+ * There is one channel per preview port (`web-node-hmr:<port>`), so two dev
+ * servers on different ports never see each other's clients. The shim tags each
+ * frame with its port, and we only push the runtime's replies to the iframe
+ * currently showing that port.
+ */
 function installHmrRelay(): void {
-  const channel = new BroadcastChannel('web-node-hmr');
-  channel.onmessage = (event) => {
-    previewFrame.contentWindow?.postMessage({ __wnHmr: event.data }, '*');
+  const channels = new Map<number, BroadcastChannel>();
+  let shownPort: number | null = null;
+
+  const channelFor = (port: number): BroadcastChannel => {
+    let channel = channels.get(port);
+    if (!channel) {
+      channel = new BroadcastChannel(`web-node-hmr:${port}`);
+      channel.onmessage = (event) => {
+        if (shownPort === port) previewFrame.contentWindow?.postMessage({ __wnHmr: event.data, port }, '*');
+      };
+      channels.set(port, channel);
+    }
+    return channel;
   };
+
   window.addEventListener('message', (event) => {
-    const frame = (event.data as { __wnHmr?: unknown } | null)?.__wnHmr;
-    if (frame) channel.postMessage(frame);
+    const data = event.data as { __wnHmr?: unknown; port?: number } | null;
+    if (data && data.__wnHmr !== undefined && typeof data.port === 'number') {
+      channelFor(data.port).postMessage(data.__wnHmr);
+    }
   });
+
+  hmrRelay = {
+    follow: (port) => {
+      shownPort = port;
+      // Subscribe eagerly so the runtime's first reply is not missed.
+      if (port !== null) channelFor(port);
+    },
+  };
 }

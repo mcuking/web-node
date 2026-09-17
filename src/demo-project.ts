@@ -514,6 +514,7 @@ const NM = path.join(ROOT, 'node_modules');
 `,
 
   '/project/site/src/main.js': `import { greet } from './message.js';
+import './style.css';
 
 const el = document.getElementById('app');
 el.textContent = greet('vite');
@@ -525,6 +526,14 @@ if (import.meta.hot) {
   import.meta.hot.accept('./message.js', function (mod) {
     el.textContent = mod.greet('vite');
   });
+}
+`,
+
+  '/project/site/src/style.css': `/* Edited by the HMR CSS button: Vite sends a css-update and the preview
+   restyles in place - no reload, no lost page state. */
+#app {
+  color: #5ef1a5;
+  font: 600 22px/1.4 ui-monospace, Menlo, monospace;
 }
 `,
 
@@ -547,7 +556,10 @@ const ROOT = '/project';
 const SITE = path.join(ROOT, 'site');
 const NM = path.join(ROOT, 'node_modules');
 const PORT = 5173;
-const HMR_CHANNEL = 'web-node-hmr';
+// One HMR channel per port, so two dev servers on different ports never see
+// each other's clients. Must match the name the preview shim builds
+// (web-node-hmr:<port> in public/sw.js).
+const HMR_CHANNEL = 'web-node-hmr:' + PORT;
 
 // The object Vite treats as its HMR server (the shape createWebSocketServer
 // returns: send / on / off / clients / close). The transport underneath is a

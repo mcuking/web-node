@@ -273,12 +273,16 @@ a ServiceWorker cannot proxy an upgrade, so the browser can never reach it
 through the preview bridge. The preview iframe is same-origin, though, so the
 ServiceWorker injects a `WebSocket` shim that diverts Vite's HMR socket to a
 `BroadcastChannel` (keyed off the `vite-hmr` subprotocol, since an https page can
-send its first attempt to the page origin rather than loopback). The runtime hands
-Vite an HMR server object that `send()`s
-over that channel instead of a socket. Vite still computes every update — we
-only carry it. A small Vite plugin turns VFS change events into Vite watcher
-events (there is no inotify in a tab), so editing a source file triggers a real
-`js-update`: hit **✏️ HMR edit** and the preview re-renders in place, no reload.
+send its first attempt to the page origin rather than loopback). The channel is
+scoped to the virtual port (`web-node-hmr:<port>`), so two dev servers never see
+each other's clients; a `<port>.localhost` preview is a *different origin* and
+cannot hear the channel at all, so its shim relays through the top-level page,
+which shares the runtime's origin. The runtime hands Vite an HMR server object
+that `send()`s over that channel instead of a socket. Vite still computes every
+update — we only carry it. A small Vite plugin turns VFS change events into Vite
+watcher events (there is no inotify in a tab), so editing a source file triggers
+a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
+`css-update`) and the preview updates in place, no reload.
 
 ## Roadmap
 
@@ -298,6 +302,7 @@ events (there is no inotify in a tab), so editing a source file triggers a real
 | M5c | Real build toolchain — Vite in the tab: production bundle to VFS | ✅ Done |
 | M5d | Vite dev server in the tab (on-demand transforms + preview) | ✅ Done |
 | M5e | Vite HMR in the tab (over BroadcastChannel, not a WebSocket) | ✅ Done |
+| M5f | HMR wrap-up — CSS `css-update` + per-port channel isolation | ✅ Done |
 
 ## Contributing
 

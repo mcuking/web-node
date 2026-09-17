@@ -183,10 +183,11 @@ listening   : http://127.0.0.1:5173
 
 **HMR 可用，走非 WebSocket 通道。** HMR 是本 WebSocket，而 ServiceWorker 无法代理 upgrade，
 浏览器经预览桥到不了它。但预览 iframe 与 runtime 同源，于是 ServiceWorker 注入一段 `WebSocket` 垫片，
-把 **loopback** URL 改道到 `BroadcastChannel`；runtime 交给 Vite 一个 HMR 服务器对象，
-其 `send()` 走该通道而非 socket。**Vite 照常计算所有更新，我们只负责搬运**。另有一个小 Vite 插件
-把 VFS 变更事件转成 Vite watcher 事件（标签页里没有 inotify），所以编辑源文件会触发真正的
-`js-update`：点 **✏️ HMR edit**，预览**原地重渲染**，不整页刷新。
+把命中 `vite-hmr` 子协议的 socket 改道到 `BroadcastChannel`；通道按虚拟端口取名（`web-node-hmr:<port>`），
+所以两个 dev server 互不干扰；而 `<port>.localhost` 预览是**别的源**，听不到该通道，改由顶页中继。
+runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非 socket。**Vite 照常计算所有更新，我们只负责搬运**。
+另有一个小 Vite 插件把 VFS 变更事件转成 Vite watcher 事件（标签页里没有 inotify），所以编辑源文件会触发
+真正的更新：点 **✏️ HMR JS**（`js-update`）或 **🎨 HMR CSS**（`css-update`），预览**原地更新**，不整页刷新。
 
 ## 里程碑
 
@@ -206,6 +207,7 @@ listening   : http://127.0.0.1:5173
 | M5c | 真实构建工具链 —— Vite 本体：production build → VFS | ✅ |
 | M5d | Vite dev server 在页内跑通（按需转换 + 预览） | ✅ |
 | M5e | Vite HMR 在页内跑通（走 BroadcastChannel，非 WebSocket） | ✅ |
+| M5f | HMR 收尾（CSS `css-update` + 按端口隔离通道） | ✅ |
 
 ## 改动约定
 
