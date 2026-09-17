@@ -25,6 +25,7 @@ const fs = require('fs');
 const os = require('os');
 const http = require('http');
 const { EventEmitter } = require('events');
+const { Transform, pipeline } = require('stream');
 
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
 
@@ -81,6 +82,35 @@ const timer = setInterval(() => {
 console.log('scheduled 3 async ticks...');
 console.log('');
 
+// --- streams (milestone 4) ---
+// Readable/Writable/Transform/pipe are real here: chunk sizes are bounded by a
+// high-water mark and pipe() propagates backpressure.
+console.log('-- stream --');
+const factsFile = path.join(dir, 'facts.txt');
+fs.writeFileSync(factsFile, require('./lib/facts.js')().map(function (r) {
+  return r[0] + ' = ' + r[1];
+}).join('; ') + ';');
+
+let streamed = 0;
+let chunkCount = 0;
+fs.createReadStream(factsFile, { highWaterMark: 16 })
+  .on('data', function (chunk) { streamed += chunk.length; chunkCount++; })
+  .on('end', function () {
+    console.log('read stream : ' + streamed + ' bytes in ' + chunkCount + ' chunks of <=16');
+  });
+
+pipeline(
+  fs.createReadStream(factsFile),
+  new Transform({
+    transform: function (chunk, enc, cb) { cb(null, chunk.toString().toUpperCase()); },
+  }),
+  fs.createWriteStream(path.join(dir, 'facts-upper.txt')),
+  function (err) {
+    console.log('pipeline    : ' + (err ? 'error ' + err.message : 'facts-upper.txt written'));
+  }
+);
+console.log('');
+
 // --- http server (milestone 3: virtual TCP) ---
 // listen(3000) binds a port inside this runtime. The ServiceWorker bridge at
 // /preview/3000/ dials it, so this URL is reachable from the browser tab.
@@ -105,6 +135,9 @@ function page() {
     '<div class="sub">This HTML was rendered inside the runtime worker and piped through a virtual TCP socket.</div>',
     '<table>' + rows + '</table>',
     '<p style="margin-top:24px"><a href="/api/info">GET /api/info</a> &middot; <a href="/api/fib?n=20">GET /api/fib?n=20</a></p>',
+    '<p><a href="/download/facts.txt">GET /download/facts.txt</a> (fs.createReadStream().pipe(res))</p>',
+    '<p><a href="/api/stream">GET /api/stream</a> (5 x res.write() -> Transfer-Encoding: chunked)</p>',
+    '<p><a href="/api/ls?dir=/project/output">GET /api/ls?dir=/project/output</a> (what the streams wrote)</p>',
     '</body></html>',
   ].join('');
 }
@@ -127,6 +160,51 @@ const server = http.createServer(function (req, res) {
     const value = Number(url.searchParams.get('n') || 10);
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ n: value, fib: fib(value) }));
+    return;
+  }
+
+  // Streamed straight off the virtual file system. No Content-Length is set,
+  // so the response is framed as chunked and backpressure flows from the
+  // socket back into the read stream.
+  if (url.pathname === '/download/facts.txt') {
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+    fs.createReadStream(factsFile).pipe(res);
+    return;
+  }
+
+  // Several writes over time: proves the server can stream a body it cannot
+  // know the length of up front.
+  if (url.pathname === '/api/stream') {
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+    let i = 0;
+    const timer = setInterval(function () {
+      res.write('tick ' + (++i) + ';');
+      if (i === 5) {
+        clearInterval(timer);
+        res.end('done');
+      }
+    }, 30);
+    return;
+  }
+
+  // Reads the virtual file system back out, so the effects of the stream /
+  // upload endpoints are visible from the browser.
+  if (url.pathname === '/api/ls') {
+    const target = url.searchParams.get('dir') || '/project';
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(fs.readdirSync(target).sort(), null, 2));
+    return;
+  }
+
+  // Upload: the request body is a Readable, so it pipes straight to a file.
+  if (url.pathname === '/api/upload') {
+    fs.mkdirSync(dir, { recursive: true });
+    const out = fs.createWriteStream(path.join(dir, 'upload.txt'));
+    req.pipe(out);
+    out.on('finish', function () {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ bytes: out.bytesWritten }));
+    });
     return;
   }
 
@@ -169,20 +247,27 @@ module.exports = function facts() {
 
 This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 
-## What works today (milestone 3)
+## What works today (milestone 3 + the streams prerequisite)
 
 - Real Node.js core source (lib/path.js, lib/querystring.js, primordials) vendored and executed
 - internalBinding() backed by TypeScript implementations over a virtual file system
 - path / fs / buffer / events / util / console / timers / process / os / string_decoder / assert / querystring
 - **net + http over a virtual TCP layer** — http.createServer().listen(3000) is reachable at /preview/3000/
 - **ServiceWorker bridge** — a browser URL is routed into the runtime's port table
+- **stream** — Readable / Writable / Duplex / Transform / PassThrough, real backpressure,
+  pipe(), pipeline(), finished(), stream/promises, plus fs.createReadStream and
+  fs.createWriteStream; the request is a Readable and the response a Writable,
+  so req.pipe(res) works
+- **Chunked transfer-encoding** — a response without Content-Length streams as chunked,
+  and the client side de-chunks it again
 - CommonJS + a subset of ESM (static import/export)
 - In-memory VFS persisted to OPFS (reload the page and your files are still here)
 
 ## Not yet
 
 - Subdomain preview routing (3000.localhost) — currently a /preview/<port>/ path prefix
-- Chunked transfer-encoding, keep-alive, TLS (https)
+- keep-alive, TLS (https)
+- Object-mode objectMode edge cases, byte-exact read(n) splitting
 - npm client (milestone 4)
 - Real build tools (milestone 5)
 `,
