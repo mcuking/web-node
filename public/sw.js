@@ -33,26 +33,66 @@ self.addEventListener('install', () => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
+  previewPortByClient.clear();
 });
+
+/**
+ * Which preview port each client (page/iframe) belongs to.
+ *
+ * A preview document and every subresource it loads share one client id, so
+ * remembering `clientId → port` when the preview is navigated lets us route that
+ * client's *absolute-path* assets (Vite emits `/@vite/client`, and chained
+ * imports carry the importing module as referrer — not the preview document)
+ * back to the right virtual port.
+ */
+const previewPortByClient = new Map();
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Only our own origin, only the preview namespace. Everything else (Vite's
-  // own modules, the app shell) must fall through to the network untouched.
+  // Only our own origin.
   if (url.origin !== self.location.origin) return;
-  if (!url.pathname.startsWith(PREVIEW_PREFIX)) return;
 
-  const rest = url.pathname.slice(PREVIEW_PREFIX.length);
+  const previewPort = portFromPreviewPath(url.pathname);
+  if (previewPort !== null) {
+    // A preview navigation or one of its in-namespace requests: bind the owning
+    // client so its later absolute-path assets can be routed too.
+    const owner = event.resultingClientId || event.clientId;
+    if (owner) previewPortByClient.set(owner, previewPort);
+    event.respondWith(handle(event, previewPort, url));
+    return;
+  }
+
+  // Not a preview path: an absolute-path asset (e.g. Vite's `/@vite/client`),
+  // which resolves to the origin root. Route it back to the preview that asked
+  // for it — by client id first, then by referrer as a fallback.
+  const port = previewPortByClient.get(event.clientId) ?? portFromReferrer(event.request.referrer);
+  if (port == null) return;
+  event.respondWith(handle(event, port, url));
+});
+
+/** Port encoded in `/<base>preview/<port>/…`, or null if the path is not a preview path. */
+function portFromPreviewPath(pathname) {
+  if (!pathname.startsWith(PREVIEW_PREFIX)) return null;
+  const rest = pathname.slice(PREVIEW_PREFIX.length);
   const slash = rest.indexOf('/');
   const portText = slash === -1 ? rest : rest.slice(0, slash);
   const port = Number(portText);
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) return;
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
+}
 
-  event.respondWith(handle(event, port, url, rest));
-});
+/** Port of the preview document that referred this request, or null. */
+function portFromReferrer(referrer) {
+  if (!referrer) return null;
+  try {
+    return portFromPreviewPath(new URL(referrer).pathname);
+  } catch {
+    return null;
+  }
+}
 
 function parsePortAndPath(pathname) {
+  if (!pathname.startsWith(PREVIEW_PREFIX)) return { port: null, path: pathname };
   const rest = pathname.slice(PREVIEW_PREFIX.length);
   const slash = rest.indexOf('/');
   const portText = slash === -1 ? rest : rest.slice(0, slash);
@@ -65,16 +105,22 @@ function parsePortAndPath(pathname) {
  * `event.clientId` is empty for *navigation* requests (which is exactly what an
  * iframe preview load is), so falling back to a window client is required —
  * otherwise every preview navigation 503s.
+ *
+ * Crucially, a preview page itself must *never* be chosen: it is the virtual
+ * server's document, not the app shell, and has no runtime listener — posting to
+ * it would silently time out. That applies to the direct `clientId` branch too:
+ * a subresource requested by a preview iframe (e.g. Vite's absolute
+ * `/@vite/client`) reports the iframe as its client, so it must be skipped in
+ * favour of the controlling app shell.
  */
 async function resolveClient(event) {
+  const isRuntimeHost = (client) => client && !new URL(client.url).pathname.startsWith(PREVIEW_PREFIX);
   if (event.clientId) {
     const direct = await self.clients.get(event.clientId);
-    if (direct) return direct;
+    if (isRuntimeHost(direct)) return direct;
   }
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: false });
-  // Never pick a preview page as the runtime host — only the app shell can
-  // serve virtual requests.
-  return windows.find((c) => !new URL(c.url).pathname.startsWith(PREVIEW_PREFIX)) || null;
+  return windows.find(isRuntimeHost) || null;
 }
 
 const HOP_BY_HOP = ['connection', 'content-length', 'transfer-encoding', 'keep-alive', 'te', 'trailer', 'upgrade'];

@@ -162,8 +162,27 @@ written     : /project/site/dist/
 动态 `import()`），并补齐了 `PathLike` 参数、`createRequire(...).resolve`、Node 的 `events`
 模块身份、以及 `crypto`。
 
-注意 Vite 8 已改用 rolldown（Rust 原生二进制），浏览器里跑要钉 **Vite 5.x**。dev server（HMR）
-是下一个里程碑（M5d）。
+注意 Vite 8 已改用 rolldown（Rust 原生二进制），浏览器里跑要钉 **Vite 5.x**。
+
+### 跑 Vite dev server（M5d）
+
+点 **🛠 Vite dev**：真正的 Vite dev server 在标签页里启动，`createServer()` 绑一个虚拟端口
+（5173）并**按需转换**模块，和 Node 里一样。打开 **Preview** tab（`:5173`）页面就能渲染，
+全部来自虚拟文件系统。
+
+```
+tool        : vite v5.4.21 dev server (in the tab)
+esbuild     : wasm started in 38ms
+listening   : http://127.0.0.1:5173
+```
+
+为此补了两样东西：loopback-only 的 **`dns`** builtin（Vite 的 `buildStart` 会解析 `localhost`）、
+以及真 EventEmitter 的 `process.stdin`（`close()` 会卸载 SIGTERM 监听）。预览桥还学会了把浏览器的
+**绝对路径**资源（`/@vite/client`、链式 import）回路由到正确虚拟端口——靠记住 `clientId → port`，
+因为 ServiceWorker 眼中一个文档及其所有子资源共享同一个 client id。
+
+**HMR 未接通**：它跑在 WebSocket 上，而 ServiceWorker 无法代理 WebSocket upgrade，
+所以浏览器经预览桥永远到不了 dev server 的 HMR 通道。demo 里已关掉（`hmr: false`）。
 
 ## 里程碑
 
@@ -181,7 +200,8 @@ written     : /project/site/dist/
 | M5 | 真实构建工具 —— esbuild WASM：安装→初始化→打包→写回 | ✅ |
 | M5b | 真实打包器 —— rollup WASM：ESM 图 + tree-shaking → VFS | ✅ |
 | M5c | 真实构建工具链 —— Vite 本体：production build → VFS | ✅ |
-| M5d | Vite dev server（dev server 编排 / HMR） | ⬜ 下一步 |
+| M5d | Vite dev server 在页内跑通（按需转换 + 预览） | ✅ |
+| M5e | Vite HMR（需非 WebSocket 的 HMR 通道） | ⬜ 暂缓 |
 
 ## 改动约定
 
