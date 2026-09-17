@@ -9,7 +9,9 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+
+> 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
@@ -27,6 +29,7 @@
 | M5c | **Vite 本体**（真实 production build → VFS） | ✅ 完成 |
 | M5d | **Vite dev server**（页内编排 + 预览） | ✅ 完成 |
 | M5e | **Vite HMR**（非 WebSocket 的 BroadcastChannel 通道） | ✅ 完成 |
+| M5f | **HMR 收尾**（CSS `css-update` + 按端口隔离通道） | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
@@ -110,15 +113,37 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **HMR 收尾**：CSS HMR（`updateStyle` 路径）与**多端口隔离**（一个端口一个 HMR 通道，不能共用一个 BroadcastChannel 把更新广播给所有预览）。
-2. **npm 收尾**：lockfile 读写、`.bin` shim、peer 依赖自动安装、integrity 校验、生命周期脚本、`file:`/`git+` 说明符。
-3. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
-4. **stream 收尾**：`read(n)` 字节精确切分、`autoDestroy` 细节、`objectMode` 边界。
-5. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
+1. **npm 收尾**：lockfile 读写、`.bin` shim、peer 依赖自动安装、integrity 校验、生命周期脚本、`file:`/`git+` 说明符。
+2. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
+3. **stream 收尾**：`read(n)` 字节精确切分、`autoDestroy` 细节、`objectMode` 边界。
+4. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
 
 ---
 
 ## 变更记录
+
+### 2026-09-17 · M5f HMR 收尾：CSS 更新 + 通道按端口隔离
+
+**目标**：把 M5e 的 HMR 补齐两处——CSS 热更（`css-update` 路径）与多端口隔离（两个 dev server 不能串台）。
+
+**1. CSS HMR**
+- site 新增 `src/style.css` 并在 `main.js` 里 `import './style.css'`；新增 **🎨 HMR CSS** 按钮（`hmrCssEdit()`）按调色板循环改写 `style.css`。
+- 验证：`getComputedStyle(#app).color` 从 `rgb(94,241,165)` 原地变为 `rgb(124,196,255)`（`#7cc4ff`），**无 reload**（marker 存活）。Vite 直接走 `css-update` / `updateStyle` 路径，运行时照搬即可。
+
+**2. 多端口隔离**
+- 通道名从固定 `web-node-hmr` 改为 **按端口** `web-node-hmr:<port>`。SW 注入 shim 时已知预览端口，因此把 `PORT` 写进 shim；运行时桥用同一规则拼名（两边必须保持一致）。
+- 子域名预览是**跨源**，shim 无法用 BroadcastChannel，仍经 `window.top` 中继；帧里新增 `port` 字段，主页面的 `installHmrRelay` 据此**按端口选通道**（`channelFor(port)`），且只把 runtime 的回复推给当前显示该端口的 iframe。
+- 验证：活预览在 5173 时，在页面里同时监听 `web-node-hmr:5173` 与 `web-node-hmr:5174`，触发一次编辑 → **`{5173:1, 5174:0}`**。
+
+**3. 顺手修的 UX/真实 bug**
+- **端口自动发现**：`listen()` 启动的服务器会让 `client.run` 永不 resolve（不退回），以前端口下拉要手动 Refresh。新增 `startPortWatch()`（每 1.5s 轻量 `describe()`），端口集合变化才刷新 → 启动 dev server 后预览自动出现（也顺便保证 `hmrRelay.follow(port)` 被调用）。
+- **`hmred` 反引号陷阱又中一次**（在 `demo-project.ts` 内嵌的 `vite-dev.mjs` 注释里）。同一条约定再现：内嵌源码字符串禁用反引号 / `${` / 反斜杠。
+
+**测试**：仍 **100/100**（本里程碑为集成行为，主要靠 `tools/e2e-subdomain-hmr.mjs` 端到端验证）。
+
+**新增验证工具**：`tools/e2e-subdomain-hmr.mjs` 扩到 JS+CSS 两阶段（含端口发现、每步超时、SW 重注册）；`tools/probe-hmr-ports.mjs`（端口隔离计数）。
+
+**涉及文件**：`public/sw.js`、`src/demo-project.ts`、`src/ui/main.ts`、`index.html`、`README.md`、`README_zh.md`、`tools/e2e-subdomain-hmr.mjs`、`tools/probe-hmr-ports.mjs`（新）
 
 ### 2026-09-17 · M3.5d 子域名路由：每个预览一个真实源（`<port>.localhost`）
 

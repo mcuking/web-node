@@ -37,8 +37,18 @@ async function attachPage() {
   ({ sessionId: pageSession } = await send('Target.attachToTarget', { targetId: t.id, flatten: true }));
 }
 await attachPage();
-// Start from a clean document: a wedged renderer from an earlier run would
-// otherwise stall every later step. The runtime re-boots from OPFS.
+// Start from a clean document and a fresh worker: a wedged renderer, or a
+// stale ServiceWorker (its injected HMR shim changed), would otherwise stall
+// the run. The runtime re-boots from OPFS.
+await send(
+  'Runtime.evaluate',
+  {
+    expression:
+      "navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }).then(function () { return 'unregistered'; })",
+    awaitPromise: true,
+  },
+  pageSession,
+);
 await send('Page.reload', { ignoreCache: true }, pageSession);
 await sleep(1500);
 
@@ -68,9 +78,12 @@ console.log('1. boot');
 await waitFor("document.getElementById('boot') && /runtime ready/.test(document.getElementById('boot').textContent) && 'ready'", 'boot');
 console.log('   ', await req("document.getElementById('boot').textContent"));
 
-console.log('2. vite dev (install first if needed)');
+console.log('2. reset project (pick up new demo files), then vite dev');
+console.log('   ', await req("document.getElementById('reset').click(), 'reset'"));
+await waitFor("document.getElementById('boot').textContent.includes('ready') && 'ok'", 'after-reset', 30000);
+await sleep(2500);
 console.log('   ', await req("document.getElementById('install').click(), 'install-clicked'"));
-await waitFor("document.getElementById('status').textContent.includes('installed') && 'installed'", 'install', 120000);
+await waitFor("document.getElementById('status').textContent.includes('installed') && 'installed'", 'install', 150000);
 console.log('   ', await req("document.getElementById('status').textContent"));
 console.log('   ', await req("document.getElementById('vitedev').click(), 'vitedev-clicked'"));
 
@@ -80,9 +93,15 @@ await waitFor(`document.getElementById('terminal').textContent.includes('listeni
 const ok = await bounded(fetch(subShell).then((r) => r.status), 15000, 'fetch shell');
 console.log('   shell status', ok);
 
-console.log('4. point the preview at the subdomain shell');
-await req(`document.getElementById('preview-frame').src='about:blank', document.getElementById('preview-frame').src=${JSON.stringify(subShell)}, 'set'`);
-await sleep(4000);
+console.log('4. preview appears on the subdomain (port auto-discovery)');
+const discovered = await waitFor(
+  "(function(){var s=document.getElementById('port-select');return s && s.options.length && s.value ? s.value : '';})()",
+  'port discovery',
+  60000,
+);
+console.log('   port discovered:', discovered);
+console.log('   iframe:', await req("document.getElementById('preview-frame').getAttribute('src')"));
+await sleep(2500);
 console.log('   ', await waitFor("document.getElementById('terminal').textContent.includes('preview connected') && 'connected'", 'hmr client', 45000));
 await sleep(2000);
 
@@ -125,8 +144,16 @@ console.log('6. edit a watched file (triggers HMR)');
 console.log('   ', await req("document.getElementById('hmred').click(), 'edited'"));
 await sleep(7000);
 
-console.log('7. result');
+console.log('7. result (JS hmr)');
 console.log('   app after :', await inApp("document.getElementById('app') && document.getElementById('app').textContent"));
+console.log('   hmr frames received by app:', await inApp("document.documentElement.dataset.hmr"));
+console.log('   marker survived (no reload):', await inApp("document.documentElement.dataset.mark"));
+
+console.log('8. css hmr');
+console.log('   color before:', await inApp("getComputedStyle(document.getElementById('app')).color"));
+console.log('   ', await req("document.getElementById('hmrcss').click(), 'edited'"));
+await sleep(6000);
+console.log('   color after :', await inApp("getComputedStyle(document.getElementById('app')).color"));
 console.log('   hmr frames received by app:', await inApp("document.documentElement.dataset.hmr"));
 console.log('   marker survived (no reload):', await inApp("document.documentElement.dataset.mark"));
 process.exit(0);

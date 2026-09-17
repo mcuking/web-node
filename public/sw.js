@@ -77,9 +77,15 @@ function isShellRequest(pathname) {
  *
  * Only Vite's HMR socket is diverted (it is recognisable by its `vite-hmr`
  * subprotocol); every other WebSocket is left to the real implementation.
+ *
+ * The channel is scoped to the virtual port (`web-node-hmr:<port>`) so several
+ * dev servers can run side by side without seeing each other's clients. The
+ * port is baked in from the preview URL the worker is answering.
  */
-const WS_SHIM = `<script>(function () {
-  var CH = 'web-node-hmr';
+function wsShim(port) {
+  return `<script>(function () {
+  var PORT = ${JSON.stringify(port)};
+  var CH = 'web-node-hmr:' + PORT;
   var Native = window.WebSocket;
   // A <port>.localhost preview is a different origin from the runtime, so the
   // BroadcastChannel below is unreachable; relay through the top page instead.
@@ -97,10 +103,12 @@ const WS_SHIM = `<script>(function () {
   }
   function makeTransport(onFrame) {
     if (SUB) {
+      // The top page relays on the channel for our port; frames carry it so a
+      // page showing several previews can route to the right one.
       window.addEventListener('message', function (e) {
-        if (e.data && e.data.__wnHmr) onFrame(e.data.__wnHmr);
+        if (e.data && e.data.__wnHmr && e.data.port === PORT) onFrame(e.data.__wnHmr);
       });
-      return function (frame) { try { window.top.postMessage({ __wnHmr: frame }, '*'); } catch (e) {} };
+      return function (frame) { try { window.top.postMessage({ __wnHmr: frame, port: PORT }, '*'); } catch (e) {} };
     }
     var ch = new BroadcastChannel(CH);
     ch.onmessage = function (e) { onFrame(e.data); };
@@ -157,6 +165,7 @@ const WS_SHIM = `<script>(function () {
   Shim.prototype = Native.prototype;
   window.WebSocket = Shim;
 })();</script>`;
+}
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -437,7 +446,7 @@ async function handle(event, port, url, mode) {
     const html = new TextDecoder().decode(merged);
     // In subdomain mode the document already sits at the origin root, so its
     // absolute paths are correct and no `<base>` is needed — only the shim.
-    const inject = mode === 'subdomain' ? WS_SHIM : `<base href="${PREVIEW_PREFIX}${port}/">` + WS_SHIM;
+    const inject = mode === 'subdomain' ? wsShim(port) : `<base href="${PREVIEW_PREFIX}${port}/">` + wsShim(port);
     const patched = html.includes('<head>') ? html.replace('<head>', '<head>' + inject) : inject + html;
     return new Response(new TextEncoder().encode(patched), {
       status: head.status,
