@@ -13,7 +13,13 @@ export interface BuiltinInitContext {
   /** Public core module ids (e.g. `path`, `fs`) known to the realm. */
   builtinModuleIds: string[];
   /** Set by the module loader so `module.createRequire` can resolve user files. */
-  userRequire?: (from: string, id: string) => unknown;
+  userRequire?: UserRequireFn;
+}
+
+/** `require` facade the loader hands to `module.createRequire`, with `resolve`. */
+export interface UserRequireFn {
+  (from: string, id: string): unknown;
+  resolve?: (from: string, id: string, options?: { paths?: string[] }) => string;
 }
 
 export interface BuiltinSpec {

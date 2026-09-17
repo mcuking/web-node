@@ -1,7 +1,7 @@
 import { createBindingTable, hasBinding, unsupportedBinding } from './bindings';
 import type { BindingContext } from './bindings/context';
 import { ALL_BUILTINS, PUBLIC_BUILTIN_IDS } from './builtins';
-import type { BuiltinInitContext, BuiltinSpec } from './builtins/types';
+import type { BuiltinInitContext, BuiltinSpec, UserRequireFn } from './builtins/types';
 import { vendoredSource } from './vendored';
 import { compileCjs } from './vm';
 import { notImplemented } from './errors';
@@ -76,7 +76,7 @@ export class Realm {
   }
 
   /** Wire the loader in so `module.createRequire` can resolve user files. */
-  setUserRequire(fn: (from: string, id: string) => unknown): void {
+  setUserRequire(fn: UserRequireFn): void {
     this.#ctx.userRequire = fn;
   }
 

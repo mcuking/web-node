@@ -3,6 +3,7 @@ import type { Vfs } from './vfs';
 import { VirtualNetwork } from './net/network';
 import { Realm } from './realm';
 import { ModuleLoader } from './loader';
+import * as p from './vfs/posix';
 import { installProject, type FetchLike, type InstallResult } from './npm';
 
 /** Thrown by `process.exit()` to unwind the call stack back to the runner. */
@@ -157,7 +158,19 @@ export class NodeRuntime {
 
     this.realm = new Realm(bindingCtx);
     this.loader = new ModuleLoader(this.realm, opts.vfs);
-    this.realm.setUserRequire(this.loader.require);
+    // Native-binary tools are aliased to their WASM counterparts: a browser tab
+    // cannot load a .node addon, so `require('rollup')`/`require('esbuild')`
+    // resolve to the WASM builds that ship the same public API.
+    this.loader.setAliases({ rollup: '@rollup/wasm-node', esbuild: 'esbuild-wasm' });
+    // `module.createRequire(...)` needs more than a lookup: bundled tooling calls
+    // `require.resolve(id)` to map an id to a path without loading it.
+    const loader = this.loader;
+    this.realm.setUserRequire(
+      Object.assign((from: string, id: string) => loader.require(from, id), {
+        resolve: (from: string, id: string, options?: { paths?: string[] }) =>
+          loader.resolve(id, options?.paths?.[0] ?? p.dirname(from), 'require'),
+      }),
+    );
 
     this.process = this.realm.require('process') as Record<string, unknown>;
     this.console = this.realm.require('console') as Record<string, unknown>;

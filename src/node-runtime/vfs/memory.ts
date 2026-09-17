@@ -5,6 +5,7 @@ import {
   type Stat,
   type Vfs,
   type WriteOptions,
+  type PathLike,
   VfsError,
 } from './types';
 import * as p from './posix';
@@ -74,10 +75,12 @@ export class MemoryVfs implements Vfs {
     return this.#cwd;
   }
 
-  resolve(input: string): string {
-    if (!input) throw new VfsError('ENOENT', 'open', input);
-    if (p.isAbsolute(input)) return p.normalize(input);
-    return p.resolve(this.#cwd, input);
+  resolve(input: PathLike): string {
+    // Accept Node's `PathLike` (string | file URL | Buffer) — see posix.toPathValue.
+    const path = p.toPathValue(input);
+    if (!path) throw new VfsError('ENOENT', 'open', path);
+    if (p.isAbsolute(path)) return p.normalize(path);
+    return p.resolve(this.#cwd, path);
   }
 
   chdir(dir: string): void {

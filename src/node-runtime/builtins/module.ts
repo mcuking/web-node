@@ -1,4 +1,4 @@
-import type { BuiltinSpec, BuiltinInitContext } from './types';
+import type { BuiltinSpec, BuiltinInitContext, UserRequireFn } from './types';
 
 /**
  * `module` builtin — a structurally compatible subset of Node's module module.
@@ -51,12 +51,25 @@ export const moduleSpec: BuiltinSpec = {
       static isBuiltin = (id: string): boolean => builtinModuleIds.includes(id.replace(/^node:/, ''));
       static syncBuiltinESMExports = (): void => undefined;
       static createRequire = (filename: string | URL): ((id: string) => unknown) => {
-        const from = typeof filename === 'string' ? filename : '/';
-        return (id: string) => {
-          const loader = (ctx as unknown as { userRequire?: (from: string, id: string) => unknown }).userRequire;
+        // Vite (and anything bundled by rollup) calls `createRequire(import.meta.url)`,
+        // so the argument is usually a `file://` URL that must be turned back
+        // into a VFS path before the loader can resolve relative to it.
+        const raw = typeof filename === 'string' ? filename : filename.href;
+        const from = raw.startsWith('file://') ? decodeURIComponent(raw.slice('file://'.length)) : raw;
+        const loader = (ctx as unknown as { userRequire?: UserRequireFn }).userRequire;
+        const req = ((id: string) => {
           if (loader) return loader(from, id);
           return ctx.require(id);
+        }) as ((id: string) => unknown) & {
+          resolve: (id: string, options?: { paths?: string[] }) => string;
         };
+        // Node's `require` carries `.resolve`; bundled tooling relies on it to
+        // turn an id into an absolute path without loading the module.
+        req.resolve = (id: string, options?: { paths?: string[] }): string => {
+          if (loader?.resolve) return loader.resolve(from, id, options);
+          return id;
+        };
+        return req;
       };
       static register = (): void => undefined;
       static _cache = new Map<string, Module>();
