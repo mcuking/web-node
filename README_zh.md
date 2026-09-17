@@ -34,6 +34,7 @@ src/
     loader/       CJS resolver + ESM→CJS 转换
     net/          虚拟 TCP（VirtualNetwork / VirtualSocket）
     vfs/          虚拟文件系统（内存树 + OPFS 持久化）
+    npm/          npm client（semver / registry / tarball / installer）
   worker/         Dedicated Worker 入口
   client/         主线程 Runtime Client API（含 ServiceWorker 桥）
   ui/             Demo UI（文件树 / 编辑器 / 终端 / 预览）
@@ -79,6 +80,31 @@ pipeline(fs.createReadStream('/project/a.txt'), new Transform({
 `Readable` / `Writable` / `Duplex` / `Transform` / `PassThrough`、`pipe()`、`pipeline()`、
 `finished()`、`stream/promises`、`fs.createReadStream` / `fs.createWriteStream` 均已实现，
 高水位之上的 `write()`/`push()` 返回 `false` 并在排空后发 `'drain'`（背压真实生效）。
+
+## npm（M4）
+
+点顶栏 **⬇ Install deps**：客户端会读项目 `package.json`，向 npm registry 解析依赖版本，
+下载 tarball 后 gunzip + untar 写入虚拟 `node_modules`（顶层 hoisting，仅在版本冲突时嵌套），
+之后普通 `require` 就能拿到：
+
+```js
+const ms = require('ms');
+ms(60000); // '1m'
+```
+
+未支持：生命周期脚本、`.bin` shim、peer 依赖自动安装、lockfile 读写、integrity 校验。
+
+## 里程碑
+
+| 里程碑 | 内容 | 状态 |
+|---|---|---|
+| M1 | 纯 JS 运行层 | ✅ |
+| M2 | 虚拟文件系统 | ✅ |
+| M3 | 网络（虚拟 TCP + SW 桥 + 预览） | ✅ |
+| S | stream 前置 | ✅ |
+| M4 | npm client | ✅ |
+| M3.5 | 网络收敛（子域名路由 / keep-alive / https） | ⬜ |
+| M5 | 真实构建工具（vite / webpack） | ⬜ |
 
 ## 改动约定
 

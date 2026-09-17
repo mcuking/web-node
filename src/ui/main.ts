@@ -14,6 +14,7 @@ const statusEl = $<HTMLSpanElement>('status');
 const bootEl = $<HTMLSpanElement>('boot');
 const factsEl = $<HTMLSpanElement>('facts');
 const runBtn = $<HTMLButtonElement>('run');
+const installBtn = $<HTMLButtonElement>('install');
 const clearBtn = $<HTMLButtonElement>('clear');
 const resetBtn = $<HTMLButtonElement>('reset');
 const portSelect = $<HTMLSelectElement>('port-select');
@@ -45,6 +46,7 @@ function setStatus(text: string, cls = ''): void {
 function renderTree(): void {
   treeEl.innerHTML = '';
   for (const f of files) {
+    if (f.includes('/node_modules/')) continue; // keep the tree readable
     const li = document.createElement('li');
     li.textContent = f.replace('/project/', '');
     li.dataset.path = f;
@@ -182,6 +184,31 @@ client.on('ready', (runtimeInfo) => {
   writeTerminal('internalBindings: ' + runtimeInfo.bindings.join(', ') + '\n\n', 'sys');
 });
 runBtn.addEventListener('click', () => void runProject());
+
+async function installDeps(): Promise<void> {
+  await save();
+  installBtn.disabled = true;
+  runBtn.disabled = true;
+  setStatus('installing…', 'running');
+  writeTerminal('\n$ npm install\n', 'sys');
+  const started = performance.now();
+  try {
+    const result = await client.installDeps({ includeDev: true });
+    const ms = (performance.now() - started).toFixed(0);
+    for (const warning of result.warnings) writeTerminal(`[npm] ${warning}\n`, 'err');
+    for (const pkg of result.installed) writeTerminal(`  ${pkg.name}@${pkg.version}\n`, 'sys');
+    writeTerminal(`[installed ${result.packages} package(s) in ${ms}ms — now press ▶ Run]\n`, 'ok');
+    setStatus(`installed ${result.packages}`, 'ok');
+  } catch (err) {
+    writeTerminal(`[npm install failed] ${(err as Error).message}\n`, 'err');
+    setStatus('error', 'err');
+  } finally {
+    installBtn.disabled = false;
+    runBtn.disabled = false;
+  }
+}
+
+installBtn.addEventListener('click', () => void installDeps());
 clearBtn.addEventListener('click', () => {
   terminalEl.innerHTML = '';
   setStatus('');

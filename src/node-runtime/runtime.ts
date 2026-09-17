@@ -3,6 +3,7 @@ import type { Vfs } from './vfs';
 import { VirtualNetwork } from './net/network';
 import { Realm } from './realm';
 import { ModuleLoader } from './loader';
+import { installProject, type FetchLike, type InstallResult } from './npm';
 
 /** Thrown by `process.exit()` to unwind the call stack back to the runner. */
 export class ProcessExit extends Error {
@@ -205,6 +206,27 @@ export class NodeRuntime {
 
   #clearAllTimers(): void {
     for (const id of [...this.#timers.keys()]) this.#clearTimer(id);
+  }
+
+  /**
+   * npm client (milestone 4).
+   *
+   * Resolves the project's `package.json` dependency ranges against the npm
+   * registry, downloads the tarballs and extracts them into the VFS. `fetch`
+   * is injected so the runtime stays host-agnostic (browser worker vs. test
+   * harness) and the installer remains unit-testable without network access.
+   */
+  async installDependencies(
+    opts: { cwd?: string; includeDev?: boolean; onLog?: (message: string) => void; fetch?: FetchLike } = {},
+  ): Promise<InstallResult> {
+    const fetchImpl = opts.fetch ?? (typeof fetch === 'function' ? (fetch.bind(globalThis) as unknown as FetchLike) : undefined);
+    if (!fetchImpl) throw new Error('npm install requires a fetch implementation');
+    return installProject(this.vfs, {
+      cwd: opts.cwd ?? this.vfs.cwd,
+      fetch: fetchImpl,
+      includeDev: opts.includeDev ?? false,
+      log: opts.onLog,
+    });
   }
 
   /** Introspection used by the UI. */
