@@ -14,7 +14,16 @@ export const DEMO_FILES: Record<string, string> = {
       type: 'commonjs',
       main: 'index.js',
       scripts: { start: 'node index.js' },
-      dependencies: { ms: '^2.1.3', 'esbuild-wasm': '^0.28.2', '@rollup/wasm-node': '^4.63.3' },
+      dependencies: {
+        ms: '^2.1.3',
+        'esbuild-wasm': '^0.28.2',
+        '@rollup/wasm-node': '^4.63.3',
+        vite: '^5.4.0',
+        postcss: '^8.4.43',
+        picocolors: '^1.0.0',
+        'source-map-js': '^1.2.0',
+        nanoid: '^3.3.7',
+      },
     },
     null,
     2,
@@ -437,6 +446,83 @@ const OUT = path.join(ROOT, 'dist', 'app.esm.js');
 });
 `,
 
+  // Milestone 5c: the real thing — Vite itself builds the `site/` project in
+  // the tab. Vite is pure ESM and expects the native esbuild addon; the runtime
+  // aliases `esbuild`→`esbuild-wasm` and `rollup`→`@rollup/wasm-node`, so all
+  // the tooling Vite reaches for resolves to a WASM build that a tab can run.
+  '/project/vite-build.mjs': `// Click "Vite build" to run this: Vite bundles site/ inside the tab.
+// Vite is loaded with a dynamic import() so the guard below can run first;
+// a static import would be evaluated eagerly and fail before the check.
+import fs from 'fs';
+import path from 'path';
+
+const ROOT = '/project';
+const SITE = path.join(ROOT, 'site');
+const NM = path.join(ROOT, 'node_modules');
+
+(async function () {
+  console.log('-- vite build (milestone 5c) --');
+  if (!fs.existsSync(path.join(NM, 'vite'))) {
+    console.log('vite: not installed yet - click "Install deps" first');
+    return;
+  }
+  const vite = await import('vite');
+  console.log('tool        : vite v' + vite.version + ' (running in the tab)');
+
+  // Vite expects the native esbuild addon. A tab cannot load one, so the runtime
+  // aliases 'esbuild' to its WASM build, which must be started explicitly first.
+  const esbuild = await import('esbuild');
+  const wasm = fs.readFileSync(path.join(NM, 'esbuild-wasm', 'esbuild.wasm'));
+  const t0 = Date.now();
+  await esbuild.initialize({ wasmModule: await WebAssembly.compile(wasm), worker: false });
+  console.log('esbuild     : wasm started in ' + (Date.now() - t0) + 'ms');
+
+  const t1 = Date.now();
+  const result = await vite.build({
+    root: SITE,
+    logLevel: 'silent',
+    build: { write: false, minify: false },
+  });
+  const bundle = Array.isArray(result) ? result[0] : result;
+
+  for (const chunk of bundle.output) {
+    const dest = path.join(SITE, 'dist', chunk.fileName);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, chunk.type === 'asset' ? String(chunk.source) : chunk.code);
+  }
+  console.log('built in    : ' + (Date.now() - t1) + 'ms');
+  console.log('written     : /project/site/dist/');
+  for (const chunk of bundle.output) console.log('  ' + chunk.fileName);
+})().catch(function (err) {
+  console.log('vite failed : ' + (err && err.message ? err.message : err));
+});
+`,
+
+  // The project Vite builds. Deliberately plain ES modules so the interesting
+  // part is the toolchain, not the source.
+  '/project/site/index.html': `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>web-node · vite</title>
+  </head>
+  <body>
+    <h1 id="app"></h1>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
+`,
+
+  '/project/site/src/main.js': `import { greet } from './message.js';
+
+document.getElementById('app').textContent = greet('vite');
+`,
+
+  '/project/site/src/message.js': `export function greet(who) {
+  return 'Hello from ' + who + ', bundled in the browser';
+}
+`,
+
   '/project/notes.md': `# web-node demo project
 
 This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
@@ -464,6 +550,11 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - **Real bundler (milestone 5b)** — "Bundle" runs rollup (its official WASM build)
   in the tab: it tree-shakes an ES module graph read straight out of the virtual
   file system and writes /project/dist/app.esm.js
+- **Vite itself (milestone 5c)** — "Vite build" runs the real Vite (v5) in the tab.
+  Vite is pure ESM and reaches for the *native* esbuild addon; the runtime aliases
+  esbuild→esbuild-wasm and rollup→@rollup/wasm-node, so Vite boots on the virtual
+  file system and produces a real production bundle (site/index.html +
+  site/dist/assets/*.js) — no server, no Node process
 - CommonJS + a subset of ESM (static import/export)
 - In-memory VFS persisted to OPFS (reload the page and your files are still here)
 
@@ -473,7 +564,6 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - Real TLS (the https module is the http surface under a TLS-shaped name)
 - Object-mode objectMode edge cases, byte-exact read(n) splitting
 - npm lifecycle scripts, .bin shims, peer-dependency auto-install, lockfile, integrity checks
-- Vite/webpack themselves (esbuild + rollup are milestones 5/5b; the dev-server
-  orchestration is next)
+- webpack (esbuild, rollup and Vite are milestones 5/5b/5c; a dev server is next)
 `,
 };

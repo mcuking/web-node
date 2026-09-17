@@ -127,8 +127,29 @@ tree-shaken : yes (dead export dropped)
 written     : /project/dist/app.esm.js
 ```
 
-Vite / webpack 本体是下一步（M5c）。注意 Vite 8 已改用 rolldown（Rust 原生二进制），
-浏览器里跑要钉 **Vite 5.x**。
+Vite / webpack 本体曾是下一步——现在 Vite 跑通了（M5c）：
+
+### 用 Vite 构建（M5c）
+
+点 **⚡ Vite build**：在页内跑**真正的 Vite（v5）**打包 `site/`。Vite 是纯 ESM，且 `import` 原生
+esbuild addon，所以运行时把 `esbuild`→`esbuild-wasm`、`rollup`→`@rollup/wasm-node` 别名；WASM
+版 esbuild 显式初始化后，`vite.build()` 整个跑在虚拟文件系统上：
+
+```
+tool        : vite v5.4.21 (running in the tab)
+esbuild     : wasm started in 33ms
+built in    : 148ms
+written     : /project/site/dist/
+  assets/index-DTtKUl1f.js
+  index.html
+```
+
+为支撑它，ESM→CJS 转换器重写成了对顶层语句的扫描器（多行 import、模板字面量、正则vs除号、
+动态 `import()`），并补齐了 `PathLike` 参数、`createRequire(...).resolve`、Node 的 `events`
+模块身份、以及 `crypto`。
+
+注意 Vite 8 已改用 rolldown（Rust 原生二进制），浏览器里跑要钉 **Vite 5.x**。dev server（HMR）
+是下一个里程碑（M5d）。
 
 ## 里程碑
 
@@ -145,7 +166,8 @@ Vite / webpack 本体是下一步（M5c）。注意 Vite 8 已改用 rolldown（
 | M3.5d | 子域名路由（`<port>.localhost`） | ⏸ 暂缓（跨源 runtime/OPFS） |
 | M5 | 真实构建工具 —— esbuild WASM：安装→初始化→打包→写回 | ✅ |
 | M5b | 真实打包器 —— rollup WASM：ESM 图 + tree-shaking → VFS | ✅ |
-| M5c | Vite / webpack 本体 | ⬜ 下一步 |
+| M5c | 真实构建工具链 —— Vite 本体：production build → VFS | ✅ |
+| M5d | Vite dev server（dev server 编排 / HMR） | ⬜ 下一步 |
 
 ## 改动约定
 

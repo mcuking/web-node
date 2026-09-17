@@ -16,6 +16,7 @@ const factsEl = $<HTMLSpanElement>('facts');
 const runBtn = $<HTMLButtonElement>('run');
 const buildBtn = $<HTMLButtonElement>('build');
 const bundleBtn = $<HTMLButtonElement>('bundle');
+const viteBtn = $<HTMLButtonElement>('vite');
 const installBtn = $<HTMLButtonElement>('install');
 const clearBtn = $<HTMLButtonElement>('clear');
 const resetBtn = $<HTMLButtonElement>('reset');
@@ -92,7 +93,7 @@ async function runProject(): Promise<void> {
 
 /**
  * Run any VFS entry (`node <path>`) with the shared busy/status/terminal
- * handling. `runProject` and `buildProject` are the two callers.
+ * handling. The Run/Build/Bundle/Vite buttons all go through here.
  */
 async function runEntry(entry: string, label: string, button: HTMLButtonElement): Promise<void> {
   await save();
@@ -123,6 +124,10 @@ async function buildProject(): Promise<void> {
 
 async function bundleProject(): Promise<void> {
   await runEntry('/project/bundle.js', 'node /project/bundle.js', bundleBtn);
+}
+
+async function viteBuildProject(): Promise<void> {
+  await runEntry('/project/vite-build.mjs', 'node /project/vite-build.mjs', viteBtn);
 }
 
 // --- preview ---------------------------------------------------------------
@@ -206,6 +211,7 @@ client.on('ready', (runtimeInfo) => {
 runBtn.addEventListener('click', () => void runProject());
 buildBtn.addEventListener('click', () => void buildProject());
 bundleBtn.addEventListener('click', () => void bundleProject());
+viteBtn.addEventListener('click', () => void viteBuildProject());
 
 async function installDeps(): Promise<void> {
   await save();
