@@ -1,85 +1,145 @@
 # web-node
 
-在浏览器里跑 Node.js 源码（WebContainer 式运行时）。
+Run Node.js source code in the browser — a WebContainer-style runtime.
 
-- **开发日志 / 进度 / 下一步**：`docs/DEVLOG.md` ← **每次改动都往这里追加**
-- 设计文档：`docs/superpowers/specs/2026-09-17-web-node-design.md`
-- 上游源码：`/Users/tangjianghong/Downloads/node`（Node.js v26.9.1）
+**English** · [简体中文](README_zh.md)
 
-## 开发
+- **Dev log / progress / next steps**: [`docs/DEVLOG.md`](docs/DEVLOG.md) ← **append an entry after every change**
+- Design doc: [`docs/superpowers/specs/2026-09-17-web-node-design.md`](docs/superpowers/specs/2026-09-17-web-node-design.md)
+- Upstream sources: local checkout of Node.js (v26.9.1), vendored via `tools/`
 
-> ⚠️ 用 fnm 的独立 Node v22.19.0，不要用 ClawHive 内置 Electron Node
-> （Electron Node 会让 rollup 原生模块 dlopen 代码签名失败）。
+## How it works
+
+WebContainer is **not** Node.js compiled to WASM. The real trick is to run user
+code on the browser's own JS engine (no V8 port) and swap only the native /
+syscall layer for a virtual one. `internalBinding()` is the single seam, and on
+top of it sit three virtual subsystems:
+
+```
+┌──────────────────────────────── browser page ────────────────────────────────┐
+│                                                                              │
+│  UI (file tree / editor / terminal / preview)                                │
+│        │                                                                     │
+│        ▼                                                                     │
+│  RuntimeClient (main thread)  ◄── ServiceWorker bridge (/preview/<port>/…)   │
+│        │                                                                     │
+│        ▼  postMessage                                                        │
+│  Runtime Worker                                                              │
+│    Realm ── internalBinding() dispatch ──┬─→ bindings/  (TS shims)           │
+│                                          ├─→ builtins/  (node:* modules)     │
+│                                          ├─→ VFS        (in-memory + OPFS)   │
+│                                          └─→ VirtualNetwork (virtual TCP)    │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Realm** — the only engine-replacement point: a binding dispatch table plus a
+  whitelist of internal bindings.
+- **Loader** — CommonJS resolver + ESM→CJS transform, running on vendored real
+  Node sources where practical and hand-written TS shims elsewhere.
+- **VFS** — an in-memory inode tree as the source of truth, persisted to OPFS
+  write-behind (debounced).
+- **Virtual network** — a plain-TS port table and duplex byte pipes, exposed to
+  the page through a ServiceWorker so `http.createServer().listen(3000)` is
+  reachable at a real browser URL.
+- **Streams** — `Readable` / `Writable` / `Duplex` / `Transform` / `PassThrough`
+  with real backpressure, wired into `fs` and `http`.
+
+## Development
+
+> ⚠️ Use an independent Node v22.19.0 from fnm — not the host app's bundled
+> Electron Node. The Electron Node makes rollup's native module fail `dlopen`
+> with a code-signing error.
 
 ```bash
 export PATH="/Users/tangjianghong/Library/Application Support/fnm/node-versions/v22.19.0/installation/bin:$PATH"
 
 npm install
 npm run dev        # http://localhost:5173
-npm test           # 单元 + 集成测试
+npm test           # unit + integration tests
 npm run typecheck  # tsc --noEmit
-npm run build      # 生产构建
-npm run vendor     # 重新从 Node 源码 vendor 文件
+npm run build      # production build
+npm run vendor     # re-vendor files from the Node.js sources
 ```
 
-## 结构
+## Layout
 
 ```
 src/
-  node-runtime/   运行时核心：realm(binding 分发) / loader / runtime
-    bindings/     TS 实现的 internalBinding
-    builtins/     node:* 模块实现（真源码 + TS 实现）
-    loader/       CJS resolver + ESM→CJS 转换
-    net/          虚拟 TCP（VirtualNetwork / VirtualSocket）
-    vfs/          虚拟文件系统（内存树 + OPFS 持久化）
-  worker/         Dedicated Worker 入口
-  client/         主线程 Runtime Client API（含 ServiceWorker 桥）
-  ui/             Demo UI（文件树 / 编辑器 / 终端 / 预览）
-public/sw.js      ServiceWorker：/preview/<port>/ → 虚拟网络
-vendor/node-lib/  从 Node.js 源码复制的真实文件（含来源记录 MANIFEST.json）
-tools/            依赖扫描 / vendoring 工具
-docs/             设计文档 + 开发日志
-test/             Vitest 单测 / 集成测试
+  node-runtime/   Runtime core: realm (binding dispatch) / loader / runtime
+    bindings/     TS implementations of internalBinding
+    builtins/     node:* module implementations (real sources + TS shims)
+    loader/       CJS resolver + ESM→CJS transform
+    net/          Virtual TCP (VirtualNetwork / VirtualSocket)
+    vfs/          Virtual file system (in-memory tree + OPFS persistence)
+  worker/         Dedicated Worker entry
+  client/         Main-thread Runtime Client API (incl. ServiceWorker bridge)
+  ui/             Demo UI (file tree / editor / terminal / preview)
+public/sw.js      ServiceWorker: /preview/<port>/ → virtual network
+vendor/node-lib/  Real files copied from the Node.js sources (with MANIFEST.json)
+tools/            Dependency scan / vendoring tools
+docs/             Design doc + dev log
+test/             Vitest unit / integration tests
 ```
 
-## 网络（M3）
+## Networking (M3)
 
-`http.createServer().listen(3000)` 后，在 UI 的 **Preview** tab 或 `/preview/3000/` 访问：
+Once `http.createServer().listen(3000)` is called, open the **Preview** tab in
+the UI, or visit `/preview/3000/`:
 
 ```
-浏览器 URL → ServiceWorker → 主线程 → runtime worker → VirtualNetwork → 你的 handler
+browser URL → ServiceWorker → main thread → runtime worker → VirtualNetwork → your handler
 ```
 
-## 流（stream 前置）
+Known MVP limits: the preview uses a `/preview/<port>/` path prefix rather than
+`<port>.localhost`, so absolute-path assets (`/app.js`) land outside the prefix
+(HTML responses get a `<base>` tag injected to fix *relative* paths). HTTP/1.1
+handles one request per connection (`Connection: close`) — no keep-alive and no
+TLS — though chunked transfer encoding is supported.
 
-`req` 是 `Readable`、`res` 是 `Writable`，所以常见写法都能直接用：
+## Streams
+
+`req` is a `Readable` and `res` is a `Writable`, so the usual patterns just work:
 
 ```js
 const fs = require('fs');
 const { Transform, pipeline } = require('stream');
 
-// 1) 文件直接流给响应（无 Content-Length → chunked 分帧）
+// 1) Stream a file straight to the response (no Content-Length → chunked framing)
 http.createServer((req, res) => fs.createReadStream('/project/a.txt').pipe(res));
 
-// 2) 请求体直接落盘
+// 2) Stream a request body to disk
 http.createServer((req, res) => {
   const out = fs.createWriteStream('/project/upload.txt');
   req.pipe(out);
   out.on('finish', () => res.end('saved ' + out.bytesWritten));
 });
 
-// 3) 三段链（带真背压）
+// 3) A three-stage chain with real backpressure
 pipeline(fs.createReadStream('/project/a.txt'), new Transform({
   transform: (c, e, cb) => cb(null, c.toString().toUpperCase()),
 }), fs.createWriteStream('/project/a-upper.txt'));
 ```
 
-`Readable` / `Writable` / `Duplex` / `Transform` / `PassThrough`、`pipe()`、`pipeline()`、
-`finished()`、`stream/promises`、`fs.createReadStream` / `fs.createWriteStream` 均已实现，
-高水位之上的 `write()`/`push()` 返回 `false` 并在排空后发 `'drain'`（背压真实生效）。
+`Readable` / `Writable` / `Duplex` / `Transform` / `PassThrough`, `pipe()`,
+`pipeline()`, `finished()`, `stream/promises`, and `fs.createReadStream` /
+`fs.createWriteStream` are all implemented. `write()`/`push()` return `false`
+above the high-water mark and emit `'drain'` once the buffer empties, so
+backpressure propagates for real instead of buffering whole bodies in memory.
 
-## 改动约定
+## Roadmap
 
-1. 改完先跑 `npm run typecheck && npm test`，保持全绿。
-2. 浏览器验证清单见 `docs/DEVLOG.md` 顶部。
-3. 在 `docs/DEVLOG.md` 追加一条变更记录（改了什么 / 为什么 / 涉及文件）。
+| Milestone | Scope | Status |
+|---|---|---|
+| M1 | Pure-JS runtime layer (realm / bindings / module loader) | ✅ Done |
+| M2 | Virtual file system (in-memory tree + OPFS persistence) | ✅ Done |
+| M3 | Networking (virtual TCP + ServiceWorker bridge + preview) | ✅ Done (basic) |
+| S | Streams foundation (`Readable`/`Writable`/`pipe`/backpressure + chunked) | ✅ Done |
+| M3.5 | Network convergence (subdomain routing / keep-alive / HTTPS) | ⬜ Not started |
+| M4 | npm client | ⬜ Not started |
+| M5 | Real build tools (Vite / webpack) | ⬜ Not started |
+
+## Contributing
+
+1. Run `npm run typecheck && npm test` and keep both green.
+2. The browser verification checklist lives at the top of `docs/DEVLOG.md`.
+3. Append a change record to `docs/DEVLOG.md` (what changed / why / files touched).
