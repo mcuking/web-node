@@ -79,26 +79,26 @@ async function runProject(): Promise<void> {
   await save();
   runBtn.disabled = true;
   setStatus('running…', 'running');
+  // Echo a header so consecutive runs are visually separated.
+  writeTerminal(`\n$ node /project/index.js\n`, 'sys');
   const started = performance.now();
   try {
     await client.run('/project/index.js');
+    const ms = (performance.now() - started).toFixed(0);
+    setStatus(`done in ${ms}ms`, 'ok');
+    writeTerminal(`[exit 0 · ${ms}ms]\n`, 'sys');
   } catch (err) {
-    writeTerminal(`\n[run failed] ${(err as Error).message}\n`, 'err');
+    writeTerminal(`[run failed] ${(err as Error).message}\n`, 'err');
     setStatus('error', 'err');
   } finally {
     runBtn.disabled = false;
-    const ms = (performance.now() - started).toFixed(0);
-    if (!statusEl.classList.contains('err')) {
-      setStatus(`done in ${ms}ms`, 'ok');
-      writeTerminal(`\n[process exited ${ms}ms]\n`, 'sys');
-    }
   }
 }
 
 client.on('stdout', (data) => writeTerminal(data));
 client.on('stderr', (data) => writeTerminal(data, 'err'));
 client.on('exit', (code) => {
-  if (code !== 0) writeTerminal(`\n[exit code ${code}]\n`, 'err');
+  if (code !== 0) writeTerminal(`[exit code ${code}]\n`, 'err');
 });
 
 client.on('ready', (runtimeInfo) => {
