@@ -333,8 +333,15 @@ async function installDeps(): Promise<void> {
     const ms = (performance.now() - started).toFixed(0);
     for (const warning of result.warnings) writeTerminal(`[npm] ${warning}\n`, 'err');
     for (const pkg of result.installed) writeTerminal(`  ${pkg.name}@${pkg.version}\n`, 'sys');
+    if (result.fromLockfile) {
+      writeTerminal(`[lock] reused ${result.fromLockfile} package(s) from package-lock.json\n`, 'sys');
+    }
     writeTerminal(`[installed ${result.packages} package(s) in ${ms}ms — now press ▶ Run]\n`, 'ok');
     setStatus(`installed ${result.packages}`, 'ok');
+    // A fresh install writes node_modules (and the lockfile) behind the UI's
+    // back, so re-read the tree to show them.
+    files = (await client.mount({})).filter((f) => !f.endsWith('/'));
+    renderTree();
   } catch (err) {
     writeTerminal(`[npm install failed] ${(err as Error).message}\n`, 'err');
     setStatus('error', 'err');

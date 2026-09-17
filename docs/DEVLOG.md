@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -30,11 +30,12 @@
 | M5d | **Vite dev server**（页内编排 + 预览） | ✅ 完成 |
 | M5e | **Vite HMR**（非 WebSocket 的 BroadcastChannel 通道） | ✅ 完成 |
 | M5f | **HMR 收尾**（CSS `css-update` + 按端口隔离通道） | ✅ 完成 |
+| M6 | **npm 收尾**（lockfile + 完整性校验 + peer 自动安装） | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **100/100 通过** · `vite build` 绿（worker ~264KB / index ~8.5KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **107/107 通过** · `vite build` 绿（worker ~276KB / index ~10.5KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -113,14 +114,42 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **npm 收尾**：lockfile 读写、`.bin` shim、peer 依赖自动安装、integrity 校验、生命周期脚本、`file:`/`git+` 说明符。
-2. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
-3. **stream 收尾**：`read(n)` 字节精确切分、`autoDestroy` 细节、`objectMode` 边界。
-4. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
+1. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
+2. **stream 收尾**：`read(n)` 字节精确切分、`autoDestroy` 细节、`objectMode` 边界。
+3. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
+4. **npm 再进一步**：生命周期脚本与 `.bin` shim（需先给运行时一个受控的 spawn 表面）、`file:`/`git+` 说明符、`overrides`/`resolutions`。
 
 ---
 
 ## 变更记录
+
+### 2026-09-17 · M6 npm 收尾：lockfile + 完整性校验 + peer 自动安装
+
+**目标**：把 M4 留下的 npm 缺口补齐到实用程度。
+
+**1. `package-lock.json`（lockfileVersion 3）** —— `src/node-runtime/npm/lockfile.ts`（新）
+- 安装结束写入 lockfile（根条目 + 每个包的 `node_modules/<name>` 条目）；条目自带 `version / resolved / integrity / dependencies / optionalDependencies / peerDependencies(+Meta) / bin / os / cpu`，**不依赖 packument 就能重装**。
+- 二次安装：已锁版本若仍满足声明范围则直接复用（跳过解析与网络）；`lockedByName()` 取“最浅路径优先”。读不到/坏 lockfile 一律忽略，不影响安装。
+- 实测：二次安装日志出现 `[lock] reused 16 package(s) from package-lock.json`。
+
+**2. 完整性校验** —— `src/node-runtime/npm/integrity.ts`（新）
+- 下载后用 WebCrypto（`crypto.subtle`）校验 registry 的 `dist.integrity`（SRI，通常 sha512）；老包只有 `dist.shasum`（sha1 hex）则校 sha1。**校验在写入 VFS 之前**，不匹配直接报错。
+- 任一处失败都是致命错误（不静默）；无可计算算法时返回 `undefined` 放行（兼容极老的私有 registry）。
+
+**3. peer 依赖自动安装**（npm 7+ 行为）
+- 解析时收集每个已放置包的必选 `peerDependencies`（`peerDependenciesMeta.optional` 跳过），主图完成后把**任何层级都没满足**的 peer 装到根 `node_modules`。
+
+**4. ️ 顺带修的真问题：optionalDependencies + 平台过滤**
+- 一开始把 `optionalDependencies` 全部安装，结果把 esbuild 的**全平台原生二进制全装了（61 个包）**，还把 OPFS 快照撞到很大（下次启动变慢）。
+- 按 npm 语义补上 **`os`/`cpu` 过滤**：不匹配目标平台（默认 `linux`/`wasm32`，即运行时自报的平台）的可选依赖**静默跳过**（`fsevents`、`@esbuild/darwin-*` 等）。安装数回到 11。
+
+**测试**：100 → **107**。新增：lockfile 写入形状 + 二次安装零解析（计数 packument 调用）；SRI 匹配/不匹配、shasum 回退；registry integrity 不匹配则不写入；peer 缺失自动装到根并能 `require`；可选依赖解析失败静默；跨平台可选依赖静默跳过。
+
+**仍不在范围**（需外部能力）：生命周期脚本与 `.bin` shim（二者都要能 spawn 进程，而运行时没有 `child_process`）；`file:`/`git+`/`link:` 说明符。
+
+**浏览器实测**：Reset → Install deps → `installed 11 package(s)`，文件树出现 `package-lock.json`；再点一次 → `[lock] reused 16 package(s)`。
+
+**涉及文件**：`src/node-runtime/npm/{integrity,lockfile,install,registry,index}.ts`、`src/client/index.ts`、`src/ui/main.ts`、`src/demo-project.ts`、`test/npm.test.ts`
 
 ### 2026-09-17 · M5f HMR 收尾：CSS 更新 + 通道按端口隔离
 

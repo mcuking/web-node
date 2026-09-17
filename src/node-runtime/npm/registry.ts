@@ -32,6 +32,7 @@ export interface PackageManifest {
   dependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   bin?: string | Record<string, string>;
   main?: string;
   type?: string;

@@ -49,7 +49,11 @@ top of it sit three virtual subsystems:
   with real backpressure, wired into `fs` and `http`.
 - **npm client** — resolves `package.json` ranges against the registry, downloads
   and unpacks tarballs (gzip + tar) into the virtual `node_modules` with npm-style
-  hoisting, so `require('pkg')` works with no server.
+  hoisting, so `require('pkg')` works with no server. Installs write a
+  `package-lock.json` (lockfileVersion 3) that a repeat install reuses without
+  re-resolving, verify every tarball against the registry's sha512/sha1 before
+  writing it, install missing peer dependencies at the root, and skip
+  optional dependencies built for another platform.
 - **Build tools** — esbuild (the official WASM build, the same transformer Vite
   uses) runs inside the tab: it compiles TypeScript, bundles a real `node_modules`
   dependency and writes `/project/dist/app.js`. The `browser` field in
@@ -185,8 +189,8 @@ const ms = require('ms');
 ms(60000); // '1m'
 ```
 
-Not yet: lifecycle scripts, `.bin` shims, peer-dependency auto-install, lockfile
-read/write and integrity verification.
+Not yet: lifecycle scripts and `.bin` shims (both need a process to spawn —
+there is no `child_process` here), and `file:` / `git+` / `link:` specifiers.
 
 ## Build tools (M5)
 
@@ -303,6 +307,7 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M5d | Vite dev server in the tab (on-demand transforms + preview) | ✅ Done |
 | M5e | Vite HMR in the tab (over BroadcastChannel, not a WebSocket) | ✅ Done |
 | M5f | HMR wrap-up — CSS `css-update` + per-port channel isolation | ✅ Done |
+| M6 | npm wrap-up — `package-lock.json`, integrity checks, peer auto-install | ✅ Done |
 
 ## Contributing
 

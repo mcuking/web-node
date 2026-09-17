@@ -99,7 +99,7 @@ pipeline(fs.createReadStream('/project/a.txt'), new Transform({
 边产生边到达（HTML 例外，为注入 `<base>` 先缓冲）。连接默认 keep-alive，服务端支持 pipelining，
 客户端按端口做连接池。`https` 是 `http` 的同名壳（虚拟网络无 TLS）。
 
-## npm（M4）
+## npm（M4 / M6）
 
 点顶栏 **⬇ Install deps**：客户端会读项目 `package.json`，向 npm registry 解析依赖版本，
 下载 tarball 后 gunzip + untar 写入虚拟 `node_modules`（顶层 hoisting，仅在版本冲突时嵌套），
@@ -110,7 +110,13 @@ const ms = require('ms');
 ms(60000); // '1m'
 ```
 
-未支持：生命周期脚本、`.bin` shim、peer 依赖自动安装、lockfile 读写、integrity 校验。
+M6 把 npm 客户端补到实用：
+- **lockfile**：安装写入 `package-lock.json`（lockfileVersion 3）；二次安装直接复用已锁版本，不再解析。
+- **完整性校验**：每个 tarball 在写入 VFS **之前**用 WebCrypto 校 registry 的 sha512/sha1。
+- **peer 依赖**：缺失的 peer 自动装到根 `node_modules`（npm 7+ 行为）。
+- **平台过滤**：仅不匹配当前平台（`linux`/`wasm32`）的 `optionalDependencies` 静默跳过。
+
+未支持：生命周期脚本与 `.bin` shim（都需能 spawn 进程，而运行时没有 `child_process`）、`file:`/`git+` 说明符。
 
 ## 构建工具（M5）
 
@@ -208,6 +214,7 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M5d | Vite dev server 在页内跑通（按需转换 + 预览） | ✅ |
 | M5e | Vite HMR 在页内跑通（走 BroadcastChannel，非 WebSocket） | ✅ |
 | M5f | HMR 收尾（CSS `css-update` + 按端口隔离通道） | ✅ |
+| M6 | npm 收尾（lockfile + 完整性校验 + peer 自动安装） | ✅ |
 
 ## 改动约定
 

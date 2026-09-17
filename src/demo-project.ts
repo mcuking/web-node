@@ -685,6 +685,10 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - **npm client (milestone 4)** — "Install deps" fetches the dependencies declared in
   package.json from the registry, gunzips + untars them into the virtual node_modules
   (npm-style hoisting, nesting on version conflicts), after which require('ms') just works
+- **npm lockfiles + integrity (milestone 6)** — install records package-lock.json
+  (lockfileVersion 3); a second install reuses the locked versions instead of
+  re-resolving, and every tarball is checked against the registry's sha512/sha1
+  before it is written. Missing peer dependencies are installed at the root too
 - **Build tools (milestone 5)** — "Build" runs esbuild (the WASM build, the same
   transformer Vite uses) inside the tab: it compiles src/app.ts, bundles a real
   node_modules dependency, and writes /project/dist/app.js. The browser field in
@@ -702,10 +706,11 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 
 ## Not yet
 
-- Subdomain preview routing (3000.localhost) — currently a /preview/<port>/ path prefix
+- Subdomain preview routing on a static host (only the dev server has the wildcard DNS)
 - Real TLS (the https module is the http surface under a TLS-shaped name)
 - Object-mode objectMode edge cases, byte-exact read(n) splitting
-- npm lifecycle scripts, .bin shims, peer-dependency auto-install, lockfile, integrity checks
-- webpack (esbuild, rollup and Vite are milestones 5/5b/5c; a dev server is next)
+- npm lifecycle scripts and .bin shims (both need a process to spawn: no child_process here)
+- npm/yarn/pnpm filesystem specs (file:, git+, link:)
+- webpack (esbuild, rollup and Vite are milestones 5/5b/5c)
 `,
 };
