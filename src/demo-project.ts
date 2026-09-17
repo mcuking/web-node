@@ -14,6 +14,7 @@ export const DEMO_FILES: Record<string, string> = {
       type: 'commonjs',
       main: 'index.js',
       scripts: { start: 'node index.js' },
+      dependencies: { ms: '^2.1.3' },
     },
     null,
     2,
@@ -109,6 +110,19 @@ pipeline(
     console.log('pipeline    : ' + (err ? 'error ' + err.message : 'facts-upper.txt written'));
   }
 );
+console.log('');
+
+// --- npm (milestone 4) ---
+// The npm client downloads and unpacks packages into the virtual node_modules.
+// require() already resolves node_modules from the VFS, so once "Install deps"
+// has run this call works exactly like it would on the desktop.
+console.log('-- npm --');
+try {
+  const ms = require('ms');
+  console.log('require(ms) :', ms(60000), '|', ms('2h') + 'ms');
+} catch (err) {
+  console.log('require(ms) : not installed yet - click "Install deps"');
+}
 console.log('');
 
 // --- http server (milestone 3: virtual TCP) ---
@@ -260,6 +274,9 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
   so req.pipe(res) works
 - **Chunked transfer-encoding** — a response without Content-Length streams as chunked,
   and the client side de-chunks it again
+- **npm client (milestone 4)** — "Install deps" fetches the dependencies declared in
+  package.json from the registry, gunzips + untars them into the virtual node_modules
+  (npm-style hoisting, nesting on version conflicts), after which require('ms') just works
 - CommonJS + a subset of ESM (static import/export)
 - In-memory VFS persisted to OPFS (reload the page and your files are still here)
 
@@ -268,7 +285,7 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - Subdomain preview routing (3000.localhost) — currently a /preview/<port>/ path prefix
 - keep-alive, TLS (https)
 - Object-mode objectMode edge cases, byte-exact read(n) splitting
-- npm client (milestone 4)
+- npm lifecycle scripts, .bin shims, peer-dependency auto-install, lockfile, integrity checks
 - Real build tools (milestone 5)
 `,
 };

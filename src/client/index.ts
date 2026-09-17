@@ -25,6 +25,12 @@ interface VirtualHttpResult {
   body: Uint8Array;
 }
 
+export interface InstallResult {
+  packages: number;
+  installed: Array<{ name: string; version: string; path: string }>;
+  warnings: string[];
+}
+
 /**
  * Main-thread facade over the runtime worker.
  *
@@ -110,6 +116,11 @@ export class RuntimeClient {
 
   reset(): Promise<string[]> {
     return this.#request({ type: 'reset' });
+  }
+
+  /** Install the project's dependencies from the npm registry (milestone 4). */
+  installDeps(opts: { cwd?: string; includeDev?: boolean } = {}): Promise<InstallResult> {
+    return this.#request({ type: 'npmInstall', cwd: opts.cwd, includeDev: opts.includeDev });
   }
 
   describe(): Promise<{

@@ -24,6 +24,7 @@ type Request =
   | { id: number; type: 'readFile'; path: string }
   | { id: number; type: 'reset' }
   | { id: number; type: 'describe' }
+  | { id: number; type: 'npmInstall'; cwd?: string; includeDev?: boolean }
   | {
       id: number;
       type: 'http';
@@ -209,6 +210,17 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
         if (!runtime) throw new Error('runtime not initialised');
         post({ id: req.id, type: 'ok', result: runtime.describe() });
         return;
+      case 'npmInstall': {
+        if (!runtime) throw new Error('runtime not initialised');
+        const result = await runtime.installDependencies({
+          cwd: req.cwd,
+          includeDev: req.includeDev,
+          onLog: (message) => post({ id: 0, type: 'stdout', data: message + '\n' }),
+        });
+        if (vfs) persistence.schedule(vfs);
+        post({ id: req.id, type: 'ok', result });
+        return;
+      }
       case 'http': {
         if (!runtime) throw new Error('runtime not initialised');
         const result = await serveVirtualRequest(runtime, req);

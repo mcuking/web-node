@@ -43,6 +43,9 @@ top of it sit three virtual subsystems:
   reachable at a real browser URL.
 - **Streams** — `Readable` / `Writable` / `Duplex` / `Transform` / `PassThrough`
   with real backpressure, wired into `fs` and `http`.
+- **npm client** — resolves `package.json` ranges against the registry, downloads
+  and unpacks tarballs (gzip + tar) into the virtual `node_modules` with npm-style
+  hoisting, so `require('pkg')` works with no server.
 
 ## Development
 
@@ -71,6 +74,7 @@ src/
     loader/       CJS resolver + ESM→CJS transform
     net/          Virtual TCP (VirtualNetwork / VirtualSocket)
     vfs/          Virtual file system (in-memory tree + OPFS persistence)
+    npm/          npm client (semver / registry / tarball / installer)
   worker/         Dedicated Worker entry
   client/         Main-thread Runtime Client API (incl. ServiceWorker bridge)
   ui/             Demo UI (file tree / editor / terminal / preview)
@@ -126,6 +130,21 @@ pipeline(fs.createReadStream('/project/a.txt'), new Transform({
 above the high-water mark and emit `'drain'` once the buffer empties, so
 backpressure propagates for real instead of buffering whole bodies in memory.
 
+## npm
+
+Hit **Install deps** and the client resolves your `package.json` dependencies
+against the npm registry, downloads each tarball, gunzips + untars it into the
+virtual `node_modules` (hoisting to the top level, nesting only on a version
+conflict), after which a normal `require` picks it up:
+
+```js
+const ms = require('ms');
+ms(60000); // '1m'
+```
+
+Not yet: lifecycle scripts, `.bin` shims, peer-dependency auto-install, lockfile
+read/write and integrity verification.
+
 ## Roadmap
 
 | Milestone | Scope | Status |
@@ -134,8 +153,8 @@ backpressure propagates for real instead of buffering whole bodies in memory.
 | M2 | Virtual file system (in-memory tree + OPFS persistence) | ✅ Done |
 | M3 | Networking (virtual TCP + ServiceWorker bridge + preview) | ✅ Done (basic) |
 | S | Streams foundation (`Readable`/`Writable`/`pipe`/backpressure + chunked) | ✅ Done |
+| M4 | npm client (registry + tarball + `node_modules`) | ✅ Done |
 | M3.5 | Network convergence (subdomain routing / keep-alive / HTTPS) | ⬜ Not started |
-| M4 | npm client | ⬜ Not started |
 | M5 | Real build tools (Vite / webpack) | ⬜ Not started |
 
 ## Contributing

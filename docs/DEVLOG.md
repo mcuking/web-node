@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：stream 前置已落地（`stream` 模块 + `fs` 流 + `http` 流 + chunked），并在真实浏览器验证通过。下一步是 M4 npm client。
+**阶段**：M4 npm client 已落地（registry 解析 + tarball 解包 + npm 式 hoisting 写入 VFS），并在真实浏览器从公共 registry 安装 `ms` 验证通过。下一步是 M3.5 网络收敛或 M5 真实构建工具。
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
@@ -17,11 +17,11 @@
 | M2 | 虚拟文件系统（内存树 + OPFS 持久化） | ✅ 完成 |
 | M3 | 网络（虚拟 TCP + ServiceWorker 桥 + 预览） | ✅ 完成（基础版） |
 | S | **stream 前置**（Readable/Writable/pipe/背压 + chunked） | ✅ 完成 |
+| M4 | **npm client**（registry + tarball + node_modules 写入） | ✅ 完成 |
 | M3.5 | 网络收敛（子域名路由 / keep-alive / https） | ⬜ 未开始 |
-| M4 | npm client | ⬜ 未开始 |
 | M5 | 真实构建工具（vite / webpack） | ⬜ 未开始 |
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **50/50 通过** · `vite build` 绿（worker ~219KB / index ~6.7KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **61/61 通过** · `vite build` 绿（worker ~230KB / index ~7.5KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -106,14 +106,36 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
    - **keep-alive**：`HttpMessageReader` 每个连接只读一条消息（读完 body 就 `done`），要改成连接循环 + `Connection: keep-alive`。
    - **浏览器侧真流式**：SW 目前把 body 收齐再回；要让 `res.write()` 逐段到达浏览器，需要把 runtime 的 chunk 流经 MessageChannel 推给 SW 并用 `ReadableStream` 组装 Response。
    - **`https`**：直接 `notImplemented` 或复用 http 的模块壳。
-2. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
-3. **npm client（M4）**：tarball 下载 + 解包 + `node_modules` 写入 VFS（resolver 已支持）。
-4. **stream 收尾**：`read(n)` 字节精确切分、`autoDestroy` 细节、`objectMode` 边界。
-5. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
+2. **M5 真实构建工具**：跑通 vite/webpack（依赖 M4 的 node_modules + M3.5 的资源路由）。
+3. **npm 收尾**：lockfile 读写、`.bin` shim、peer 依赖自动安装、integrity 校验、生命周期脚本、`file:`/`git+` 说明符。
+4. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
+5. **stream 收尾**：`read(n)` 字节精确切分、`autoDestroy` 细节、`objectMode` 边界。
+6. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
 
 ---
 
 ## 变更记录
+
+### 2026-09-17 · M4 npm client：registry 解析 + tarball 解包 + node_modules 写入 VFS
+
+- **交付**：点 **Install deps** 会读项目 `package.json`，向 npm registry 解析版本、下载 tarball、gunzip+untar 后写入虚拟 `node_modules`；之后 `require('ms')` 直接可用。
+  - `src/node-runtime/npm/semver.ts`（新）—— 极简 semver：`^ ~ = > >= < <= *`、部分版本、通配符、hyphen range、`||` 并集、prerelease 门控；导出 `parseVersion`/`compare`/`satisfies`/`maxSatisfying`/`minSatisfying`。
+  - `src/node-runtime/npm/tarball.ts`（新）—— `gunzip`（平台 `DecompressionStream('gzip')`，零 zlib 依赖）+ `untar`（ustar + pax `path`/`size` 扩展 + GNU longname；剥掉 npm 的 `package/` 前缀；忽略 symlink/device）。
+  - `src/node-runtime/npm/registry.ts`（新）—— `createRegistry(fetch, baseUrl)`：packument（用 `application/vnd.npm.install-v1+json` 精简文档）+ tarball 下载，均按实例 memoize。`fetch` 以 **FetchLike** 注入，测试无需网络。
+  - `src/node-runtime/npm/install.ts`（新）—— `installProject(vfs, opts)`：解析依赖→**npm 式 hoisting**（能复用祖先已装的兼容版本就复用，否则放最浅的空位，冲突则嵌到依赖者自己的 `node_modules`）→ 每个 `name@version` 只下载解包一次 → 写 VFS。
+  - `src/node-runtime/runtime.ts` —— 新增 `installDependencies({ cwd, includeDev, onLog, fetch })`，默认取宿主 `fetch`。
+  - `src/worker/runtime.worker.ts` —— 新增 `npmInstall` 消息；安装日志逐行走 `stdout`；完成后调度 OPFS 持久化。
+  - `src/client/index.ts` —— `installDeps({ cwd, includeDev })`。
+  - `index.html` + `src/ui/main.ts` —— 顶栏新增 **⬇ Install deps** 按钮；文件树过滤 `node_modules`（保持可读）。
+  - `src/demo-project.ts` —— demo `package.json` 声明 `dependencies: { ms: '^2.1.3' }`；`index.js` 加 `-- npm --` 段（`require('ms')`，未装时给提示）；`notes.md` 勾掉 M4。
+  - `test/npm.test.ts`（新，11 条）—— semver 语义；gunzip+untar（含 pax 长路径）；离线假 registry 端到端：安装+hoisting+`require`、版本冲突嵌套、范围无解告警。
+- **为什么**：npm client 是 WebContainer 形态的核心能力，也是 M5（跑真实构建工具）的硬前置；resolver 的 `node_modules` 逐级向上解析早已就绪，正好接上。
+- **踩过的坑（重要，别重犯）**：
+  1. **TS 5.6 + DOM lib 下 `new Blob([uint8])` 编译报错**：`Uint8Array<ArrayBufferLike>` 不满足 `BlobPart`（要求 `ArrayBufferView<ArrayBuffer>`）。**修复**：用 `bytes.buffer.slice(byteOffset, byteOffset+byteLength) as ArrayBuffer` 传 `Blob`。
+  2. **不要为了 gzip 去实现 inflate**：浏览器与 Node 18+ 都有 `DecompressionStream('gzip')`，直接 `new Blob([...]).stream().pipeThrough(ds)` 即可。
+  3. **npm tarball 的长路径走 pax 扩展头**（`typeflag='x'`，记录 `path=`），不是 ustar 的 prefix 字段；只按 100 字节 name 截断会写错文件。解析 pax 时记录长度要**含长度前缀自身**（迭代到不动点）。
+- **验证**：`tsc --noEmit` 干净 · `vitest run` **61/61** · `vite build` 绿。浏览器实测：Reset 项目 → Install deps → `+ ms@2.1.3` / `↓ ms@2.1.3` / `[installed 1 package(s) in 521ms]` → Run 输出 `require(ms) : 1m | 7200000ms`；`/preview/3000/api/info` 仍 200（无回归）；文件树不含 `node_modules`。
+- **限制**（记入 demo notes）：不跑生命周期脚本、不建 `.bin`、不自动装 peer、不读写 lockfile、不校验 integrity、不支持 `file:`/`git+`/`link:` 说明符；根级同名版本冲突按声明顺序保留第一个。
 
 ### 2026-09-17 · README 英文化 + 仓库转公开
 
