@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地 —— **esbuild（官方 WASM 构建）在标签页里直接跑**：从 registry 安装、经 `browser` 字段解析到浏览器构建、编译 wasm、用 VFS 插件打包 TS + `node_modules` 依赖、写回 `dist/app.js`。顺带修了一个 OPFS 二进制持久化 bug（见变更记录）。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM 转换 + 打包），M5b 又接入了 **rollup 的官方 WASM 构建**——在页内做真正的 tree-shaking 打包，直接从 VFS 读项目源码、写回 `dist/app.esm.js`。顺带修了两个 loader 真实 bug（`main`/`module` 解析顺序、宿主同名全局注入冲突）。
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
@@ -22,9 +22,11 @@
 | M3.5b | **浏览器侧真流式**（SW 直转 ReadableStream） | ✅ 完成 |
 | M3.5c | **https**（http 同名壳，无 TLS） | ✅ 完成 |
 | M3.5d | 子域名路由（`<port>.localhost`） | ⏸ 暂缓（见下） |
-| M5 | **真实构建工具**（esbuild WASM：安装→初始化→打包→写回） | ✅ 完成（vite/webpack 本体见「下一步」） |
+| M5 | **构建工具：esbuild WASM**（安装→初始化→打包→写回） | ✅ 完成 |
+| M5b | **真实打包器：rollup WASM**（ESM + tree-shaking → VFS） | ✅ 完成 |
+| M5c | Vite / webpack 本体（dev-server 编排） | ⬜ 下一步 |
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **78/78 通过** · `vite build` 绿（worker ~241KB / index ~8.0KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **82/82 通过** · `vite build` 绿（worker ~245KB / index ~8.1KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -103,7 +105,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **Vite / webpack 本体**：M5 打通了 esbuild（真实构建工具）；下一步是把 **Vite** 装进来跑 `vite build`（依赖 esbuild + 本里程碑的 `browser` 字段/`require.resolve`），以及 webpack。预期还需：`exports` 字段解析、`fs` 的 `watch`/`realpath` 补齐、更完整的 ESM（dynamic `import()`）。
+1. **Vite / webpack 本体（M5c）**：M5/M5b 已把 esbuild 与 rollup（都是真实构建工具）跑通。Vite 8 已改用 Rust 的 **rolldown**（napi 原生二进制，浏览器不可行）；要跑 `vite build` 应钉 **Vite 5.x**（rollup+esbuild）并把 rollup 别名到 `@rollup/wasm-node`，另外还需 `exports` 字段解析、`fs.watch`、dynamic `import()` 等。
 2. **子域名路由（M3.5d，暂缓项）**：若要捡起来，推荐方案：子域名 SW 经 `postMessage` 中继到主源页面里的 runtime（主源保留 OPFS 与单例 worker）。需要 Vite `server.allowedHosts: ['.localhost']` + 一个子域名 bootstrap 页 + 跨源 MessagePort 中继。
 3. **npm 收尾**：lockfile 读写、`.bin` shim、peer 依赖自动安装、integrity 校验、生命周期脚本、`file:`/`git+` 说明符。
 4. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
@@ -113,6 +115,21 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-17 · M5b 真实打包器：rollup（官方 WASM 构建）在页内做 tree-shaking
+
+**目标**：把真正的打包器跑起来。选了 **rollup**——它是 Vite 的底层打包器，官方提供 `@rollup/wasm-node`（用 WASM 代替 napi 原生二进制，浏览器可用）。
+
+- **新增 builtins**：
+  - `fs/promises`（= `fs.promises`，rollup 直接 `require('node:fs/promises')`）
+  - `perf_hooks`（直接用浏览器的 `performance`）
+  - `url`（原生 `URL`/`URLSearchParams` + `pathToFileURL`/`fileURLToPath`/`urlToHttpOptions` + 简单 legacy `parse`/`format`）。文件：`src/node-runtime/builtins/{fs-promises,perf-hooks,url}.ts`、`builtins/index.ts`
+  - `child_process` **不提供**：不需要，且保持“require 即抛明确错误”的诚实行为。
+- **Loader 修复 1：`main` 先于 `module`**。之前 `#packageEntry` 把 `module`（ESM）排在 `main`（CJS）前，rollup 因此被解析到 ESM 构建后编译失败。Node 的 `require` 语义应先看 `main`（`module` 只是打包器字段）。修正后 rollup 正确走到 CJS 入口。
+- **Loader 修复 2：不再注入“宿主同名”全局**。CJS 包装把沙箱里的每个全局都做成形参，而沙箱镜像的宿主全局（`btoa`/`performance`/`TextEncoder`…）与模块自己的顶层 `const btoa = …` 冲突（`Identifier 'btoa' has already been declared`，rollup 真实踩到）。现在**只在沙箱值与宿主不同时才注入**（同名的一致值本就能通过真实全局作用域拿到）。沙箱特有的 `process`/`Buffer`/`console`/timers/`globalThis` 仍照旧注入。
+- **演示**：新增「⧉ Bundle」按钮 → 跑 `/project/bundle.js`：`require('@rollup/wasm-node')` → `rollup.rollup({input})` 直接读 VFS 源码（我们的 `fs` 就是 VFS，无需插件）→ `generate({format:'es'})` → 写回 `/project/dist/app.esm.js`。演示新增 `/project/app/main.js`、`app/text.js`（含死代码 `explode` 用于展示 tree-shaking）；`package.json` 新增 `@rollup/wasm-node` 依赖。文件：`index.html`、`src/ui/main.ts`、`src/demo-project.ts`
+- **测试**：78 → **82**。新增：`fs/promises` 与 `fs.promises` 同源、`perf_hooks`/`url` 基本接口、`const btoa` 不再冲突、rollup 未安装时 build.js/bundle.js 给提示。
+- **浏览器实测**：Reset → Install deps（`ms` + `esbuild-wasm` + `@rollup/wasm-node` + `@types/estree`，scoped 包正常）→ Bundle：`rollup v4.63.3 (official WASM build)` · `bundle: 339 bytes in 13ms` · `tree-shaken: yes (dead export dropped)` · `written: /project/dist/app.esm.js`。**重载后不重装**直接再 Bundle/Build 均成功（OPFS base64 持久化对 577KB 与 13.3MB wasm 都完好）。
 
 ### 2026-09-17 · M5 真实构建工具：esbuild WASM 在页内打包 + OPFS 二进制持久化修复
 

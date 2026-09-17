@@ -14,7 +14,7 @@ export const DEMO_FILES: Record<string, string> = {
       type: 'commonjs',
       main: 'index.js',
       scripts: { start: 'node index.js' },
-      dependencies: { ms: '^2.1.3', 'esbuild-wasm': '^0.28.2' },
+      dependencies: { ms: '^2.1.3', 'esbuild-wasm': '^0.28.2', '@rollup/wasm-node': '^4.63.3' },
     },
     null,
     2,
@@ -377,6 +377,66 @@ function vfsPlugin() {
 });
 `,
 
+  '/project/app/text.js': `// A plain ES module, consumed by rollup (see bundle.js).
+export const TITLE = 'web-node';
+
+export function slugify(value) {
+  return String(value).toLowerCase();
+}
+
+// Dead code: never imported, so rollup drops it from the bundle (tree-shaking).
+export function explode() {
+  throw new Error('never called');
+}
+`,
+
+  '/project/app/main.js': `// ESM entry point for the rollup build.
+import { slugify, TITLE } from './text.js';
+
+const parts = ['Web', 'Node', 'Bundled'];
+
+export const heading = TITLE + ': ' + parts.map(function (p) { return slugify(p); }).join('-');
+`,
+
+  // Milestone 5b: a real bundler — rollup's official WASM build — in the tab.
+  // It reads project sources straight out of the virtual file system (our `fs`
+  // is the VFS) and writes the bundle back.
+  '/project/bundle.js': `// Click "Bundle" to run this: it bundles app/main.js with rollup-wasm.
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = '/project';
+const OUT = path.join(ROOT, 'dist', 'app.esm.js');
+
+(async function () {
+  console.log('-- bundle (milestone 5b) --');
+  if (!fs.existsSync(path.join(ROOT, 'node_modules', '@rollup', 'wasm-node'))) {
+    console.log('rollup: not installed yet - click "Install deps" first');
+    return;
+  }
+  const rollup = require('@rollup/wasm-node');
+  console.log('tool        : rollup v' + rollup.VERSION + ' (official WASM build)');
+
+  const t0 = Date.now();
+  const bundle = await rollup.rollup({
+    input: path.join(ROOT, 'app', 'main.js'),
+    onwarn: function () {},
+  });
+  const result = await bundle.generate({ format: 'es', compact: true });
+  const code = result.output[0].code;
+
+  fs.mkdirSync(path.join(ROOT, 'dist'), { recursive: true });
+  fs.writeFileSync(OUT, code);
+  console.log('bundle      : ' + code.length + ' bytes in ' + (Date.now() - t0) + 'ms');
+  console.log('tree-shaken : ' + (code.indexOf('explode') === -1 ? 'yes (dead export dropped)' : 'no'));
+  console.log('written     : /project/dist/app.esm.js');
+  console.log('');
+  console.log(code.trim());
+})().catch(function (err) {
+  console.log('bundle failed : ' + (err && err.message ? err.message : err));
+});
+`,
+
   '/project/notes.md': `# web-node demo project
 
 This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
@@ -401,6 +461,9 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
   transformer Vite uses) inside the tab: it compiles src/app.ts, bundles a real
   node_modules dependency, and writes /project/dist/app.js. The browser field in
   package.json is honoured, which is what lets esbuild resolve to its browser build
+- **Real bundler (milestone 5b)** — "Bundle" runs rollup (its official WASM build)
+  in the tab: it tree-shakes an ES module graph read straight out of the virtual
+  file system and writes /project/dist/app.esm.js
 - CommonJS + a subset of ESM (static import/export)
 - In-memory VFS persisted to OPFS (reload the page and your files are still here)
 
@@ -410,6 +473,7 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - Real TLS (the https module is the http surface under a TLS-shaped name)
 - Object-mode objectMode edge cases, byte-exact read(n) splitting
 - npm lifecycle scripts, .bin shims, peer-dependency auto-install, lockfile, integrity checks
-- Vite/webpack themselves (esbuild is milestone 5; a full dev server is next)
+- Vite/webpack themselves (esbuild + rollup are milestones 5/5b; the dev-server
+  orchestration is next)
 `,
 };

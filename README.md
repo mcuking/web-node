@@ -51,6 +51,9 @@ top of it sit three virtual subsystems:
   dependency and writes `/project/dist/app.js`. The `browser` field in
   `package.json` is honoured, which is what lets a Node-only `main` resolve to a
   package's browser build.
+- **Real bundler** — rollup (its official WASM build) also runs inside the tab: it
+  tree-shakes an ES module graph read straight out of the virtual file system and
+  writes `/project/dist/app.esm.js`.
 
 ## Development
 
@@ -176,8 +179,23 @@ written     : /project/dist/app.js
 
 Two runtime features were added to make this work: the `package.json`
 **`browser` field** (string and object forms, `false` → empty module) and a
-module-level **`require.resolve()`**. Vite / webpack themselves are the next
-step (M5b).
+module-level **`require.resolve()`**.
+
+### Bundling with rollup (M5b)
+
+Hit **Bundle** and rollup — its official WASM build — bundles the project's ES
+modules straight out of the virtual file system (no plugin needed: our `fs` *is*
+the VFS) and writes `/project/dist/app.esm.js`:
+
+```
+tool        : rollup v4.63.3 (official WASM build)
+bundle      : 339 bytes in 13ms
+tree-shaken : yes (dead export dropped)
+written     : /project/dist/app.esm.js
+```
+
+Vite / webpack themselves are the next step (M5c). Note Vite 8 moved to
+rolldown (a native Rust binary), so a browser build would pin Vite 5.x.
 
 ## Roadmap
 
@@ -193,7 +211,8 @@ step (M5b).
 | M3.5c | `https` (the `http` surface under a TLS-shaped name) | ✅ Done |
 | M3.5d | Subdomain routing (`<port>.localhost`) | ⏸ Deferred (cross-origin runtime/OPFS) |
 | M5 | Real build tool — esbuild WASM: install, initialize, bundle, write back | ✅ Done |
-| M5b | Vite / webpack themselves | ⬜ Next |
+| M5b | Real bundler — rollup WASM: ESM graph, tree-shaking, write to VFS | ✅ Done |
+| M5c | Vite / webpack themselves | ⬜ Next |
 
 ## Contributing
 
