@@ -18,6 +18,8 @@ import { stringDecoderSpec } from './string_decoder';
 import { osSpec } from './os';
 import { assertSpec } from './assert-impl';
 import { moduleSpec } from './module';
+import { netSpec } from './net';
+import { httpSpec } from './http';
 
 /** Every builtin the runtime knows about, in dependency-friendly order. */
 export const ALL_BUILTINS: BuiltinSpec[] = [
@@ -40,6 +42,9 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   assertSpec,
   moduleSpec,
   fsSpec,
+  // milestone 3: networking
+  netSpec,
+  httpSpec,
 ];
 
 /** Ids that are user-visible core modules (no `internal/` prefix). */

@@ -23,7 +23,16 @@ type Request =
   | { id: number; type: 'writeFile'; path: string; contents: string }
   | { id: number; type: 'readFile'; path: string }
   | { id: number; type: 'reset' }
-  | { id: number; type: 'describe' };
+  | { id: number; type: 'describe' }
+  | {
+      id: number;
+      type: 'http';
+      port: number;
+      method: string;
+      path: string;
+      headers: Record<string, string>;
+      body: ArrayBuffer | null;
+    };
 
 export interface RuntimeInfo {
   persistSupported: boolean;
@@ -67,6 +76,37 @@ function writeAll(v: MemoryVfs, files: Record<string, string>): void {
     ensureDir(v, path);
     v.writeFile(path, new TextEncoder().encode(contents));
   }
+}
+
+interface VirtualHttpResult {
+  status: number;
+  statusMessage: string;
+  headers: Record<string, string | string[]>;
+  body: Uint8Array;
+}
+
+/**
+ * Inbound request from the outside world (the ServiceWorker bridge).
+ *
+ * This is the *only* way a browser URL reaches a user's `http.createServer`:
+ * SW → page → here → virtual network → the server the user bound.
+ */
+async function serveVirtualRequest(
+  rt: NodeRuntime,
+  req: { port: number; method: string; path: string; headers: Record<string, string>; body: ArrayBuffer | null },
+): Promise<VirtualHttpResult & { body: Uint8Array }> {
+  const http = rt.realm.require('http') as unknown as {
+    _request: (
+      port: number,
+      init: { method?: string; path?: string; headers?: Record<string, string>; body?: string | Uint8Array },
+    ) => Promise<VirtualHttpResult>;
+  };
+  return http._request(req.port, {
+    method: req.method,
+    path: req.path,
+    headers: req.headers,
+    body: req.body ? new Uint8Array(req.body) : undefined,
+  });
 }
 
 async function init(id: number): Promise<void> {
@@ -169,6 +209,12 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
         if (!runtime) throw new Error('runtime not initialised');
         post({ id: req.id, type: 'ok', result: runtime.describe() });
         return;
+      case 'http': {
+        if (!runtime) throw new Error('runtime not initialised');
+        const result = await serveVirtualRequest(runtime, req);
+        post({ id: req.id, type: 'ok', result });
+        return;
+      }
     }
   } catch (err) {
     const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);

@@ -1,5 +1,6 @@
 import type { BindingContext } from './bindings/context';
 import type { Vfs } from './vfs';
+import { VirtualNetwork } from './net/network';
 import { Realm } from './realm';
 import { ModuleLoader } from './loader';
 
@@ -46,6 +47,7 @@ export class NodeRuntime {
   readonly realm: Realm;
   readonly loader: ModuleLoader;
   readonly bindingCtx: BindingContext;
+  readonly network: VirtualNetwork;
   readonly process: Record<string, unknown>;
   readonly console: Record<string, unknown>;
   readonly Buffer: unknown;
@@ -63,6 +65,7 @@ export class NodeRuntime {
 
     const bindingCtx: BindingContext = {
       vfs: opts.vfs,
+      network: new VirtualNetwork(),
       env,
       argv,
       execPath: opts.execPath ?? '/bin/node',
@@ -110,6 +113,7 @@ export class NodeRuntime {
       },
     };
     this.bindingCtx = bindingCtx;
+    this.network = bindingCtx.network;
 
     this.realm = new Realm(bindingCtx);
     this.loader = new ModuleLoader(this.realm, opts.vfs);
@@ -195,6 +199,7 @@ export class NodeRuntime {
   resetRunState(): void {
     this.loader.reset();
     this.#clearAllTimers();
+    this.network.reset();
     this.#exitCode = null;
   }
 
@@ -206,10 +211,12 @@ export class NodeRuntime {
   describe(): {
     bindings: string[];
     modules: Array<{ id: string; origin: string; state: string }>;
+    ports: number[];
   } {
     return {
       bindings: this.realm.bindingIds,
       modules: this.realm.listModules(),
+      ports: this.network.ports,
     };
   }
 }
