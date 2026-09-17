@@ -36,22 +36,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const targets = async () => (await (await fetch('http://127.0.0.1:38800/json/list')).json());
 
 console.log('1. open a fresh tab on the Pages build');
-const { targetId } = await send('Target.createTarget', { url: URL_ });
-await sleep(4000);
-const page = (await targets()).find((t) => t.id === targetId) ?? (await targets()).find((t) => t.url.includes('mcuking.github.io'));
-const { sessionId } = await send('Target.attachToTarget', { targetId: page.id, flatten: true });
+const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
+await sleep(800);
+const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
 await send('Page.enable', {}, sessionId);
 await send('Runtime.enable', {}, sessionId);
+await send('Network.enable', {}, sessionId);
+// Pages is behind a CDN/browser cache; a stale bundle would test the old build.
+await send('Network.setCacheDisabled', { cacheDisabled: true }, sessionId);
+await send('Page.navigate', { url: URL_ + '?v=' + Date.now() }, sessionId);
 
 const bounded = (p, ms, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`TIMEOUT ${label}`)), ms))]);
-const req = (expr, ms = 8000) =>
+const req = (expr, ms = 20000) =>
   bounded(send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, sessionId), ms, 'eval').then(
     (r) => r.result?.value ?? JSON.stringify(r),
   );
 async function waitFor(expr, label, timeoutMs = 120000, every = 1500) {
   const t0 = Date.now();
   for (;;) {
-    const v = await req(expr, 8000);
+    const v = await req(expr, 20000);
     if (v && v !== 'false' && String(v) !== 'null') return v;
     if (Date.now() - t0 > timeoutMs) throw new Error(`waitFor ${label} timed out`);
     await sleep(every);
@@ -66,6 +69,11 @@ await sleep(2500);
 await req("document.getElementById('install').click(), 'install'");
 await waitFor("document.getElementById('status').textContent.includes('installed') && 'installed'", 'install', 180000);
 console.log('   ', await req("document.getElementById('status').textContent"));
+// A second install must reuse the lockfile rather than re-resolving.
+await req("document.getElementById('install').click(), 'install-again'");
+await waitFor("document.getElementById('terminal').textContent.includes('[lock] reused') && 'locked'", 'lockfile reuse', 180000);
+console.log('   ', await waitFor("document.getElementById('terminal').textContent.includes('[lock] reused') && 'reused'", 'lockfile reuse', 180000));
+console.log('   lockfile in tree:', await req("[...document.querySelectorAll('#file-tree li')].some(li => li.textContent.includes('package-lock.json'))"));
 await req("document.getElementById('vitedev').click(), 'vitedev'");
 
 console.log('3. preview appears under the path prefix');
