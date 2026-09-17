@@ -1,0 +1,179 @@
+/// <reference lib="webworker" />
+import { NodeRuntime, ProcessExit } from '../node-runtime/runtime';
+import { MemoryVfs, OpfsPersistence } from '../node-runtime/vfs';
+import { VENDORED } from '../node-runtime/vendored';
+import { DEMO_FILES } from '../demo-project';
+
+/**
+ * Runtime worker.
+ *
+ * Everything Node-flavoured happens here: the realm, the bindings, the VFS and
+ * the user's code. The main thread only talks to it over a MessagePort.
+ *
+ * Why a worker (not the main thread):
+ *  - user code can be CPU-heavy; the UI must stay responsive
+ *  - OPFS sync access handles are worker-only
+ *  - it is the natural home for future SharedArrayBuffer/Atomics syscalls
+ */
+
+type Request =
+  | { id: number; type: 'init' }
+  | { id: number; type: 'mount'; files: Record<string, string> }
+  | { id: number; type: 'run'; entry?: string }
+  | { id: number; type: 'writeFile'; path: string; contents: string }
+  | { id: number; type: 'readFile'; path: string }
+  | { id: number; type: 'reset' }
+  | { id: number; type: 'describe' };
+
+export interface RuntimeInfo {
+  persistSupported: boolean;
+  restored: boolean;
+  files: string[];
+  bindings: string[];
+  vendoredFiles: string[];
+}
+
+type Response =
+  | { id: number; type: 'ok'; result?: unknown }
+  | { id: number; type: 'error'; message: string }
+  | { id: number; type: 'stdout'; data: string }
+  | { id: number; type: 'stderr'; data: string }
+  | { id: number; type: 'exit'; code: number }
+  | { id: number; type: 'ready'; info: RuntimeInfo };
+
+const persistence = new OpfsPersistence('web-node-project');
+let runtime: NodeRuntime | null = null;
+let vfs: MemoryVfs | null = null;
+
+function post(msg: Response): void {
+  self.postMessage(msg);
+}
+
+function ensureDir(v: MemoryVfs, filePath: string): void {
+  const idx = filePath.lastIndexOf('/');
+  if (idx > 0) v.mkdir(filePath.slice(0, idx), { recursive: true });
+}
+
+function listTree(v: MemoryVfs): string[] {
+  return v
+    .snapshot()
+    .filter((s) => s.type === 'file')
+    .map((s) => s.path)
+    .sort();
+}
+
+function writeAll(v: MemoryVfs, files: Record<string, string>): void {
+  for (const [path, contents] of Object.entries(files)) {
+    ensureDir(v, path);
+    v.writeFile(path, new TextEncoder().encode(contents));
+  }
+}
+
+async function init(id: number): Promise<void> {
+  const restored = await persistence.load();
+  const hasRestored = Boolean(restored && restored.length > 0);
+  const v = new MemoryVfs({ cwd: '/project' });
+
+  if (hasRestored) {
+    for (const item of restored!.filter((s) => s.type === 'dir').sort((a, b) => a.path.length - b.path.length)) {
+      v.mkdir(item.path, { recursive: true, mode: item.mode });
+    }
+    for (const item of restored!.filter((s) => s.type === 'file')) {
+      ensureDir(v, item.path);
+      v.writeFile(item.path, new TextEncoder().encode(item.data ?? ''), { mode: item.mode });
+    }
+  } else {
+    writeAll(v, DEMO_FILES);
+  }
+
+  vfs = v;
+  runtime = new NodeRuntime({
+    vfs: v,
+    argv: ['/project/index.js'],
+    env: { NODE_ENV: 'development', WEB_NODE: '1' },
+    installGlobals: true,
+    onStdout: (data) => post({ id: 0, type: 'stdout', data }),
+    onStderr: (data) => post({ id: 0, type: 'stderr', data }),
+  });
+
+  persistence.schedule(v);
+
+  post({
+    id,
+    type: 'ready',
+    info: {
+      persistSupported: OpfsPersistence.supported,
+      restored: hasRestored,
+      files: listTree(v),
+      bindings: runtime.realm.bindingIds,
+      vendoredFiles: Object.keys(VENDORED).sort(),
+    },
+  });
+}
+
+function run(id: number, entry?: string): void {
+  if (!runtime || !vfs) throw new Error('runtime not initialised');
+  const target = entry ?? '/project/index.js';
+  try {
+    runtime.runMain(target);
+  } catch (err) {
+    if (err instanceof ProcessExit) {
+      persistence.schedule(vfs);
+      post({ id, type: 'exit', code: err.code });
+      return;
+    }
+    post({ id: 0, type: 'stderr', data: `\n${(err as Error).stack ?? String(err)}\n` });
+    post({ id, type: 'error', message: (err as Error).message });
+    return;
+  }
+  persistence.schedule(vfs);
+  post({ id, type: 'exit', code: runtime.exitCode ?? 0 });
+}
+
+self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
+  const req = event.data;
+  try {
+    switch (req.type) {
+      case 'init':
+        await init(req.id);
+        return;
+      case 'mount':
+        if (!vfs) throw new Error('runtime not initialised');
+        writeAll(vfs, req.files);
+        persistence.schedule(vfs);
+        post({ id: req.id, type: 'ok', result: listTree(vfs) });
+        return;
+      case 'run':
+        run(req.id, req.entry);
+        return;
+      case 'writeFile':
+        if (!vfs) throw new Error('runtime not initialised');
+        ensureDir(vfs, req.path);
+        vfs.writeFile(req.path, new TextEncoder().encode(req.contents));
+        persistence.schedule(vfs);
+        post({ id: req.id, type: 'ok', result: listTree(vfs) });
+        return;
+      case 'readFile':
+        if (!vfs) throw new Error('runtime not initialised');
+        post({ id: req.id, type: 'ok', result: new TextDecoder().decode(vfs.readFile(req.path)) });
+        return;
+      case 'reset':
+        await persistence.clear();
+        if (vfs) {
+          writeAll(vfs, DEMO_FILES);
+          persistence.schedule(vfs);
+        }
+        post({ id: req.id, type: 'ok', result: vfs ? listTree(vfs) : [] });
+        return;
+      case 'describe':
+        if (!runtime) throw new Error('runtime not initialised');
+        post({ id: req.id, type: 'ok', result: runtime.describe() });
+        return;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    const stack = err instanceof Error && err.stack ? `\n${err.stack}` : '';
+    post({ id: 0, type: 'stderr', data: `[worker:${req.type}] ${message}${stack}\n` });
+    post({ id: req.id, type: 'error', message });
+  }
+};
