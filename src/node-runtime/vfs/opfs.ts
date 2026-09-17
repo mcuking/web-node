@@ -1,4 +1,5 @@
 import type { MemoryVfs } from './memory';
+import { encodeBase64, decodeBase64 } from './base64';
 
 /**
  * OPFS-backed persistence for the in-memory VFS.
@@ -54,7 +55,9 @@ export class OpfsPersistence {
     const snapshot = vfs.snapshot();
 
     // Directory index file: cheap way to restore structure without walking OPFS.
-    await this.#writeFile(dir, '.wvm.json', JSON.stringify(snapshot, null, 0));
+    // Contents are base64 so binary files (wasm, images) survive intact. `v`
+    // marks the encoding so pre-base64 snapshots can still be read back.
+    await this.#writeText(dir, '.wvm.json', JSON.stringify({ v: 2, entries: snapshot }, null, 0));
 
     // Mirror actual file contents so OPFS stays browsable/inspectable.
     for (const item of snapshot) {
@@ -65,16 +68,20 @@ export class OpfsPersistence {
       for (let i = 0; i < parts.length - 1; i++) {
         cur = await cur.getDirectoryHandle(parts[i], { create: true });
       }
-      await this.#writeFile(cur, parts[parts.length - 1], item.data ?? '');
+      await this.#writeBytes(cur, parts[parts.length - 1], decodeBase64(item.data ?? ''));
     }
   }
 
-  async #writeFile(dir: FileSystemDirectoryHandle, name: string, text: string): Promise<void> {
+  async #writeText(dir: FileSystemDirectoryHandle, name: string, text: string): Promise<void> {
+    await this.#writeBytes(dir, name, new TextEncoder().encode(text));
+  }
+
+  async #writeBytes(dir: FileSystemDirectoryHandle, name: string, bytes: Uint8Array): Promise<void> {
     const fh = await (dir as any).getFileHandle(name, { create: true });
     const access = await fh.createSyncAccessHandle();
     try {
       access.truncate(0);
-      access.write(new TextEncoder().encode(text), { at: 0 });
+      access.write(bytes, { at: 0 });
       access.flush();
     } finally {
       access.close();
@@ -82,14 +89,18 @@ export class OpfsPersistence {
   }
 
   /** Load a previously persisted snapshot, if any. */
-  async load(): Promise<Array<{ path: string; type: 'file' | 'dir'; data?: string; mode?: number }> | null> {
+  async load(): Promise<{ version: number; entries: Array<{ path: string; type: 'file' | 'dir'; data?: string; mode?: number }> } | null> {
     if (!OpfsPersistence.supported) return null;
     try {
       const dir = await this.#ensureDir();
       const fh = await (dir as any).getFileHandle('.wvm.json');
       const file = await fh.getFile();
       const text = await file.text();
-      return JSON.parse(text);
+      const parsed = JSON.parse(text);
+      // v1 wrote a bare array with UTF-8 text contents.
+      if (Array.isArray(parsed)) return { version: 1, entries: parsed };
+      if (parsed && Array.isArray(parsed.entries)) return { version: parsed.v ?? 2, entries: parsed.entries };
+      return null;
     } catch {
       return null;
     }

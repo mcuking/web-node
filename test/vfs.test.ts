@@ -71,4 +71,24 @@ describe('MemoryVfs', () => {
     const restored = MemoryVfs.fromSnapshot(vfs.snapshot());
     expect(new TextDecoder().decode(restored.readFile('/p/q/f.txt'))).toBe('data');
   });
+
+  it('preserves binary bytes through a snapshot (no UTF-8 mangling)', () => {
+    const bytes = new Uint8Array(1024);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 7 + 200) & 0xff;
+    const vfs = new MemoryVfs();
+    vfs.writeFile('/blob.wasm', bytes);
+    const restored = MemoryVfs.fromSnapshot(vfs.snapshot());
+    const back = restored.readFile('/blob.wasm');
+    expect(back.byteLength).toBe(bytes.byteLength);
+    expect(Array.from(back)).toEqual(Array.from(bytes));
+  });
+
+  it('still rehydrates legacy text snapshots', () => {
+    const legacy = [
+      { path: '/dir', type: 'dir' as const, mode: 0o755 },
+      { path: '/dir/greet.txt', type: 'file' as const, mode: 0o644, data: 'hello' },
+    ];
+    const restored = MemoryVfs.fromSnapshot(legacy, {}, 'text');
+    expect(new TextDecoder().decode(restored.readFile('/dir/greet.txt'))).toBe('hello');
+  });
 });
