@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M4 npm client 已落地（registry 解析 + tarball 解包 + npm 式 hoisting 写入 VFS），并在真实浏览器从公共 registry 安装 `ms` 验证通过。下一步是 M3.5 网络收敛或 M5 真实构建工具。
+**阶段**：M3.5 网络收敛已完成 3/4（keep-alive + 浏览器侧真流式 + https），子域名路由因跨源架构原因**暂缓**（见下方「已知限制」）。下一步建议 M5 真实构建工具。
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
@@ -18,10 +18,13 @@
 | M3 | 网络（虚拟 TCP + ServiceWorker 桥 + 预览） | ✅ 完成（基础版） |
 | S | **stream 前置**（Readable/Writable/pipe/背压 + chunked） | ✅ 完成 |
 | M4 | **npm client**（registry + tarball + node_modules 写入） | ✅ 完成 |
-| M3.5 | 网络收敛（子域名路由 / keep-alive / https） | ⬜ 未开始 |
+| M3.5a | **keep-alive**（持久连接 + pipelining + 客户端连接池） | ✅ 完成 |
+| M3.5b | **浏览器侧真流式**（SW 直转 ReadableStream） | ✅ 完成 |
+| M3.5c | **https**（http 同名壳，无 TLS） | ✅ 完成 |
+| M3.5d | 子域名路由（`<port>.localhost`） | ⏸ 暂缓（见下） |
 | M5 | 真实构建工具（vite / webpack） | ⬜ 未开始 |
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **61/61 通过** · `vite build` 绿（worker ~230KB / index ~7.5KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **67/67 通过** · `vite build` 绿（worker ~233KB / index ~7.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -48,8 +51,7 @@
 
 **MVP 限制**（已知）：
 - 预览走路径前缀 `/preview/<port>/`，不是 `<port>.localhost`。绝对路径资源（`/app.js`）会落在前缀外；HTML 响应会注入 `<base>` 修正**相对路径**资源。
-- HTTP/1.1 每次连接只处理一个请求（`Connection: close`），无 keep-alive、无 TLS。
-- 响应在服务端是真流式的（无 `Content-Length` 就按 chunked 分帧），但 SW 桥会把整个 body 收齐再回给浏览器，所以**浏览器侧看不到逐段流式**（要真正流式需要 SW 直接转发 ReadableStream，属 M3.5）。
+- **子域名路由暂缓**：`<port>.localhost:5199` 是**另一个源**，而 runtime worker、VFS 与 OPFS（按源隔离）都在 `localhost:5199`。要让子域名预览工作，得重新安排「runtime 住哪」：要么每个子域名各自跑一份 runtime（OPFS 看不到主源项目、且出现双 runtime），要么让子域名的 SW 经 `postMessage` 转发给主源页面里的 runtime（需新增跨源中继层 + Vite `server.allowedHosts` + 子域名 bootstrap 页）。后者可行但属架构改动，暂不做；路径前缀方案继续保留。
 - `Readable.read(n)` 字节模式下是「整块交付」而非精确切 n 字节（`data`/`pipe()` 路径是精确的）；objectMode 只支持基本形态。
 
 ### stream 层怎么走通的（前置）
@@ -101,12 +103,8 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **M3.5 网络收敛**：
-   - **子域名路由**：`<port>.localhost:5199` 替代路径前缀 → 绝对路径资源正确。需要：Vite `server.allowedHosts: ['.localhost']`；预览页需要在子域名下注册自己的 SW。
-   - **keep-alive**：`HttpMessageReader` 每个连接只读一条消息（读完 body 就 `done`），要改成连接循环 + `Connection: keep-alive`。
-   - **浏览器侧真流式**：SW 目前把 body 收齐再回；要让 `res.write()` 逐段到达浏览器，需要把 runtime 的 chunk 流经 MessageChannel 推给 SW 并用 `ReadableStream` 组装 Response。
-   - **`https`**：直接 `notImplemented` 或复用 http 的模块壳。
-2. **M5 真实构建工具**：跑通 vite/webpack（依赖 M4 的 node_modules + M3.5 的资源路由）。
+1. **M5 真实构建工具**：跑通 vite/webpack（依赖 M4 的 node_modules + M3 的资源路由）。
+2. **子域名路由（M3.5d，暂缓项）**：若要捡起来，推荐方案：子域名 SW 经 `postMessage` 中继到主源页面里的 runtime（主源保留 OPFS 与单例 worker）。需要 Vite `server.allowedHosts: ['.localhost']` + 一个子域名 bootstrap 页 + 跨源 MessagePort 中继。
 3. **npm 收尾**：lockfile 读写、`.bin` shim、peer 依赖自动安装、integrity 校验、生命周期脚本、`file:`/`git+` 说明符。
 4. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
 5. **stream 收尾**：`read(n)` 字节精确切分、`autoDestroy` 细节、`objectMode` 边界。
@@ -115,6 +113,27 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-17 · M3.5 网络收敛：keep-alive + 浏览器侧真流式 + https（子域名路由暂缓）
+
+四项做了三项：
+
+- **keep-alive（HTTP/1.1 持久连接）**
+  - `HttpMessageReader` 可复用：读完一条消息后置 `done` 但继续缓冲，`rest()` 把下一条（pipelined）消息的字节交回，便于连接重新武装。顺便补上了 **chunked trailer 段的消费**（之前 `0\r\n` 后的结尾 CRLF 会泄漏到下一条消息，导致 keep-alive 下第二条请求解析失败）。
+  - `Server.#serveConnection` 改为连接循环：每个 reader 局部持有自己的 `req`/`res`，响应结束时（延迟一个 tick，因为 handler 可能在 `onHead` 里同步 `res.end()`）重新武装，并回放抢先到达的字节。
+  - **客户端连接池**：新增内部 `Connection`（socket 数据回调只注册一次，永远喂给「当前」reader，避免监听器堆积）+ 按端口的 idle 池；`http._request` 默认发 `Connection: keep-alive` 并复用连接。`IncomingMessage._destroy` 不再在正常完成时销毁 socket（之前会把待复用的连接杀掉）。
+  - `ServerResponse` 根据请求/响应头决定 `Connection`，不再无条件写 `close`。
+  - 文件：`src/node-runtime/builtins/http.ts`
+- **浏览器侧真流式**
+  - `http._stream(port, init, handlers)`：先回调 head，再逐块回调 body；`_request` 改为基于它实现。
+  - worker 新增 `httpStream` 消息，把 head/chunk/end 分别 `postMessage`。
+  - `RuntimeClient` 新增 `#serveViaStream`：把每个 chunk 经 MessagePort 转发给 SW。
+  - `public/sw.js`：用 `ReadableStream` 组装 Response，`res.write()` / SSE / 大文件**边产生边到达**浏览器。HTML 是唯一例外（为注入 `<base>` 先缓冲）。
+  - 文件：`src/node-runtime/builtins/http.ts`、`src/worker/runtime.worker.ts`、`src/client/index.ts`、`public/sw.js`
+- **https**：`http` 的同名壳（虚拟网络里没有 TLS，浏览器也开不了裸 TCP 口）；真 TLS 选项接受但忽略，不假装安全。文件：`src/node-runtime/builtins/https.ts`、`builtins/index.ts`
+- **子域名路由暂缓**：`<port>.localhost:5199` 是**另一个源**，而 runtime/VFS/OPFS（按源隔离）都在 `localhost:5199`。强做会导致「每个子域名一份 runtime（看不到主源 OPFS）」或需要新增跨源中继层。见「已知限制」与「下一步」。
+- **测试**：61 → **67**。新增：keep-alive 单连接复用 3 次请求、`Connection: close` 后重连、单 socket 写入两条 pipelined 请求、`_stream` 的 head/chunk 顺序与增量交付、`_stream` 连接失败 `ECONNREFUSED`、https 往返。
+- **浏览器实测**：`/preview/3000/api/stream` 从「最后一次性返回」变为 **6 个 chunk，间隔 ~30ms**（与 `setInterval(30)` 一致）；HTML `<base>` 注入、JSON、下载（197B）、目录列举均无回归；console 无报错。
 
 ### 2026-09-17 · M4 npm client：registry 解析 + tarball 解包 + node_modules 写入 VFS
 

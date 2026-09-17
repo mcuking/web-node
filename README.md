@@ -96,9 +96,17 @@ browser URL → ServiceWorker → main thread → runtime worker → VirtualNetw
 
 Known MVP limits: the preview uses a `/preview/<port>/` path prefix rather than
 `<port>.localhost`, so absolute-path assets (`/app.js`) land outside the prefix
-(HTML responses get a `<base>` tag injected to fix *relative* paths). HTTP/1.1
-handles one request per connection (`Connection: close`) — no keep-alive and no
-TLS — though chunked transfer encoding is supported.
+(HTML responses get a `<base>` tag injected to fix *relative* paths). Subdomain
+routing is deferred because `<port>.localhost` is a *different origin* while the
+runtime, VFS and OPFS (origin-scoped) live on the main origin — making it work
+needs a cross-origin relay layer, which is a larger change.
+
+Connections are persistent (HTTP/1.1 keep-alive) with pipelining on the server
+side and a per-port client connection pool. Responses stream all the way: the
+ServiceWorker hands the browser a `ReadableStream`, so `res.write()` / SSE /
+large downloads arrive incrementally instead of as one blob (HTML is buffered
+so the `<base>` tag can be injected). `https` is provided as the `http` surface
+under a TLS-shaped name — the virtual network has no TLS.
 
 ## Streams
 
@@ -154,7 +162,10 @@ read/write and integrity verification.
 | M3 | Networking (virtual TCP + ServiceWorker bridge + preview) | ✅ Done (basic) |
 | S | Streams foundation (`Readable`/`Writable`/`pipe`/backpressure + chunked) | ✅ Done |
 | M4 | npm client (registry + tarball + `node_modules`) | ✅ Done |
-| M3.5 | Network convergence (subdomain routing / keep-alive / HTTPS) | ⬜ Not started |
+| M3.5a | Keep-alive (persistent connections + pipelining + client pool) | ✅ Done |
+| M3.5b | Real browser-side streaming (SW relays a `ReadableStream`) | ✅ Done |
+| M3.5c | `https` (the `http` surface under a TLS-shaped name) | ✅ Done |
+| M3.5d | Subdomain routing (`<port>.localhost`) | ⏸ Deferred (cross-origin runtime/OPFS) |
 | M5 | Real build tools (Vite / webpack) | ⬜ Not started |
 
 ## Contributing
