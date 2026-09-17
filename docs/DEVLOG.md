@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M3.5 网络收敛已完成 3/4（keep-alive + 浏览器侧真流式 + https），子域名路由因跨源架构原因**暂缓**（见下方「已知限制」）。下一步建议 M5 真实构建工具。
+**阶段**：M5 真实构建工具已落地 —— **esbuild（官方 WASM 构建）在标签页里直接跑**：从 registry 安装、经 `browser` 字段解析到浏览器构建、编译 wasm、用 VFS 插件打包 TS + `node_modules` 依赖、写回 `dist/app.js`。顺带修了一个 OPFS 二进制持久化 bug（见变更记录）。
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
@@ -22,9 +22,9 @@
 | M3.5b | **浏览器侧真流式**（SW 直转 ReadableStream） | ✅ 完成 |
 | M3.5c | **https**（http 同名壳，无 TLS） | ✅ 完成 |
 | M3.5d | 子域名路由（`<port>.localhost`） | ⏸ 暂缓（见下） |
-| M5 | 真实构建工具（vite / webpack） | ⬜ 未开始 |
+| M5 | **真实构建工具**（esbuild WASM：安装→初始化→打包→写回） | ✅ 完成（vite/webpack 本体见「下一步」） |
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **69/69 通过** · `vite build` 绿（worker ~233KB / index ~7.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **78/78 通过** · `vite build` 绿（worker ~241KB / index ~8.0KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -103,7 +103,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **M5 真实构建工具**：跑通 vite/webpack（依赖 M4 的 node_modules + M3 的资源路由）。
+1. **Vite / webpack 本体**：M5 打通了 esbuild（真实构建工具）；下一步是把 **Vite** 装进来跑 `vite build`（依赖 esbuild + 本里程碑的 `browser` 字段/`require.resolve`），以及 webpack。预期还需：`exports` 字段解析、`fs` 的 `watch`/`realpath` 补齐、更完整的 ESM（dynamic `import()`）。
 2. **子域名路由（M3.5d，暂缓项）**：若要捡起来，推荐方案：子域名 SW 经 `postMessage` 中继到主源页面里的 runtime（主源保留 OPFS 与单例 worker）。需要 Vite `server.allowedHosts: ['.localhost']` + 一个子域名 bootstrap 页 + 跨源 MessagePort 中继。
 3. **npm 收尾**：lockfile 读写、`.bin` shim、peer 依赖自动安装、integrity 校验、生命周期脚本、`file:`/`git+` 说明符。
 4. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
@@ -113,6 +113,18 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-17 · M5 真实构建工具：esbuild WASM 在页内打包 + OPFS 二进制持久化修复
+
+**目标**：把一个真实构建工具跑起来。选了 **esbuild**，因为它是 Vite 内部的转换/预打包器，且官方提供 **WASM 构建**（浏览器原生，零依赖）。
+
+- **`browser` 字段支持**（loader）—— 关键前置。`esbuild-wasm` 的 `main` 是 Node 构建（需 `child_process`/`worker_threads`/`tty`），必须按 npm 约定解析到 `browser` 指向的自包含浏览器构建。实现了字符串形式（重定向入口）和对象形式（`{"fs": false, "...": "..."}`），`false` 映射为空模块；作用于入口解析与包内相对/裸说明符重映射。文件：`src/node-runtime/loader/index.ts`
+- **`require.resolve`**：新增模块级 `require.resolve(request[, {paths}])`，与 Node 签名一致；esbuild 插件用它做 `node_modules` 解析。文件：同上
+- **沙箱浏览器全局**：用户模块里的 `globalThis` 是沙箱对象，因此把标签页真正拥有的全局（`WebAssembly`/`crypto`/`performance`/`TextEncoder`/`TextDecoder`/`Blob`/`Worker`/`fetch`/`self`…）镜像到沙箱上；宿主没有的（Node 下）跳过，`self` 回退到真实全局。没有这步 esbuild 会在 `globalThis.crypto` 上报错。文件：`src/node-runtime/runtime.ts`
+- **演示**：新增「▦ Build」按钮 → 跑 `/project/build.js`：从 VFS 读 `esbuild.wasm` → `WebAssembly.compile` → `esbuild.initialize({worker:false})` → 用 VFS 插件 `build()` 打包 `src/app.ts`（TS + 真实 `node_modules` 依赖 `ms`）→ 写回 `/project/dist/app.js`。演示还新增 `src/app.ts`/`src/greet.ts`。文件：`index.html`、`src/ui/main.ts`（`runEntry` 重构）、`src/demo-project.ts`
+- **OPFS 二进制持久化 bug（M5 暴露）**：`MemoryVfs.snapshot()` 用 `TextDecoder()`（UTF-8）解码文件字节，非文本内容被破坏并膨胀（13.3MB 的 wasm 变 17.2MB，重载后 `WebAssembly.compile` 报 `length overflow`）。改为 **base64**（新增 `src/node-runtime/vfs/base64.ts`，零依赖），`fromSnapshot` 支持 `base64`/`text` 两种编码；OPFS 快照加 `{v:2}` 标记，旧格式（v1 纯文本）仍可读。文件：`src/node-runtime/vfs/{memory,opfs,base64}.ts`、`src/worker/runtime.worker.ts`（恢复逻辑改用 `fromSnapshot`）
+- **测试**：69 → **78**。新增 `test/browser-field.test.ts`（4：字符串入口、对象重映射、`false`→空模块、无 browser 字段回退 main）、`test/build.test.ts`（3：`require.resolve` 相对/裸/子路径、browser 字段参与解析、未安装 esbuild-wasm 时 build.js 给提示）、`test/vfs.test.ts`（+2：二进制快照往返、旧文本快照兼容）
+- **浏览器实测**：Reset → Install deps（`ms@2.1.3` + `esbuild-wasm@0.28.2`）→ Build：`tool: esbuild-wasm v0.28.2 (13.3 MB wasm)` · `wasm: compiled + service started in 37ms` · `bundle: 5138 bytes in 116ms` · `written: /project/dist/app.js`；再运行产物得到 `hello, world! | hello, web-node! | hello, browser!  (ms: 7200000ms)`。
 
 ### 2026-09-17 · http 健壮性：handler 抛异常不再卡死 keep-alive 连接
 

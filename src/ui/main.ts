@@ -14,6 +14,7 @@ const statusEl = $<HTMLSpanElement>('status');
 const bootEl = $<HTMLSpanElement>('boot');
 const factsEl = $<HTMLSpanElement>('facts');
 const runBtn = $<HTMLButtonElement>('run');
+const buildBtn = $<HTMLButtonElement>('build');
 const installBtn = $<HTMLButtonElement>('install');
 const clearBtn = $<HTMLButtonElement>('clear');
 const resetBtn = $<HTMLButtonElement>('reset');
@@ -85,14 +86,23 @@ async function save(): Promise<void> {
 }
 
 async function runProject(): Promise<void> {
+  await runEntry('/project/index.js', 'node /project/index.js', runBtn);
+}
+
+/**
+ * Run any VFS entry (`node <path>`) with the shared busy/status/terminal
+ * handling. `runProject` and `buildProject` are the two callers.
+ */
+async function runEntry(entry: string, label: string, button: HTMLButtonElement): Promise<void> {
   await save();
+  button.disabled = true;
   runBtn.disabled = true;
   setStatus('running…', 'running');
   // Echo a header so consecutive runs are visually separated.
-  writeTerminal(`\n$ node /project/index.js\n`, 'sys');
+  writeTerminal(`\n$ ${label}\n`, 'sys');
   const started = performance.now();
   try {
-    await client.run('/project/index.js');
+    await client.run(entry);
     const ms = (performance.now() - started).toFixed(0);
     setStatus(`done in ${ms}ms`, 'ok');
     writeTerminal(`[exit 0 · ${ms}ms]\n`, 'sys');
@@ -100,9 +110,14 @@ async function runProject(): Promise<void> {
     writeTerminal(`[run failed] ${(err as Error).message}\n`, 'err');
     setStatus('error', 'err');
   } finally {
+    button.disabled = false;
     runBtn.disabled = false;
     await refreshPorts();
   }
+}
+
+async function buildProject(): Promise<void> {
+  await runEntry('/project/build.js', 'node /project/build.js', buildBtn);
 }
 
 // --- preview ---------------------------------------------------------------
@@ -184,6 +199,7 @@ client.on('ready', (runtimeInfo) => {
   writeTerminal('internalBindings: ' + runtimeInfo.bindings.join(', ') + '\n\n', 'sys');
 });
 runBtn.addEventListener('click', () => void runProject());
+buildBtn.addEventListener('click', () => void buildProject());
 
 async function installDeps(): Promise<void> {
   await save();
