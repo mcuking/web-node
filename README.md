@@ -2,8 +2,12 @@
 
 Run Node.js source code in the browser — a WebContainer-style runtime.
 
+[![live demo](https://img.shields.io/badge/live%20demo-mcuking.github.io%2Fweb--node-5ef1a5)](https://mcuking.github.io/web-node/)
+
 **English** · [简体中文](README_zh.md)
 
+- **Live demo**: <https://mcuking.github.io/web-node/> (install deps, run the
+  demo project, hit **⚡ Vite build** — all inside the tab)
 - **Dev log / progress / next steps**: [`docs/DEVLOG.md`](docs/DEVLOG.md) ← **append an entry after every change**
 - Design doc: [`docs/superpowers/specs/2026-09-17-web-node-design.md`](docs/superpowers/specs/2026-09-17-web-node-design.md)
 - Upstream sources: local checkout of Node.js (v26.9.1), vendored via `tools/`
@@ -76,6 +80,17 @@ npm run typecheck  # tsc --noEmit
 npm run build      # production build
 npm run vendor     # re-vendor files from the Node.js sources
 ```
+
+### Deploying (GitHub Pages)
+
+Pages serves a project site from a sub-path, so the build takes a base path and
+the script publishes it to a `gh-pages` branch (no Actions needed):
+
+```bash
+npm run deploy     # = BASE_PATH=/web-node/ tools/deploy-pages.sh
+```
+
+The site is then live at <https://mcuking.github.io/web-node/>.
 
 ## Layout
 

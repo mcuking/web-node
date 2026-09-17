@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM 转换 + 打包），M5b 接入了 **rollup 的官方 WASM 构建**；M5c 又把 **Vite 本体**跑了起来——Vite 是纯 ESM 且依赖原生 esbuild，运行时把 `esbuild`→`esbuild-wasm`、`rollup`→`@rollup/wasm-node` 别名后，Vite 直接跑在 VFS 上完成一次真实 production build。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM 转换 + 打包），M5b 接入了 **rollup 的官方 WASM 构建**；M5c 又把 **Vite 本体**跑了起来——Vite 是纯 ESM 且依赖原生 esbuild，运行时把 `esbuild`→`esbuild-wasm`、`rollup`→`@rollup/wasm-node` 别名后，Vite 直接跑在 VFS 上完成一次真实 production build。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
@@ -26,6 +26,9 @@
 | M5b | **真实打包器：rollup WASM**（ESM + tree-shaking → VFS） | ✅ 完成 |
 | M5c | **Vite 本体**（真实 production build → VFS） | ✅ 完成 |
 | M5d | Vite **dev server**（dev server 编排 / HMR） | ⬜ 下一步 |
+| D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
+
+**在线 demo**：<https://mcuking.github.io/web-node/>
 
 **质量门禁**：`tsc --noEmit` 干净 · `vitest run` **85/85 通过** · `vite build` 绿（worker ~260KB / index ~8.2KB / css ~4.1KB）
 
@@ -116,6 +119,24 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-17 · GitHub Pages 部署：子路径站点 + `gh-pages` 发布
+
+**目标**：把已实现的功能部署成在线 demo，链接写进仓库描述。
+
+**子路径适配**（Pages 的 project site 跑在 `/web-node/`）：之前 SW 与预览路由写死 origin 根路径，搬到子路径会全挂。
+- `vite.config.ts`：新增 `base`，由 `BASE_PATH` 环境变量控制（默认 `/`，部署时 `/web-node/`）。HTML 里的 script/link 与 worker 引用自动带上前缀。
+- `public/sw.js`：`PREVIEW_PREFIX` 从写死 `/preview/` 改为由 `new URL('./', self.location).pathname` 推导（dev=`/`，Pages=`/web-node/`），`<base>` 注入与 client 归属判断同步。
+- `src/client/index.ts`：SW 注册路径/作用域改为 `import.meta.env.BASE_URL`（`/web-node/sw.js`，scope `/web-node/`）。
+- `src/ui/main.ts`：预览 URL 用 `BASE_URL` 拼。
+
+**发布**：新增 `tools/deploy-pages.sh`（+ `npm run deploy`）——`BASE_PATH=/web-node/` 构建 → `dist/` 推到 `gh-pages` 分支（带 `.nojekyll`，临时 repo，不动主仓库）。不用 Actions。
+
+**Pages**：仓库已设 Source = gh-pages / (root)，push 后自动重建，站点 `https://mcuking.github.io/web-node/`（强制 HTTPS）。仓库描述与 Website 字段已指向该链接。
+
+**线上实测**：`/web-node/` 200；runtime ready（16 bindings / 8 vendored / OPFS on）；SW scope = `https://mcuking.github.io/web-node/`；Run → `/web-node/preview/3000/` 200（`<base href="/web-node/preview/3000/">`）；Install deps 11 包 8.3s；⚡ Vite build → `vite v5.4.21 (running in the tab)` · `built in 197ms`。
+
+**注**：`vite preview` 不发送 dev 的 COOP/COEP 头，与 Pages 一致——实测证明运行时并不依赖 SharedArrayBuffer。
 
 ### 2026-09-17 · M5c 真实构建工具链：Vite 本体在页内完成 production build
 

@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "deploy": "tools/deploy-pages.sh",
     "vendor": "node tools/vendor.mjs",
     "typecheck": "tsc --noEmit"
   },

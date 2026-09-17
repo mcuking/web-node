@@ -2,8 +2,11 @@
 
 在浏览器里跑 Node.js 源码（WebContainer 式运行时）。
 
+[![在线 demo](https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%20demo-mcuking.github.io%2Fweb--node-5ef1a5)](https://mcuking.github.io/web-node/)
+
 [English](README.md) · **简体中文**
 
+- **在线 demo**：<https://mcuking.github.io/web-node/>（装依赖、跑 demo 项目、点 **⚡ Vite build**，全在标签页里）
 - **开发日志 / 进度 / 下一步**：`docs/DEVLOG.md` ← **每次改动都往这里追加**
 - 设计文档：`docs/superpowers/specs/2026-09-17-web-node-design.md`
 - 上游源码：`/Users/tangjianghong/Downloads/node`（Node.js v26.9.1）
@@ -23,6 +26,17 @@ npm run typecheck  # tsc --noEmit
 npm run build      # 生产构建
 npm run vendor     # 重新从 Node 源码 vendor 文件
 ```
+
+### 部署（GitHub Pages）
+
+Pages 的 project site 跑在子路径下，所以构建要带 base path；脚本会把 `dist/` 发布到
+`gh-pages` 分支（无需 Actions）：
+
+```bash
+npm run deploy     # = BASE_PATH=/web-node/ tools/deploy-pages.sh
+```
+
+上线地址：<https://mcuking.github.io/web-node/>。
 
 ## 结构
 
