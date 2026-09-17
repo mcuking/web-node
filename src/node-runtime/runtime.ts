@@ -172,14 +172,34 @@ export class NodeRuntime {
     return this.#timers.size;
   }
 
-  /** Execute a module by absolute VFS path (the program entry point). */
+  /**
+   * Execute a module by absolute VFS path (the program entry point).
+   *
+   * Every call models a *fresh process*: the user module cache is dropped and
+   * pending timers/exit code are cleared, so clicking Run twice actually runs
+   * the program twice (Node.2 semantics). Without this, the second run returns
+   * the cached entry module and the process exits immediately with no output
+   * — which looked like "[process exited 1ms]".
+   */
   runMain(entryPath: string): unknown {
+    this.resetRunState();
     try {
       return this.loader.loadModule(entryPath);
     } catch (err) {
       if (err instanceof ProcessExit) return undefined;
       throw err;
     }
+  }
+
+  /** Reset everything that belongs to a single program execution. */
+  resetRunState(): void {
+    this.loader.reset();
+    this.#clearAllTimers();
+    this.#exitCode = null;
+  }
+
+  #clearAllTimers(): void {
+    for (const id of [...this.#timers.keys()]) this.#clearTimer(id);
   }
 
   /** Introspection used by the UI. */

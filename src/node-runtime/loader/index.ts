@@ -169,4 +169,16 @@ export class ModuleLoader {
   get loadedModules(): string[] {
     return [...this.#cache.keys()].sort();
   }
+
+  /**
+   * Drop the user-module cache so the next `loadModule()` re-executes from
+   * source. `NodeRuntime.runMain()` calls this on every run: clicking Run twice
+   * must behave like `node index.js` twice, not like a cached no-op.
+   *
+   * Builtins (`realm`) are deliberately *not* reset — they model the process's
+   * own loaded core, not the user's module graph.
+   */
+  reset(): void {
+    this.#cache.clear();
+  }
 }

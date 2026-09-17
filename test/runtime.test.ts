@@ -162,4 +162,44 @@ describe('NodeRuntime — core', () => {
     expect(pathMod?.origin).toBe('node-source');
     expect(pathMod?.state).toBe('loaded');
   });
+
+  it('re-executes the entry module on every run (no stale cache)', () => {
+    const vfs = makeProject({
+      '/project/index.js': `console.log('run');`,
+      '/project/lib/counter.js': `globalThis.__n = (globalThis.__n || 0) + 1; console.log('lib ' + globalThis.__n);`,
+    });
+    const out: string[] = [];
+    const runtime = new NodeRuntime({
+      vfs,
+      argv: ['/project/index.js'],
+      installGlobals: false,
+      onStdout: (c) => out.push(c),
+    });
+
+    runtime.runMain('/project/index.js');
+    runtime.runMain('/project/index.js');
+    runtime.runMain('/project/index.js');
+
+    // A cached entry would print once. `node index.js` three times prints three times.
+    expect(out.join('')).toBe('run\nrun\nrun\n');
+  });
+
+  it('resets exitCode between runs', () => {
+    const vfs = makeProject({
+      '/project/index.js': `if (!globalThis.__exited) { globalThis.__exited = true; process.exit(3); } console.log('second run');`,
+    });
+    const out: string[] = [];
+    const runtime = new NodeRuntime({
+      vfs,
+      argv: ['/project/index.js'],
+      installGlobals: false,
+      onStdout: (c) => out.push(c),
+    });
+
+    runtime.runMain('/project/index.js');
+    expect(runtime.exitCode).toBe(3);
+
+    runtime.runMain('/project/index.js');
+    expect(out.join('')).toBe('second run\n');
+  });
 });
