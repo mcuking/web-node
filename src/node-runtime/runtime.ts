@@ -1,0 +1,195 @@
+import type { BindingContext } from './bindings/context';
+import type { Vfs } from './vfs';
+import { Realm } from './realm';
+import { ModuleLoader } from './loader';
+
+/** Thrown by `process.exit()` to unwind the call stack back to the runner. */
+export class ProcessExit extends Error {
+  code: number;
+  constructor(code: number) {
+    super(`process.exit(${code})`);
+    this.name = 'ProcessExit';
+    this.code = code;
+  }
+}
+
+// Capture the host timers *before* installGlobals() can shadow them, otherwise
+// our timer bindings would call themselves through globalThis.setTimeout.
+const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
+const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
+const nativeSetInterval = globalThis.setInterval.bind(globalThis);
+const nativeClearInterval = globalThis.clearInterval.bind(globalThis);
+
+export interface RuntimeOptions {
+  vfs: Vfs;
+  argv?: string[];
+  env?: Record<string, string>;
+  execPath?: string;
+  /** Also assign runtime globals onto the real globalThis (browser worker use). */
+  installGlobals?: boolean;
+  onStdout?: (chunk: string) => void;
+  onStderr?: (chunk: string) => void;
+}
+
+interface TimerHandle {
+  kind: 'timeout' | 'interval' | 'immediate';
+}
+
+/**
+ * Creates a Node-flavoured runtime over a VFS.
+ *
+ * Ordering matters and mirrors Node's bootstrap: bindings → realm → primordials
+ * → core modules → globals → loader.
+ */
+export class NodeRuntime {
+  readonly vfs: Vfs;
+  readonly realm: Realm;
+  readonly loader: ModuleLoader;
+  readonly bindingCtx: BindingContext;
+  readonly process: Record<string, unknown>;
+  readonly console: Record<string, unknown>;
+  readonly Buffer: unknown;
+
+  #timers = new Map<number, ReturnType<typeof nativeSetTimeout>>();
+  #nextTimerId = 1;
+  #exitCode: number | null = null;
+
+  constructor(opts: RuntimeOptions) {
+    this.vfs = opts.vfs;
+    const argv = opts.argv ?? [];
+    const env = opts.env ?? {};
+    const onStdout = opts.onStdout ?? (() => undefined);
+    const onStderr = opts.onStderr ?? (() => undefined);
+
+    const bindingCtx: BindingContext = {
+      vfs: opts.vfs,
+      env,
+      argv,
+      execPath: opts.execPath ?? '/bin/node',
+      writeStdout: onStdout,
+      writeStderr: onStderr,
+      exit: (code: number) => {
+        this.#exitCode = code;
+        throw new ProcessExit(code);
+      },
+      nextTick: (fn, ...args) => queueMicrotask(() => fn(...args)),
+      timers: {
+        setTimeout: (fn, ms, ...args) => {
+          const id = this.#nextTimerId++;
+          const handle = nativeSetTimeout(() => {
+            this.#timers.delete(id);
+            fn(...args);
+          }, Math.max(1, ms || 0));
+          this.#timers.set(id, handle);
+          return id;
+        },
+        clearTimeout: (id) => this.#clearTimer(id),
+        setInterval: (fn, ms, ...args) => {
+          const id = this.#nextTimerId++;
+          const handle = nativeSetInterval(() => fn(...args), Math.max(1, ms || 0));
+          this.#timers.set(id, handle);
+          return id;
+        },
+        clearInterval: (id) => this.#clearTimer(id),
+        setImmediate: (fn, ...args) => {
+          const id = this.#nextTimerId++;
+          const handle = nativeSetTimeout(() => {
+            this.#timers.delete(id);
+            fn(...args);
+          }, 0);
+          this.#timers.set(id, handle);
+          return id;
+        },
+        clearImmediate: (id) => this.#clearTimer(id),
+        activeCount: () => this.#timers.size,
+      },
+      now: () => performance.now(),
+      hrtime: () => {
+        const ns = Math.round(performance.now() * 1e6);
+        return [Math.floor(ns / 1e9), ns % 1e9];
+      },
+    };
+    this.bindingCtx = bindingCtx;
+
+    this.realm = new Realm(bindingCtx);
+    this.loader = new ModuleLoader(this.realm, opts.vfs);
+    this.realm.setUserRequire(this.loader.require);
+
+    this.process = this.realm.require('process') as Record<string, unknown>;
+    this.console = this.realm.require('console') as Record<string, unknown>;
+    this.Buffer = (this.realm.require('buffer') as { Buffer: unknown }).Buffer;
+
+    // Build the sandbox global object shared by all user modules. This is what
+    // makes `process` / `Buffer` / `console` resolve inside user code without
+    // touching the host realm's globals (which matters under Vitest).
+    const timers = this.realm.require('timers') as Record<string, unknown>;
+    const sandboxGlobal: Record<string, unknown> = {
+      process: this.process,
+      Buffer: this.Buffer,
+      console: this.console,
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout,
+      setInterval: timers.setInterval,
+      clearInterval: timers.clearInterval,
+      setImmediate: timers.setImmediate,
+      clearImmediate: timers.clearImmediate,
+      queueMicrotask: (fn: () => void) => queueMicrotask(fn),
+    };
+    sandboxGlobal.global = sandboxGlobal;
+    sandboxGlobal.globalThis = sandboxGlobal;
+    this.loader.setGlobals(sandboxGlobal);
+    this.sandboxGlobals = sandboxGlobal;
+
+    if (opts.installGlobals !== false) {
+      this.#installGlobals(sandboxGlobal);
+    }
+  }
+
+  readonly sandboxGlobals: Record<string, unknown>;
+
+  get exitCode(): number | null {
+    return this.#exitCode;
+  }
+
+  #installGlobals(sandboxGlobal: Record<string, unknown>): void {
+    const g = globalThis as unknown as Record<string, unknown>;
+    for (const key of ['process', 'Buffer', 'console', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'setImmediate', 'clearImmediate']) {
+      g[key] = sandboxGlobal[key];
+    }
+    g.global = globalThis;
+  }
+
+  #clearTimer(id: number): void {
+    const handle = this.#timers.get(id);
+    if (handle === undefined) return;
+    nativeClearTimeout(handle);
+    nativeClearInterval(handle);
+    this.#timers.delete(id);
+  }
+
+  /** Number of live timers (used by the runner / tests). */
+  get activeTimers(): number {
+    return this.#timers.size;
+  }
+
+  /** Execute a module by absolute VFS path (the program entry point). */
+  runMain(entryPath: string): unknown {
+    try {
+      return this.loader.loadModule(entryPath);
+    } catch (err) {
+      if (err instanceof ProcessExit) return undefined;
+      throw err;
+    }
+  }
+
+  /** Introspection used by the UI. */
+  describe(): {
+    bindings: string[];
+    modules: Array<{ id: string; origin: string; state: string }>;
+  } {
+    return {
+      bindings: this.realm.bindingIds,
+      modules: this.realm.listModules(),
+    };
+  }
+}
