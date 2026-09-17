@@ -93,6 +93,14 @@ describe('demo build script', () => {
     expect(out.join('')).toContain('not installed yet');
     expect(out.join('')).not.toContain('bundle failed');
   });
+
+  it('explains how to install vite when it is missing', async () => {
+    const { run, out } = boot(DEMO_FILES, '/project/vite-build.mjs');
+    run();
+    await tick(20);
+    expect(out.join('')).toContain('not installed yet');
+    expect(out.join('')).not.toContain('vite failed');
+  });
 });
 
 describe('fs/promises, perf_hooks and url builtins', () => {

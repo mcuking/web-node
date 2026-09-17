@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM 转换 + 打包），M5b 又接入了 **rollup 的官方 WASM 构建**——在页内做真正的 tree-shaking 打包，直接从 VFS 读项目源码、写回 `dist/app.esm.js`。顺带修了两个 loader 真实 bug（`main`/`module` 解析顺序、宿主同名全局注入冲突）。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM 转换 + 打包），M5b 接入了 **rollup 的官方 WASM 构建**；M5c 又把 **Vite 本体**跑了起来——Vite 是纯 ESM 且依赖原生 esbuild，运行时把 `esbuild`→`esbuild-wasm`、`rollup`→`@rollup/wasm-node` 别名后，Vite 直接跑在 VFS 上完成一次真实 production build。
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
@@ -24,9 +24,10 @@
 | M3.5d | 子域名路由（`<port>.localhost`） | ⏸ 暂缓（见下） |
 | M5 | **构建工具：esbuild WASM**（安装→初始化→打包→写回） | ✅ 完成 |
 | M5b | **真实打包器：rollup WASM**（ESM + tree-shaking → VFS） | ✅ 完成 |
-| M5c | Vite / webpack 本体（dev-server 编排） | ⬜ 下一步 |
+| M5c | **Vite 本体**（真实 production build → VFS） | ✅ 完成 |
+| M5d | Vite **dev server**（dev server 编排 / HMR） | ⬜ 下一步 |
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **82/82 通过** · `vite build` 绿（worker ~245KB / index ~8.1KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **85/85 通过** · `vite build` 绿（worker ~260KB / index ~8.2KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -105,7 +106,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **Vite / webpack 本体（M5c）**：M5/M5b 已把 esbuild 与 rollup（都是真实构建工具）跑通。Vite 8 已改用 Rust 的 **rolldown**（napi 原生二进制，浏览器不可行）；要跑 `vite build` 应钉 **Vite 5.x**（rollup+esbuild）并把 rollup 别名到 `@rollup/wasm-node`，另外还需 `exports` 字段解析、`fs.watch`、dynamic `import()` 等。
+1. **Vite dev server（M5d，下一步）**：M5c 已让 `vite build` 在页内跑通（Vite 5.x + rollup→@rollup/wasm-node + esbuild→esbuild-wasm）。dev server 还差：`fs.watch`（HMR 文件监听，可基于 VFS 变更事件实现）、WebSocket HMR 通道（可复用已有虚拟 TCP）、`server.addMiddlewareMode` 与 `transformIndexHtml` 的按需转换、以及 `optimizeDeps` 预构建缓存。注意 **Vite 6+/8 走 rolldown（napi 原生二进制）不可行**，必须钉 5.x。
 2. **子域名路由（M3.5d，暂缓项）**：若要捡起来，推荐方案：子域名 SW 经 `postMessage` 中继到主源页面里的 runtime（主源保留 OPFS 与单例 worker）。需要 Vite `server.allowedHosts: ['.localhost']` + 一个子域名 bootstrap 页 + 跨源 MessagePort 中继。
 3. **npm 收尾**：lockfile 读写、`.bin` shim、peer 依赖自动安装、integrity 校验、生命周期脚本、`file:`/`git+` 说明符。
 4. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
@@ -115,6 +116,33 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-17 · M5c 真实构建工具链：Vite 本体在页内完成 production build
+
+**目标**：把 **Vite 本体**（不是 esbuild、不是 rollup，而是 Vite 自己）在标签页里跑起来，完整做一次 `vite build`。
+
+**为什么难**：Vite 是纯 ESM，且 `import esbuild from 'esbuild'`（原生 addon）。两边都要处理：① 我们的 ESM→CJS 转换器必须能啃下 Vite 那种 6.7 万行的 bundle；② `esbuild`/`rollup` 需要别名到 WASM 构建（运行时已设）。
+
+**核心改动：重写 ESM→CJS 转换器**（`src/node-runtime/loader/esm-transform.ts`）
+- 从**逐行**改成**基于扫描器的顶层语句切分**（`splitStatements`）：跟踪字符串/模板字面量（含嵌套 `${…}`）/注释/正则/括号深度，只在真正的顶层 `;` 或块结束处切分。多行 `import` 和多行模板字面量是 Vite bundle 的常态，逐行处理必崩。
+- **token 级关键字判断**决定 `/` 是正则还是除号（`return /re/` vs `a / b`）。判断错会让括号深度从那一刻起漂移（实测漂了 +3，末尾的 `export` 因深度不为 0 被漏掉）。
+- **顶层 `export`/`import` 关键字**作为语句边界（前一条函数声明可能没有分号，会吞掉后面的 `export`）。
+- ESM 包装形参改用 **`__wn_*` 前缀绑定**（`__wn_exports`/`__wn_require`），且 **不注入 `require`/`exports`/`__filename`/`__dirname`**——Vite chunk 会自己写 `const require = createRequire(import.meta.url)`、`const __filename = …`，注入同名形参会直接 `Identifier already declared`。
+- 修好的真实 bug：① `export { a as b } from 'm'` 之前错误地读局部变量（应从被 require 的模块取值）；② `import.meta.url` 未转换（`new Function` 里是硬语法错误）；③ 前导 license 块注释导致 `startsWith('import')` 失效（新增 `leadTrim`）；④ **动态 `import()`** 在 `new Function` 里 V8 直接报 “A dynamic import callback was not specified” → 重写为 `__wn_import`（loader 提供的异步加载，按 `import` 条件解析）。
+
+**其余修复（都是 Vite 真实踩到的）**
+- **PathLike**：`fs.readFileSync(new URL(...))` / Buffer 路径 → 在 VFS 唯一漏斗 `resolve()` 统一归一化（`posix.toPathValue`）。文件：`vfs/posix.ts`、`vfs/memory.ts`、`vfs/types.ts`
+- **`createRequire(...).resolve`**：Vite 用它把 id 映射成路径而不加载 → `userRequire` 挂上 `.resolve`。文件：`runtime.ts`、`realm.ts`、`builtins/module.ts`、`builtins/types.ts`
+- **`events` 语义**：Node 里 `module.exports === EventEmitter`（构造器本身带命名导出），之前返回的是普通对象，导致 `import EventEmitter from 'events'; class X extends EventEmitter` 报 “Class extends value #<Object> is not a constructor”。文件：`builtins/events.ts`
+- **`unsupported` stub 的 interop**：`has()` 恒真 + `__esModule` 返回“抛错的函数”（真值），使 `__wnDefault` 误判成 ES 命名空间并取 `.default`，`import tty from 'tty'` 拿到的是 stub 函数 → interop 键改为返回 `undefined`。文件：`builtins/unsupported.ts`
+- **`fs.realpathSync.native`**：Vite 做特性探测（`fs.realpathSync.native ?? fs.realpathSync`）→ 补上 `.native`。文件：`builtins/fs.ts`
+- **新增 `crypto` builtin**（纯 JS SHA-1/SHA-256/MD5 + WebCrypto 随机数）+ **`unsupported` stub 模块**（`tty`/`child_process`/`dns`/`v8`/`worker_threads`/`readline`/`tls`/`zlib`：**加载不抛**，仅“使用”才抛 `NotImplementedError`，因为 `import 'node:tty'` 这类副作用导入不能炸）。文件：`builtins/crypto.ts`、`builtins/unsupported.ts`
+
+**演示**：新增「⚡ Vite build」按钮 → 跑 `/project/vite-build.mjs`（动态 `import('vite')` → 初始化 esbuild-wasm → `vite.build()` → 写回 `/project/site/dist/`）。新增站点源码 `/project/site/{index.html,src/main.js,src/message.js}`；`package.json` 新增 `vite`/`postcss`/`picocolors`/`source-map-js`/`nanoid`。文件：`index.html`、`src/ui/main.ts`、`src/demo-project.ts`
+
+**测试**：82 → **85**。新增 Vite 未安装时的提示用例；把旧的「`crypto` 未实现即抛」改为「白名单外模块抛」并新增 stub 行为用例（`tty.isatty()` 返回 false、`dns.lookup()` 抛）。另：`tsconfig.json` 排除 `test/_*.test.ts`（一次性可行性验证脚本读真实磁盘，不参与 `tsc` 门禁；vitest 仍会跑）。
+
+**浏览器实测**：Reset → Install deps（11 个包，含 `vite@5.4.21`）→ ⚡ Vite build：`vite v5.4.21 (running in the tab)` · `esbuild wasm started in 33ms` · `built in 148ms` · 产物 `site/dist/assets/index-*.js` + `site/dist/index.html`（真实 Vite production 输出，含 modulepreload polyfill）。重载后产物仍在 OPFS 里。
 
 ### 2026-09-17 · M5b 真实打包器：rollup（官方 WASM 构建）在页内做 tree-shaking
 

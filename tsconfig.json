@@ -15,5 +15,9 @@
     "noEmit": true,
     "types": []
   },
-  "include": ["src", "test", "tools"]
+  "include": ["src", "test", "tools"],
+  // `test/_*.test.ts` are throwaway feasibility spikes: they read fixtures off
+  // the real disk (node:fs) which `types: []` does not type. Vitest still runs
+  // them; the production build does not type-check them.
+  "exclude": ["test/_*.test.ts", "node_modules", "dist"]
 }

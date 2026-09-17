@@ -54,6 +54,11 @@ top of it sit three virtual subsystems:
 - **Real bundler** — rollup (its official WASM build) also runs inside the tab: it
   tree-shakes an ES module graph read straight out of the virtual file system and
   writes `/project/dist/app.esm.js`.
+- **Vite itself** — the real Vite (v5) runs inside the tab. Vite is pure ESM and
+  reaches for the *native* esbuild addon; the runtime aliases
+  `esbuild`→`esbuild-wasm` and `rollup`→`@rollup/wasm-node`, so Vite boots on the
+  virtual file system and produces a real production bundle
+  (`site/dist/index.html` + `site/dist/assets/*.js`) — no server, no Node process.
 
 ## Development
 
@@ -194,8 +199,32 @@ tree-shaken : yes (dead export dropped)
 written     : /project/dist/app.esm.js
 ```
 
-Vite / webpack themselves are the next step (M5c). Note Vite 8 moved to
-rolldown (a native Rust binary), so a browser build would pin Vite 5.x.
+Vite / webpack themselves were the next step — and Vite now works (M5c):
+
+### Building with Vite (M5c)
+
+Hit **⚡ Vite build** and the *real* Vite (v5) bundles `site/` inside the tab.
+Vite is pure ESM and `import`s the native esbuild addon, so the runtime aliases
+`esbuild`→`esbuild-wasm` and `rollup`→`@rollup/wasm-node`; the WASM esbuild is
+started explicitly, then `vite.build()` runs entirely on the virtual file
+system:
+
+```
+tool        : vite v5.4.21 (running in the tab)
+esbuild     : wasm started in 33ms
+built in    : 148ms
+written     : /project/site/dist/
+  assets/index-DTtKUl1f.js
+  index.html
+```
+
+Making this work meant rewriting the ESM→CJS transform as a scanner over
+top-level statements (multi-line imports, template literals, regex-vs-division,
+dynamic `import()`), plus support for `PathLike` arguments,
+`createRequire(...).resolve`, Node's `events` module identity, and `crypto`.
+
+Note Vite 8 moved to rolldown (a native Rust binary), so a browser build pins
+Vite 5.x. The dev server (HMR) is the next milestone (M5d).
 
 ## Roadmap
 
@@ -212,7 +241,8 @@ rolldown (a native Rust binary), so a browser build would pin Vite 5.x.
 | M3.5d | Subdomain routing (`<port>.localhost`) | ⏸ Deferred (cross-origin runtime/OPFS) |
 | M5 | Real build tool — esbuild WASM: install, initialize, bundle, write back | ✅ Done |
 | M5b | Real bundler — rollup WASM: ESM graph, tree-shaking, write to VFS | ✅ Done |
-| M5c | Vite / webpack themselves | ⬜ Next |
+| M5c | Real build toolchain — Vite in the tab: production bundle to VFS | ✅ Done |
+| M5d | Vite dev server (dev-server orchestration / HMR) | ⬜ Next |
 
 ## Contributing
 
