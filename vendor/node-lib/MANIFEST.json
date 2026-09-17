@@ -1,0 +1,67 @@
+{
+  "generatedAt": "2026-09-17T09:22:27.419Z",
+  "nodeSource": "/Users/tangjianghong/Downloads/node",
+  "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
+  "files": [
+    {
+      "path": "internal/per_context/primordials.js",
+      "sha256": "40c3178b900495a5f8b1f1ee13297282457c62b6095f18564731b314e072df01",
+      "upstreamSha256": "c5bd695fc5a09d206acb917862411694a12c696f9063d982ccf1a25787ee3622",
+      "bytes": 23097,
+      "patches": [
+        "Skip intrinsics missing on this engine (Float16Array / Iterator) instead of throwing.",
+        "Guard intrinsic-object copies against missing globals.",
+        "Guard bound-intrinsic copies against missing globals."
+      ]
+    },
+    {
+      "path": "internal/per_context/domexception.js",
+      "sha256": "3c920df8a551ca84bcc571dd70df334cb10bd0f3088fa423a784f9f608cef6f7",
+      "upstreamSha256": "3c920df8a551ca84bcc571dd70df334cb10bd0f3088fa423a784f9f608cef6f7",
+      "bytes": 9452,
+      "patches": []
+    },
+    {
+      "path": "internal/per_context/messageport.js",
+      "sha256": "28bf223a668ddaa3ac43fdc84b7196e3c8e689d9d6c5d845d0d525a2fcb5410c",
+      "upstreamSha256": "28bf223a668ddaa3ac43fdc84b7196e3c8e689d9d6c5d845d0d525a2fcb5410c",
+      "bytes": 995,
+      "patches": []
+    },
+    {
+      "path": "internal/constants.js",
+      "sha256": "4548f10f15035b415bfa69a158e7bcf7e320355625d744d7318715c9acc21212",
+      "upstreamSha256": "4548f10f15035b415bfa69a158e7bcf7e320355625d744d7318715c9acc21212",
+      "bytes": 1647,
+      "patches": []
+    },
+    {
+      "path": "internal/encoding/util.js",
+      "sha256": "d2b4b86ac88c150a3cd099419287381f3efffd5650de553ec0e2637eb98b9b07",
+      "upstreamSha256": "d2b4b86ac88c150a3cd099419287381f3efffd5650de553ec0e2637eb98b9b07",
+      "bytes": 3059,
+      "patches": []
+    },
+    {
+      "path": "internal/querystring.js",
+      "sha256": "92d0cbd561d7cce93936b083d56d2a41063d177f3aa6772ae2c1871f160163d1",
+      "upstreamSha256": "92d0cbd561d7cce93936b083d56d2a41063d177f3aa6772ae2c1871f160163d1",
+      "bytes": 3316,
+      "patches": []
+    },
+    {
+      "path": "path.js",
+      "sha256": "dd326ecdc2d6ad2025c4991f4b480d76a9f1d52b7f6d0988a5dc0a1d02de5209",
+      "upstreamSha256": "dd326ecdc2d6ad2025c4991f4b480d76a9f1d52b7f6d0988a5dc0a1d02de5209",
+      "bytes": 52691,
+      "patches": []
+    },
+    {
+      "path": "querystring.js",
+      "sha256": "513ace4440c97fcaf3da958598be85f136eb044c6045b06dcac945395c4a7b56",
+      "upstreamSha256": "513ace4440c97fcaf3da958598be85f136eb044c6045b06dcac945395c4a7b56",
+      "bytes": 14576,
+      "patches": []
+    }
+  ]
+}
