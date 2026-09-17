@@ -162,7 +162,10 @@ export class RuntimeClient {
     });
 
     try {
-      await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      // Derive both from BASE_URL so the worker works from a sub-path too
+      // (GitHub Pages serves the app from /web-node/, not the origin root).
+      const base = import.meta.env.BASE_URL;
+      await navigator.serviceWorker.register(base + 'sw.js', { scope: base });
       await navigator.serviceWorker.ready;
       return true;
     } catch {
