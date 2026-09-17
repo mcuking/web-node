@@ -127,12 +127,14 @@ the UI, or visit `/preview/3000/`:
 browser URL → ServiceWorker → main thread → runtime worker → VirtualNetwork → your handler
 ```
 
-Known MVP limits: the preview uses a `/preview/<port>/` path prefix rather than
-`<port>.localhost`, so absolute-path assets (`/app.js`) land outside the prefix
-(HTML responses get a `<base>` tag injected to fix *relative* paths). Subdomain
-routing is deferred because `<port>.localhost` is a *different origin* while the
-runtime, VFS and OPFS (origin-scoped) live on the main origin — making it work
-needs a cross-origin relay layer, which is a larger change.
+Known MVP limits: on the **dev server** each preview gets its own origin,
+`<port>.localhost`, so absolute paths, cookies and storage behave like a real
+host (a small middleware serves a bootstrap shell that relays the subdomain's
+requests back to the main origin, where the single runtime/VFS/OPFS live). A
+static host has no `*.localhost` wildcard, so builds, `vite preview` and GitHub
+Pages fall back to a `/preview/<port>/` path prefix, where absolute-path assets
+(`/app.js`) land outside the prefix (HTML responses get a `<base>` tag injected
+to fix *relative* paths).
 
 Connections are persistent (HTTP/1.1 keep-alive) with pipelining on the server
 side and a per-port client connection pool. Responses stream all the way: the
@@ -290,7 +292,7 @@ events (there is no inotify in a tab), so editing a source file triggers a real
 | M3.5a | Keep-alive (persistent connections + pipelining + client pool) | ✅ Done |
 | M3.5b | Real browser-side streaming (SW relays a `ReadableStream`) | ✅ Done |
 | M3.5c | `https` (the `http` surface under a TLS-shaped name) | ✅ Done |
-| M3.5d | Subdomain routing (`<port>.localhost`) | ⏸ Deferred (cross-origin runtime/OPFS) |
+| M3.5d | Subdomain routing (`<port>.localhost`) | ✅ Done (dev server) |
 | M5 | Real build tool — esbuild WASM: install, initialize, bundle, write back | ✅ Done |
 | M5b | Real bundler — rollup WASM: ESM graph, tree-shaking, write to VFS | ✅ Done |
 | M5c | Real build toolchain — Vite in the tab: production bundle to VFS | ✅ Done |

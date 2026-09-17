@@ -154,11 +154,22 @@ export class RuntimeClient {
   async installServiceWorkerBridge(): Promise<boolean> {
     if (!('serviceWorker' in navigator)) return false;
     navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
-      const data = event.data as BridgeHttpRequest | undefined;
-      if (!data || data.type !== 'web-node:http') return;
-      const reply = event.ports[0];
-      if (!reply) return;
-      this.#serveViaStream(data, reply);
+      this.#onRelayedRequest(event);
+    });
+    // A preview on its own subdomain (`<port>.localhost`) is a *different
+    // origin*, so its ServiceWorker cannot post to this page directly: it relays
+    // through its own bootstrap page, which forwards here over `postMessage`.
+    // Same message shape, so it takes the same path from here on.
+    window.addEventListener('message', (event: MessageEvent) => {
+      const from = (() => {
+        try {
+          return new URL(event.origin).hostname;
+        } catch {
+          return '';
+        }
+      })();
+      if (from !== location.hostname && !from.endsWith('.localhost')) return;
+      this.#onRelayedRequest(event);
     });
 
     try {
@@ -171,6 +182,15 @@ export class RuntimeClient {
     } catch {
       return false;
     }
+  }
+
+  /** Serve one bridged request (from a same-origin or subdomain preview). */
+  #onRelayedRequest(event: MessageEvent): void {
+    const data = event.data as BridgeHttpRequest | undefined;
+    if (!data || data.type !== 'web-node:http') return;
+    const reply = event.ports[0];
+    if (!reply) return;
+    this.#serveViaStream(data, reply);
   }
 
   /**

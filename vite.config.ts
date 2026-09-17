@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { devSubdomains } from './plugins/dev-subdomains';
 
 // GitHub Pages serves the site from a sub-path (`/web-node/`), while the dev
 // server serves it from the origin root. `BASE_PATH` lets the deploy script set
@@ -8,6 +9,7 @@ const base = process.env.BASE_PATH || '/';
 
 export default defineConfig({
   base,
+  plugins: [devSubdomains()],
   server: {
     // COOP/COEP so SharedArrayBuffer is available (needed later for wasm/Atomics).
     headers: {
