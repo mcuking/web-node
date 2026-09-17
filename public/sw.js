@@ -117,8 +117,12 @@ async function handle(event, port, url) {
   }
 
   const responseHeaders = new Headers();
+  // Hop-by-hop headers must not be forwarded: the runtime's `chunked` framing
+  // was already decoded inside the worker and the browser frames the Response
+  // itself, so passing `transfer-encoding` on would corrupt the body.
+  const HOP_BY_HOP = ['connection', 'content-length', 'transfer-encoding', 'keep-alive', 'te', 'trailer', 'upgrade'];
   for (const [name, value] of Object.entries(result.headers || {})) {
-    if (name.toLowerCase() === 'connection' || name.toLowerCase() === 'content-length') continue;
+    if (HOP_BY_HOP.includes(name.toLowerCase())) continue;
     if (Array.isArray(value)) for (const v of value) responseHeaders.append(name, v);
     else responseHeaders.set(name, value);
   }

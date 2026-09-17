@@ -8,9 +8,15 @@ import type { VirtualSocket } from '../net/network';
  * async_hooks. We implement HTTP/1.1 directly on top of the virtual network so
  * that `http.createServer().listen(port)` + `http.get()` actually work in a tab.
  *
- * Scope (MVP): one request per connection, `Content-Length` bodies, no chunked
- * transfer-encoding, no keep-alive, no TLS. Anything outside that throws instead
- * of silently misbehaving.
+ * Scope: one request per connection (no keep-alive yet), `Content-Length` and
+ * `Transfer-Encoding: chunked` bodies, no TLS. Anything outside that throws
+ * instead of silently misbehaving.
+ *
+ * Bodies are real streams: `req` is a `Readable` and `res` a `Writable`, so
+ * `req.pipe(res)` works and propagates backpressure. A response that never sets
+ * `Content-Length` is framed as chunked, and our own client reader decodes that
+ * framing again — which is what makes streaming servers reachable through the
+ * ServiceWorker bridge.
  */
 
 interface ParsedHead {
@@ -39,6 +45,14 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   out.set(a, 0);
   out.set(b, a.length);
   return out;
+}
+
+/** Index of the next CRLF at or after `from`, or -1. */
+function indexOfCrlf(buf: Uint8Array, from = 0): number {
+  for (let i = from; i + 1 < buf.length; i++) {
+    if (buf[i] === 13 && buf[i + 1] === 10) return i;
+  }
+  return -1;
 }
 
 export function parseHead(text: string): ParsedHead | null {
@@ -78,12 +92,19 @@ export function parseHead(text: string): ParsedHead | null {
   return null;
 }
 
-/** Incremental HTTP/1.1 reader: head → body → end, one message per connection. */
+/**
+ * Incremental HTTP/1.1 reader — head, then body.
+ *
+ * Understands both framings user code actually produces: `Content-Length` and
+ * `Transfer-Encoding: chunked`. One message per connection for now (no
+ * keep-alive), so the reader latches `done` at the end of the body; trailing
+ * bytes (including the trailer section after a zero chunk) are dropped.
+ */
 export class HttpMessageReader {
   #buffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   #head: ParsedHead | null = null;
-  #bodyRemaining = 0;
-  #done = false;
+  #mode: 'head' | 'length' | 'chunk-size' | 'chunk-data' | 'chunk-crlf' | 'done' = 'head';
+  #remaining = 0;
 
   constructor(
     private readonly onHead: (head: ParsedHead) => void,
@@ -92,41 +113,90 @@ export class HttpMessageReader {
   ) {}
 
   push(chunk: Uint8Array): void {
-    if (this.#done) return;
+    if (this.#mode === 'done') return;
     this.#buffer = concat(this.#buffer, chunk);
 
-    if (!this.#head) {
-      const idx = indexOfHeadEnd(this.#buffer);
-      if (idx < 0) return;
-      const headText = new TextDecoder('latin1').decode(this.#buffer.subarray(0, idx));
-      this.#buffer = this.#buffer.subarray(idx + 4);
-      const head = parseHead(headText);
-      if (!head) {
-        this.#done = true;
-        this.onEnd();
-        return;
+    // Loop: a single socket chunk can complete several framing steps (e.g. a
+    // whole `5\r\nhello\r\n0\r\n\r\n` arriving in one read).
+    for (;;) {
+      if (this.#mode === 'head') {
+        const idx = indexOfHeadEnd(this.#buffer);
+        if (idx < 0) return;
+        const headText = new TextDecoder('latin1').decode(this.#buffer.subarray(0, idx));
+        this.#buffer = this.#buffer.subarray(idx + 4);
+        const head = parseHead(headText);
+        if (!head) {
+          this.#mode = 'done';
+          this.onEnd();
+          return;
+        }
+        this.#head = head;
+        this.onHead(head);
+
+        const te = head.headers['transfer-encoding'];
+        const teValue = Array.isArray(te) ? te.join(',') : te ?? '';
+        const cl = head.headers['content-length'];
+        const len = cl === undefined ? 0 : Number(Array.isArray(cl) ? cl[0] : cl);
+        if (/chunked/i.test(teValue)) {
+          this.#mode = 'chunk-size';
+        } else if (Number.isFinite(len) && len > 0) {
+          this.#mode = 'length';
+          this.#remaining = len;
+        } else {
+          this.#mode = 'done';
+          this.onEnd();
+          return;
+        }
+        continue;
       }
-      this.#head = head;
-      const cl = head.headers['content-length'];
-      const len = cl === undefined ? 0 : Number(Array.isArray(cl) ? cl[0] : cl);
-      this.#bodyRemaining = Number.isFinite(len) && len > 0 ? len : 0;
-      this.onHead(head);
-    }
 
-    if (this.#bodyRemaining > 0) {
-      if (this.#buffer.length === 0) return;
-      const take = Math.min(this.#bodyRemaining, this.#buffer.length);
-      const piece = this.#buffer.slice(0, take);
-      this.#buffer = this.#buffer.subarray(take);
-      this.#bodyRemaining -= take;
-      this.onBody(piece);
-      if (this.#bodyRemaining > 0) return;
-    }
+      if (this.#mode === 'length' || this.#mode === 'chunk-data') {
+        if (this.#buffer.length === 0) return;
+        const take = Math.min(this.#remaining, this.#buffer.length);
+        this.onBody(this.#buffer.slice(0, take));
+        this.#buffer = this.#buffer.subarray(take);
+        this.#remaining -= take;
+        if (this.#remaining > 0) return;
+        if (this.#mode === 'length') {
+          this.#mode = 'done';
+          this.onEnd();
+          return;
+        }
+        this.#mode = 'chunk-crlf';
+        continue;
+      }
 
-    this.#done = true;
-    this.onEnd();
+      if (this.#mode === 'chunk-size') {
+        const lineEnd = indexOfCrlf(this.#buffer);
+        if (lineEnd < 0) return;
+        const line = new TextDecoder('latin1').decode(this.#buffer.subarray(0, lineEnd)).split(';')[0].trim();
+        this.#buffer = this.#buffer.subarray(lineEnd + 2);
+        const size = parseInt(line, 16);
+        if (!Number.isFinite(size) || size < 0) {
+          this.#mode = 'done';
+          this.onEnd();
+          return;
+        }
+        if (size === 0) {
+          this.#mode = 'done';
+          this.onEnd();
+          return;
+        }
+        this.#remaining = size;
+        this.#mode = 'chunk-data';
+        continue;
+      }
+
+      // chunk-crlf: consume the CRLF that terminates the previous chunk's data.
+      if (this.#buffer.length < 2) return;
+      this.#buffer = this.#buffer.subarray(2);
+      this.#mode = 'chunk-size';
+    }
   }
 }
+
+const CRLF = new TextEncoder().encode('\r\n');
+const END_CHUNK = new TextEncoder().encode('0\r\n\r\n');
 
 const STATUS_CODES: Record<number, string> = {
   100: 'Continue',
@@ -166,11 +236,18 @@ export const httpSpec: BuiltinSpec = {
   id: 'http',
   aliases: ['node:http'],
   origin: 'web-node',
-  deps: ['net', 'events'],
+  deps: ['net', 'events', 'stream'],
   init: (ctx: BuiltinInitContext) => {
     const { EventEmitter } = ctx.require('events') as { EventEmitter: new () => Emitter };
     const net = ctx.require('net') as {
       Server: new (l?: (s: unknown) => void) => netServer;
+    };
+
+    // `req` is a Readable and `res` a Writable, exactly like Node — that is what
+    // makes `req.pipe(res)` and `fs.createReadStream(p).pipe(res)` work.
+    const { Readable, Writable } = ctx.require('stream') as {
+      Readable: new (opts?: Record<string, unknown>) => ReadableLike;
+      Writable: new (opts?: Record<string, unknown>) => WritableLike;
     };
 
     interface Emitter {
@@ -178,6 +255,23 @@ export const httpSpec: BuiltinSpec = {
       emit(name: string, ...args: unknown[]): boolean;
       once(name: string, fn: (...a: never[]) => void): unknown;
       removeListener(name: string, fn: (...a: never[]) => void): unknown;
+    }
+
+    interface ReadableLike extends Emitter {
+      push(chunk: unknown): boolean;
+      pause(): unknown;
+      resume(): unknown;
+      setEncoding(enc: string): unknown;
+      destroy(err?: Error): unknown;
+      readableEnded: boolean;
+    }
+
+    interface WritableLike extends Emitter {
+      write(chunk: unknown, enc?: unknown, cb?: () => void): boolean;
+      end(chunk?: unknown, enc?: unknown, cb?: () => void): unknown;
+      destroy(err?: Error): unknown;
+      writableEnded: boolean;
+      writableFinished: boolean;
     }
 
     interface netServer extends Emitter {
@@ -217,7 +311,7 @@ export const httpSpec: BuiltinSpec = {
 
     // -- IncomingMessage ------------------------------------------------------
 
-    class IncomingMessage extends (EventEmitter as new () => Emitter) {
+    class IncomingMessage extends (Readable as new (opts?: Record<string, unknown>) => ReadableLike) {
       httpVersion = '1.1';
       httpVersionMajor = 1;
       httpVersionMinor = 1;
@@ -235,9 +329,15 @@ export const httpSpec: BuiltinSpec = {
       connection: NetSocket | null = null;
       req: unknown = undefined;
 
-      #encoding: string | null = null;
-      #paused = false;
-      #buffered: Uint8Array[] = [];
+      constructor() {
+        // The socket reader pushes bodies at us, so `_read()` has nothing to
+        // pull; the Readable base only has to buffer and manage flow.
+        super({});
+      }
+
+      _read(): void {
+        /* bodies arrive through _pushBody() */
+      }
 
       /** @internal */
       _setup(head: ParsedHead, socket: NetSocket): void {
@@ -256,40 +356,21 @@ export const httpSpec: BuiltinSpec = {
 
       /** @internal */
       _pushBody(chunk: Uint8Array): void {
-        if (this.#paused) {
-          this.#buffered.push(chunk);
-          return;
-        }
-        this.emit('data', this.#encoding ? new TextDecoder(this.#encoding).decode(chunk) : toBuffer(chunk));
+        this.push(toBuffer(chunk));
       }
 
       /** @internal */
       _end(): void {
+        if (this.complete) return;
         this.complete = true;
-        this.emit('end');
-        this.emit('close');
+        this.push(null);
       }
 
-      setEncoding(enc: string): this {
-        this.#encoding = enc;
-        return this;
-      }
-      pause(): this {
-        this.#paused = true;
-        return this;
-      }
-      resume(): this {
-        if (!this.#paused) return this;
-        this.#paused = false;
-        const pending = this.#buffered;
-        this.#buffered = [];
-        for (const chunk of pending) this._pushBody(chunk);
-        return this;
-      }
-      destroy(err?: Error): this {
-        if (err) this.emit('error', err);
+      /** @internal */
+      _destroy(err: Error | null, cb: (err?: Error | null) => void): void {
+        if (err) this.aborted = true;
         this.socket?.destroy();
-        return this;
+        cb(err);
       }
       /** Convenience: read the whole body as a string/Buffer. */
       async _readAll(): Promise<Uint8Array> {
@@ -317,21 +398,22 @@ export const httpSpec: BuiltinSpec = {
 
     // -- ServerResponse -------------------------------------------------------
 
-    class ServerResponse extends (EventEmitter as new () => Emitter) {
+    class ServerResponse extends (Writable as new (opts?: Record<string, unknown>) => WritableLike) {
       statusCode = 200;
       statusMessage: string | undefined = undefined;
       headersSent = false;
       finished = false;
       sendDate = true;
-      writableEnded = false;
       socket: NetSocket | null = null;
       req: IncomingMessage | null = null;
 
       #headers = new Map<string, string | string[]>();
-      #chunks: Uint8Array[] = [];
+      #flushed = false;
+      #chunked = false;
+      #bodyLength = 0;
 
       constructor(socket: NetSocket) {
-        super();
+        super({});
         this.socket = socket;
       }
 
@@ -370,50 +452,57 @@ export const httpSpec: BuiltinSpec = {
       }
 
       flushHeaders(): void {
-        this.headersSent = true;
+        this.#flush();
       }
 
-      write(chunk: unknown, enc?: unknown, cb?: () => void): boolean {
-        if (typeof enc === 'function') {
-          cb = enc as () => void;
-          enc = undefined;
+      /** @internal — Writable contract: one chunk per `_write`. */
+      _write(chunk: unknown, _enc: string, cb: (err?: Error | null) => void): void {
+        try {
+          this.#flush();
+          const bytes = toBytes(chunk);
+          this.#bodyLength += bytes.byteLength;
+          if (this.#chunked) this.socket?.write(new TextEncoder().encode(bytes.byteLength.toString(16) + '\r\n'));
+          if (bytes.byteLength) this.socket?.write(bytes);
+          if (this.#chunked) this.socket?.write(CRLF);
+          cb(null);
+        } catch (err) {
+          cb(err as Error);
         }
-        this.headersSent = true;
-        this.#chunks.push(toBytes(chunk));
-        if (typeof cb === 'function') ctx.binding.nextTick(cb as () => void);
-        return true;
       }
 
-      end(chunk?: unknown, enc?: unknown, cb?: () => void): this {
-        if (typeof chunk === 'function') {
-          cb = chunk as () => void;
-          chunk = undefined;
-        } else if (typeof enc === 'function') {
-          cb = enc as () => void;
-          enc = undefined;
+      /** @internal — Writable contract: terminate the framing and close. */
+      _final(cb: (err?: Error | null) => void): void {
+        try {
+          this.#flush();
+          if (this.#chunked) this.socket?.write(END_CHUNK);
+          this.finished = true;
+          this.socket?.end();
+          cb(null);
+        } catch (err) {
+          cb(err as Error);
         }
-        if (chunk !== undefined) this.write(chunk);
-        this.writableEnded = true;
-        this.finished = true;
-        this.#finalize();
-        const done = cb as (() => void) | undefined;
-        ctx.binding.nextTick(() => {
-          this.emit('finish');
-          this.emit('close');
-          if (typeof done === 'function') done();
-        });
-        return this;
       }
 
-      #finalize(): void {
-        const body = concatAll(this.#chunks);
+      #flush(): void {
+        if (this.#flushed) return;
+        this.#flushed = true;
+        this.headersSent = true;
+
         const message = this.statusMessage ?? STATUS_CODES[this.statusCode] ?? 'Unknown';
         const lines: string[] = [`HTTP/1.1 ${this.statusCode} ${message}`];
 
         const headers = new Map(this.#headers);
+        const bodiless = this.statusCode === 204 || this.statusCode === 304 || this.statusCode === 101;
         if (!headers.has('content-type')) headers.set('content-type', 'text/plain; charset=utf-8');
         if (this.sendDate && !headers.has('date')) headers.set('date', new Date().toUTCString());
-        headers.set('content-length', String(body.byteLength));
+        if (bodiless) {
+          headers.delete('transfer-encoding');
+        } else if (!headers.has('content-length')) {
+          // No length known up front: frame as chunked, which is exactly what
+          // lets `write()` stream instead of buffering the whole body.
+          this.#chunked = true;
+          headers.set('transfer-encoding', 'chunked');
+        }
         headers.set('connection', 'close');
 
         for (const [name, value] of headers) {
@@ -422,16 +511,12 @@ export const httpSpec: BuiltinSpec = {
           else lines.push(`${canonical}: ${value}`);
         }
         lines.push('', '');
-
-        const head = new TextEncoder().encode(lines.join('\r\n'));
-        this.socket?.write(head);
-        if (body.byteLength) this.socket?.write(body);
-        this.socket?.end();
+        this.socket?.write(new TextEncoder().encode(lines.join('\r\n')));
       }
 
-      /** Convenience used by the ServiceWorker bridge + tests. */
+      /** Bytes handed to the socket (used by the ServiceWorker bridge + tests). */
       get _bodyLength(): number {
-        return this.#chunks.reduce((n, c) => n + c.byteLength, 0);
+        return this.#bodyLength;
       }
     }
 
@@ -504,7 +589,7 @@ export const httpSpec: BuiltinSpec = {
       headers?: Record<string, string | string[]>;
     }
 
-    class ClientRequest extends (EventEmitter as new () => Emitter) {
+    class ClientRequest extends (Writable as new (opts?: Record<string, unknown>) => WritableLike) {
       method: string;
       path: string;
       host: string;
@@ -541,31 +626,21 @@ export const httpSpec: BuiltinSpec = {
         delete this.headers[name.toLowerCase()];
       }
 
-      write(chunk: unknown, enc?: unknown, cb?: () => void): boolean {
-        if (typeof enc === 'function') {
-          cb = enc as () => void;
-          enc = undefined;
-        }
+      /** @internal — Writable contract: stash the body until `end()`. */
+      _write(chunk: unknown, _enc: string, cb: (err?: Error | null) => void): void {
         this.#chunks.push(toBytes(chunk));
-        if (typeof cb === 'function') ctx.binding.nextTick(cb as () => void);
-        return true;
+        cb(null);
       }
 
-      end(chunk?: unknown, enc?: unknown, cb?: () => void): this {
-        if (typeof chunk === 'function') {
-          cb = chunk as () => void;
-          chunk = undefined;
-        } else if (typeof enc === 'function') {
-          cb = enc as () => void;
-          enc = undefined;
-        }
-        if (chunk !== undefined) this.write(chunk);
+      /** @internal — Writable contract: dial + send once the body is complete. */
+      _final(cb: (err?: Error | null) => void): void {
         this.finished = true;
+        // Deferred so a dial failure surfaces as an async 'error' event, like a
+        // real socket connect, instead of throwing out of `end()`.
         ctx.binding.nextTick(() => {
           this.#send();
-          if (typeof cb === 'function') (cb as () => void)();
+          cb(null);
         });
-        return this;
       }
 
       #send(): void {
@@ -618,10 +693,9 @@ export const httpSpec: BuiltinSpec = {
         (this.#socket as unknown as VirtualSocket | null)?.destroy();
         this.emit('abort');
       }
-      destroy(err?: Error): this {
+      _destroy(err: Error | null, cb: (err?: Error | null) => void): void {
         this.abort();
-        if (err) this.emit('error', err);
-        return this;
+        cb(err);
       }
       setTimeout(): this {
         return this;
