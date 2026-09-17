@@ -46,7 +46,12 @@ const WS_SHIM = `<script>(function () {
   function isLoopback(host) {
     return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
   }
-  function isHmr(url) {
+  // Vite's HMR client always opens its socket with the subprotocol 'vite-hmr'
+  // (and, on https, may fall back to the page origin rather than loopback), so
+  // the subprotocol is the reliable signal; loopback is a belt-and-braces check.
+  function isHmr(url, protocols) {
+    var list = Array.isArray(protocols) ? protocols.join(',') : String(protocols == null ? '' : protocols);
+    if (list.indexOf('vite-hmr') !== -1) return true;
     try { return isLoopback(new URL(url, location.href).hostname); } catch (e) { return false; }
   }
   function fire(ws, type, extra) {
@@ -96,7 +101,7 @@ const WS_SHIM = `<script>(function () {
     this._ch.close();
   };
   function Shim(url, protocols) {
-    if (isHmr(url)) return new Bridged(url);
+    if (isHmr(url, protocols)) return new Bridged(url);
     return new Native(url, protocols);
   }
   Shim.CONNECTING = 0; Shim.OPEN = 1; Shim.CLOSING = 2; Shim.CLOSED = 3;

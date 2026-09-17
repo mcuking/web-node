@@ -600,6 +600,7 @@ function vfsWatchPlugin() {
     configureServer(server) {
       const watcher = fs.watch(SITE, { recursive: true }, function (eventType, filename) {
         if (!filename) return;
+        console.log('vfs-change  : ' + eventType + ' ' + filename);
         server.watcher.emit(eventType === 'change' ? 'change' : 'add', path.join(SITE, filename));
       });
       if (server.httpServer) server.httpServer.on('close', function () { watcher.close(); });

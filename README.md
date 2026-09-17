@@ -269,8 +269,10 @@ Worker sees one client id for a document and all its subresources.
 **HMR works, over a non-WebSocket channel.** The HMR socket is a WebSocket, and
 a ServiceWorker cannot proxy an upgrade, so the browser can never reach it
 through the preview bridge. The preview iframe is same-origin, though, so the
-ServiceWorker injects a `WebSocket` shim that diverts *loopback* URLs to a
-`BroadcastChannel`; the runtime hands Vite an HMR server object that `send()`s
+ServiceWorker injects a `WebSocket` shim that diverts Vite's HMR socket to a
+`BroadcastChannel` (keyed off the `vite-hmr` subprotocol, since an https page can
+send its first attempt to the page origin rather than loopback). The runtime hands
+Vite an HMR server object that `send()`s
 over that channel instead of a socket. Vite still computes every update — we
 only carry it. A small Vite plugin turns VFS change events into Vite watcher
 events (there is no inotify in a tab), so editing a source file triggers a real
