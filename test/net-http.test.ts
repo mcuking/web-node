@@ -238,3 +238,163 @@ describe('http (server + client over the virtual network)', () => {
     expect(out.join('')).toContain('boom:EADDRINUSE');
   });
 });
+
+interface HttpStreamModule {
+  _stream(
+    port: number,
+    init: { method?: string; path?: string; headers?: Record<string, string>; body?: string },
+    handlers: {
+      onHead: (h: { status: number; statusMessage: string; headers: Record<string, string | string[]> }) => void;
+      onData: (c: Uint8Array) => void;
+      onEnd: () => void;
+      onError: (e: Error) => void;
+    },
+  ): void;
+}
+
+
+describe('http keep-alive (persistent connections)', () => {
+  const SERVER = `
+    const http = require('http');
+    const server = http.createServer((req, res) => {
+      res.setHeader('content-type', 'text/plain');
+      res.end('path:' + req.url + ' conn:' + req.socket.remotePort);
+    });
+    server.on('connection', () => process.stdout.write('conn\\n'));
+    server.listen(3010);
+  `;
+
+  it('serves several requests over a single socket by default', async () => {
+    const { runtime, run, out } = boot({ '/project/index.js': SERVER });
+    run();
+    await tick();
+
+    const http = runtime.realm.require('http') as unknown as HttpModule;
+    for (const path of ['/a', '/b', '/c']) {
+      const res = await http._request(3010, { path });
+      expect(decoder.decode(res.body)).toMatch(new RegExp('^path:' + path + ' conn:'));
+      expect(res.headers['connection']).toBe('keep-alive');
+    }
+
+    expect(out.join('')).toBe('conn\n'); // exactly one TCP connection
+  });
+
+  it('honours Connection: close and reconnects afterwards', async () => {
+    const { runtime, run, out } = boot({ '/project/index.js': SERVER });
+    run();
+    await tick();
+
+    const http = runtime.realm.require('http') as unknown as HttpModule;
+
+    const first = await http._request(3010, { path: '/one', headers: { connection: 'close' } });
+    expect(first.headers['connection']).toBe('close');
+
+    const second = await http._request(3010, { path: '/two' });
+    expect(second.headers['connection']).toBe('keep-alive');
+
+    expect(out.join('')).toBe('conn\nconn\n'); // two connections
+  });
+
+  it('answers pipelined requests written to one raw socket', async () => {
+    const { runtime, run } = boot({ '/project/index.js': SERVER });
+    run();
+    await tick();
+
+    const chunks: Uint8Array[] = [];
+    const socket = runtime.network.dial(3010);
+    socket.onData((c) => chunks.push(c));
+    socket.write(
+      'GET /alpha HTTP/1.1\r\nHost: x\r\n\r\n' + 'GET /beta HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n',
+    );
+    await tick(30);
+
+    const text = chunks.map((c) => decoder.decode(c)).join('');
+    expect(text).toContain('path:/alpha');
+    expect(text).toContain('path:/beta');
+    // Both responses ride the same connection.
+    const firstPort = /path:\/alpha conn:(\d+)/.exec(text)?.[1];
+    const secondPort = /path:\/beta conn:(\d+)/.exec(text)?.[1];
+    expect(firstPort).toBeDefined();
+    expect(secondPort).toBe(firstPort);
+  });
+});
+
+describe('https (http surface, no TLS in the virtual network)', () => {
+  it('serves and requests over the virtual network', async () => {
+    const { runtime, run } = boot({
+      '/project/index.js': `
+        const https = require('https');
+        https.createServer((req, res) => {
+          res.setHeader('content-type', 'text/plain');
+          res.end('secure-ish ' + req.url);
+        }).listen(3012);
+      `,
+    });
+    run();
+    await tick();
+
+    const https = runtime.realm.require('https') as unknown as HttpModule;
+    const res = await https._request(3012, { path: '/x' });
+    expect(res.status).toBe(200);
+    expect(decoder.decode(res.body)).toBe('secure-ish /x');
+  });
+});
+
+describe('http streaming client (_stream)', () => {
+  const STREAM_SERVER = `
+    const http = require('http');
+    http.createServer((req, res) => {
+      res.setHeader('content-type', 'text/event-stream');
+      res.write('a');
+      setTimeout(() => { res.write('b'); res.end('c'); }, 10);
+    }).listen(3011);
+  `;
+
+  it('delivers the head and each body chunk before the request ends', async () => {
+    const { runtime, run } = boot({ '/project/index.js': STREAM_SERVER });
+    run();
+    await tick();
+
+    const http = runtime.realm.require('http') as unknown as HttpStreamModule;
+    const events: string[] = [];
+    await new Promise<void>((resolve) => {
+      http._stream(
+        3011,
+        { path: '/' },
+        {
+          onHead: (h) => events.push('head:' + h.status + ':' + String(h.headers['content-type'])),
+          onData: (c) => events.push('data:' + decoder.decode(c)),
+          onEnd: () => {
+            events.push('end');
+            resolve();
+          },
+          onError: (e) => {
+            events.push('error:' + e.message);
+            resolve();
+          },
+        },
+      );
+    });
+
+    expect(events[0]).toBe('head:200:text/event-stream');
+    expect(events.at(-1)).toBe('end');
+    expect(events.join('|')).toBe('head:200:text/event-stream|data:a|data:b|data:c|end');
+  });
+
+  it('surfaces a connect failure through onError', async () => {
+    const { runtime, run } = boot({ '/project/index.js': STREAM_SERVER });
+    run();
+    await tick();
+
+    const http = runtime.realm.require('http') as unknown as HttpStreamModule;
+    const err = await new Promise<Error>((resolve) => {
+      http._stream(9999, { path: '/' }, {
+        onHead: () => resolve(new Error('unexpected head')),
+        onData: () => undefined,
+        onEnd: () => resolve(new Error('unexpected end')),
+        onError: (e) => resolve(e),
+      });
+    });
+    expect((err as Error & { code?: string }).code).toBe('ECONNREFUSED');
+  });
+});
