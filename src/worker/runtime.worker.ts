@@ -136,21 +136,18 @@ async function serveVirtualRequest(
 }
 
 async function init(id: number): Promise<void> {
-  const restored = await persistence.load();
-  const hasRestored = Boolean(restored && restored.length > 0);
-  const v = new MemoryVfs({ cwd: '/project' });
+  const loaded = await persistence.load();
+  const hasRestored = Boolean(loaded && loaded.entries.length > 0);
 
-  if (hasRestored) {
-    for (const item of restored!.filter((s) => s.type === 'dir').sort((a, b) => a.path.length - b.path.length)) {
-      v.mkdir(item.path, { recursive: true, mode: item.mode });
-    }
-    for (const item of restored!.filter((s) => s.type === 'file')) {
-      ensureDir(v, item.path);
-      v.writeFile(item.path, new TextEncoder().encode(item.data ?? ''), { mode: item.mode });
-    }
-  } else {
-    writeAll(v, DEMO_FILES);
-  }
+  const v = hasRestored
+    ? MemoryVfs.fromSnapshot(
+        loaded!.entries,
+        { cwd: '/project' },
+        loaded!.version >= 2 ? 'base64' : 'text',
+      )
+    : new MemoryVfs({ cwd: '/project' });
+
+  if (!hasRestored) writeAll(v, DEMO_FILES);
 
   vfs = v;
   runtime = new NodeRuntime({

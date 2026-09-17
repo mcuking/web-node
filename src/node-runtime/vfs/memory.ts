@@ -8,6 +8,7 @@ import {
   VfsError,
 } from './types';
 import * as p from './posix';
+import { encodeBase64, decodeBase64 } from './base64';
 
 interface Entry {
   type: 'file' | 'dir';
@@ -318,22 +319,30 @@ export class MemoryVfs implements Vfs {
         path,
         type: e.type,
         mode: e.mode,
-        data: e.type === 'file' ? new TextDecoder().decode(e.data) : undefined,
+        // base64, not text: contents are arbitrary bytes (wasm, images) and a
+        // UTF-8 round-trip would corrupt and inflate them.
+        data: e.type === 'file' ? encodeBase64(e.data) : undefined,
       });
     }
     return out.sort((a, b) => a.path.localeCompare(b.path));
   }
 
-  /** Bulk-load a snapshot (used when rehydrating from OPFS). */
+  /** Bulk-load a snapshot (used when rehydrating from OPFS).
+   *
+   * `encoding` selects how `data` is interpreted: `base64` (current) or `text`
+   * (legacy snapshots written before binary-safe persistence).
+   */
   static fromSnapshot(
     snapshot: Array<{ path: string; type: 'file' | 'dir'; data?: string; mode?: number }>,
     opts: { cwd?: string; onChange?: (path: string | null) => void } = {},
+    encoding: 'base64' | 'text' = 'base64',
   ): MemoryVfs {
     const vfs = new MemoryVfs(opts);
     const dirs = snapshot.filter((s) => s.type === 'dir').sort((a, b) => a.path.length - b.path.length);
     for (const d of dirs) vfs.mkdir(d.path, { recursive: true, mode: d.mode });
     for (const f of snapshot.filter((s) => s.type === 'file')) {
-      vfs.writeFile(f.path, new TextEncoder().encode(f.data ?? ''), { mode: f.mode });
+      const bytes = encoding === 'base64' ? decodeBase64(f.data ?? '') : new TextEncoder().encode(f.data ?? '');
+      vfs.writeFile(f.path, bytes, { mode: f.mode });
     }
     return vfs;
   }
