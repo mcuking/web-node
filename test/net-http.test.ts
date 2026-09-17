@@ -135,7 +135,33 @@ describe('http (server + client over the virtual network)', () => {
     expect(res.status).toBe(200);
     expect(decoder.decode(res.body)).toBe('hello /world');
     expect(res.headers['content-type']).toBe('text/plain');
-    expect(res.headers['content-length']).toBe('12');
+    // No `Content-Length` was set by the handler, so the response is framed as
+    // chunked — and our client reader has to de-chunk it back to `12` bytes.
+    expect(res.headers['transfer-encoding']).toBe('chunked');
+    expect(res.headers['content-length']).toBeUndefined();
+  });
+
+  it('honours an explicit Content-Length instead of chunking', async () => {
+    const { runtime, run } = boot({
+      '/project/index.js': `
+        const http = require('http');
+        const server = http.createServer((req, res) => {
+          const body = 'measured precisely';
+          res.writeHead(200, { 'content-type': 'text/plain', 'content-length': String(body.length) });
+          res.end(body);
+        });
+        server.listen(3000, () => console.log('listening'));
+      `,
+    });
+    run();
+
+    const http = runtime.realm.require('http') as unknown as HttpModule;
+    const res = await http._request(3000, { path: '/' });
+
+    expect(res.status).toBe(200);
+    expect(decoder.decode(res.body)).toBe('measured precisely');
+    expect(res.headers['content-length']).toBe('18');
+    expect(res.headers['transfer-encoding']).toBeUndefined();
   });
 
   it('carries a POST body through to the handler', async () => {
