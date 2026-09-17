@@ -63,6 +63,10 @@ top of it sit three virtual subsystems:
   `esbuild`→`esbuild-wasm` and `rollup`→`@rollup/wasm-node`, so Vite boots on the
   virtual file system and produces a real production bundle
   (`site/dist/index.html` + `site/dist/assets/*.js`) — no server, no Node process.
+- **Vite's dev server** — `createServer()` + `listen()` also boot in the tab,
+  binding a virtual port and transforming modules on demand. The preview bridge
+  routes the browser's absolute-path assets back to the virtual port, so the dev
+  app renders in the Preview tab.
 
 ## Development
 
@@ -239,7 +243,31 @@ dynamic `import()`), plus support for `PathLike` arguments,
 `createRequire(...).resolve`, Node's `events` module identity, and `crypto`.
 
 Note Vite 8 moved to rolldown (a native Rust binary), so a browser build pins
-Vite 5.x. The dev server (HMR) is the next milestone (M5d).
+Vite 5.x.
+
+### Running Vite's dev server (M5d)
+
+Hit **🛠 Vite dev** and the real Vite dev server boots inside the tab:
+`createServer()` binds a virtual port (5173) and transforms modules *on demand*,
+exactly as it would in Node. Open the **Preview** tab (`:5173`) and the page
+renders — served entirely from the virtual file system.
+
+```
+tool        : vite v5.4.21 dev server (in the tab)
+esbuild     : wasm started in 38ms
+listening   : http://127.0.0.1:5173
+```
+
+Two things had to be added: a loopback-only **`dns`** builtin (Vite's
+`buildStart` resolves `localhost`) and a real EventEmitter `process.stdin`
+(its `close()` removes a SIGTERM listener). The preview bridge also learned to
+route a browser's **absolute-path** assets (`/@vite/client`, chained imports)
+back to the right virtual port, by remembering `clientId → port` — a Service
+Worker sees one client id for a document and all its subresources.
+
+**HMR is not wired up**: it runs over a WebSocket, and a ServiceWorker cannot
+proxy WebSocket upgrades, so the browser can never reach the dev server's HMR
+socket through the preview bridge. The demo disables it (`hmr: false`).
 
 ## Roadmap
 
@@ -257,7 +285,8 @@ Vite 5.x. The dev server (HMR) is the next milestone (M5d).
 | M5 | Real build tool — esbuild WASM: install, initialize, bundle, write back | ✅ Done |
 | M5b | Real bundler — rollup WASM: ESM graph, tree-shaking, write to VFS | ✅ Done |
 | M5c | Real build toolchain — Vite in the tab: production bundle to VFS | ✅ Done |
-| M5d | Vite dev server (dev-server orchestration / HMR) | ⬜ Next |
+| M5d | Vite dev server in the tab (on-demand transforms + preview) | ✅ Done |
+| M5e | Vite HMR (needs a non-WebSocket HMR channel) | ⬜ Deferred |
 
 ## Contributing
 

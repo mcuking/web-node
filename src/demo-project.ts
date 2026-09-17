@@ -523,6 +523,57 @@ document.getElementById('app').textContent = greet('vite');
 }
 `,
 
+  // Milestone 5d: Vite's *dev server* — the orchestration layer, not just the
+  // build. It boots in the tab, binds a virtual port and serves transformed
+  // modules on demand (that is what `transformRequest` does per import).
+  // HMR's WebSocket is deliberately off: a ServiceWorker cannot proxy a
+  // WebSocket, so the browser could never reach it through the preview bridge.
+  '/project/vite-dev.mjs': `// Click "Vite dev" to run this: Vite's dev server serves site/ in the tab.
+import fs from 'fs';
+import path from 'path';
+
+const ROOT = '/project';
+const SITE = path.join(ROOT, 'site');
+const NM = path.join(ROOT, 'node_modules');
+const PORT = 5173;
+
+(async function () {
+  console.log('-- vite dev server (milestone 5d) --');
+  if (!fs.existsSync(path.join(NM, 'vite'))) {
+    console.log('vite: not installed yet - click "Install deps" first');
+    return;
+  }
+  const vite = await import('vite');
+  console.log('tool        : vite v' + vite.version + ' dev server (in the tab)');
+
+  const esbuild = await import('esbuild');
+  const wasm = fs.readFileSync(path.join(NM, 'esbuild-wasm', 'esbuild.wasm'));
+  const t0 = Date.now();
+  await esbuild.initialize({ wasmModule: await WebAssembly.compile(wasm), worker: false });
+  console.log('esbuild     : wasm started in ' + (Date.now() - t0) + 'ms');
+
+  const server = await vite.createServer({
+    root: SITE,
+    logLevel: 'error',
+    server: {
+      host: '127.0.0.1',
+      port: PORT,
+      // No file watching and no HMR over the preview bridge (see header).
+      watch: null,
+      hmr: false,
+    },
+  });
+  await server.listen();
+
+  console.log('listening   : http://127.0.0.1:' + PORT);
+  console.log('preview     : open the Preview tab (:5173)');
+  console.log('serving     : ' + SITE + ' (index.html + on-demand transforms)');
+  console.log('note        : modules are transformed per import, exactly as in Node');
+})().catch(function (err) {
+  console.log('vite dev failed : ' + (err && err.message ? err.message : err));
+});
+`,
+
   '/project/notes.md': `# web-node demo project
 
 This project is mounted into an in-browser VFS. Edit any file and hit **Run**.

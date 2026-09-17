@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM 转换 + 打包），M5b 接入了 **rollup 的官方 WASM 构建**；M5c 又把 **Vite 本体**跑了起来——Vite 是纯 ESM 且依赖原生 esbuild，运行时把 `esbuild`→`esbuild-wasm`、`rollup`→`@rollup/wasm-node` 别名后，Vite 直接跑在 VFS 上完成一次真实 production build。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
@@ -25,12 +25,13 @@
 | M5 | **构建工具：esbuild WASM**（安装→初始化→打包→写回） | ✅ 完成 |
 | M5b | **真实打包器：rollup WASM**（ESM + tree-shaking → VFS） | ✅ 完成 |
 | M5c | **Vite 本体**（真实 production build → VFS） | ✅ 完成 |
-| M5d | Vite **dev server**（dev server 编排 / HMR） | ⬜ 下一步 |
+| M5d | **Vite dev server**（页内编排 + 预览；HMR 暂缓） | ✅ 完成 |
+| M5e | Vite HMR（需自定义非 WebSocket HMR 通道） | ⬜ 暂缓 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **85/85 通过** · `vite build` 绿（worker ~260KB / index ~8.2KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **87/87 通过** · `vite build` 绿（worker ~264KB / index ~8.4KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -109,7 +110,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **Vite dev server（M5d，下一步）**：M5c 已让 `vite build` 在页内跑通（Vite 5.x + rollup→@rollup/wasm-node + esbuild→esbuild-wasm）。dev server 还差：`fs.watch`（HMR 文件监听，可基于 VFS 变更事件实现）、WebSocket HMR 通道（可复用已有虚拟 TCP）、`server.addMiddlewareMode` 与 `transformIndexHtml` 的按需转换、以及 `optimizeDeps` 预构建缓存。注意 **Vite 6+/8 走 rolldown（napi 原生二进制）不可行**，必须钉 5.x。
+1. **Vite HMR（M5e，暂缓）**：dev server 已跑通（M5d），但 HMR 靠 WebSocket，而 **ServiceWorker 无法代理 WebSocket**（`fetch` 拦截不到 upgrade）。要真做 HMR，需绕开 SW：让 Vite 的 HMR 走自定义通道（如 `MessageChannel` / `postMessage`），或给虚拟网络加一个「非 SW 的实时通道」，属架构改动。
 2. **子域名路由（M3.5d，暂缓项）**：若要捡起来，推荐方案：子域名 SW 经 `postMessage` 中继到主源页面里的 runtime（主源保留 OPFS 与单例 worker）。需要 Vite `server.allowedHosts: ['.localhost']` + 一个子域名 bootstrap 页 + 跨源 MessagePort 中继。
 3. **npm 收尾**：lockfile 读写、`.bin` shim、peer 依赖自动安装、integrity 校验、生命周期脚本、`file:`/`git+` 说明符。
 4. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
@@ -119,6 +120,28 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-17 · M5d Vite **dev server** 在页内跑通（+ 预览路由修正绝对路径）
+
+**目标**：不只是 `vite build`，而是 Vite 的 **dev server 编排层**——在标签页里 `createServer()` + `listen()`，按需转换模块。
+
+**结果**：dev server 真的在运行时里起来了：`createServer({ root })` → `server.listen(5173)`，`/` 返回 200 并注入 `/@vite/client`，`/src/main.js`、`/src/message.js` 按需转换，`/@vite/client` 返回 137KB。预览 iframe 真实渲染出 `Hello from vite, bundled in the browser`。
+
+**为什么能跑**：Vite dev server 只是「一个用到 `http`/`net`/`fs`/`dns` 的 Node 程序」。之前只有 build 路径通，dev 路径多了三处：
+- **`dns` builtin（新）**：Vite 的 `buildStart` 会 `dns.promises.lookup('localhost')` 判断能否广播 `127.0.0.1`。虚拟网络里一切都在本机，所以诚实语义就是**所有主机名解析到 loopback**（`dns` / `dns/promises` 两个 spec；`lookup` 支持 callback / `all` / `family` / `verbatim`，无 callback 同步抛 `ERR_INVALID_ARG_TYPE`，查询类 API 抛 `NotImplementedError`）。文件：`src/node-runtime/builtins/dns.ts`
+- **`process.stdin` 改成真 EventEmitter**：Vite `close()` 会 `stdin.off('SIGTERM'…)` 卸载监听，以前的裸对象没有 `.off` → 直接崩。文件：`src/node-runtime/builtins/process.ts`
+- **移除 stub `dns`**（被真实现取代）。文件：`src/node-runtime/builtins/unsupported.ts`
+
+**顺带修好预览路由的「绝对路径」根病**（也是 M3 遗留的已知限制）：
+- Vite dev server 输出**绝对路径**资源（`/@vite/client`），还有**链式 import**（`main.js` 再 import `/src/message.js`），它们都不在 `/preview/<port>/` 前缀下，旧 SW 直接放行 → 404。
+- SW 新增：**按客户端记住预览端口**（`clientId → port`）。预览文档与其所有子资源共享同一个 client id，所以导航预览时记账，之后该客户端的绝对路径请求（含链式 import）就能回路由到正确端口；referrer 作为兜底。这同时修复了 M3 长期记录的「绝对路径资源落在前缀外」。
+- 修正 `resolveClient`：原直接的 `clientId` 分支会把**预览 iframe 自己**当成 runtime host（它是 Vite 页面，没有 runtime 监听器）→ 消息石沉大海 → `502 virtual server timed out`。现在两条分支都拒绝预览客户端。文件：`public/sw.js`
+
+**演示**：「🛠 Vite dev」按钮 → `/project/vite-dev.mjs`（动态 `import('vite')` → 初始化 esbuild-wasm → `createServer` → `listen(5173)` → 常驻）。UI 新增按钮：`index.html`、`src/ui/main.ts`、`src/demo-project.ts`
+
+**测试**：85 → **87**。新增：`process.stdin` 具备 EventEmitter 表面；`dns`/`dns/promises` 主机名解析到 loopback。把旧的「stub 模块被调用即抛」用例从 `dns` 改为 `child_process`（`dns` 已真实现）。
+
+**已知限制 / 暂缓：HMR**。HMR 靠 WebSocket，而 **ServiceWorker 无法代理 WebSocket**（`fetch` 拦截不到 upgrade 连接），所以浏览器永远到不了 dev server 的 HMR 通道。故 demo 以 `hmr: false` 启动。要真做 HMR，需绕开 SW：让 Vite 的 HMR 走自定义通道（如 `MessageChannel`），属架构改动，暂缓。
 
 ### 2026-09-17 · GitHub Pages 部署：子路径站点 + `gh-pages` 发布
 

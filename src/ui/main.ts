@@ -17,6 +17,7 @@ const runBtn = $<HTMLButtonElement>('run');
 const buildBtn = $<HTMLButtonElement>('build');
 const bundleBtn = $<HTMLButtonElement>('bundle');
 const viteBtn = $<HTMLButtonElement>('vite');
+const viteDevBtn = $<HTMLButtonElement>('vitedev');
 const installBtn = $<HTMLButtonElement>('install');
 const clearBtn = $<HTMLButtonElement>('clear');
 const resetBtn = $<HTMLButtonElement>('reset');
@@ -130,6 +131,10 @@ async function viteBuildProject(): Promise<void> {
   await runEntry('/project/vite-build.mjs', 'node /project/vite-build.mjs', viteBtn);
 }
 
+async function viteDevProject(): Promise<void> {
+  await runEntry('/project/vite-dev.mjs', 'node /project/vite-dev.mjs', viteDevBtn);
+}
+
 // --- preview ---------------------------------------------------------------
 
 async function refreshPorts(): Promise<void> {
@@ -213,6 +218,7 @@ runBtn.addEventListener('click', () => void runProject());
 buildBtn.addEventListener('click', () => void buildProject());
 bundleBtn.addEventListener('click', () => void bundleProject());
 viteBtn.addEventListener('click', () => void viteBuildProject());
+viteDevBtn.addEventListener('click', () => void viteDevProject());
 
 async function installDeps(): Promise<void> {
   await save();
