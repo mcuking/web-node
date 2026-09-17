@@ -16,13 +16,17 @@ interface BridgeHttpRequest {
   path: string;
   headers: Record<string, string>;
   body: ArrayBuffer | null;
+  stream?: boolean;
 }
 
-interface VirtualHttpResult {
-  status: number;
-  statusMessage: string;
-  headers: Record<string, string | string[]>;
-  body: Uint8Array;
+interface StreamMessage {
+  id: number;
+  type: 'httpHead' | 'httpChunk' | 'httpEnd' | 'error';
+  status?: number;
+  statusMessage?: string;
+  headers?: Record<string, string | string[]>;
+  data?: Uint8Array;
+  message?: string;
 }
 
 export interface InstallResult {
@@ -40,6 +44,7 @@ export interface InstallResult {
 export class RuntimeClient {
   #worker: Worker;
   #pending = new Map<number, Pending>();
+  #streams = new Map<number, (msg: StreamMessage) => void>();
   #nextId = 1;
   #listeners: Partial<RuntimeEvents> = {};
 
@@ -59,6 +64,16 @@ export class RuntimeClient {
   }
 
   #onMessage(msg: { id: number; type: string; [k: string]: unknown }): void {
+    // Streaming HTTP responses are dispatched to their per-request handler and
+    // never settle a promise.
+    if (msg.type.startsWith('http')) {
+      const stream = this.#streams.get(msg.id);
+      if (stream) {
+        stream(msg as unknown as StreamMessage);
+        return;
+      }
+    }
+
     switch (msg.type) {
       case 'stdout':
         this.#listeners.stdout?.(String(msg.data));
@@ -143,10 +158,7 @@ export class RuntimeClient {
       if (!data || data.type !== 'web-node:http') return;
       const reply = event.ports[0];
       if (!reply) return;
-      void this.#serveViaBridge(data).then(
-        (result) => reply.postMessage(result),
-        (err: unknown) => reply.postMessage({ error: err instanceof Error ? err.message : String(err) }),
-      );
+      this.#serveViaStream(data, reply);
     });
 
     try {
@@ -158,19 +170,46 @@ export class RuntimeClient {
     }
   }
 
-  async #serveViaBridge(req: BridgeHttpRequest): Promise<VirtualHttpResult | { error: string }> {
-    try {
-      return await this.#request<VirtualHttpResult>({
-        type: 'http',
-        port: req.port,
-        method: req.method,
-        path: req.path,
-        headers: req.headers,
-        body: req.body,
-      });
-    } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) };
-    }
+  /**
+   * Relay one virtual request to the worker in streaming mode, forwarding the
+   * head and every body chunk to the ServiceWorker as they arrive. That is what
+   * makes `res.write()` / SSE / large files reach the browser incrementally
+   * instead of as one blob.
+   */
+  #serveViaStream(req: BridgeHttpRequest, reply: MessagePort): void {
+    const id = this.#nextId++;
+    this.#streams.set(id, (msg) => {
+      switch (msg.type) {
+        case 'httpHead':
+          reply.postMessage({
+            type: 'head',
+            status: msg.status,
+            statusMessage: msg.statusMessage,
+            headers: msg.headers,
+          });
+          return;
+        case 'httpChunk':
+          reply.postMessage({ type: 'chunk', data: msg.data });
+          return;
+        case 'httpEnd':
+          this.#streams.delete(id);
+          reply.postMessage({ type: 'end' });
+          return;
+        case 'error':
+          this.#streams.delete(id);
+          reply.postMessage({ type: 'error', message: msg.message });
+          return;
+      }
+    });
+    this.#worker.postMessage({
+      id,
+      type: 'httpStream',
+      port: req.port,
+      method: req.method,
+      path: req.path,
+      headers: req.headers,
+      body: req.body,
+    });
   }
 
   terminate(): void {

@@ -20,6 +20,7 @@ import { assertSpec } from './assert-impl';
 import { moduleSpec } from './module';
 import { netSpec } from './net';
 import { httpSpec } from './http';
+import { httpsSpec } from './https';
 import { streamSpec, streamPromisesSpec } from './stream';
 
 /** Every builtin the runtime knows about, in dependency-friendly order. */
@@ -49,6 +50,7 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   streamPromisesSpec,
   fsSpec,
   httpSpec,
+  httpsSpec,
 ];
 
 /** Ids that are user-visible core modules (no `internal/` prefix). */

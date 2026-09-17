@@ -13,6 +13,11 @@
  * dev-server host configuration; the trade-off is that absolute-path assets
  * (`/app.js`) resolve outside the prefix, so HTML responses get a `<base>` tag
  * injected to fix the far more common *relative* asset case.
+ *
+ * Responses are streamed: the runtime posts the head and then each body chunk
+ * as `res.write()` produces it, and we hand the browser a `ReadableStream` — so
+ * SSE and large downloads arrive incrementally. HTML is the one exception: it is
+ * buffered so the `<base>` tag can be injected before the first byte is sent.
  */
 
 const PREVIEW_PREFIX = '/preview/';
@@ -67,6 +72,76 @@ async function resolveClient(event) {
   return windows.find((c) => !new URL(c.url).pathname.startsWith(PREVIEW_PREFIX)) || null;
 }
 
+const HOP_BY_HOP = ['connection', 'content-length', 'transfer-encoding', 'keep-alive', 'te', 'trailer', 'upgrade'];
+
+function buildHeaders(raw) {
+  const headers = new Headers();
+  // The runtime already decoded its own `chunked` framing and the browser frames
+  // the Response itself, so passing hop-by-hop headers on would corrupt the body.
+  for (const [name, value] of Object.entries(raw || {})) {
+    if (HOP_BY_HOP.includes(name.toLowerCase())) continue;
+    if (Array.isArray(value)) for (const v of value) headers.append(name, v);
+    else headers.set(name, value);
+  }
+  // The app shell is served with COOP/COEP: require-corp (so SharedArrayBuffer is
+  // available). Under that policy an embedded document must opt in explicitly,
+  // otherwise Chrome silently renders the iframe blank.
+  headers.set('cross-origin-resource-policy', 'cross-origin');
+  headers.set('cross-origin-embedder-policy', 'require-corp');
+  headers.set('cross-origin-opener-policy', 'same-origin');
+  return headers;
+}
+
+/**
+ * A tiny async queue over the reply MessagePort: `next()` resolves with the next
+ * message from the page (head / chunk / end / error), optionally with a timeout.
+ */
+function makeInbox(port) {
+  const queue = [];
+  let notify = null;
+  let closed = false;
+  port.onmessage = (event) => {
+    const msg = event.data;
+    if (msg && msg.type === 'end') closed = true;
+    queue.push(msg);
+    if (notify) {
+      const n = notify;
+      notify = null;
+      n();
+    }
+  };
+
+  return {
+    get closed() {
+      return closed;
+    },
+    next(timeoutMs) {
+      return new Promise((resolve, reject) => {
+        const deliver = () => {
+          if (timer) clearTimeout(timer);
+          resolve(queue.shift());
+        };
+        let timer = null;
+        if (queue.length) return deliver();
+        if (timeoutMs) {
+          timer = setTimeout(() => {
+            notify = null;
+            reject(new Error('virtual server timed out'));
+          }, timeoutMs);
+        }
+        notify = deliver;
+      });
+    },
+  };
+}
+
+function bridgeError(message) {
+  return new Response('web-node: ' + message, {
+    status: 502,
+    headers: { 'content-type': 'text/plain' },
+  });
+}
+
 async function handle(event, port, url) {
   const { path } = parsePortAndPath(url.pathname);
   const request = event.request;
@@ -90,64 +165,95 @@ async function handle(event, port, url) {
   }
 
   const channel = new MessageChannel();
-  const result = await new Promise((resolve) => {
-    const timer = setTimeout(() => resolve({ error: 'virtual server timed out' }), 15000);
-    channel.port1.onmessage = (e) => {
-      clearTimeout(timer);
-      resolve(e.data);
-    };
-    client.postMessage(
-      {
-        type: 'web-node:http',
-        port,
-        method: request.method,
-        path: path + url.search,
-        headers,
-        body,
-      },
-      [channel.port2],
-    );
-  });
+  const inbox = makeInbox(channel.port1);
+  client.postMessage(
+    {
+      type: 'web-node:http',
+      port,
+      method: request.method,
+      path: path + url.search,
+      headers,
+      body,
+      stream: true,
+    },
+    [channel.port2],
+  );
 
-  if (result.error) {
-    return new Response('web-node: ' + result.error, {
-      status: 502,
-      headers: { 'content-type': 'text/plain' },
+  // Wait (bounded) for the response head. A connect failure surfaces here.
+  let head;
+  try {
+    head = await inbox.next(15000);
+  } catch (err) {
+    return bridgeError(err.message);
+  }
+  if (head.error) return bridgeError(head.error);
+  if (head.type === 'error') return bridgeError(head.message || 'virtual request failed');
+
+  const responseHeaders = buildHeaders(head.headers);
+  const contentType = String(responseHeaders.get('content-type') || '');
+
+  // HTML needs its `<base>` tag injected, which means buffering it first.
+  if (contentType.includes('text/html')) {
+    const parts = [];
+    for (;;) {
+      let msg;
+      try {
+        msg = await inbox.next(0);
+      } catch {
+        break;
+      }
+      if (!msg || msg.type === 'end') break;
+      if (msg.type === 'error') break;
+      if (msg.type === 'chunk') parts.push(toBytes(msg.data));
+    }
+    const total = parts.reduce((n, c) => n + c.length, 0);
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const c of parts) {
+      merged.set(c, offset);
+      offset += c.length;
+    }
+    const html = new TextDecoder().decode(merged);
+    const base = `<base href="${PREVIEW_PREFIX}${port}/">`;
+    const patched = html.includes('<head>') ? html.replace('<head>', '<head>' + base) : base + html;
+    return new Response(new TextEncoder().encode(patched), {
+      status: head.status,
+      statusText: head.statusMessage || '',
+      headers: responseHeaders,
     });
   }
 
-  const responseHeaders = new Headers();
-  // Hop-by-hop headers must not be forwarded: the runtime's `chunked` framing
-  // was already decoded inside the worker and the browser frames the Response
-  // itself, so passing `transfer-encoding` on would corrupt the body.
-  const HOP_BY_HOP = ['connection', 'content-length', 'transfer-encoding', 'keep-alive', 'te', 'trailer', 'upgrade'];
-  for (const [name, value] of Object.entries(result.headers || {})) {
-    if (HOP_BY_HOP.includes(name.toLowerCase())) continue;
-    if (Array.isArray(value)) for (const v of value) responseHeaders.append(name, v);
-    else responseHeaders.set(name, value);
-  }
+  // Everything else streams straight through.
+  const stream = new ReadableStream({
+    async pull(controller) {
+      try {
+        const msg = await inbox.next(0);
+        if (!msg || msg.type === 'end') {
+          controller.close();
+          return;
+        }
+        if (msg.type === 'error') {
+          controller.error(new Error(msg.message || 'virtual request failed'));
+          return;
+        }
+        if (msg.type === 'chunk') controller.enqueue(toBytes(msg.data));
+      } catch (err) {
+        controller.error(err);
+      }
+    },
+  });
 
-  // The app shell is served with COOP/COEP: require-corp (so SharedArrayBuffer is
-  // available). Under that policy an embedded document must opt in explicitly,
-  // otherwise Chrome silently renders the iframe blank.
-  responseHeaders.set('cross-origin-resource-policy', 'cross-origin');
-  responseHeaders.set('cross-origin-embedder-policy', 'require-corp');
-  responseHeaders.set('cross-origin-opener-policy', 'same-origin');
-
-  let responseBody = result.body;
-  const contentType = String(responseHeaders.get('content-type') || '');
-
-  // Relative asset URLs inside a previewed page need to stay under the prefix.
-  if (contentType.includes('text/html') && responseBody) {
-    const html = new TextDecoder().decode(responseBody);
-    const base = `<base href="${PREVIEW_PREFIX}${port}/">`;
-    const patched = html.includes('<head>') ? html.replace('<head>', '<head>' + base) : base + html;
-    responseBody = new TextEncoder().encode(patched);
-  }
-
-  return new Response(responseBody, {
-    status: result.status,
-    statusText: result.statusMessage || '',
+  return new Response(stream, {
+    status: head.status,
+    statusText: head.statusMessage || '',
     headers: responseHeaders,
   });
 }
+
+function toBytes(data) {
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  return new Uint8Array(0);
+}
+

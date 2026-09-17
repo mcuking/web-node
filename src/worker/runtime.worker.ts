@@ -33,6 +33,15 @@ type Request =
       path: string;
       headers: Record<string, string>;
       body: ArrayBuffer | null;
+    }
+  | {
+      id: number;
+      type: 'httpStream';
+      port: number;
+      method: string;
+      path: string;
+      headers: Record<string, string>;
+      body: ArrayBuffer | null;
     };
 
 export interface RuntimeInfo {
@@ -49,6 +58,9 @@ type Response =
   | { id: number; type: 'stdout'; data: string }
   | { id: number; type: 'stderr'; data: string }
   | { id: number; type: 'exit'; code: number }
+  | { id: number; type: 'httpHead'; status: number; statusMessage: string; headers: Record<string, string | string[]> }
+  | { id: number; type: 'httpChunk'; data: Uint8Array }
+  | { id: number; type: 'httpEnd' }
   | { id: number; type: 'ready'; info: RuntimeInfo };
 
 const persistence = new OpfsPersistence('web-node-project');
@@ -92,6 +104,19 @@ interface VirtualHttpResult {
  * This is the *only* way a browser URL reaches a user's `http.createServer`:
  * SW → page → here → virtual network → the server the user bound.
  */
+interface HttpStreamModule {
+  _stream: (
+    port: number,
+    init: { method?: string; path?: string; headers?: Record<string, string>; body?: string | Uint8Array },
+    handlers: {
+      onHead: (h: { status: number; statusMessage: string; headers: Record<string, string | string[]> }) => void;
+      onData: (c: Uint8Array) => void;
+      onEnd: () => void;
+      onError: (e: Error) => void;
+    },
+  ) => void;
+}
+
 async function serveVirtualRequest(
   rt: NodeRuntime,
   req: { port: number; method: string; path: string; headers: Record<string, string>; body: ArrayBuffer | null },
@@ -225,6 +250,33 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
         if (!runtime) throw new Error('runtime not initialised');
         const result = await serveVirtualRequest(runtime, req);
         post({ id: req.id, type: 'ok', result });
+        return;
+      }
+      case 'httpStream': {
+        if (!runtime) throw new Error('runtime not initialised');
+        const http = runtime.realm.require('http') as unknown as HttpStreamModule;
+        http._stream(
+          req.port,
+          {
+            method: req.method,
+            path: req.path,
+            headers: req.headers,
+            body: req.body ? new Uint8Array(req.body) : undefined,
+          },
+          {
+            onHead: (h) =>
+              post({
+                id: req.id,
+                type: 'httpHead',
+                status: h.status,
+                statusMessage: h.statusMessage,
+                headers: h.headers,
+              }),
+            onData: (chunk) => post({ id: req.id, type: 'httpChunk', data: chunk }),
+            onEnd: () => post({ id: req.id, type: 'httpEnd' }),
+            onError: (err) => post({ id: req.id, type: 'error', message: err.message }),
+          },
+        );
         return;
       }
     }
