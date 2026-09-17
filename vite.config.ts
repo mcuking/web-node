@@ -1,6 +1,13 @@
 import { defineConfig } from 'vitest/config';
 
+// GitHub Pages serves the site from a sub-path (`/web-node/`), while the dev
+// server serves it from the origin root. `BASE_PATH` lets the deploy script set
+// the prefix; everything else (service worker scope, preview URLs, the worker
+// bundle) is derived from it automatically.
+const base = process.env.BASE_PATH || '/';
+
 export default defineConfig({
+  base,
   server: {
     // COOP/COEP so SharedArrayBuffer is available (needed later for wasm/Atomics).
     headers: {

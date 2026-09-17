@@ -8,11 +8,15 @@
  *                                     ↓
  *                          user's http.createServer
  *
- * Preview URLs are same-origin paths: `/preview/<port>/<path>`.
- * We use a path prefix (not `<port>.localhost`) because it needs no DNS or
- * dev-server host configuration; the trade-off is that absolute-path assets
- * (`/app.js`) resolve outside the prefix, so HTML responses get a `<base>` tag
- * injected to fix the far more common *relative* asset case.
+ * Preview URLs are same-origin paths: `<base>/preview/<port>/<path>`. We use a
+ * path prefix (not `<port>.localhost`) because it needs no DNS or dev-server
+ * host configuration; the trade-off is that absolute-path assets (`/app.js`)
+ * resolve outside the prefix, so HTML responses get a `<base>` tag injected to
+ * fix the far more common *relative* asset case.
+ *
+ * The app may be served from a sub-path (GitHub Pages uses `/web-node/`), so the
+ * prefix is derived from where this worker actually lives instead of assuming
+ * the origin root. In dev that is `/`, on Pages `/web-node/`.
  *
  * Responses are streamed: the runtime posts the head and then each body chunk
  * as `res.write()` produces it, and we hand the browser a `ReadableStream` — so
@@ -20,7 +24,8 @@
  * buffered so the `<base>` tag can be injected before the first byte is sent.
  */
 
-const PREVIEW_PREFIX = '/preview/';
+const BASE = new URL('./', self.location).pathname;
+const PREVIEW_PREFIX = BASE + 'preview/';
 
 self.addEventListener('install', () => {
   self.skipWaiting();

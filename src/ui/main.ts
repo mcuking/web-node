@@ -159,7 +159,8 @@ async function refreshPorts(): Promise<void> {
 
 function previewUrl(): string {
   const port = portSelect.value;
-  return `${location.origin}/preview/${port}/`;
+  // BASE_URL keeps this correct when the app is served from a sub-path.
+  return `${location.origin}${import.meta.env.BASE_URL}preview/${port}/`;
 }
 
 function loadPreview(): void {
