@@ -9,7 +9,7 @@ export const fsSpec: BuiltinSpec = {
   id: 'fs',
   aliases: ['node:fs'],
   origin: 'web-node',
-  deps: ['buffer', 'stream'],
+  deps: ['buffer', 'stream', 'events'],
   init: (ctx: BuiltinInitContext) => {
     const binding = ctx.internalBinding('fs') as {
       openSync(p: string, f: string, m: number): number;
@@ -58,6 +58,36 @@ export const fsSpec: BuiltinSpec = {
 
     const bindingCtx = ctx.binding;
     const vfs = bindingCtx.vfs;
+
+    // `fs.watch` is a projection of VFS change events. A browser tab has no
+    // inotify, so the only edits we can see are the ones written through this
+    // VFS — which, for everything inside the runtime, is all of them.
+    const { EventEmitter } = ctx.require('events') as {
+      EventEmitter: new () => { on(name: string, fn: (...a: unknown[]) => void): unknown; emit(name: string, ...a: unknown[]): boolean };
+    };
+    type WatcherBase = { on(name: string, fn: (...a: unknown[]) => void): unknown; emit(name: string, ...a: unknown[]): boolean };
+    class FSWatcher extends (EventEmitter as unknown as new () => WatcherBase) {
+      #unsubscribe: (() => void) | null = null;
+      #options: Record<string, unknown> = {};
+      /** @internal — wired by `watch()`. */
+      _attach(unsubscribe: () => void, options: Record<string, unknown>): void {
+        this.#unsubscribe = unsubscribe;
+        this.#options = options;
+      }
+      close(): void {
+        this.#unsubscribe?.();
+        this.#unsubscribe = null;
+      }
+      ref(): this {
+        return this;
+      }
+      unref(): this {
+        return this;
+      }
+      get options(): Record<string, unknown> {
+        return this.#options;
+      }
+    }
 
     function toBuffer(data: Uint8Array): Uint8Array {
       return (Buffer as unknown as { from(v: unknown): Uint8Array }).from(data);
@@ -446,8 +476,36 @@ export const fsSpec: BuiltinSpec = {
       write: (fd: number, b: Uint8Array, o: number, l: number, pos: number | null, c: (e: Error | null, n?: number) => void) =>
         cb(() => binding.writeSync(fd, b, o, l, pos), c),
       realpath: (p: string, c: (e: Error | null, r?: string) => void) => cb(() => binding.realpathSync(p), c),
-      watch: () => {
-        throw new Error('fs.watch is not supported in web-node');
+      watch: (p: string, options?: unknown, listener?: unknown) => {
+        const opts = typeof options === 'function' ? undefined : (options as { recursive?: boolean } | undefined);
+        const callback = (typeof options === 'function' ? options : listener) as
+          | ((eventType: string, filename: string | null) => void)
+          | undefined;
+        const target = vfs.resolve(p);
+        const isDir = (() => {
+          try {
+            return vfs.stat(target).type === 'dir';
+          } catch {
+            return false;
+          }
+        })();
+        const scope = target === '/' ? '/' : target + '/';
+        const emitter = new FSWatcher();
+        const unsubscribe = vfs.subscribe((change) => {
+          if (change.path !== target && !change.path.startsWith(scope)) return;
+          // Node reports `rename` for create/delete and `change` for edits; for a
+          // directory the filename is the basename that moved.
+          const filename = isDir
+            ? change.path === target
+              ? ''
+              : change.path.slice(scope.length)
+            : (target.split('/').pop() ?? '');
+          const eventType = change.type === 'change' ? 'change' : 'rename';
+          callback?.(eventType, filename);
+          emitter.emit('change', eventType, filename);
+        });
+        emitter._attach(unsubscribe, { recursive: !!opts?.recursive, path: target, isDir });
+        return emitter;
       },
       createReadStream,
       createWriteStream,

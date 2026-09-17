@@ -27,6 +27,83 @@
 const BASE = new URL('./', self.location).pathname;
 const PREVIEW_PREFIX = BASE + 'preview/';
 
+/**
+ * Injected into every preview document, ahead of the app's own scripts.
+ *
+ * A ServiceWorker cannot proxy a WebSocket — `fetch` never sees the upgrade — so
+ * a dev server running inside the runtime is unreachable over the wire. It *is*
+ * reachable over a same-origin `BroadcastChannel`, though (the browser ignores
+ * it, but worker and page are one origin), so we swap `WebSocket` for a shim
+ * that speaks a tiny JSON protocol on that channel instead.
+ *
+ * Only loopback URLs are diverted: the preview's Vite HMR socket (
+ * `ws://127.0.0.1:5173/`). Every other WebSocket is left untouched for the real
+ * browser implementation.
+ */
+const WS_SHIM = `<script>(function () {
+  var CH = 'web-node-hmr';
+  var Native = window.WebSocket;
+  function isLoopback(host) {
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  }
+  function isHmr(url) {
+    try { return isLoopback(new URL(url, location.href).hostname); } catch (e) { return false; }
+  }
+  function fire(ws, type, extra) {
+    var ev;
+    if (type === 'message') {
+      try { ev = new MessageEvent('message', { data: extra.data }); } catch (e) { ev = { type: type }; ev.data = extra.data; }
+    } else {
+      try { ev = new Event(type); } catch (e) { ev = { type: type }; }
+      for (var k in extra) ev[k] = extra[k];
+    }
+    var h = ws['on' + type];
+    if (typeof h === 'function') h.call(ws, ev);
+    (ws._ls[type] || []).forEach(function (fn) { fn.call(ws, ev); });
+  }
+  function Bridged(url) {
+    this.url = String(url);
+    this.readyState = 0;
+    this.protocol = 'vite-hmr';
+    this.binaryType = 'blob';
+    this.bufferedAmount = 0;
+    this.onopen = this.onmessage = this.onerror = this.onclose = null;
+    this._ls = {};
+    var self = this;
+    this._id = 'c' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    this._ch = new BroadcastChannel(CH);
+    this._ch.onmessage = function (e) {
+      var m = e.data;
+      if (!m || m.id !== self._id) return;
+      if (m.t === 'open') { self.readyState = 1; fire(self, 'open', {}); }
+      else if (m.t === 'message') { fire(self, 'message', { data: m.data }); }
+      else if (m.t === 'close') { self.readyState = 3; fire(self, 'close', { code: 1000, wasClean: true }); }
+    };
+    setTimeout(function () { self._ch.postMessage({ t: 'open', id: self._id, url: self.url }); }, 0);
+  }
+  Bridged.prototype.addEventListener = function (t, fn) { (this._ls[t] = this._ls[t] || []).push(fn); };
+  Bridged.prototype.removeEventListener = function (t, fn) {
+    var a = this._ls[t];
+    if (a) this._ls[t] = a.filter(function (f) { return f !== fn; });
+  };
+  Bridged.prototype.send = function (d) {
+    if (this.readyState !== 1) return;
+    this._ch.postMessage({ t: 'send', id: this._id, data: String(d) });
+  };
+  Bridged.prototype.close = function () {
+    this.readyState = 2;
+    try { this._ch.postMessage({ t: 'close', id: this._id }); } catch (e) {}
+    this._ch.close();
+  };
+  function Shim(url, protocols) {
+    if (isHmr(url)) return new Bridged(url);
+    return new Native(url, protocols);
+  }
+  Shim.CONNECTING = 0; Shim.OPEN = 1; Shim.CLOSING = 2; Shim.CLOSED = 3;
+  Shim.prototype = Native.prototype;
+  window.WebSocket = Shim;
+})();</script>`;
+
 self.addEventListener('install', () => {
   self.skipWaiting();
 });
@@ -266,7 +343,7 @@ async function handle(event, port, url) {
     }
     const html = new TextDecoder().decode(merged);
     const base = `<base href="${PREVIEW_PREFIX}${port}/">`;
-    const patched = html.includes('<head>') ? html.replace('<head>', '<head>' + base) : base + html;
+    const patched = html.includes('<head>') ? html.replace('<head>', '<head>' + base + WS_SHIM) : base + WS_SHIM + html;
     return new Response(new TextEncoder().encode(patched), {
       status: head.status,
       statusText: head.statusMessage || '',

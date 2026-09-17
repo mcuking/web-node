@@ -66,7 +66,8 @@ top of it sit three virtual subsystems:
 - **Vite's dev server** — `createServer()` + `listen()` also boot in the tab,
   binding a virtual port and transforming modules on demand. The preview bridge
   routes the browser's absolute-path assets back to the virtual port, so the dev
-  app renders in the Preview tab.
+  app renders in the Preview tab. **HMR** rides a `BroadcastChannel` (a
+  ServiceWorker cannot proxy the WebSocket), so edits hot-update in place.
 
 ## Development
 
@@ -245,7 +246,7 @@ dynamic `import()`), plus support for `PathLike` arguments,
 Note Vite 8 moved to rolldown (a native Rust binary), so a browser build pins
 Vite 5.x.
 
-### Running Vite's dev server (M5d)
+### Running Vite's dev server (M5d–M5e)
 
 Hit **🛠 Vite dev** and the real Vite dev server boots inside the tab:
 `createServer()` binds a virtual port (5173) and transforms modules *on demand*,
@@ -265,9 +266,15 @@ route a browser's **absolute-path** assets (`/@vite/client`, chained imports)
 back to the right virtual port, by remembering `clientId → port` — a Service
 Worker sees one client id for a document and all its subresources.
 
-**HMR is not wired up**: it runs over a WebSocket, and a ServiceWorker cannot
-proxy WebSocket upgrades, so the browser can never reach the dev server's HMR
-socket through the preview bridge. The demo disables it (`hmr: false`).
+**HMR works, over a non-WebSocket channel.** The HMR socket is a WebSocket, and
+a ServiceWorker cannot proxy an upgrade, so the browser can never reach it
+through the preview bridge. The preview iframe is same-origin, though, so the
+ServiceWorker injects a `WebSocket` shim that diverts *loopback* URLs to a
+`BroadcastChannel`; the runtime hands Vite an HMR server object that `send()`s
+over that channel instead of a socket. Vite still computes every update — we
+only carry it. A small Vite plugin turns VFS change events into Vite watcher
+events (there is no inotify in a tab), so editing a source file triggers a real
+`js-update`: hit **✏️ HMR edit** and the preview re-renders in place, no reload.
 
 ## Roadmap
 
@@ -286,7 +293,7 @@ socket through the preview bridge. The demo disables it (`hmr: false`).
 | M5b | Real bundler — rollup WASM: ESM graph, tree-shaking, write to VFS | ✅ Done |
 | M5c | Real build toolchain — Vite in the tab: production bundle to VFS | ✅ Done |
 | M5d | Vite dev server in the tab (on-demand transforms + preview) | ✅ Done |
-| M5e | Vite HMR (needs a non-WebSocket HMR channel) | ⬜ Deferred |
+| M5e | Vite HMR in the tab (over BroadcastChannel, not a WebSocket) | ✅ Done |
 
 ## Contributing
 

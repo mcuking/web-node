@@ -4,6 +4,7 @@ import {
   type ReaddirOptions,
   type Stat,
   type Vfs,
+  type VfsChange,
   type WriteOptions,
   type PathLike,
   VfsError,
@@ -36,10 +37,21 @@ export class MemoryVfs implements Vfs {
   constructor(opts: { cwd?: string; onChange?: (path: string | null) => void } = {}) {
     this.#cwd = p.normalize(opts.cwd ?? '/');
     this.#entries.set('/', this.#makeDir());
-    this.#onChange = opts.onChange;
+    // `onChange` predates the subscription API; keep it working by projecting.
+    if (opts.onChange) {
+      const cb = opts.onChange;
+      this.#listeners.add((change) => cb(change.path));
+    }
   }
 
-  #onChange?: (path: string | null) => void;
+  #listeners = new Set<(change: VfsChange) => void>();
+
+  subscribe(listener: (change: VfsChange) => void): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  }
 
   #makeDir(): Entry {
     const now = Date.now();
@@ -67,8 +79,8 @@ export class MemoryVfs implements Vfs {
     };
   }
 
-  #touch(path: string | null = null) {
-    this.#onChange?.(path);
+  #touch(path: string, type: VfsChange['type']) {
+    for (const listener of [...this.#listeners]) listener({ type, path });
   }
 
   get cwd(): string {
@@ -170,7 +182,7 @@ export class MemoryVfs implements Vfs {
         merged.set(data, existing.data.byteLength);
         existing.data = merged;
         existing.mtimeMs = Date.now();
-        this.#touch(abs);
+        this.#touch(abs, 'change');
         return;
       }
     }
@@ -183,7 +195,7 @@ export class MemoryVfs implements Vfs {
       this.#entries.set(abs, this.#makeFile(data.slice(), opts.mode !== undefined ? opts.mode & 0o777 : 0o644));
       void name;
     }
-    this.#touch(abs);
+    this.#touch(abs, existing ? 'change' : 'create');
   }
 
   appendFile(path: string, data: Uint8Array): void {
@@ -213,14 +225,14 @@ export class MemoryVfs implements Vfs {
         }
         this.#entries.set(cur, this.#makeDir());
       }
-      this.#touch(abs);
+      this.#touch(abs, 'create');
       return;
     }
 
     const [dir] = this.#parent(abs);
     this.#requireDir(dir, 'mkdir', path);
     this.#entries.set(abs, this.#makeDir());
-    this.#touch(abs);
+    this.#touch(abs, 'create');
   }
 
   readdir(path: string, opts: ReaddirOptions = {}): Dirent[] {
@@ -274,7 +286,7 @@ export class MemoryVfs implements Vfs {
     } else {
       this.#entries.delete(abs);
     }
-    this.#touch(abs);
+    this.#touch(abs, 'delete');
   }
 
   rename(from: string, to: string): void {
@@ -297,7 +309,8 @@ export class MemoryVfs implements Vfs {
         }
       }
     }
-    this.#touch(dst);
+    this.#touch(src, 'delete');
+    this.#touch(dst, 'create');
   }
 
   copyFile(from: string, to: string): void {
@@ -310,7 +323,7 @@ export class MemoryVfs implements Vfs {
     const e = this.#entries.get(abs);
     if (!e) throw new VfsError('ENOENT', 'chmod', path);
     e.mode = mode & 0o777;
-    this.#touch(abs);
+    this.#touch(abs, 'change');
   }
 
   /** Snapshot the whole tree (used for persistence + tests). */

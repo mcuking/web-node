@@ -24,6 +24,22 @@ describe('MemoryVfs', () => {
     expect(vfs.readdir('/a').map((d) => d.name)).toEqual(['b']);
   });
 
+  it('notifies subscribers about creates, changes and deletes', () => {
+    const vfs = new MemoryVfs();
+    const seen: Array<{ type: string; path: string }> = [];
+    const off = vfs.subscribe((c) => seen.push(c));
+    vfs.writeFile('/a.txt', new TextEncoder().encode('1'));
+    vfs.writeFile('/a.txt', new TextEncoder().encode('2'));
+    vfs.rm('/a.txt');
+    off();
+    vfs.writeFile('/b.txt', new TextEncoder().encode('3'));
+    expect(seen).toEqual([
+      { type: 'create', path: '/a.txt' },
+      { type: 'change', path: '/a.txt' },
+      { type: 'delete', path: '/a.txt' },
+    ]);
+  });
+
   it('throws ENOENT for missing files', () => {
     const vfs = new MemoryVfs();
     expect(() => vfs.readFile('/nope')).toThrowError(VfsError);

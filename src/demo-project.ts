@@ -515,7 +515,17 @@ const NM = path.join(ROOT, 'node_modules');
 
   '/project/site/src/main.js': `import { greet } from './message.js';
 
-document.getElementById('app').textContent = greet('vite');
+const el = document.getElementById('app');
+el.textContent = greet('vite');
+
+// Accept updates to message.js and re-render in place - no full reload. The
+// callback gets the *new* module, so read the fresh export from it (the old
+// \`greet\` binding inside this module is not re-executed).
+if (import.meta.hot) {
+  import.meta.hot.accept('./message.js', function (mod) {
+    el.textContent = mod.greet('vite');
+  });
+}
 `,
 
   '/project/site/src/message.js': `export function greet(who) {
@@ -523,12 +533,13 @@ document.getElementById('app').textContent = greet('vite');
 }
 `,
 
-  // Milestone 5d: Vite's *dev server* — the orchestration layer, not just the
-  // build. It boots in the tab, binds a virtual port and serves transformed
-  // modules on demand (that is what `transformRequest` does per import).
-  // HMR's WebSocket is deliberately off: a ServiceWorker cannot proxy a
-  // WebSocket, so the browser could never reach it through the preview bridge.
-  '/project/vite-dev.mjs': `// Click "Vite dev" to run this: Vite's dev server serves site/ in the tab.
+  // Milestone 5e: HMR over a *non-WebSocket* channel.
+  //
+  // A ServiceWorker cannot proxy a WebSocket (fetch never sees the upgrade), so
+  // Vite's HMR socket is unreachable through the preview bridge. The preview
+  // iframe is same-origin, though, so the injected shim swaps WebSocket for a
+  // BroadcastChannel. Vite still *computes* the updates; we only carry them.
+  '/project/vite-dev.mjs': `// Click "Vite dev" to run: Vite's dev server serves site/ in the tab (HMR on).
 import fs from 'fs';
 import path from 'path';
 
@@ -536,9 +547,69 @@ const ROOT = '/project';
 const SITE = path.join(ROOT, 'site');
 const NM = path.join(ROOT, 'node_modules');
 const PORT = 5173;
+const HMR_CHANNEL = 'web-node-hmr';
+
+// The object Vite treats as its HMR server (the shape createWebSocketServer
+// returns: send / on / off / clients / close). The transport underneath is a
+// BroadcastChannel to the preview iframe, not a socket.
+function createHmrBridge() {
+  const channel = new BroadcastChannel(HMR_CHANNEL);
+  const clients = new Set();
+  let onConnection = null;
+  channel.onmessage = function (event) {
+    const msg = event.data;
+    if (!msg) return;
+    if (msg.t === 'open') {
+      clients.add(msg.id);
+      channel.postMessage({ t: 'open', id: msg.id });
+      // Vite's client waits for "connected" before flushing queued operations.
+      channel.postMessage({ t: 'message', id: msg.id, data: JSON.stringify({ type: 'connected' }) });
+      console.log('hmr         : preview connected (' + clients.size + ' client/s)');
+      if (onConnection) onConnection({ send: function () {} }, {});
+    } else if (msg.t === 'send') {
+      let parsed = null;
+      try { parsed = JSON.parse(msg.data); } catch (e) {}
+      if (parsed && parsed.type === 'ping') {
+        channel.postMessage({ t: 'message', id: msg.id, data: JSON.stringify({ type: 'pong' }) });
+      }
+    } else if (msg.t === 'close') {
+      clients.delete(msg.id);
+    }
+  };
+  return {
+    name: 'web-node-hmr',
+    get clients() { return clients; },
+    send(payload) {
+      const data = JSON.stringify(payload);
+      clients.forEach(function (id) { channel.postMessage({ t: 'message', id: id, data: data }); });
+    },
+    on(event, fn) { if (event === 'connection') onConnection = fn; },
+    off(event, fn) { if (event === 'connection' && onConnection === fn) onConnection = null; },
+    listen() {},
+    close() { clients.clear(); channel.close(); },
+    handleUpgrade() {},
+  };
+}
+
+// Vite's real watcher is chokidar, which wants fs.watch + inotify the tab does
+// not have. Watch the VFS ourselves and forward events into Vite's (no-op)
+// watcher, which is where the HMR pipeline is wired up.
+function vfsWatchPlugin() {
+  return {
+    name: 'web-node-vfs-watch',
+    configureServer(server) {
+      const watcher = fs.watch(SITE, { recursive: true }, function (eventType, filename) {
+        if (!filename) return;
+        server.watcher.emit(eventType === 'change' ? 'change' : 'add', path.join(SITE, filename));
+      });
+      if (server.httpServer) server.httpServer.on('close', function () { watcher.close(); });
+      console.log('watching    : ' + SITE + ' (VFS events -> Vite HMR)');
+    },
+  };
+}
 
 (async function () {
-  console.log('-- vite dev server (milestone 5d) --');
+  console.log('-- vite dev server (milestone 5e) --');
   if (!fs.existsSync(path.join(NM, 'vite'))) {
     console.log('vite: not installed yet - click "Install deps" first');
     return;
@@ -555,20 +626,27 @@ const PORT = 5173;
   const server = await vite.createServer({
     root: SITE,
     logLevel: 'error',
+    plugins: [vfsWatchPlugin()],
     server: {
       host: '127.0.0.1',
       port: PORT,
-      // No file watching and no HMR over the preview bridge (see header).
+      // No chokidar (see vfsWatchPlugin); HMR stays on but rides our bridge.
       watch: null,
-      hmr: false,
+      hmr: { protocol: 'ws', host: '127.0.0.1', port: PORT },
     },
   });
+
+  // Replace Vite's WebSocket channel with the BroadcastChannel bridge. Vite
+  // reads server.hot on every update, so swapping the reference is enough.
+  const bridge = createHmrBridge();
+  server.hot = bridge;
+  server.ws = bridge;
+
   await server.listen();
 
   console.log('listening   : http://127.0.0.1:' + PORT);
-  console.log('preview     : open the Preview tab (:5173)');
-  console.log('serving     : ' + SITE + ' (index.html + on-demand transforms)');
-  console.log('note        : modules are transformed per import, exactly as in Node');
+  console.log('hmr         : BroadcastChannel "' + HMR_CHANNEL + '" (no WebSocket)');
+  console.log('preview     : open Preview (:5173), then edit site/src/message.js');
 })().catch(function (err) {
   console.log('vite dev failed : ' + (err && err.message ? err.message : err));
 });
