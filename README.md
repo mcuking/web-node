@@ -50,6 +50,34 @@ test/             Vitest 单测 / 集成测试
 浏览器 URL → ServiceWorker → 主线程 → runtime worker → VirtualNetwork → 你的 handler
 ```
 
+## 流（stream 前置）
+
+`req` 是 `Readable`、`res` 是 `Writable`，所以常见写法都能直接用：
+
+```js
+const fs = require('fs');
+const { Transform, pipeline } = require('stream');
+
+// 1) 文件直接流给响应（无 Content-Length → chunked 分帧）
+http.createServer((req, res) => fs.createReadStream('/project/a.txt').pipe(res));
+
+// 2) 请求体直接落盘
+http.createServer((req, res) => {
+  const out = fs.createWriteStream('/project/upload.txt');
+  req.pipe(out);
+  out.on('finish', () => res.end('saved ' + out.bytesWritten));
+});
+
+// 3) 三段链（带真背压）
+pipeline(fs.createReadStream('/project/a.txt'), new Transform({
+  transform: (c, e, cb) => cb(null, c.toString().toUpperCase()),
+}), fs.createWriteStream('/project/a-upper.txt'));
+```
+
+`Readable` / `Writable` / `Duplex` / `Transform` / `PassThrough`、`pipe()`、`pipeline()`、
+`finished()`、`stream/promises`、`fs.createReadStream` / `fs.createWriteStream` 均已实现，
+高水位之上的 `write()`/`push()` 返回 `false` 并在排空后发 `'drain'`（背压真实生效）。
+
 ## 改动约定
 
 1. 改完先跑 `npm run typecheck && npm test`，保持全绿。

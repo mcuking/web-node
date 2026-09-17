@@ -9,18 +9,19 @@
 
 ## 当前状态
 
-**阶段**：M3 网络已落地并在真实浏览器验证通过（虚拟 TCP + ServiceWorker 桥 + 预览面板）。
+**阶段**：stream 前置已落地（`stream` 模块 + `fs` 流 + `http` 流 + chunked），并在真实浏览器验证通过。下一步是 M4 npm client。
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
 | M1 | 纯 JS 运行层（realm / bindings / module loader） | ✅ 完成 |
 | M2 | 虚拟文件系统（内存树 + OPFS 持久化） | ✅ 完成 |
 | M3 | 网络（虚拟 TCP + ServiceWorker 桥 + 预览） | ✅ 完成（基础版） |
-| M3.5 | 网络收敛（子域名路由 / keep-alive / chunked / https） | ⬜ 未开始 |
+| S | **stream 前置**（Readable/Writable/pipe/背压 + chunked） | ✅ 完成 |
+| M3.5 | 网络收敛（子域名路由 / keep-alive / https） | ⬜ 未开始 |
 | M4 | npm client | ⬜ 未开始 |
 | M5 | 真实构建工具（vite / webpack） | ⬜ 未开始 |
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` 32/32 通过 · `vite build` 绿（worker 产物 ~203KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **50/50 通过** · `vite build` 绿（worker ~219KB / index ~6.7KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -47,8 +48,23 @@
 
 **MVP 限制**（已知）：
 - 预览走路径前缀 `/preview/<port>/`，不是 `<port>.localhost`。绝对路径资源（`/app.js`）会落在前缀外；HTML 响应会注入 `<base>` 修正**相对路径**资源。
-- HTTP/1.1 每次连接只处理一个请求（`Connection: close`），无 keep-alive、无 chunked、无 TLS。
-- 没有 stream：`req.pipe()` / `res.write` 背压不可用（但 `on('data')` 可用）。
+- HTTP/1.1 每次连接只处理一个请求（`Connection: close`），无 keep-alive、无 TLS。
+- 响应在服务端是真流式的（无 `Content-Length` 就按 chunked 分帧），但 SW 桥会把整个 body 收齐再回给浏览器，所以**浏览器侧看不到逐段流式**（要真正流式需要 SW 直接转发 ReadableStream，属 M3.5）。
+- `Readable.read(n)` 字节模式下是「整块交付」而非精确切 n 字节（`data`/`pipe()` 路径是精确的）；objectMode 只支持基本形态。
+
+### stream 层怎么走通的（前置）
+
+```
+fs.createReadStream(p)  ─┐
+req (IncomingMessage)   ─┼─►  Readable ──pipe()──►  Writable  ─┬─►  fs.createWriteStream(p)
+Readable.from(iter)     ─┘        ▲        背压: write()===false           └─►  res (ServerResponse,
+                                  └────── dest 'drain' ── resume()             无 Content-Length → chunked)
+```
+
+- **`stream`**：`src/node-runtime/builtins/stream.ts`（新，纯 TS，`origin: 'web-node'`）。真 `lib/stream*.js` 是 30+ 文件的簇，所以自建可观察表面：`Readable`/`Writable`/`Duplex`/`Transform`/`PassThrough` + `pipe`/`pipeline`/`finished` + `stream/promises`。
+- **背压是真的**：`write()`/`push()` 过 high-water mark 返回 `false`，Writable 排空后发 `'drain'`，`pipe()` 暂停源并在 `'drain'` 时 `resume()`。`req.pipe(res)` 因此能把背压一路传回读端，而不是把整个 body 吞进内存。
+- **`fs` 流**：`fs.createReadStream`/`createWriteStream` + `fs.ReadStream`/`fs.WriteStream`。VFS 是同步的，所以 `_read()` 按需拉下一块——背压不是装饰。
+- **`http`**：`IncomingMessage` 改成 `Readable`、`ServerResponse` 改成 `Writable`（没设 `Content-Length` 就用 `Transfer-Encoding: chunked` 分帧）、`ClientRequest` 改成 `Writable`。`HttpMessageReader` 新增 chunked 解码（含 `chunk-size`/`chunk-data`/`chunk-crlf` 状态机）。
 
 **怎么跑起来**：
 ```bash
@@ -72,24 +88,51 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 7. 刷新页面 → 文件树里 `output/report.txt` 仍在（验证 OPFS 持久化）
 8. 点 **Reset project** → 回到完整 demo（含 `lib/facts.js`）
 
+**stream 附加清单**（本里程碑）：
+9. Run 输出里应有 `-- stream --`、`read stream : 197 bytes in 13 chunks of <=16`、`pipeline    : facts-upper.txt written`
+10. `await (await fetch('/preview/3000/download/facts.txt')).text()` → 197 字节 facts 文本（`fs.createReadStream().pipe(res)`）
+11. `await (await fetch('/preview/3000/api/stream')).text()` → `tick 1;tick 2;tick 3;tick 4;tick 5;done`（5 次 `res.write()` → chunked）
+12. `await fetch('/preview/3000/api/upload', { method: 'POST', body: '...' })` → `{"bytes":N}`；再查 `/api/ls?dir=/project/output` 应看到 `upload.txt`
+13. `/api/ls?dir=/project/output` → `facts-upper.txt`、`facts.txt`、`report.txt`（+ 上传后 `upload.txt`）
+
 ---
 
 ## 下一步（从这里继续）
 
 按优先级：
 
-1. **M3.5 网络收敛**（工程价值最高）：
+1. **M3.5 网络收敛**：
    - **子域名路由**：`<port>.localhost:5199` 替代路径前缀 → 绝对路径资源正确。需要：Vite `server.allowedHosts: ['.localhost']`；预览页需要在子域名下注册自己的 SW。
-   - **keep-alive + chunked**：现在的 `HttpMessageReader` 每个连接只读一条消息（`#done` 后丢弃剩余字节），要改成一个连接循环解析、按 `transfer-encoding: chunked` 解析。
+   - **keep-alive**：`HttpMessageReader` 每个连接只读一条消息（读完 body 就 `done`），要改成连接循环 + `Connection: keep-alive`。
+   - **浏览器侧真流式**：SW 目前把 body 收齐再回；要让 `res.write()` 逐段到达浏览器，需要把 runtime 的 chunk 流经 MessageChannel 推给 SW 并用 `ReadableStream` 组装 Response。
    - **`https`**：直接 `notImplemented` 或复用 http 的模块壳。
-2. **补 stream**（M4/M5 的硬前置）：`fs.createReadStream`、`req.pipe(res)`、背压都缺。自建 `stream` 模块，或从 Node 源码 vendor `lib/stream.js`（先用 `node tools/dep-scan.mjs` 估算会牵出多少文件）。
-3. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim。
-4. **npm client（M4）**：tarball 下载 + 解包 + `node_modules` 写入 VFS（resolver 已支持）。
+2. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
+3. **npm client（M4）**：tarball 下载 + 解包 + `node_modules` 写入 VFS（resolver 已支持）。
+4. **stream 收尾**：`read(n)` 字节精确切分、`autoDestroy` 细节、`objectMode` 边界。
 5. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
 
 ---
 
 ## 变更记录
+
+### 2026-09-17 · stream 前置：`stream` 模块 + `fs`/`http` 流 + chunked
+
+- **交付**：`req.pipe(res)`、`fs.createReadStream(...).pipe(...)`、`res.write()` 流式响应都能用了；响应无 `Content-Length` 时按 `Transfer-Encoding: chunked` 分帧，客户端会再解码回来。
+  - `src/node-runtime/builtins/stream.ts`（新）—— `Readable`/`Writable`/`Duplex`/`Transform`/`PassThrough` + `pipe`/`unpipe`/`read`/`push`/`unshift`/`cork`/`uncork` + `pipeline`/`finished`/`Readable.from` + `stream/promises`。**真背压**（hwm → `false` → `'drain'` → `resume()`）。`origin: 'web-node'`。
+  - `src/node-runtime/builtins/fs.ts` —— `createReadStream`/`createWriteStream` + `ReadStream`/`WriteStream`（`open`/`ready`/`data`/`end`/`close`/`finish`/`bytesRead`/`bytesWritten`，支持 `start`/`end`/`highWaterMark`/`flags`/`autoClose`）。删掉了原来两个「streams milestone pending」的抛错桩。
+  - `src/node-runtime/builtins/http.ts` —— `IncomingMessage` → `Readable`、`ServerResponse` → `Writable`（chunked 分帧 + `flushHeaders`）、`ClientRequest` → `Writable`；`HttpMessageReader` 新增 chunked 解码状态机。
+  - `public/sw.js` —— 响应头过滤扩成完整的 hop-by-hop 列表（新增 `transfer-encoding`/`keep-alive`/`te`/`trailer`/`upgrade`）。**这条是必须的**：body 在 worker 里已经被解码成平铺字节，再把 `transfer-encoding: chunked` 转给浏览器会让它二次解帧、直接损坏响应。
+  - `src/demo-project.ts` —— 新增 `-- stream --` 段落（`createReadStream` 16 字节分块读 + `pipeline` 大写写出 `facts-upper.txt`）和 4 个端点：`/download/facts.txt`（`createReadStream().pipe(res)`）、`/api/stream`（5 次 `res.write()`）、`/api/upload`（`req.pipe(createWriteStream)`）、`/api/ls?dir=`（回读 VFS）。
+  - `test/stream.test.ts`（新，17 条）—— 基类语义（顺序/背压/pipe/drain/Transform/pipeline/promises/finished）+ 集成（fs 流、文件拷贝、chunked 响应、多段 `res.write()`、上传落盘、用 Transform 流式改请求体）。
+  - `test/net-http.test.ts` —— GET 往返改成断言 chunked 分帧；另加一条「显式 `Content-Length` 时不 chunked」。
+- **接线**：`streamSpec` + `streamPromisesSpec` 进 `ALL_BUILTINS`（排在 `fs`/`http` 之前）；`fsSpec.deps` 加 `stream`，`httpSpec.deps` 加 `stream`。
+- **踩过的坑（重要，别重犯）**：
+  1. **`pipe()` 里监听器的挂载顺序有坑**。挂 `'data'` 监听器会立刻把流切成 flowing 并**同步**排空已缓冲的数据；如果此时 `'end'` 回调还没挂上，就直接错过收尾（表现为 dest 永远不 `end()`、socket 不关、客户端挂死）。**修复**：`pipe()` 先挂 `'end'`/`'error'`，再挂 `'data'`。
+  2. **`'end'`/`'finish'` 不能同步发射**。Node 是异步发射的；同步发射会导致「先 `end()` 再挂 `'finish'` 监听器」这种极常见写法收不到事件。**修复**：`Readable.#drain()` 的 `'end'`/`'close'` 和 `Writable.afterFlush()` 的 `'finish'`/`'close'` 一律 `defer()`（`ctx.binding.nextTick`）。
+  3. **Writable 的状态不能放 `#private` 字段**。`Duplex`/`Transform`/`PassThrough` 是靠把 Writable 的 API 混入 Readable 子类实现的（Node 结构上也如此），私有字段是 per-constructor、混入后取不到。**修复**：Writable 状态放 `WeakMap`，配模块级 `doWrite()/afterFlush()` 函数。
+  4. **`demo-project.ts` 的反引号陷阱又踩了一次**。往 `notes.md` 里写 markdown 反引号（如 `` `Content-Length` ``）会直接让模板字面量提前闭合 → 编译报 `Module declaration names may only use ' or " quoted strings`。**约定重申**：内嵌源码（含 `notes.md`）里禁用反引号 / `${` / 反斜杠。
+  5. **`Buffer` 是沙箱全局**（`runtime.ts` 的 `sandboxGlobal` 里注入了 `Buffer`），用户代码里再写 `const { Buffer } = require('buffer')` 会撞上 prologue 的声明 → `Identifier 'Buffer' has already been declared`。写测试时别重复声明。
+- **验证**：`tsc --noEmit` 干净 · `vitest run` **50/50** · `vite build` 绿。浏览器实测：Run 输出 `read stream : 197 bytes in 13 chunks of <=16` + `pipeline : facts-upper.txt written`；`/download/facts.txt` → 197 字节；`/api/stream` → `tick 1;…;done`；POST `/api/upload` → `{"bytes":21}`；`/api/ls?dir=/project/output` → `facts-upper.txt, facts.txt, report.txt, upload.txt`；`crossOriginIsolated: true`。
 
 ### 2026-09-17 · M3 网络：虚拟 TCP + ServiceWorker 桥 + 预览面板
 
