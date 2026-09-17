@@ -91,9 +91,17 @@ await waitFor("document.getElementById('terminal').textContent.includes('preview
 console.log('4. instrument the preview frame (same origin)');
 const appFrame = await (async () => {
   for (let i = 0; i < 20; i++) {
-    const { frameTree } = await send('Page.getFrameTree', {}, sessionId);
+    // Page-domain commands run on the renderer's main thread, which is busy
+    // while Vite boots in the tab — bound them so a busy tab cannot hang us.
+    let tree = null;
+    try {
+      tree = await bounded(send('Page.getFrameTree', {}, sessionId), 15000, 'getFrameTree');
+    } catch {
+      await sleep(2000);
+      continue;
+    }
     const flat = [];
-    (function walk(n) { flat.push(n.frame); for (const c of n.childFrames || []) walk(c); })(frameTree);
+    (function walk(n) { flat.push(n.frame); for (const c of n.childFrames || []) walk(c); })(tree.frameTree);
     const f = flat.find((x) => x.url.includes(`${BASE}preview/${PORT}/`));
     if (f) return f;
     await sleep(1000);
