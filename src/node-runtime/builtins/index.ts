@@ -14,6 +14,7 @@ import { fsPromisesSpec } from './fs-promises';
 import { perfHooksSpec } from './perf-hooks';
 import { cryptoSpec } from './crypto';
 import { urlSpec } from './url';
+import { dnsSpec, dnsPromisesSpec } from './dns';
 import { unsupportedSpecs } from './unsupported';
 import { utilSpec } from './util';
 import { consoleSpec } from './console';
@@ -58,6 +59,8 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   perfHooksSpec,
   urlSpec,
   cryptoSpec,
+  dnsSpec,
+  dnsPromisesSpec,
   ...unsupportedSpecs,
   httpSpec,
   httpsSpec,

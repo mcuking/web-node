@@ -71,12 +71,6 @@ export const unsupportedSpecs: BuiltinSpec[] = [
     init: () => unsupported('child_process'),
   },
   {
-    id: 'dns',
-    aliases: ['node:dns'],
-    origin: 'web-node',
-    init: () => unsupported('dns'),
-  },
-  {
     id: 'v8',
     aliases: ['node:v8'],
     origin: 'web-node',

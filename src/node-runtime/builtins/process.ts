@@ -34,6 +34,38 @@ export const processSpec: BuiltinSpec = {
       };
     }
 
+    /**
+     * `process.stdin` is a real EventEmitter (the dev server calls `stdin.off()`
+     * when it tears down its SIGTERM listener), but reading is never possible in
+     * a tab — so it is an emitter that simply never emits, with `read()` → null.
+     */
+    class StdinStream extends (EventEmitter as new () => object) {
+      isTTY = false;
+      readable = true;
+      fd = 0;
+      read(): null {
+        return null;
+      }
+      pause(): this {
+        return this;
+      }
+      resume(): this {
+        return this;
+      }
+      setEncoding(): this {
+        return this;
+      }
+      setRawMode(): this {
+        return this;
+      }
+      ref(): this {
+        return this;
+      }
+      unref(): this {
+        return this;
+      }
+    }
+
     const startTime = Date.now();
 
     class Process extends (EventEmitter as new () => object) {
@@ -79,15 +111,7 @@ export const processSpec: BuiltinSpec = {
       allowedNodeEnvironmentFlags = new Set<string>();
       stdout = makeStream(binding.writeStdout, false);
       stderr = makeStream(binding.writeStderr, false);
-      stdin = {
-        isTTY: false,
-        read: () => null,
-        on: () => undefined,
-        once: () => undefined,
-        pause: () => undefined,
-        resume: () => undefined,
-        setEncoding: () => undefined,
-      };
+      stdin = new StdinStream();
 
       cwd(): string {
         return binding.vfs.cwd;

@@ -31,7 +31,7 @@ function run(files: Record<string, string>, entry = '/project/index.js') {
   } catch (e) {
     error = e;
   }
-  return { runtime, vfs, stdout: out.join(''), stderr: err.join(''), error };
+  return { runtime, vfs, out, err, stdout: out.join(''), stderr: err.join(''), error };
 }
 
 describe('NodeRuntime — core', () => {
@@ -46,6 +46,20 @@ describe('NodeRuntime — core', () => {
       '/project/index.js': `console.log(process.platform, process.argv.length, process.env.NODE_ENV);`,
     });
     expect(stdout).toBe('linux 2 test\n');
+  });
+
+  it('gives process.stdin an EventEmitter surface (tools call stdin.off)', () => {
+    // Vite's dev server adds and then removes a SIGTERM listener on close().
+    const { stdout, error } = run({
+      '/project/index.js': `
+        process.stdin.on('data', () => {});
+        process.stdin.off('data', () => {});
+        process.stdin.removeListener('data', () => {});
+        console.log('stdin-ok', process.stdin.isTTY, process.stdin.read(), typeof process.stdin.resume());
+      `,
+    });
+    expect(error).toBeNull();
+    expect(stdout).toBe('stdin-ok false null object\n');
   });
 
   it('runs real vendored node path.js', () => {
@@ -152,13 +166,30 @@ describe('NodeRuntime — core', () => {
     const { stdout, error } = run({
       '/project/index.js': `
         const tty = require('tty');
-        const dns = require('dns');
+        const cp = require('child_process');
         console.log('isatty', tty.isatty(1));
-        try { dns.lookup('example.com'); } catch (e) { console.log('threw', /dns\.lookup/.test(e.message)); }
+        try { cp.execSync('ls'); } catch (e) { console.log('threw', /child_process\.execSync/.test(e.message)); }
       `,
     });
     expect(error).toBeNull();
     expect(stdout).toBe('isatty false\nthrew true\n');
+  });
+
+  it('resolves every hostname to loopback in the virtual network', async () => {
+    // The dev server calls dns.promises.lookup('localhost') during buildStart.
+    const { out, error } = run({
+      '/project/index.js': `
+        const dns = require('dns');
+        const p = require('dns/promises');
+        dns.lookup('localhost', (err, address, family) => console.log('cb', address, family));
+        p.lookup('anything.example').then((r) => console.log('promise', r.address, r.family));
+      `,
+    });
+    // Both lookups settle on a microtask.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(error).toBeNull();
+    expect(out.join('')).toContain('cb 127.0.0.1 4');
+    expect(out.join('')).toContain('promise 127.0.0.1 4');
   });
 
   it('exposes an internalBinding table covering the whitelist', () => {
