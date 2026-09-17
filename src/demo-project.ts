@@ -14,7 +14,7 @@ export const DEMO_FILES: Record<string, string> = {
       type: 'commonjs',
       main: 'index.js',
       scripts: { start: 'node index.js' },
-      dependencies: { ms: '^2.1.3' },
+      dependencies: { ms: '^2.1.3', 'esbuild-wasm': '^0.28.2' },
     },
     null,
     2,
@@ -257,6 +257,126 @@ module.exports = function facts() {
 };
 `,
 
+  '/project/src/greet.ts': `// TypeScript, compiled by esbuild inside the tab (see build.js).
+export interface Greeting {
+  to: string;
+  message: string;
+}
+
+export function greet(to: string): Greeting {
+  return { to: to, message: 'hello, ' + to + '!' };
+}
+`,
+
+  '/project/src/app.ts': `import { greet, Greeting } from './greet';
+import ms from 'ms';
+
+const names: string[] = ['world', 'web-node', 'browser'];
+
+const greetings: Greeting[] = names.map(function (n) {
+  return greet(n);
+});
+
+export function banner(): string {
+  return greetings.map(function (g) { return g.message; }).join(' | ');
+}
+
+console.log(banner() + '  (ms: ' + ms('2h') + 'ms)');
+`,
+
+  // Milestone 5: a real build tool — esbuild's WASM build — running in the tab.
+  // It reads the virtual file system through a plugin and writes the bundle back.
+  '/project/build.js': `// Click "Build" to run this: it bundles src/app.ts with esbuild-wasm.
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = '/project';
+const WASM_PATH = path.join(ROOT, 'node_modules', 'esbuild-wasm', 'esbuild.wasm');
+
+function dirname(p) {
+  const i = p.lastIndexOf('/');
+  return i <= 0 ? '/' : p.slice(0, i);
+}
+
+// esbuild's browser build has no file system, so everything it reads is served
+// out of the virtual file system through a resolve/load plugin.
+function vfsPlugin() {
+  return {
+    name: 'web-node-vfs',
+    setup: function (build) {
+      build.onResolve({ filter: /.*/ }, function (args) {
+        if (args.kind === 'entry-point') return { path: args.path, namespace: 'vfs' };
+        const base = args.resolveDir || dirname(args.importer) || ROOT;
+        if (args.path.charAt(0) === '.' || args.path.charAt(0) === '/') {
+          const joined = args.path.charAt(0) === '/' ? args.path : path.join(base, args.path);
+          return { path: path.normalize(joined), namespace: 'vfs' };
+        }
+        try {
+          return { path: require.resolve(args.path, { paths: [base] }), namespace: 'vfs' };
+        } catch (err) {
+          return { errors: [{ text: 'vfs: cannot resolve ' + args.path }] };
+        }
+      });
+      build.onLoad({ filter: /.*/, namespace: 'vfs' }, function (args) {
+        const tries = [
+          args.path,
+          args.path + '.ts',
+          args.path + '.tsx',
+          args.path + '.js',
+          args.path + '.json',
+          path.join(args.path, 'index.ts'),
+          path.join(args.path, 'index.js'),
+        ];
+        for (let i = 0; i < tries.length; i++) {
+          if (fs.existsSync(tries[i]) && fs.statSync(tries[i]).isFile()) {
+            const file = tries[i];
+            const ext = path.extname(file);
+            const loader = ext === '.ts' ? 'ts' : ext === '.tsx' ? 'tsx' : ext === '.json' ? 'json' : 'js';
+            return { contents: fs.readFileSync(file, 'utf8'), loader: loader, resolveDir: dirname(file) };
+          }
+        }
+        return { errors: [{ text: 'vfs: cannot find ' + args.path }] };
+      });
+    },
+  };
+}
+
+(async function () {
+  console.log('-- build (milestone 5) --');
+  if (!fs.existsSync(WASM_PATH)) {
+    console.log('esbuild-wasm: not installed yet - click "Install deps" first');
+    return;
+  }
+  const bytes = fs.readFileSync(WASM_PATH);
+  const esbuild = require('esbuild-wasm');
+  const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'node_modules', 'esbuild-wasm', 'package.json'), 'utf8')).version;
+  console.log('tool        : esbuild-wasm v' + version + ' (' + (bytes.length / 1048576).toFixed(1) + ' MB wasm)');
+
+  const t0 = Date.now();
+  await esbuild.initialize({ wasmModule: await WebAssembly.compile(bytes), worker: false });
+  console.log('wasm        : compiled + service started in ' + (Date.now() - t0) + 'ms');
+
+  const t1 = Date.now();
+  const result = await esbuild.build({
+    entryPoints: [ROOT + '/src/app.ts'],
+    bundle: true,
+    format: 'cjs',
+    target: 'es2020',
+    write: false,
+    plugins: [vfsPlugin()],
+  });
+  const code = result.outputFiles[0].text;
+  fs.mkdirSync(ROOT + '/dist', { recursive: true });
+  fs.writeFileSync(ROOT + '/dist/app.js', code);
+  console.log('bundle      : ' + code.length + ' bytes in ' + (Date.now() - t1) + 'ms');
+  console.log('written     : /project/dist/app.js');
+  console.log('');
+  console.log(code.trim());
+})().catch(function (err) {
+  console.log('build failed : ' + err.message);
+});
+`,
+
   '/project/notes.md': `# web-node demo project
 
 This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
@@ -277,6 +397,10 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - **npm client (milestone 4)** — "Install deps" fetches the dependencies declared in
   package.json from the registry, gunzips + untars them into the virtual node_modules
   (npm-style hoisting, nesting on version conflicts), after which require('ms') just works
+- **Build tools (milestone 5)** — "Build" runs esbuild (the WASM build, the same
+  transformer Vite uses) inside the tab: it compiles src/app.ts, bundles a real
+  node_modules dependency, and writes /project/dist/app.js. The browser field in
+  package.json is honoured, which is what lets esbuild resolve to its browser build
 - CommonJS + a subset of ESM (static import/export)
 - In-memory VFS persisted to OPFS (reload the page and your files are still here)
 
@@ -286,6 +410,6 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - Real TLS (the https module is the http surface under a TLS-shaped name)
 - Object-mode objectMode edge cases, byte-exact read(n) splitting
 - npm lifecycle scripts, .bin shims, peer-dependency auto-install, lockfile, integrity checks
-- Real build tools (milestone 5)
+- Vite/webpack themselves (esbuild is milestone 5; a full dev server is next)
 `,
 };

@@ -98,6 +98,23 @@ ms(60000); // '1m'
 
 未支持：生命周期脚本、`.bin` shim、peer 依赖自动安装、lockfile 读写、integrity 校验。
 
+## 构建工具（M5）
+
+点顶栏 **▦ Build**：在标签页里跑 **esbuild 的官方 WASM 构建**（就是 Vite 内部用的那个转换器）。
+它会 `require('esbuild-wasm')`（靠 `browser` 字段解析到自包含的浏览器构建）、用 VFS 里的
+`esbuild.wasm` 初始化、再用一个 VFS 插件打包 `src/app.ts`（TypeScript + 真实 `node_modules`
+依赖），写回 `/project/dist/app.js`。
+
+```
+tool        : esbuild-wasm v0.28.2 (13.3 MB wasm)
+wasm        : compiled + service started in 37ms
+bundle      : 5138 bytes in 116ms
+written     : /project/dist/app.js
+```
+
+为支持它顺带补齐了：`package.json` 的 **`browser` 字段**（字符串/对象形式，`false` → 空模块）和
+模块级 **`require.resolve()`**。Vite / webpack 本体是下一步（M5b）。
+
 ## 里程碑
 
 | 里程碑 | 内容 | 状态 |
@@ -111,7 +128,8 @@ ms(60000); // '1m'
 | M3.5b | 浏览器侧真流式（SW 直转 ReadableStream） | ✅ |
 | M3.5c | https（http 同名壳） | ✅ |
 | M3.5d | 子域名路由（`<port>.localhost`） | ⏸ 暂缓（跨源 runtime/OPFS） |
-| M5 | 真实构建工具（vite / webpack） | ⬜ |
+| M5 | 真实构建工具 —— esbuild WASM：安装→初始化→打包→写回 | ✅ |
+| M5b | Vite / webpack 本体 | ⬜ 下一步 |
 
 ## 改动约定
 

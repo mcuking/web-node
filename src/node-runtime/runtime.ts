@@ -22,6 +22,45 @@ const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
 const nativeSetInterval = globalThis.setInterval.bind(globalThis);
 const nativeClearInterval = globalThis.clearInterval.bind(globalThis);
 
+/**
+ * Browser/worker globals mirrored onto the sandbox object so that user code
+ * (and bundled libraries) can reach them through `globalThis.X`. Copied only
+ * when the host defines them, so this stays a no-op under Node/Vitest.
+ */
+const HOST_GLOBALS = [
+  'crypto',
+  'performance',
+  'WebAssembly',
+  'TextEncoder',
+  'TextDecoder',
+  'URL',
+  'URLSearchParams',
+  'Blob',
+  'File',
+  'FormData',
+  'Headers',
+  'Request',
+  'Response',
+  'fetch',
+  'WebSocket',
+  'Worker',
+  'MessageChannel',
+  'MessagePort',
+  'BroadcastChannel',
+  'structuredClone',
+  'atob',
+  'btoa',
+  'AbortController',
+  'AbortSignal',
+  'Event',
+  'EventTarget',
+  'location',
+  'navigator',
+  'self',
+  'origin',
+  'caches',
+];
+
 export interface RuntimeOptions {
   vfs: Vfs;
   argv?: string[];
@@ -142,6 +181,18 @@ export class NodeRuntime {
     };
     sandboxGlobal.global = sandboxGlobal;
     sandboxGlobal.globalThis = sandboxGlobal;
+    // Because `globalThis` inside user modules is the sandbox object, the
+    // browser/worker globals a tab legitimately has (and that libraries like
+    // esbuild-wasm reach through `globalThis.X`) must be mirrored onto it.
+    // Node's own global has none of these; only copy what the host provides.
+    for (const name of HOST_GLOBALS) {
+      const value = (globalThis as unknown as Record<string, unknown>)[name];
+      if (value !== undefined) sandboxGlobal[name] = value;
+    }
+    // `self` only exists in a browser/worker host; browser-targeted libraries
+    // rely on it. Under Node (tests) alias it to the real global so those
+    // libraries still find crypto/performance/TextEncoder through it.
+    if (sandboxGlobal.self === undefined) sandboxGlobal.self = globalThis;
     this.loader.setGlobals(sandboxGlobal);
     this.sandboxGlobals = sandboxGlobal;
 

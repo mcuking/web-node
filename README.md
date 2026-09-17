@@ -46,6 +46,11 @@ top of it sit three virtual subsystems:
 - **npm client** — resolves `package.json` ranges against the registry, downloads
   and unpacks tarballs (gzip + tar) into the virtual `node_modules` with npm-style
   hoisting, so `require('pkg')` works with no server.
+- **Build tools** — esbuild (the official WASM build, the same transformer Vite
+  uses) runs inside the tab: it compiles TypeScript, bundles a real `node_modules`
+  dependency and writes `/project/dist/app.js`. The `browser` field in
+  `package.json` is honoured, which is what lets a Node-only `main` resolve to a
+  package's browser build.
 
 ## Development
 
@@ -153,6 +158,27 @@ ms(60000); // '1m'
 Not yet: lifecycle scripts, `.bin` shims, peer-dependency auto-install, lockfile
 read/write and integrity verification.
 
+## Build tools (M5)
+
+Hit **Build** and the real esbuild — its official WASM build, the same
+transformer Vite uses internally — runs inside the tab. It `require`s
+`esbuild-wasm` (resolved to the self-contained browser build through the
+`browser` field), initializes from the `esbuild.wasm` in the virtual file
+system, then bundles `src/app.ts` (TypeScript plus a real `node_modules`
+dependency) through a VFS plugin and writes `/project/dist/app.js`:
+
+```
+tool        : esbuild-wasm v0.28.2 (13.3 MB wasm)
+wasm        : compiled + service started in 37ms
+bundle      : 5138 bytes in 116ms
+written     : /project/dist/app.js
+```
+
+Two runtime features were added to make this work: the `package.json`
+**`browser` field** (string and object forms, `false` → empty module) and a
+module-level **`require.resolve()`**. Vite / webpack themselves are the next
+step (M5b).
+
 ## Roadmap
 
 | Milestone | Scope | Status |
@@ -166,7 +192,8 @@ read/write and integrity verification.
 | M3.5b | Real browser-side streaming (SW relays a `ReadableStream`) | ✅ Done |
 | M3.5c | `https` (the `http` surface under a TLS-shaped name) | ✅ Done |
 | M3.5d | Subdomain routing (`<port>.localhost`) | ⏸ Deferred (cross-origin runtime/OPFS) |
-| M5 | Real build tools (Vite / webpack) | ⬜ Not started |
+| M5 | Real build tool — esbuild WASM: install, initialize, bundle, write back | ✅ Done |
+| M5b | Vite / webpack themselves | ⬜ Next |
 
 ## Contributing
 
