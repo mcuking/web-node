@@ -317,6 +317,65 @@ describe('http keep-alive (persistent connections)', () => {
     expect(firstPort).toBeDefined();
     expect(secondPort).toBe(firstPort);
   });
+  it('answers a handler that throws with 500 and keeps the connection usable', async () => {
+    const { runtime, run } = boot({
+      '/project/index.js': `
+        const http = require('http');
+        const server = http.createServer((req, res) => {
+          if (req.url === '/boom') throw new Error('kaboom');
+          res.setHeader('content-type', 'text/plain');
+          res.end('path:' + req.url);
+        });
+        server.listen(3013);
+      `,
+    });
+    run();
+    await tick();
+
+    const http = runtime.realm.require('http') as unknown as HttpModule;
+    const boom = await http._request(3013, { path: '/boom' });
+    expect(boom.status).toBe(500);
+
+    // The throw must not wedge the keep-alive connection: the next request on
+    // the pooled socket still gets served.
+    const ok = await http._request(3013, { path: '/after' });
+    expect(ok.status).toBe(200);
+    expect(decoder.decode(ok.body)).toBe('path:/after');
+  });
+
+  it('surfaces a throw after bytes were flushed as an error, not a hang', async () => {
+    const { runtime, run } = boot({
+      '/project/index.js': `
+        const http = require('http');
+        const server = http.createServer((req, res) => {
+          if (req.url === '/half') {
+            res.writeHead(200, { 'content-type': 'text/plain' });
+            res.write('partial');
+            throw new Error('late boom');
+          }
+          res.setHeader('content-type', 'text/plain');
+          res.end('path:' + req.url);
+        });
+        server.listen(3014);
+      `,
+    });
+    run();
+    await tick();
+
+    const http = runtime.realm.require('http') as unknown as HttpModule;
+    let failed = '';
+    try {
+      await http._request(3014, { path: '/half' });
+    } catch (err) {
+      failed = (err as Error).message;
+    }
+    expect(failed).toMatch(/hang up|closed|destroyed/i);
+
+    // A fresh connection still works after the damage.
+    const ok = await http._request(3014, { path: '/after' });
+    expect(ok.status).toBe(200);
+    expect(decoder.decode(ok.body)).toBe('path:/after');
+  });
 });
 
 describe('https (http surface, no TLS in the virtual network)', () => {

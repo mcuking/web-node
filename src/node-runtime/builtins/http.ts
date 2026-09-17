@@ -574,6 +574,25 @@ export const httpSpec: BuiltinSpec = {
       get _bodyLength(): number {
         return this.#bodyLength;
       }
+
+      /**
+       * @internal — Best-effort error reply for a handler that threw.
+       *
+       * If nothing has reached the socket yet the status line and headers can
+       * still be replaced, so we answer `status` (default 500) and the
+       * connection stays usable. Once bytes are on the wire that is impossible:
+       * we report failure and let the caller tear the socket down.
+       */
+      _fail(status = 500): boolean {
+        if (this.#flushed) return false;
+        this.statusCode = status;
+        this.statusMessage = undefined;
+        this.#headers = new Map([['content-type', 'text/plain; charset=utf-8']]);
+        this.#chunked = false;
+        this.#bodyLength = 0;
+        this.end('Internal Server Error');
+        return true;
+      }
     }
 
     // -- Server ---------------------------------------------------------------
@@ -626,7 +645,16 @@ export const httpSpec: BuiltinSpec = {
                   if (leftover.length > 0) reader.push(leftover);
                 });
               };
-              this.emit('request', request, response);
+              // A synchronous throw in a request handler must not wedge the
+              // connection: answer 500 (or drop the socket if the response had
+              // already started) so the client gets a reply instead of hanging
+              // until its timeout.
+              try {
+                this.emit('request', request, response);
+              } catch (err) {
+                if (!response._fail(500)) socket.destroy();
+                void err;
+              }
             },
             (chunk) => req?._pushBody(chunk),
             () => {
@@ -689,7 +717,15 @@ export const httpSpec: BuiltinSpec = {
           this.destroy();
           handlers?.onError(err);
         });
-        socket.onClose(() => this.destroy());
+        socket.onClose(() => {
+          // A close while a response is still pending (no `onEnd` yet) means the
+          // server dropped the connection mid-response: surface it as an error
+          // instead of leaving the caller to hang until its own timeout.
+          const handlers = this.current;
+          this.current = null;
+          this.destroy();
+          handlers?.onError(new Error('socket hang up'));
+        });
       }
 
       /** Swap in a fresh reader (optionally primed with raced-ahead bytes). */
