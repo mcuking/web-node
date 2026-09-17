@@ -6,6 +6,10 @@
  * store (memory-only / OPFS-backed / remote) without touching bindings.
  */
 
+import type { PathLike } from './posix';
+
+export type { PathLike };
+
 export type NodeType = 'file' | 'dir';
 
 export interface Stat {
@@ -125,5 +129,5 @@ export interface Vfs {
   chmod(path: string, mode: number): void;
 
   /** Resolve a (possibly relative) path against the current working directory. */
-  resolve(p: string): string;
+  resolve(p: PathLike): string;
 }

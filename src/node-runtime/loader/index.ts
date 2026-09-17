@@ -1,7 +1,7 @@
 import type { Realm } from '../realm';
 import type { Vfs } from '../vfs';
 import * as p from '../vfs/posix';
-import { transformEsmToCjs } from './esm-transform';
+import { transformEsmToCjs, EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING } from './esm-transform';
 import { notImplemented } from '../errors';
 
 const USER_CJS_PARAMS = ['exports', 'require', 'module', '__filename', '__dirname'] as const;
@@ -15,11 +15,25 @@ const EXTENSIONS = ['', '.js', '.cjs', '.mjs', '.json'];
 export const EMPTY_MODULE = '\u0000web-node:empty';
 
 interface PackageJson {
+  name?: string;
   main?: string;
   module?: string;
   browser?: string | Record<string, string | false>;
   type?: string;
   exports?: unknown;
+}
+
+type Condition = 'import' | 'require';
+
+/**
+ * Package `exports` resolution conditions.
+ *
+ * We emulate Node, so `node` is included; `browser` is deliberately omitted so
+ * resolution stays deterministic (DOM-targeted builds are reached through the
+ * `browser` *field* when a package declares one).
+ */
+function conditionsFor(condition: Condition): string[] {
+  return condition === 'import' ? ['node', 'import', 'default'] : ['node', 'require', 'default'];
 }
 
 interface UserModule {
@@ -34,6 +48,7 @@ export class ModuleLoader {
   #cache = new Map<string, UserModule>();
   /** Extra names injected into every user module's scope (a sandbox global). */
   #globals: Record<string, unknown>;
+  #aliases: Record<string, string>;
   #globalNames!: string[];
   #globalValues!: unknown[];
   #paramNames!: string[];
@@ -42,12 +57,46 @@ export class ModuleLoader {
     this.#realm = realm;
     this.#vfs = vfs;
     this.#globals = globals;
+    this.#aliases = {};
     this.#syncGlobals();
   }
 
   setGlobals(globals: Record<string, unknown>): void {
     this.#globals = globals;
     this.#syncGlobals();
+  }
+
+  /**
+   * Replace one package with another at resolution time, e.g.
+   * `{ rollup: '@rollup/wasm-node', esbuild: 'esbuild-wasm' }`.
+   *
+   * This is how a native-binary dependency is swapped for its WASM/browser
+   * counterpart without touching the installed tree — the same trick bundler
+   * ports use. Subpaths are rewritten too (`rollup/parseAst` →
+   * `@rollup/wasm-node/parseAst`).
+   */
+  setAliases(aliases: Record<string, string>): void {
+    this.#aliases = { ...aliases };
+  }
+
+  get aliases(): Record<string, string> {
+    return { ...this.#aliases };
+  }
+
+  /** Apply the alias map to a bare specifier, if one matches. */
+  #applyAlias(request: string): string {
+    if (request.startsWith('.') || p.isAbsolute(request)) return request;
+    const exact = this.#aliases[request];
+    if (exact) return exact;
+    const slash = request.indexOf('/');
+    // scoped package: keep `@scope/name` together when splitting
+    const nameEnd = request.startsWith('@') ? request.indexOf('/', slash + 1) : slash;
+    if (nameEnd > 0) {
+      const head = request.slice(0, nameEnd);
+      const replacement = this.#aliases[head];
+      if (replacement) return replacement + request.slice(nameEnd);
+    }
+    return request;
   }
 
   /**
@@ -78,7 +127,8 @@ export class ModuleLoader {
   }
 
   /** Node's require resolution order, reduced to what the VFS supports. */
-  resolve(request: string, fromDir: string): string {
+  resolve(request: string, fromDir: string, condition: Condition = 'require'): string {
+    request = this.#applyAlias(request);
     if (request.startsWith('.') || p.isAbsolute(request)) {
       const base = p.resolve(fromDir, request);
       const found = this.#tryFileOrDir(base);
@@ -90,11 +140,119 @@ export class ModuleLoader {
     const parts = p.segments(fromDir);
     for (let i = parts.length; i >= 0; i--) {
       const nmDir = '/' + parts.slice(0, i).concat('node_modules').join('/');
-      const candidate = p.join(nmDir, request);
-      const found = this.#tryFileOrDir(candidate);
+      const found = this.#resolveInNodeModules(nmDir, request, condition);
       if (found) return found;
     }
     throw Object.assign(new Error(`Cannot find module '${request}' from '${fromDir}'`), { code: 'MODULE_NOT_FOUND' });
+  }
+
+  /** Resolve `request` inside `nmDir` (a `node_modules` directory), if present. */
+  #resolveInNodeModules(nmDir: string, request: string, condition: Condition): string | null {
+    // Split `@scope/name/rest` into the package name and the subpath.
+    const isScoped = request.startsWith('@');
+    const firstSlash = request.indexOf('/');
+    let nameEnd: number;
+    if (isScoped) {
+      // `@scope/name` needs its second slash; without one the whole id is the name.
+      nameEnd = firstSlash < 0 ? -1 : request.indexOf('/', firstSlash + 1);
+    } else {
+      nameEnd = firstSlash;
+    }
+    const pkgName = nameEnd < 0 ? request : request.slice(0, nameEnd);
+    const subpath = nameEnd < 0 ? '' : request.slice(nameEnd + 1);
+    if (pkgName === '') return null;
+
+    const pkgDir = p.join(nmDir, pkgName);
+    if (!this.#vfs.exists(pkgDir) || this.#vfs.stat(pkgDir).type !== 'dir') return null;
+    const json = this.#packageJson(pkgDir);
+
+    // `exports` takes precedence over `main` whenever it is present.
+    if (json?.exports !== undefined) {
+      const target = this.#resolveExports(json.exports, pkgDir, subpath, conditionsFor(condition));
+      if (target) {
+        const found = this.#tryFileOrDir(target);
+        if (found) return found;
+      }
+      // A package with `exports` is *sealed*: Node does not fall back to `main`
+      // for an unmatched subpath. But being permissive here is more useful than
+      // failing, so we still try the direct path below.
+    }
+
+    if (subpath === '') {
+      if (json) {
+        const entry = this.#packageEntry(pkgDir, json);
+        if (entry) return entry;
+      }
+      return this.#tryFileOrDir(pkgDir);
+    }
+    return this.#tryFileOrDir(p.join(pkgDir, subpath));
+  }
+
+  /**
+   * Resolve a package's `exports` field for a subpath (`''` = the root `.`).
+   *
+   * Supports the shapes real packages use: a bare string, an array of
+   * fallbacks, a conditions object (`{ import, require, default }`) and a
+   * subpath map (`{ '.': …, './runtime': …, './dist/*': … }`) with `*` patterns.
+   */
+  #resolveExports(field: unknown, pkgDir: string, subpath: string, conditions: string[]): string | null {
+    const target = subpath === '' ? '.' : './' + subpath;
+    const hit = this.#walkExports(field, target, conditions);
+    return hit ? p.join(pkgDir, hit) : null;
+  }
+
+  #walkExports(node: unknown, target: string, conditions: string[]): string | null {
+    if (typeof node === 'string') {
+      return node.startsWith('./') ? node : null;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const hit = this.#walkExports(item, target, conditions);
+        if (hit) return hit;
+      }
+      return null;
+    }
+    if (node && typeof node === 'object') {
+      const obj = node as Record<string, unknown>;
+      const keys = Object.keys(obj);
+      const isSubpathMap = keys.some((k) => k.startsWith('.'));
+      if (isSubpathMap) {
+        // Longest matching key wins; `*` captures the rest.
+        let bestKey: string | null = null;
+        let bestStar = '';
+        for (const key of keys) {
+          if (!key.startsWith('.')) continue;
+          if (key === target) {
+            bestKey = key;
+            bestStar = '';
+            break;
+          }
+          const star = key.indexOf('*');
+          if (star >= 0) {
+            const prefix = key.slice(0, star);
+            const suffix = key.slice(star + 1);
+            if (target.startsWith(prefix) && target.endsWith(suffix) && target.length >= key.length - 1) {
+              if (!bestKey || key.length > bestKey.length) {
+                bestKey = key;
+                bestStar = target.slice(prefix.length, target.length - suffix.length);
+              }
+            }
+          }
+        }
+        if (!bestKey) return null;
+        const value = this.#walkExports(obj[bestKey], target, conditions);
+        return value && bestStar !== '' ? value.split('*').join(bestStar) : value;
+      }
+      // conditions object
+      for (const condition of conditions) {
+        if (Object.prototype.hasOwnProperty.call(obj, condition)) {
+          const hit = this.#walkExports(obj[condition], target, conditions);
+          if (hit) return hit;
+        }
+      }
+      return null;
+    }
+    return null;
   }
 
   /** Read and parse the `package.json` in `dir`, if any. */
@@ -222,7 +380,7 @@ export class ModuleLoader {
   }
 
   /** Public require facade: builtins first, then VFS modules. */
-  require = (fromFile: string, request: string): unknown => {
+  require = (fromFile: string, request: string, condition: Condition = 'require'): unknown => {
     if (typeof request !== 'string') {
       throw new TypeError(`The "id" argument must be of type string. Received ${typeof request}`);
     }
@@ -237,7 +395,7 @@ export class ModuleLoader {
       throw notImplemented('module', request, 'Only whitelisted core modules are exposed.');
     }
     const fromDir = p.dirname(fromFile);
-    const resolved = this.resolve(request, fromDir);
+    const resolved = this.resolve(request, fromDir, condition);
     return this.loadModule(resolved);
   };
 
@@ -262,31 +420,49 @@ export class ModuleLoader {
     const code = isEsm ? transformEsmToCjs(source, `file://${absPath}`).code : source;
     const dirname = p.dirname(absPath);
 
+    // Real ESM has no `__filename`/`__dirname`/`require`/`exports` in scope, and
+    // modules routinely declare their own (`const require = createRequire(...)`,
+    // `const __filename = fileURLToPath(import.meta.url)`, as Vite's chunks do).
+    // So ESM gets only the prefixed bindings the transform emits; CJS keeps the
+    // Node-shaped parameter list.
+    const params = isEsm
+      ? [EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING, ...this.#globalNames]
+      : this.#paramNames;
+
     let fn: (...args: unknown[]) => void;
     try {
       // eslint-disable-next-line no-new-func
-      fn = new Function(...this.#paramNames, code) as unknown as (...args: unknown[]) => void;
+      fn = new Function(...params, code) as unknown as (...args: unknown[]) => void;
     } catch (err) {
       this.#cache.delete(absPath);
       throw new Error(`Failed to compile ${absPath}: ${err instanceof Error ? err.message : String(err)}`);
     }
-
     const moduleObj = { exports: mod.exports };
+    // ESM files resolve their imports under the `import` condition so that
+    // `exports` maps (`{ import, require }`) pick the right entry.
+    const reqCondition: Condition = isEsm ? 'import' : 'require';
     const requireFn = Object.assign(
-      (request: string) => this.require(absPath, request),
+      (request: string) => this.require(absPath, request, reqCondition),
       {
         resolve: (request: string, options?: { paths?: string[] }): string => {
           const fromDir = options?.paths?.[0] ?? dirname;
           const remapped = this.#browserRemap(request, absPath);
-          return this.resolve(remapped && remapped !== EMPTY_MODULE ? remapped : request, fromDir);
+          return this.resolve(remapped && remapped !== EMPTY_MODULE ? remapped : request, fromDir, reqCondition);
         },
       },
     );
     const globalValues = this.#globalValues;
+    // Dynamic `import()` resolves relative to the importing module and always
+    // uses the `import` condition, like real ESM.
+    const dynamicImport = (specifier: string): Promise<unknown> =>
+      Promise.resolve().then(() => this.require(absPath, specifier, 'import'));
     try {
-      fn(moduleObj.exports, requireFn, moduleObj, absPath, dirname, ...globalValues);
+      if (isEsm) fn(moduleObj.exports, requireFn, dynamicImport, ...globalValues);
+      else fn(moduleObj.exports, requireFn, moduleObj, absPath, dirname, ...globalValues);
     } catch (err) {
       this.#cache.delete(absPath);
+      // eslint-disable-next-line no-console
+      if ((globalThis as { __WN_DEBUG__?: boolean }).__WN_DEBUG__) console.error('load error in', absPath, err);
       throw err;
     }
 

@@ -138,12 +138,27 @@ describe('NodeRuntime — core', () => {
     expect(stdout).toBe('value 42 b.js\n');
   });
 
-  it('emits a loud error for unimplemented modules', () => {
+  it('emits a loud error for modules outside the whitelist', () => {
     const { error } = run({
-      '/project/index.js': `const crypto = require('crypto');`,
+      '/project/index.js': `require('cluster');`,
     });
     expect(error).toBeInstanceOf(Error);
-    expect(String((error as Error).message)).toContain('crypto');
+    expect(String((error as Error).message)).toContain('cluster');
+  });
+
+  it('loads stub modules for side-effect imports but throws when used', () => {
+    // Bundlers do `import 'node:tty'` purely to keep the dependency; that must
+    // not explode. Actually *calling* the unsupported API must.
+    const { stdout, error } = run({
+      '/project/index.js': `
+        const tty = require('tty');
+        const dns = require('dns');
+        console.log('isatty', tty.isatty(1));
+        try { dns.lookup('example.com'); } catch (e) { console.log('threw', /dns\.lookup/.test(e.message)); }
+      `,
+    });
+    expect(error).toBeNull();
+    expect(stdout).toBe('isatty false\nthrew true\n');
   });
 
   it('exposes an internalBinding table covering the whitelist', () => {

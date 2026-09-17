@@ -12,7 +12,9 @@ import { eventsSpec } from './events';
 import { fsSpec } from './fs';
 import { fsPromisesSpec } from './fs-promises';
 import { perfHooksSpec } from './perf-hooks';
+import { cryptoSpec } from './crypto';
 import { urlSpec } from './url';
+import { unsupportedSpecs } from './unsupported';
 import { utilSpec } from './util';
 import { consoleSpec } from './console';
 import { timersSpec } from './timers';
@@ -55,6 +57,8 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   fsPromisesSpec,
   perfHooksSpec,
   urlSpec,
+  cryptoSpec,
+  ...unsupportedSpecs,
   httpSpec,
   httpsSpec,
 ];

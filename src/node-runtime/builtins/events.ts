@@ -154,6 +154,19 @@ export const eventsSpec: BuiltinSpec = {
     Object.defineProperty(EventEmitter.prototype, 'kCapture', { value: Symbol.for('nodejs.kCapture') });
     void kRejection;
 
-    return { EventEmitter, default: EventEmitter, once: EventEmitter.once, on: EventEmitter.on, getEventListeners: EventEmitter.getEventListeners, listenerCount: EventEmitter.listenerCount, errorMonitor, captureRejectionSymbol: kRejection, EventEmitterAsyncResource: EventEmitter };
+    // Node's `events` module *is* the EventEmitter constructor, with the named
+    // exports hung off it as properties (`module.exports = EventEmitter`).
+    // Bundled code does `import EventEmitter from 'events'` and then
+    // `class X extends EventEmitter`, so the module value must be callable.
+    const mod = EventEmitter as unknown as Record<string, unknown>;
+    mod.EventEmitter = EventEmitter;
+    mod.default = EventEmitter;
+    mod.once = EventEmitter.once;
+    mod.on = EventEmitter.on;
+    mod.getEventListeners = EventEmitter.getEventListeners;
+    mod.listenerCount = EventEmitter.listenerCount;
+    mod.captureRejectionSymbol = kRejection;
+    mod.EventEmitterAsyncResource = EventEmitter;
+    return mod;
   },
 };

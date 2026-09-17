@@ -385,7 +385,11 @@ export const fsSpec: BuiltinSpec = {
         binding.readSync(fd, b, o, l, p),
       writeSync: (fd: number, b: Uint8Array, o = 0, l = b.byteLength - o, p: number | null = null) =>
         binding.writeSync(fd, b, o, l, p),
-      realpathSync: (p: string) => binding.realpathSync(p),
+      // Node exposes `fs.realpathSync.native` (a faster C++ path). Bundlers
+      // feature-detect it (`fs.realpathSync.native ?? fs.realpathSync`).
+      realpathSync: Object.assign((p: string) => binding.realpathSync(p), {
+        native: (p: string) => binding.realpathSync(p),
+      }),
       readFile: (p: string, o: unknown, c?: (e: Error | null, d?: unknown) => void) => {
         const callback = typeof o === 'function' ? (o as (e: Error | null, d?: unknown) => void) : c!;
         const options = typeof o === 'function' ? undefined : o;

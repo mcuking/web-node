@@ -1,6 +1,26 @@
 // Minimal POSIX path helpers used by the VFS and the loader.
 // Deliberately independent of the user-facing `path` builtin to avoid cycles.
 
+/** Node's `PathLike`: most path-taking APIs accept a string, a `file:` URL or a Buffer. */
+export type PathLike = string | URL | Uint8Array;
+
+/**
+ * Coerce a Node `PathLike` argument to a VFS path string. Real tooling calls
+ * `fs.readFileSync(fileURLToPath(import.meta.url))` and `fs.readFileSync(new URL(...))`
+ * interchangeably, so the VFS funnels every path through this before resolving.
+ */
+export function toPathValue(value: PathLike): string {
+  if (typeof value === 'string') return value;
+  if (value instanceof URL) {
+    if (value.protocol !== 'file:') {
+      throw new TypeError(`The URL must be of scheme file, received '${value.protocol}'`);
+    }
+    return decodeURIComponent(value.pathname);
+  }
+  if (value instanceof Uint8Array) return new TextDecoder().decode(value);
+  throw new TypeError('The "path" argument must be of type string or an instance of Buffer or URL');
+}
+
 export function normalize(path: string): string {
   if (path.length === 0) return '.';
   const isAbsolute = path.charCodeAt(0) === 47;
