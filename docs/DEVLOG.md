@@ -115,6 +115,16 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-17 · README 英文化 + 仓库转公开
+
+- **改了什么**：
+  - 中文 README 改为 `README_zh.md`（`git mv` 保留历史），新建英文 `README.md` 作为默认首页。
+  - 英文 README 新增「How it works」架构图、「Networking」/「Streams」/「Roadmap」/「Contributing」等章节，顶部加语言切换（English · 简体中文）。
+  - 顶部两份 README 互相链接；中文版同样补充语言切换行。
+- **为什么**：对外公开仓库需要英文门面；中文内容保留给团队。
+- **涉及文件**：`README.md`（新，英文）、`README_zh.md`（由 `README.md` 改名）。
+- **另**：GitHub 仓库由 private 转为 public（仓库设置，不改代码）。
+
 ### 2026-09-17 · stream 前置：`stream` 模块 + `fs`/`http` 流 + chunked
 
 - **交付**：`req.pipe(res)`、`fs.createReadStream(...).pipe(...)`、`res.write()` 流式响应都能用了；响应无 `Content-Length` 时按 `Transfer-Encoding: chunked` 分帧，客户端会再解码回来。
