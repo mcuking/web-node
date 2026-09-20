@@ -122,6 +122,12 @@ interface WritableState {
   closed: boolean;
   destroyed: boolean;
   error: Error | null;
+  /** `stream.writable` — false once the writable side is disabled. */
+  writable: boolean;
+  /** `'error'` has been emitted (Node's `_writableState.errorEmitted`). */
+  errorEmitted: boolean;
+  /** `'finish'` has been emitted (Node's kFinished bit). */
+  finishEmitted: boolean;
 }
 
 /**
@@ -195,6 +201,41 @@ function initWritable(
     closed: false,
     destroyed: false,
     error: null,
+    writable: true,
+    errorEmitted: false,
+    finishEmitted: false,
+  });
+  // Node-compatible, stable view over the writable half, read by
+  // `internal/streams/utils` (mirrors `Readable#_readableState`).
+  const s = W_STATE.get(self) as WritableState;
+  const view: Record<string, unknown> = {};
+  const def = (key: string, get: () => unknown): void => {
+    Object.defineProperty(view, key, { get, enumerable: true });
+  };
+  def('objectMode', () => s.objectMode);
+  def('highWaterMark', () => s.hwm);
+  def('length', () => s.length);
+  def('buffer', () => s.buffer.map((item) => item.chunk));
+  def('writing', () => s.writing);
+  def('corked', () => s.corked);
+  def('ended', () => s.ending || s.ended);
+  def('ending', () => s.ending);
+  def('finished', () => s.finishEmitted);
+  def('destroyed', () => s.destroyed);
+  def('closed', () => s.closed);
+  def('errored', () => s.error);
+  def('errorEmitted', () => s.errorEmitted);
+  def('needDrain', () => s.needDrain);
+  def('autoDestroy', () => s.autoDestroy);
+  def('emitClose', () => true);
+  def('writable', () => s.writable);
+  def('defaultEncoding', () => 'utf8');
+  Object.defineProperty(view, 'getBuffer', { value: () => s.buffer.map((item) => item.chunk) });
+  Object.defineProperty(self, '_writableState', {
+    value: view,
+    writable: true,
+    configurable: true,
+    enumerable: false,
   });
   // A Duplex reaches here with a registry already created by Readable; a plain
   // Writable gets one now, with its readable half marked done from the start.
@@ -222,7 +263,14 @@ export const streamSpec: BuiltinSpec = {
   id: 'stream',
   aliases: ['node:stream'],
   origin: 'web-node',
-  deps: ['events', 'buffer', 'internal/errors', 'internal/streams/state', 'internal/streams/from'],
+  deps: [
+    'events',
+    'buffer',
+    'internal/errors',
+    'internal/streams/state',
+    'internal/streams/from',
+    'internal/streams/utils',
+  ],
   init: (ctx: BuiltinInitContext) => {
     const { EventEmitter } = ctx.require('events') as { EventEmitter: new () => EmitterLike };
     const { getHighWaterMark, getDefaultHighWaterMark, setDefaultHighWaterMark } = ctx.require(
@@ -264,6 +312,16 @@ export const streamSpec: BuiltinSpec = {
       opts?: unknown,
     ) => AnyChunk;
 
+    // `stream.isReadable/isWritable/isDisturbed/isErrored` are Node's own
+    // predicates (vendor/node-lib/internal/streams/utils.js). They read the
+    // `_readableState`/`_writableState` views defined below.
+    const streamUtils = ctx.require('internal/streams/utils') as {
+      isReadable: (s: unknown) => boolean | null;
+      isWritable: (s: unknown) => boolean | null;
+      isDisturbed: (s: unknown) => boolean;
+      isErrored: (s: unknown) => boolean;
+    };
+
     /** Byte-mode chunks reach consumers as Buffers, as they do in Node. */
     const toBuffer = (chunk: AnyChunk): AnyChunk => {
       if (chunk instanceof Buffer_) return chunk;
@@ -280,7 +338,21 @@ export const streamSpec: BuiltinSpec = {
     // ======================= Readable ======================================
 
     class Readable extends (EventEmitter as new () => EmitterLike) {
-      readable = true;
+      /**
+       * Node exposes `readable` and `_readableState` as accessors over the
+       * stream state, not as plain fields: `readable` goes false once the
+       * stream is destroyed / errored / has ended, and `_readableState` is a
+       * *stable* object (identity is preserved) that the
+       * `internal/streams/utils` predicates read.
+       */
+      #readableFlag = true;
+      #readableStateView: Record<string, unknown> | null = null;
+      /** A chunk has been handed to a consumer (`readableDidRead`). */
+      #dataEmitted = false;
+      /** The error that destroyed the stream, or null. */
+      #errored: Error | null = null;
+      /** `'error'` has been emitted. */
+      #errorEmitted = false;
 
       #buffer: AnyChunk[] = [];
       #length = 0;
@@ -330,6 +402,53 @@ export const streamSpec: BuiltinSpec = {
         });
       }
 
+      get readable(): boolean {
+        // Node: `state.readable !== false && !destroyed && !errorEmitted &&
+        // !endEmitted` (the state keeps `readable` true after `end`; only the
+        // deprecated setter / a disabled Duplex half makes it false).
+        return this.#readableFlag && !this.#destroyed && !this.#errorEmitted && !this.#endEmitted;
+      }
+      set readable(value: boolean) {
+        this.#readableFlag = !!value;
+      }
+
+      /**
+       * Node-compatible view over the readable half, read by
+       * `internal/streams/utils`. Properties are live getters (reads only) and
+       * the object identity is stable within one stream.
+       */
+      get _readableState(): Record<string, unknown> {
+        const existing = this.#readableStateView;
+        if (existing) return existing;
+        const view: Record<string, unknown> = {};
+        const def = (key: string, get: () => unknown): void => {
+          Object.defineProperty(view, key, { get, enumerable: true });
+        };
+        def('objectMode', () => this.#objectMode);
+        def('highWaterMark', () => this.#hwm);
+        def('buffer', () => this.#buffer);
+        def('length', () => this.#length);
+        def('pipes', () => this.#piped);
+        def('flowing', () => this.readableFlowing);
+        def('reading', () => this.#reading);
+        def('ended', () => this.#ended);
+        def('endEmitted', () => this.#endEmitted);
+        def('destroyed', () => this.#destroyed);
+        def('closed', () => this.#closed);
+        def('errored', () => this.#errored);
+        def('errorEmitted', () => this.#errorEmitted);
+        def('dataEmitted', () => this.#dataEmitted);
+        // Only an explicitly disabled half makes `state.readable` false; destroy
+        // and error leave it alone (Node leaves this `undefined` on a plain
+        // Readable, which is `!== false`, so `true` is equivalent here).
+        def('readable', () => this.#readableFlag);
+        def('autoDestroy', () => this.#autoDestroy);
+        def('emitClose', () => true);
+        def('defaultEncoding', () => 'utf8');
+        this.#readableStateView = view;
+        return view;
+      }
+
       /** Mark destroyed and emit `close` once, without re-entering `_destroy`. */
       #softClose(): void {
         if (this.#closed) return;
@@ -360,13 +479,54 @@ export const streamSpec: BuiltinSpec = {
       get readableEnded(): boolean {
         return this.#endEmitted;
       }
+      get readableEncoding(): string | null {
+        return this.#encoding;
+      }
+      /** `_readableState.buffer` — the buffered chunks, as in Node. */
+      get readableBuffer(): AnyChunk[] {
+        return this.#buffer;
+      }
+      /** True once a chunk has reached a consumer (`data` or `read()`). */
+      get readableDidRead(): boolean {
+        return this.#dataEmitted;
+      }
+      /** Destroyed/errored before `end` — what `isDisturbed` keys off. */
+      get readableAborted(): boolean {
+        return !!(this.#readableFlag && (this.#destroyed || this.#errored !== null) && !this.#endEmitted);
+      }
+      get readableErrored(): Error | null {
+        return this.#errored;
+      }
+      /** The error that destroyed the stream, or null (Node >= 18). */
+      get errored(): Error | null {
+        return this.#errored;
+      }
+      get closed(): boolean {
+        return this.#closed;
+      }
       get readableFlowing(): boolean | null {
         if (this.#flowing && !this.#paused) return true;
         if (this.#paused) return false;
         return null;
       }
+      set readableFlowing(state: boolean | null) {
+        // Backwards compatible manual control, as in Node.
+        if (state === true) {
+          this.#flowing = true;
+          this.#paused = false;
+        } else if (state === false) {
+          this.#paused = true;
+        } else {
+          this.#flowing = false;
+          this.#paused = false;
+        }
+      }
       get destroyed(): boolean {
         return this.#destroyed;
+      }
+      set destroyed(value: boolean) {
+        // Backwards compat: userland may manage `destroyed` by hand (§ http/net).
+        this.#destroyed = !!value;
       }
 
       #shouldFlow(): boolean {
@@ -409,6 +569,7 @@ export const streamSpec: BuiltinSpec = {
             while (this.#buffer.length > 0 && this.#shouldFlow()) {
               const chunk = this.#buffer.shift() as AnyChunk;
               this.#length -= chunkSize(chunk, this.#objectMode);
+              this.#dataEmitted = true;
               this.emit('data', this.#decode(chunk));
               progressed = true;
             }
@@ -599,6 +760,7 @@ export const streamSpec: BuiltinSpec = {
         if (ret === null) {
           this.#needReadable = true;
         } else {
+          this.#dataEmitted = true;
           // The buffer moved, so the next arrival must announce itself again.
           this.#emittedReadable = false;
           this.#needReadable = false;
@@ -702,7 +864,12 @@ export const streamSpec: BuiltinSpec = {
         const settle = (e?: Error | null): void => {
           const final = err ?? e ?? null;
           defer(() => {
-            if (final) this.emit('error', final);
+            if (final) {
+              this.#errored = final;
+              this.#errorEmitted = true;
+              this.emit('error', final);
+            }
+            this.#closed = true;
             this.emit('close');
           });
         };
@@ -804,7 +971,20 @@ export const streamSpec: BuiltinSpec = {
     // ======================= Writable ======================================
 
     class Writable extends (EventEmitter as new () => EmitterLike) {
-      writable = true;
+      /** Node: `writable` is true until end()/destroy()/error disable the side. */
+      get writable(): boolean {
+        const s = W_STATE.get(this) as WritableState | undefined;
+        if (!s || s.writable === false) return false;
+        return !s.ending && !s.ended && !s.destroyed && s.error === null;
+      }
+      set writable(value: boolean) {
+        const s = W_STATE.get(this) as WritableState | undefined;
+        if (s) s.writable = !!value;
+      }
+
+      get _writableState(): Record<string, unknown> {
+        return (W_STATE.get(this) as unknown as { _writableState: Record<string, unknown> })._writableState;
+      }
 
       constructor(options: Record<string, unknown> = {}) {
         super();
@@ -832,11 +1012,13 @@ export const streamSpec: BuiltinSpec = {
         cb(err);
       }
 
+      // Node's `writableEnded` reflects *end() called* (bitfield kEnding), not
+      // `finish` having fired — that is `writableFinished`.
       get writableEnded(): boolean {
-        return wstate(this).ended;
+        return wstate(this).ending;
       }
       get writableFinished(): boolean {
-        return wstate(this).finished;
+        return wstate(this).finishEmitted;
       }
       get writableLength(): number {
         return wstate(this).length;
@@ -847,8 +1029,33 @@ export const streamSpec: BuiltinSpec = {
       get writableObjectMode(): boolean {
         return wstate(this).objectMode;
       }
+      get writableCorked(): number {
+        return wstate(this).corked;
+      }
+      /** The chunks still queued (Node's `_writableState.getBuffer()`). */
+      get writableBuffer(): AnyChunk[] {
+        return wstate(this).buffer.map((item) => item.chunk);
+      }
+      get writableErrored(): Error | null {
+        return wstate(this).error;
+      }
+      /** The error that destroyed the stream, or null (Node >= 18). */
+      get errored(): Error | null {
+        return wstate(this).error;
+      }
+      /** Destroyed/errored before `finish` — the writable mirror of aborted. */
+      get writableAborted(): boolean {
+        const s = wstate(this);
+        return (s.destroyed || s.error !== null) && !s.finishEmitted;
+      }
+      get closed(): boolean {
+        return wstate(this).closed;
+      }
       get destroyed(): boolean {
         return wstate(this).destroyed;
+      }
+      set destroyed(value: boolean) {
+        wstate(this).destroyed = !!value;
       }
       get writableNeedDrain(): boolean {
         return wstate(this).needDrain;
@@ -917,8 +1124,15 @@ export const streamSpec: BuiltinSpec = {
         s.length = 0;
         const settle = (e?: Error | null): void => {
           const final = err ?? e ?? null;
+          if (final) {
+            if (s.error === null) s.error = final;
+          }
           defer(() => {
-            if (final) this.emit('error', final);
+            if (final) {
+              s.errorEmitted = true;
+              this.emit('error', final);
+            }
+            s.closed = true;
             this.emit('close');
           });
         };
@@ -985,6 +1199,7 @@ export const streamSpec: BuiltinSpec = {
           // caller attaching its listener right after `end()` would miss it.
           defer(() => {
             if (s.destroyed) return;
+            s.finishEmitted = true;
             self.emit('finish');
             settleAutoDestroy(self, 'writable');
           });
@@ -1172,12 +1387,6 @@ export const streamSpec: BuiltinSpec = {
     function compose(): never {
       throw new Error('[web-node] stream.compose is not implemented');
     }
-    function isReadable(stream: unknown): boolean {
-      return typeof (stream as { read?: unknown } | null)?.read === 'function';
-    }
-    function isWritable(stream: unknown): boolean {
-      return typeof (stream as { write?: unknown } | null)?.write === 'function';
-    }
 
     return {
       Stream: Readable,
@@ -1190,12 +1399,29 @@ export const streamSpec: BuiltinSpec = {
       finished,
       addAbortSignal,
       compose,
-      isReadable,
-      isWritable,
+      // Node's own predicates (internal/streams/utils.js), not duck-typing.
+      isReadable: streamUtils.isReadable,
+      isWritable: streamUtils.isWritable,
+      isDisturbed: streamUtils.isDisturbed,
+      isErrored: streamUtils.isErrored,
       getDefaultHighWaterMark,
       setDefaultHighWaterMark,
       promises,
-      default: { Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished, getDefaultHighWaterMark, setDefaultHighWaterMark },
+      default: {
+        Readable,
+        Writable,
+        Duplex,
+        Transform,
+        PassThrough,
+        pipeline,
+        finished,
+        isReadable: streamUtils.isReadable,
+        isWritable: streamUtils.isWritable,
+        isDisturbed: streamUtils.isDisturbed,
+        isErrored: streamUtils.isErrored,
+        getDefaultHighWaterMark,
+        setDefaultHighWaterMark,
+      },
       /** Non-standard: lets `net`/`http`/`fs` share the exact same base classes. */
       _base: { Readable, Writable, Duplex, Transform, PassThrough },
     };
