@@ -36,11 +36,12 @@
 | M8 | **stream 收尾**（字节精确 `read(n)` + `objectMode` 分离 + `autoDestroy` + `readable` 驱动 + chunk 交付 `Buffer`） | ✅ 完成 |
 | M9 | **Buffer 共享内存**（`slice`/`subarray` + `from(ArrayBuffer)` 返回视图） | ✅ 完成 |
 | M10 | **扩大 vendoring**（真源码 `internal/streams/state.js` 接管 highWaterMark） | ✅ 完成 |
+| M11 | **修 stream 核心 bug**（同步 push 递归、异步迭代错误传播）+ 真源码 `Readable.from` | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **156/156 通过** · `vite build` 绿（worker ~313KB / index ~10.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **164/164 通过** · `vite build` 绿（worker ~313KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -118,7 +119,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **继续扩大 vendoring**：下一批候选是纯 JS 的 `internal/streams/{utils,destroy,legacy,from}.js` 与 `internal/fixed_queue.js`、`internal/events/symbols.js`；再接 `internal/streams/end-of-stream.js`（需补 `internal/abort_controller` + `internal/event_target` 链）以把 `stream.finished` 的 `cleanup()` 换成真实现。
+1. **继续扩大 vendoring**：`internal/streams/{utils,legacy}.js`（纯 JS）可用，但 `utils` 的谓词（`isReadable`/`isWritable`/`isDestroyed`/`isDisturbed`/`isErrored`）要读流状态位（`_readableState`/`_writableState`），得先把我们的流状态形状对齐 Node（它现在完全没暴露这两个对象）。建议下一步做「流状态形状对齐 + 真谓词」。
 2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 3. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
 4. **stream 遗留（M8 尾声）**：`stream.finished` 的回调形式返回的是 no-op `cleanup()`。
@@ -129,6 +130,44 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M11 修两个 stream 核心 bug + `Readable.from` 改用真源码
+
+**背景**：继续扩大 vendoring，目标是 `Readable.from`。量真 Node 基准时反而搜出两个真 bug（用手写实现时的实现缺陷），先修 bug 再接真源码。
+
+**改了什么**
+
+1. **修：`_read()` 里同步 `push()` 会无限递归 / 重复发块（runaway）**。
+   - 复现：`new Readable({ read(){ this.push('x'); this.push(null); } })`。旧实现 `push() -> #drain() -> #maybeRead() -> _read() -> push() ...` 自递归，`on('data')` 收到上百个块（`Maximum call stack size exceeded`），`for await` 永不结束。
+   - 修法：给 `#drain()` 加**重入锁 `#draining`** + 内层进度循环（`stream.ts`）：同步 push 只把数据放回 buffer，由外层同一趟循环读取；旧代码靠 `#reading` 标志防重入，但 `push()` 会在调 `#drain()` 前清掉它，所以拦不住。
+   - 现在是：该源只产出 **1 个块**，`end` 正常触发。
+
+2. **修：异步迭代器不在 `error` 时 reject（会变成未捕获异常）**。
+   - 旧 `[Symbol.asyncIterator]` 只监听了 `data`/`end`。`destroy(err)` 经 `defer` 发射 `'error'` 时无监听者 → EventEmitter 直接抛出 → 变成 uncaught（在 `for await` 里表现为挂死）。
+   - 修法：加 `once('error')` 监听，把挂起的 `next()` reject，并让后续 `next()` 也 reject。这正是 `for await` 的错误通道。
+
+3. **`Readable.from` 改用 Node 真源码**（`vendor/node-lib/internal/streams/from.js`，`npm run vendor` 生成，manifest 现有 10 个文件）。它只用 `Readable` 公开 API，所以能直接落位。相比旧手写版：
+   - **字符串 / Buffer 是整个一块**（旧版把 `'abc'` 拆成 `'a','b','c'`、把 Buffer 拆成逐字节数字）。
+   - **`null` 值抛 `ERR_STREAM_NULL_VALUES`**（旧版把 `null` 当 EOF 静默结束）。
+   - **`destroy()` 会调 `iterator.return()`**：async generator 的 `finally` 会跑，资源能释放（旧版不调）。
+   - **非可迭代入参抛 Node 原文案**：`The "iterable" argument must be an instance of Iterable. Received null / type number (42)`。
+
+4. **`internal/errors` 保真度**（`internal-shims.ts`）：
+   - `ERR_INVALID_ARG_TYPE` 改用 Node 的完整构造算法（`type`/`an instance of`/`one of ...`/Received 描述），新增 `ERR_STREAM_NULL_VALUES`。
+   - validators 改为传**原始值**（而非 `typeof` 字符串），于是报错与 Node 一致（如 `must be of type string. Received type number (5)`）。
+   - `AbortError` 对齐 Node：`name = 'AbortError'`、默认 message `The operation was aborted`。
+
+**为什么**
+
+- 第 1、2 个是真 bug：`read(){ push(x); push(null) }` 是最常见的自定义 Readable 写法；流内错误不可捕获会让任何 `for await` 崩。
+- `Readable.from` 是高使用率 API，且旧实现有多个可观测差异（分块数、null、generator 清理）。
+- 错误文案/类型是对外契约，用真源码后必须把 errors 层对齐。
+
+**涉及文件**
+
+新增：`vendor/node-lib/internal/streams/from.js`（+ MANIFEST）、`test/readable-from.test.ts`（8 条）。修改：`tools/vendor.mjs`、`src/node-runtime/builtins/vendored-builtins.ts`、`src/node-runtime/builtins/internal-shims.ts`、`src/node-runtime/builtins/stream.ts`、`src/demo-project.ts`。
+
+**验证**：`tsc --noEmit` 干净 · `vitest run` **164/164** · 浏览器端到端：`hwm default : 65536 bytes / 16 objects`、`from(string): 1 chunk(s) -> ["abc"]`。
 
 ### 2026-09-20 · M10 扩大 vendoring：真源码 `internal/streams/state.js` 接管 highWaterMark
 
