@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -31,11 +31,13 @@
 | M5e | **Vite HMR**（非 WebSocket 的 BroadcastChannel 通道） | ✅ 完成 |
 | M5f | **HMR 收尾**（CSS `css-update` + 按端口隔离通道） | ✅ 完成 |
 | M6 | **npm 收尾**（lockfile + 完整性校验 + peer 自动安装） | ✅ 完成 |
+| M7 | **child_process + 受控 spawn 面**（fork/exec/spawn + mini-shell + `ProcessHost`） | ✅ 完成 |
+| M7 | **npm `.bin` shim + 生命周期脚本**（JS shim + 依赖/根项目脚本） | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **107/107 通过** · `vite build` 绿（worker ~276KB / index ~10.5KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **136/136 通过** · `vite build` 绿（worker ~307KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -117,11 +119,40 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 1. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
 2. **stream 收尾**：`read(n)` 字节精确切分、`autoDestroy` 细节、`objectMode` 边界。
 3. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
-4. **npm 再进一步**：生命周期脚本与 `.bin` shim（需先给运行时一个受控的 spawn 表面）、`file:`/`git+` 说明符、`overrides`/`resolutions`。
+4. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
+5. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M7 进程表面：`child_process` + mini-shell + npm `.bin`/生命周期脚本
+
+**目标**：让运行时不仅能跑「一个」程序，还能跑一个「进程树」——并让 npm 的安装钩子（postinstall 等）真正有地方可跑。
+
+**改了什么**
+
+- **新增 `child_process` 真实实现**（原先只是 stub）：`exec` / `execFile` / `spawn` / `spawnSync` / `execSync` / `execFileSync`。派生的一切都走受控 `ProcessHost`，不存在真 OS 进程——每个 child 是同一事件循环上的**第二个模块注册表**，有自己的 `process` 视图（argv/env/cwd/pid/stdout/stderr）与自己的管道。
+- **新增 mini-shell**（`src/node-runtime/shell/sh.ts`）：支持引号、`$VAR`/`${VAR}`、`;` `&&` `||`、`|`、`>` `>>` `<` `2>`、前导 `VAR=value`、`#` 注释与内建 `cd pwd echo true false exit`。**明确拒绝**（抛 `ShellUnsupportedError`，不静默降级）`$(…)`/反引号、子 shell、进程替换、glob、后台 `&`、here-doc、`export`/`unset`。管道按阶段串行传字节。
+- **新增 `ProcessHost`**（`src/node-runtime/proc/`）：`spawn`/`run`/`runSync`/`activeChildren`/`reset`，负责 pid 分配、受控环境、stdout/stderr 缓冲与重放、stdin 泵、退出结算。
+- **child 生命周期判定**：入口同步返回且 spawn 前后未在 timer 队列留下工作 → 结束；或 `process.exit()`/`process.kill()`；或被 kill/超时。child 的 `setTimeout`/`setInterval`/`queueMicrotask`/`process.nextTick` 被包装，抛错归因到该 child（栈进 child stderr + 非零退出），不会拖垮整个 worker。
+- **npm `.bin` shim**（`src/node-runtime/npm/bin.ts`）：把包声明的 bin 以 **JavaScript shim** 写入 `node_modules/.bin/<name>`（`chmod 0o755`）。用 JS 而非 POSIX shell，是因为 mini-shell 无法执行 shell 脚本；shim 带 `SHIM_MARKER`，`proc/command.ts` 解析时跟随 marker 指向真实入口，保证 `process.argv[1]` 是真实入口而非 shim。同名冲突保留首个并 warn。
+- **npm 生命周期脚本**（`src/node-runtime/npm/scripts.ts`）：`preinstall`/`install`/`postinstall`（依赖）+ `prepare`（根项目），复用同一 spawn 面，带全套 `npm_*` 生命周期环境变量（`npm_lifecycle_event`、`npm_package_json` 等）。脚本失败记为 warning 并继续（**有意偏离** npm），`ignoreScripts` 可整体关闭。无 `host` 时跳过并 warn。
+- **loader 剥离 shebang**（`src/node-runtime/loader/index.ts` 新增 `stripShebang`）：`.bin` 入口以 `#!/usr/bin/env node` 开头，直接交给 `new Function` 是语法错误——Node 对主模块会剥离，这里必须同样处理。修掉 `Failed to compile /project/node_modules/hello/cli.js: Invalid or unexpected token`。
+- **`fork` 的 IPC 明确抛错**：`fork` 可启动模块，但 `send()`/`disconnect()`/`'message'` 抛 `notImplemented('api', …)`，绝不静默 no-op。
+- **接线**：worker 把安装期生命周期脚本的 stdout/stderr 转发到同一个终端（`onOutput`）；UI 展示 `[lifecycle] …` 与 `[bin] node_modules/.bin: …`；demo 新增 `child_process` 段落（同步 execFileSync → 嵌套 child → 拒绝 shell 脚本 → 管道）。
+
+**为什么**
+
+- M6 留下的 npm 缺口正是「安装钩子」，而钩子需要一个受控的进程表面。与其零散补丁，不如把 `child_process` 一次性做成真实实现：子程序继承同一别名表（`rollup`/`esbuild` 仍指 WASM 版）、同一 VFS、同一虚拟网络，于是「node 脚本调 node 脚本」在页内天然可嵌套。
+- 能做什么就明说什么：**只有 JS 能被派生**（VFS 里能的，就是能跑的）；shell 脚本按名拒绝（`ENOEXEC`），不半执行。这既诚实，也解释了为什么 npm 的 `.bin` 必须写成 JS shim。
+
+**涉及文件**
+
+新增：`src/node-runtime/builtins/child_process.ts`、`src/node-runtime/proc/{command,host}.ts`、`src/node-runtime/shell/sh.ts`、`src/node-runtime/npm/{bin,scripts}.ts`、`test/child-process.test.ts`。
+修改：`src/node-runtime/{runtime,loader/index,errors}.ts`、`src/node-runtime/builtins/{index,unsupported}.ts`、`src/node-runtime/npm/{install,index}.ts`、`src/worker/runtime.worker.ts`、`src/client/index.ts`、`src/ui/main.ts`、`src/demo-project.ts`、`test/runtime.test.ts`。
+
+**验证**：`tsc --noEmit` 干净 · `vitest run` **136/136**（新增 29 条 child_process 测试）· `vite build` 绿 · 浏览器端到端：`child out : spawned pid 100 in /project; its own child said 42`、`sh script : ENOEXEC`、`shell pipe : 42 (via pipe)`。
 
 ### 2026-09-17 · M6 npm 收尾：lockfile + 完整性校验 + peer 自动安装
 
