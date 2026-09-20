@@ -182,7 +182,9 @@ web-node/
 
 ## 9. 已知限制
 
-> 本表按里程碑进展刷新（当前至 **M9**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
+> 本表按里程碑进展刷新（当前至 **M10**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
+>
+> **vendoring 进展**：`internal/streams/state.js`（highWaterMark）、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`path.js`、`querystring.js`、`internal/per_context/*` 已用 Node 真源码。
 
 | 限制 | 说明 |
 |---|---|
@@ -199,8 +201,10 @@ web-node/
 
 ## 10. 后续里程碑
 
-1. **M3 网络**：ServiceWorker 虚拟 TCP，端口 → 子域名路由，`http.createServer` + `fetch`。
-2. **M4 npm**：自研 client（tarball + 无 install script），`node_modules` 解析已就绪。
-3. **M5 构建**：跑通 vite/webpack。
-4. **性能**：把热点 binding（buffer/fs）替换为 wasm；引入 SharedArrayBuffer + Atomics 做同步 syscall。
-5. **扩大 vendoring**：把 `lib/events.js`、`lib/util.js`、`lib/buffer.js` 等逐步从"TS 实现"换成"真源码 + shim"。
+已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）。
+
+接下来：
+
+1. **继续扩大 vendoring**（M10 已开）：纯 JS 模块优先（`internal/streams/{utils,destroy,legacy,from}.js`、`internal/fixed_queue.js`、`internal/events/symbols.js`），再接 `internal/streams/end-of-stream.js`（需补 `internal/abort_controller` + `internal/event_target` 链）以拿回真 `stream.finished`。
+2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
+3. **性能**：把热点 binding（buffer/fs）替换为 wasm；引入 SharedArrayBuffer + Atomics 做同步 syscall。

@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -35,11 +35,12 @@
 | M7 | **npm `.bin` shim + 生命周期脚本**（JS shim + 依赖/根项目脚本） | ✅ 完成 |
 | M8 | **stream 收尾**（字节精确 `read(n)` + `objectMode` 分离 + `autoDestroy` + `readable` 驱动 + chunk 交付 `Buffer`） | ✅ 完成 |
 | M9 | **Buffer 共享内存**（`slice`/`subarray` + `from(ArrayBuffer)` 返回视图） | ✅ 完成 |
+| M10 | **扩大 vendoring**（真源码 `internal/streams/state.js` 接管 highWaterMark） | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **150/150 通过** · `vite build` 绿（worker ~310KB / index ~10.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **156/156 通过** · `vite build` 绿（worker ~313KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -117,10 +118,10 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
+1. **继续扩大 vendoring**：下一批候选是纯 JS 的 `internal/streams/{utils,destroy,legacy,from}.js` 与 `internal/fixed_queue.js`、`internal/events/symbols.js`；再接 `internal/streams/end-of-stream.js`（需补 `internal/abort_controller` + `internal/event_target` 链）以把 `stream.finished` 的 `cleanup()` 换成真实现。
 2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 3. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
-4. **stream 遗留（M8 尾声）**：`stream.finished` 的回调形式返回的是 no-op `cleanup()`；`read(n)` 的 `n` 大于 hwm 时未按 Node 向上取整到 hwm。
+4. **stream 遗留（M8 尾声）**：`stream.finished` 的回调形式返回的是 no-op `cleanup()`。
 5. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
 4. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 5. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
@@ -128,6 +129,34 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M10 扩大 vendoring：真源码 `internal/streams/state.js` 接管 highWaterMark
+
+**目标**：开始把手工 TS 实现换成 **Node 真源码 + shim**（DEVLOG「下一步」第 1 项）。选 `internal/streams/state.js` 作第一个，因为它是纯 JS（零 `internalBinding`、零外部依赖，只需 `internal/errors`/`internal/validators`/`primordials`）且语义可观测。
+
+**改了什么**
+
+- **vendor `internal/streams/state.js`**（`tools/vendor.mjs` 新增一项，`npm run vendor` 重生成，manifest 现有 9 个文件）。注册为 builtin `internal/streams/state`（`origin: 'node-source'`），依赖 `internal/errors` + `internal/validators`。
+- **`stream` 的 highWaterMark 改由真源码计算**：删掉手写的 `DEFAULT_HWM = 16*1024` / `OBJECT_HWM = 16`，改用 vendored 的 `getHighWaterMark(state, options, duplexKey, isDuplex)`。因此：
+  - **默认值对齐 Node v22**：byte 模式 **65536**（之前写死 16384）、object 模式 **16**。
+  - **支持 Duplex 的 per-side 键**：`readableHighWaterMark` / `writableHighWaterMark`，以及 `readableObjectMode` / `writableObjectMode`（普通 `Readable`/`Writable` 会忽略对面那个键，与 Node 一致）。
+  - **校验对齐**：非法 hwm（负数/小数）抛 `ERR_INVALID_ARG_VALUE`。
+- **公开 `stream.getDefaultHighWaterMark` / `stream.setDefaultHighWaterMark`**（真 Node 22 已有）。
+- **`read(n)` 的 hwm 增长**（关闭 M8 遗留项）：`read(n)` 当 `n > hwm` 时把 hwm 提升到 **下一个 2 的幂**（`computeNewHighWaterMark`，上限 1 GiB 否则 `ERR_OUT_OF_RANGE`）。例：`read(100000)` → hwm 变 131072。
+- **错误类的类型对齐**（`internal-shims.ts`）：Node 的 `ERR_*` 类继承对应的内建类型并保留其 `name`，code 只在 `.code` 上。现在 `new Readable({highWaterMark:-1})` 抛的是 **`TypeError`**（`instanceof TypeError` 成立，`constructor.name === 'TypeError'`，`.code === 'ERR_INVALID_ARG_VALUE'`），消息为 Node 原样的 `The property 'options.highWaterMark' is invalid. Received -1`（带点路径叫 `property`，否则叫 `argument`）。
+
+**为什么**
+
+- 默认 hwm 16384 vs 真 Node 65536 是真差异：会直接影响背压时机与吞吐，任何依赖“默认 hwm”的库都会算错。
+- Duplex 的 per-side 键目前完全不生效（静默忽略），是常见写法（`new Duplex({ readableObjectMode: true })`）。
+- 错误类型/文案也是对外契约（`instanceof TypeError`、`.code`、文案）。
+- 用真源码而不是继续手写，是 vendoring 路线的第一块试金石：证明「纯 JS 模块直接 vendor + 注册」的管道通了。
+
+**涉及文件**
+
+新增：`vendor/node-lib/internal/streams/state.js`（+ MANIFEST 更新）、`test/stream-hwm.test.ts`（6 条）。修改：`tools/vendor.mjs`、`src/node-runtime/builtins/vendored-builtins.ts`、`src/node-runtime/builtins/stream.ts`、`src/node-runtime/builtins/internal-shims.ts`、`src/demo-project.ts`。
+
+**验证**：`tsc --noEmit` 干净 · `vitest run` **156/156** · `vite build` 绿（worker ~313KB）· 浏览器端到端：`hwm default : 65536 bytes / 16 objects`。
 
 ### 2026-09-20 · M9 Buffer 共享内存：`slice`/`subarray` 与 `from(ArrayBuffer)` 不再拷贝
 
