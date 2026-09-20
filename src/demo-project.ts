@@ -102,6 +102,14 @@ console.log('');
 // Readable/Writable/Transform/pipe are real here: chunk sizes are bounded by a
 // high-water mark and pipe() propagates backpressure.
 console.log('-- stream --');
+const { Readable: DefaultsReadable } = require('stream');
+console.log(
+  'hwm default : ' +
+    new DefaultsReadable().readableHighWaterMark +
+    ' bytes / ' +
+    new DefaultsReadable({ objectMode: true }).readableHighWaterMark +
+    ' objects'
+);
 const factsFile = path.join(dir, 'facts.txt');
 fs.writeFileSync(factsFile, require('./lib/facts.js')().map(function (r) {
   return r[0] + ' = ' + r[1];
