@@ -110,6 +110,16 @@ console.log(
     new DefaultsReadable({ objectMode: true }).readableHighWaterMark +
     ' objects'
 );
+// Readable.from is Node's own source: a string is one chunk, not per char.
+(function () {
+  const readableFrom = require('stream').Readable.from;
+  const chunks = [];
+  const r = readableFrom('abc');
+  r.on('data', function (c) { chunks.push(String(c)); });
+  r.on('end', function () {
+    console.log('from(string): ' + chunks.length + ' chunk(s) -> ' + JSON.stringify(chunks));
+  });
+})();
 const factsFile = path.join(dir, 'facts.txt');
 fs.writeFileSync(factsFile, require('./lib/facts.js')().map(function (r) {
   return r[0] + ' = ' + r[1];
