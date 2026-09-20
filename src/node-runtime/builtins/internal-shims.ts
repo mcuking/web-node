@@ -16,6 +16,8 @@ import { notImplemented } from '../errors';
 export const ERROR_CODES: Record<string, string> = {
   ERR_INVALID_ARG_TYPE: 'The "%s" argument must be of type %s. Received %s',
   ERR_STREAM_NULL_VALUES: 'May not write null values to stream',
+  ERR_MULTIPLE_CALLBACK: 'Callback called multiple times',
+  ERR_STREAM_PREMATURE_CLOSE: 'Premature close',
   ERR_INVALID_ARG_VALUE: 'The argument \'%s\' is invalid. Received %s',
   ERR_INVALID_URI: 'URI malformed',
   ERR_OUT_OF_RANGE: 'The value of "%s" is out of range. It must be %s. Received %s',
@@ -40,6 +42,8 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_INVALID_URI: TypeError,
   ERR_MISSING_ARGS: TypeError,
   ERR_STREAM_NULL_VALUES: TypeError,
+  ERR_MULTIPLE_CALLBACK: Error,
+  ERR_STREAM_PREMATURE_CLOSE: Error,
   ERR_UNKNOWN_FILE_EXTENSION: TypeError,
   ERR_UNSUPPORTED_ESM_URL_SCHEME: TypeError,
 };

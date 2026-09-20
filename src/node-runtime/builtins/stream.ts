@@ -121,6 +121,8 @@ interface WritableState {
   autoDestroy: boolean;
   closed: boolean;
   destroyed: boolean;
+  /** `'close'` has been emitted (Node's kCloseEmitted). */
+  closeEmitted: boolean;
   error: Error | null;
   /** `stream.writable` — false once the writable side is disabled. */
   writable: boolean;
@@ -128,6 +130,12 @@ interface WritableState {
   errorEmitted: boolean;
   /** `'finish'` has been emitted (Node's kFinished bit). */
   finishEmitted: boolean;
+  /** Node's kConstructed: our streams are constructed synchronously. */
+  constructed: boolean;
+  /** `_final` has run (what `undestroy()` resets). */
+  finalCalled: boolean;
+  /** A `'prefinish'` pass happened (what `undestroy()` resets). */
+  prefinished: boolean;
 }
 
 /**
@@ -168,6 +176,32 @@ function settleAutoDestroy(self: object, side: 'readable' | 'writable'): void {
 
 const W_STATE = new WeakMap<object, WritableState>();
 
+/**
+ * The `[kState]` bitfield bridge (built in `streamSpec.init`). It is threaded
+ * into `initWritable` because that helper is defined outside the closure that
+ * owns the vendored `internal/streams/*` modules.
+ */
+interface StateBitApi {
+  bitsFrom(f: {
+    objectMode: boolean;
+    autoDestroy: boolean;
+    destroyed: boolean;
+    closed: boolean;
+    closeEmitted: boolean;
+    errorEmitted: boolean;
+    errored: boolean;
+  }): number;
+  defineStateBits(
+    view: Record<string, unknown>,
+    read: () => number,
+    write: (bits: number) => void,
+  ): void;
+  kDestroyed: number;
+  kClosed: number;
+  kCloseEmitted: number;
+  kErrorEmitted: number;
+}
+
 function wstate(self: object): WritableState {
   const s = W_STATE.get(self);
   if (!s) throw new Error('[web-node] writable state missing; call super() first');
@@ -178,6 +212,7 @@ function initWritable(
   self: object,
   options: Record<string, unknown> = {},
   resolveHwm: HwmResolver,
+  bits: StateBitApi,
   isDuplex = false,
 ): void {
   // Node: `objectMode` wins, then the Duplex-specific side flag; a plain
@@ -200,10 +235,14 @@ function initWritable(
     autoDestroy: options.autoDestroy !== false,
     closed: false,
     destroyed: false,
+    closeEmitted: false,
     error: null,
     writable: true,
     errorEmitted: false,
     finishEmitted: false,
+    constructed: true,
+    finalCalled: false,
+    prefinished: false,
   });
   // Node-compatible, stable view over the writable half, read by
   // `internal/streams/utils` (mirrors `Readable#_readableState`).
@@ -212,24 +251,66 @@ function initWritable(
   const def = (key: string, get: () => unknown): void => {
     Object.defineProperty(view, key, { get, enumerable: true });
   };
+  // `internal/streams/destroy.js` writes `w.errored` (and the bitfield) directly.
+  const defRW = (key: string, get: () => unknown, set: (v: never) => void): void => {
+    Object.defineProperty(view, key, { get, set, enumerable: true, configurable: true });
+  };
   def('objectMode', () => s.objectMode);
   def('highWaterMark', () => s.hwm);
   def('length', () => s.length);
   def('buffer', () => s.buffer.map((item) => item.chunk));
   def('writing', () => s.writing);
   def('corked', () => s.corked);
-  def('ended', () => s.ending || s.ended);
-  def('ending', () => s.ending);
-  def('finished', () => s.finishEmitted);
+  defRW('ended', () => s.ending || s.ended, (v: boolean) => {
+    s.ended = v;
+  });
+  defRW('ending', () => s.ending, (v: boolean) => {
+    s.ending = v;
+  });
+  defRW('finished', () => s.finishEmitted, (v: boolean) => {
+    s.finishEmitted = v;
+  });
   def('destroyed', () => s.destroyed);
   def('closed', () => s.closed);
-  def('errored', () => s.error);
+  def('closeEmitted', () => s.closeEmitted);
+  defRW('errored', () => s.error, (v: Error | null) => {
+    s.error = v;
+  });
   def('errorEmitted', () => s.errorEmitted);
+  defRW('constructed', () => s.constructed, (v: boolean) => {
+    s.constructed = v;
+  });
+  defRW('finalCalled', () => s.finalCalled, (v: boolean) => {
+    s.finalCalled = v;
+  });
+  defRW('prefinished', () => s.prefinished, (v: boolean) => {
+    s.prefinished = v;
+  });
   def('needDrain', () => s.needDrain);
   def('autoDestroy', () => s.autoDestroy);
   def('emitClose', () => true);
   def('writable', () => s.writable);
   def('defaultEncoding', () => 'utf8');
+  // The [kState] bitfield view (mirrors `Readable#_readableState`).
+  bits.defineStateBits(
+    view,
+    () =>
+      bits.bitsFrom({
+        objectMode: s.objectMode,
+        autoDestroy: s.autoDestroy,
+        destroyed: s.destroyed,
+        closed: s.closed,
+        closeEmitted: s.closeEmitted,
+        errorEmitted: s.errorEmitted,
+        errored: s.error !== null,
+      }),
+    (value: number) => {
+      s.destroyed = (value & bits.kDestroyed) !== 0;
+      s.closed = (value & bits.kClosed) !== 0;
+      s.closeEmitted = (value & bits.kCloseEmitted) !== 0;
+      s.errorEmitted = (value & bits.kErrorEmitted) !== 0;
+    },
+  );
   Object.defineProperty(view, 'getBuffer', { value: () => s.buffer.map((item) => item.chunk) });
   Object.defineProperty(self, '_writableState', {
     value: view,
@@ -250,9 +331,10 @@ function initWritable(
       writableDone: false,
       close: () => {
         const s = W_STATE.get(self) as WritableState;
-        if (s.closed) return;
+        if (s.closed || s.closeEmitted) return;
         s.closed = true;
         s.destroyed = true;
+        s.closeEmitted = true;
         (self as { emit(n: string, ...a: unknown[]): unknown }).emit('close');
       },
     });
@@ -270,6 +352,7 @@ export const streamSpec: BuiltinSpec = {
     'internal/streams/state',
     'internal/streams/from',
     'internal/streams/utils',
+    'internal/streams/destroy',
   ],
   init: (ctx: BuiltinInitContext) => {
     const { EventEmitter } = ctx.require('events') as { EventEmitter: new () => EmitterLike };
@@ -320,6 +403,85 @@ export const streamSpec: BuiltinSpec = {
       isWritable: (s: unknown) => boolean | null;
       isDisturbed: (s: unknown) => boolean;
       isErrored: (s: unknown) => boolean;
+      isDestroyed: (s: unknown) => boolean | null;
+      isFinished: (s: unknown, opts?: { readable?: boolean; writable?: boolean }) => boolean | null;
+      isReadableFinished: (s: unknown, strict?: boolean) => boolean | null;
+      isWritableFinished: (s: unknown, strict?: boolean) => boolean | null;
+      isClosed: (s: unknown) => boolean | null;
+      willEmitClose: (s: unknown) => boolean | null;
+      kState: symbol;
+      kObjectMode: number;
+      kErrorEmitted: number;
+      kAutoDestroy: number;
+      kEmitClose: number;
+      kDestroyed: number;
+      kClosed: number;
+      kCloseEmitted: number;
+      kErrored: number;
+      kConstructed: number;
+    };
+
+    // The real `destroy()` / `undestroy()` / `errorOrDestroy()` chain, straight
+    // from vendor/node-lib/internal/streams/destroy.js. It drives streams purely
+    // through `_readableState` / `_writableState` and the `[kState]` bitfield, so
+    // it drops in once those views exist (see `defineStateBits` below).
+    const streamDestroy = ctx.require('internal/streams/destroy') as {
+      destroy: (this: unknown, err?: Error | null, cb?: () => void) => unknown;
+      undestroy: (this: unknown) => void;
+      errorOrDestroy: (this: unknown, stream: unknown, err: Error, sync?: boolean) => unknown;
+    };
+
+    const errorCodes = (ctx.require('internal/errors') as {
+      codes: Record<string, unknown>;
+    }).codes;
+
+    // ---- the [kState] bitfield adapter -----------------------------------
+    // Node tracks the stream lifecycle in a bitfield under a private symbol on
+    // `_readableState` / `_writableState`. Ours lives in real fields, so we
+    // expose the bitfield as a *view*: a read recomputes it from live state, a
+    // write folds the lifecycle bits back. That lets the real destroy code
+    // mutate our streams (`w[kState] |= kDestroyed`) without a second source of
+    // truth. Construction-time bits and the error identity stay owned here.
+    const KB = streamUtils;
+    const bitsFrom = (f: {
+      objectMode: boolean;
+      autoDestroy: boolean;
+      destroyed: boolean;
+      closed: boolean;
+      closeEmitted: boolean;
+      errorEmitted: boolean;
+      errored: boolean;
+    }): number => {
+      let bits = KB.kEmitClose | KB.kConstructed;
+      if (f.objectMode) bits |= KB.kObjectMode;
+      if (f.autoDestroy) bits |= KB.kAutoDestroy;
+      if (f.destroyed) bits |= KB.kDestroyed;
+      if (f.closed) bits |= KB.kClosed;
+      if (f.closeEmitted) bits |= KB.kCloseEmitted;
+      if (f.errorEmitted) bits |= KB.kErrorEmitted;
+      if (f.errored) bits |= KB.kErrored;
+      return bits;
+    };
+    const defineStateBits = (
+      view: Record<string, unknown>,
+      read: () => number,
+      write: (bits: number) => void,
+    ): void => {
+      Object.defineProperty(view, KB.kState, {
+        get: read,
+        set: write,
+        enumerable: false,
+        configurable: true,
+      });
+    };
+    // Handed to `initWritable`, which is defined outside this closure.
+    const bitApi: StateBitApi = {
+      bitsFrom,
+      defineStateBits,
+      kDestroyed: KB.kDestroyed,
+      kClosed: KB.kClosed,
+      kCloseEmitted: KB.kCloseEmitted,
+      kErrorEmitted: KB.kErrorEmitted,
     };
 
     /** Byte-mode chunks reach consumers as Buffers, as they do in Node. */
@@ -373,6 +535,10 @@ export const streamSpec: BuiltinSpec = {
       #draining = false;
       #destroyed = false;
       #closed = false;
+      /** `'close'` has been emitted (Node's kCloseEmitted). */
+      #closeEmitted = false;
+      /** Node's kConstructed: a plain Readable is constructed synchronously. */
+      #constructed = true;
       #encoding: string | null = null;
       #piped: unknown[] = [];
       /** A `readable` signal is already scheduled: do not queue a second one. */
@@ -424,19 +590,45 @@ export const streamSpec: BuiltinSpec = {
         const def = (key: string, get: () => unknown): void => {
           Object.defineProperty(view, key, { get, enumerable: true });
         };
+        // Node's state is a plain mutable object, so a few fields need a setter:
+        // `internal/streams/destroy.js` assigns `r.errored` directly.
+        const defRW = (key: string, get: () => unknown, set: (v: never) => void): void => {
+          Object.defineProperty(view, key, { get, set, enumerable: true, configurable: true });
+        };
         def('objectMode', () => this.#objectMode);
         def('highWaterMark', () => this.#hwm);
         def('buffer', () => this.#buffer);
         def('length', () => this.#length);
         def('pipes', () => this.#piped);
         def('flowing', () => this.readableFlowing);
-        def('reading', () => this.#reading);
-        def('ended', () => this.#ended);
-        def('endEmitted', () => this.#endEmitted);
-        def('destroyed', () => this.#destroyed);
-        def('closed', () => this.#closed);
-        def('errored', () => this.#errored);
-        def('errorEmitted', () => this.#errorEmitted);
+        defRW('reading', () => this.#reading, (v: boolean) => {
+          this.#reading = v;
+        });
+        defRW('ended', () => this.#ended, (v: boolean) => {
+          this.#ended = v;
+        });
+        defRW('endEmitted', () => this.#endEmitted, (v: boolean) => {
+          this.#endEmitted = v;
+        });
+        // Node's kConstructed: this view is already a constructed stream.
+        defRW('constructed', () => this.#constructed, (v: boolean) => {
+          this.#constructed = v;
+        });
+        defRW('destroyed', () => this.#destroyed, (v: boolean) => {
+          this.#destroyed = v;
+        });
+        defRW('closed', () => this.#closed, (v: boolean) => {
+          this.#closed = v;
+        });
+        defRW('closeEmitted', () => this.#closeEmitted, (v: boolean) => {
+          this.#closeEmitted = v;
+        });
+        defRW('errored', () => this.#errored, (v: Error | null) => {
+          this.#errored = v;
+        });
+        defRW('errorEmitted', () => this.#errorEmitted, (v: boolean) => {
+          this.#errorEmitted = v;
+        });
         def('dataEmitted', () => this.#dataEmitted);
         // Only an explicitly disabled half makes `state.readable` false; destroy
         // and error leave it alone (Node leaves this `undefined` on a plain
@@ -445,15 +637,36 @@ export const streamSpec: BuiltinSpec = {
         def('autoDestroy', () => this.#autoDestroy);
         def('emitClose', () => true);
         def('defaultEncoding', () => 'utf8');
+        // The [kState] bitfield view the vendored destroy code reads and writes.
+        bitApi.defineStateBits(
+          view,
+          () =>
+            bitApi.bitsFrom({
+              objectMode: this.#objectMode,
+              autoDestroy: this.#autoDestroy,
+              destroyed: this.#destroyed,
+              closed: this.#closed,
+              closeEmitted: this.#closeEmitted,
+              errorEmitted: this.#errorEmitted,
+              errored: this.#errored !== null,
+            }),
+          (bits: number) => {
+            this.#destroyed = (bits & bitApi.kDestroyed) !== 0;
+            this.#closed = (bits & bitApi.kClosed) !== 0;
+            this.#closeEmitted = (bits & bitApi.kCloseEmitted) !== 0;
+            this.#errorEmitted = (bits & bitApi.kErrorEmitted) !== 0;
+          },
+        );
         this.#readableStateView = view;
         return view;
       }
 
       /** Mark destroyed and emit `close` once, without re-entering `_destroy`. */
       #softClose(): void {
-        if (this.#closed) return;
+        if (this.#closed || this.#closeEmitted) return;
         this.#closed = true;
         this.#destroyed = true;
+        this.#closeEmitted = true;
         this.emit('close');
       }
 
@@ -858,27 +1071,11 @@ export const streamSpec: BuiltinSpec = {
       }
 
       destroy(err?: Error): this {
-        if (this.#destroyed) return this;
-        this.#destroyed = true;
+        // Real source: vendor/node-lib/internal/streams/destroy.js. It flips the
+        // [kState] bitfield, calls `_destroy`, then emits `error`/`close` on
+        // nextTick (error before close), exactly as Node does.
         this.#flowing = false;
-        const settle = (e?: Error | null): void => {
-          const final = err ?? e ?? null;
-          defer(() => {
-            if (final) {
-              this.#errored = final;
-              this.#errorEmitted = true;
-              this.emit('error', final);
-            }
-            this.#closed = true;
-            this.emit('close');
-          });
-        };
-        try {
-          this._destroy(err ?? null, settle);
-        } catch (e) {
-          settle(e as Error);
-        }
-        return this;
+        return streamDestroy.destroy.call(this, err ?? null) as this;
       }
 
       [Symbol.asyncIterator](): AsyncIterator<AnyChunk> {
@@ -988,7 +1185,7 @@ export const streamSpec: BuiltinSpec = {
 
       constructor(options: Record<string, unknown> = {}) {
         super();
-        initWritable(this, options, resolveHwm);
+        initWritable(this, options, resolveHwm, bitApi);
         if (typeof options.write === 'function') {
           (this as unknown as Record<string, unknown>)._write = (options.write as (...a: unknown[]) => void).bind(this);
         }
@@ -1117,31 +1314,15 @@ export const streamSpec: BuiltinSpec = {
       }
 
       destroy(err?: Error): this {
+        // Real source (internal/streams/destroy.js). Our old body also dropped
+        // the queued chunks; keep that so a destroyed Writable cannot still be
+        // flushed by the write loop.
         const s = wstate(this);
-        if (s.destroyed) return this;
-        s.destroyed = true;
-        s.buffer = [];
-        s.length = 0;
-        const settle = (e?: Error | null): void => {
-          const final = err ?? e ?? null;
-          if (final) {
-            if (s.error === null) s.error = final;
-          }
-          defer(() => {
-            if (final) {
-              s.errorEmitted = true;
-              this.emit('error', final);
-            }
-            s.closed = true;
-            this.emit('close');
-          });
-        };
-        try {
-          this._destroy(err ?? null, settle);
-        } catch (e) {
-          settle(e as Error);
+        if (!s.destroyed) {
+          s.buffer = [];
+          s.length = 0;
         }
-        return this;
+        return streamDestroy.destroy.call(this, err ?? null) as this;
       }
     }
 
@@ -1217,7 +1398,7 @@ export const streamSpec: BuiltinSpec = {
     class Duplex extends Readable {
       constructor(options: Record<string, unknown> = {}) {
         super(options, true);
-        initWritable(this, options, resolveHwm, true);
+        initWritable(this, options, resolveHwm, bitApi, true);
         const self = this as unknown as Record<string, unknown>;
         if (typeof options.write === 'function') self._write = (options.write as (...a: unknown[]) => void).bind(this);
         if (typeof options.final === 'function') self._final = (options.final as (...a: unknown[]) => void).bind(this);
@@ -1251,13 +1432,25 @@ export const streamSpec: BuiltinSpec = {
         writable: true,
         value: function destroy(this: Duplex, err?: Error): Duplex {
           const s = wstate(this);
-          s.destroyed = true;
-          s.buffer = [];
-          s.length = 0;
-          return Readable.prototype.destroy.call(this, err) as Duplex;
+          if (!s.destroyed) {
+            s.buffer = [];
+            s.length = 0;
+          }
+          // Both halves must be torn down together; the real destroy() flips
+          // the bitfield on whichever state exists (here, both).
+          return streamDestroy.destroy.call(this, err ?? null) as Duplex;
         },
       });
     }
+
+    // `_undestroy()` is part of the vendored destroy module: it resets the
+    // lifecycle bits so a stream can be reused. Node exposes it under the
+    // protected `_undestroy` name (net.js calls it), not as a public method.
+    const undestroy = function (this: unknown): void {
+      streamDestroy.undestroy.call(this);
+    };
+    (Readable.prototype as unknown as Record<string, unknown>)._undestroy = undestroy;
+    (Writable.prototype as unknown as Record<string, unknown>)._undestroy = undestroy;
 
     mixWritableApi(Duplex);
 
@@ -1318,24 +1511,122 @@ export const streamSpec: BuiltinSpec = {
 
     // ======================= helpers =======================================
 
-    function finished(stream: EmitterLike, cb?: (err?: Error | null) => void): (() => void) | Promise<void> {
+    // Node's `finished()` (internal/streams/end-of-stream.js) is built on the
+    // same `internal/streams/utils` predicates we now vendor; this is that logic
+    // without the async_hooks/AsyncResource plumbing it also carries. It settles
+    // when the readable half ended / the writable half finished, reports a
+    // destroyed-with-error stream as that error, and otherwise flags a `close`
+    // that arrives before both halves are done as ERR_STREAM_PREMATURE_CLOSE.
+    const prematureClose = (): Error =>
+      new (errorCodes.ERR_STREAM_PREMATURE_CLOSE as new () => Error)();
+    const erroredOf = (s: EmitterLike): Error | null => {
+      const e = streamUtils.isErrored(s)
+        ? ((s as unknown as { errored?: Error | null }).errored ??
+            (s as unknown as { _readableState?: { errored?: Error | null } })._readableState?.errored ??
+            (s as unknown as { _writableState?: { errored?: Error | null } })._writableState?.errored ??
+            null)
+        : null;
+      return (e as Error | null) ?? null;
+    };
+
+    function finished(
+      stream: EmitterLike,
+      cb?: (err?: Error | null) => void,
+    ): (() => void) | Promise<void> {
+      const readable = streamUtils.isReadable(stream) === true;
+      const writable = streamUtils.isWritable(stream) === true;
+      let willEmitClose = streamUtils.willEmitClose(stream) === true;
+      let readableFinished = streamUtils.isReadableFinished(stream, false) === true;
+      let writableFinished = streamUtils.isWritableFinished(stream, false) === true;
+
       let settled = false;
-      const done = (err?: Error | null): void => {
+      let finish: (err?: Error | null) => void = () => {};
+      const bound: Array<[string, (...a: never[]) => void]> = [];
+      const cleanup = (): void => {
+        for (const [name, fn] of bound) {
+          (stream.removeListener as (n: string, f: (...a: unknown[]) => void) => unknown)(
+            name,
+            fn as (...a: unknown[]) => void,
+          );
+        }
+        bound.length = 0;
+        finish = () => {};
+      };
+      const settle = (err?: Error | null): void => {
         if (settled) return;
         settled = true;
-        if (cb) cb(err ?? null);
+        // Grab the finisher first: `cleanup()` resets it to a no-op.
+        const f = finish;
+        cleanup();
+        f(err ?? null);
       };
-      (stream.on as (n: string, f: (...a: unknown[]) => void) => unknown)('error', done as (...a: unknown[]) => void);
-      (stream.on as (n: string, f: (...a: unknown[]) => void) => unknown)('end', () => done(null));
-      (stream.on as (n: string, f: (...a: unknown[]) => void) => unknown)('finish', () => done(null));
-      (stream.on as (n: string, f: (...a: unknown[]) => void) => unknown)('close', () => done(null));
-      if (cb) return () => undefined;
-      return new Promise<void>((resolve, reject) => {
-        (stream.on as (n: string, f: (...a: unknown[]) => void) => unknown)('error', (e: unknown) => reject(e as Error));
-        (stream.on as (n: string, f: (...a: unknown[]) => void) => unknown)('end', () => resolve());
-        (stream.on as (n: string, f: (...a: unknown[]) => void) => unknown)('finish', () => resolve());
-        (stream.on as (n: string, f: (...a: unknown[]) => void) => unknown)('close', () => resolve());
-      });
+      const on = (name: string, fn: (...a: never[]) => void): void => {
+        (stream.on as (n: string, f: (...a: unknown[]) => void) => unknown)(
+          name,
+          fn as (...a: unknown[]) => void,
+        );
+        bound.push([name, fn]);
+      };
+
+      const onend = (): void => {
+        readableFinished = true;
+        // A stream destroyed mid-flight cannot be trusted to emit `close`.
+        if ((stream as unknown as { destroyed?: boolean }).destroyed) willEmitClose = false;
+        if (willEmitClose) return;
+        if (!writable || writableFinished) settle(null);
+      };
+      const onfinish = (): void => {
+        writableFinished = true;
+        if ((stream as unknown as { destroyed?: boolean }).destroyed) willEmitClose = false;
+        if (willEmitClose) return;
+        if (!readable || readableFinished) settle(null);
+      };
+      const onerror = (err: Error): void => settle(err);
+      const onclose = (): void => {
+        // Node's getEosOnCloseError(): a close before both halves are done is a
+        // premature close unless the stream was destroyed with an error.
+        const errored = erroredOf(stream);
+        if (errored) {
+          settle(errored);
+          return;
+        }
+        if (readable && !readableFinished && streamUtils.isReadableFinished(stream, false) !== true) {
+          settle(prematureClose());
+          return;
+        }
+        if (writable && !writableFinished && streamUtils.isWritableFinished(stream, false) !== true) {
+          settle(prematureClose());
+          return;
+        }
+        settle(null);
+      };
+
+      if (cb) {
+        finish = cb;
+        if (settled) return () => undefined;
+      } else {
+        return new Promise<void>((resolve, reject) => {
+          finish = (err) => (err ? reject(err) : resolve());
+          start();
+        });
+      }
+      start();
+      return cleanup;
+
+      function start(): void {
+        // Already done? Answer on the next tick, like Node's immediate result.
+        if (
+          streamUtils.isDestroyed(stream) ||
+          ((!readable || readableFinished) && (!writable || writableFinished))
+        ) {
+          defer(() => settle(erroredOf(stream)));
+          return;
+        }
+        if (readable) on('end', onend as (...a: never[]) => void);
+        if (writable) on('finish', onfinish as (...a: never[]) => void);
+        on('error', onerror as (...a: never[]) => void);
+        on('close', onclose as (...a: never[]) => void);
+      }
     }
 
     function pipeline(...args: unknown[]): unknown {
@@ -1400,6 +1691,7 @@ export const streamSpec: BuiltinSpec = {
       addAbortSignal,
       compose,
       // Node's own predicates (internal/streams/utils.js), not duck-typing.
+      isDestroyed: streamUtils.isDestroyed,
       isReadable: streamUtils.isReadable,
       isWritable: streamUtils.isWritable,
       isDisturbed: streamUtils.isDisturbed,
@@ -1415,6 +1707,7 @@ export const streamSpec: BuiltinSpec = {
         PassThrough,
         pipeline,
         finished,
+        isDestroyed: streamUtils.isDestroyed,
         isReadable: streamUtils.isReadable,
         isWritable: streamUtils.isWritable,
         isDisturbed: streamUtils.isDisturbed,

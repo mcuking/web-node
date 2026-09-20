@@ -137,6 +137,35 @@ console.log(
     );
   });
 })();
+// destroy() / finished() run on Node's own destroy source
+// (internal/streams/destroy.js): a destroy emits 'error' then 'close' on the
+// next tick, and finished() flags a close that beats the writable half as
+// ERR_STREAM_PREMATURE_CLOSE.
+(function () {
+  const stream = require('stream');
+  const order = [];
+  const r = new stream.Readable({ read: function () {} });
+  r.on('error', function (e) { order.push('error:' + e.message); });
+  r.on('close', function () { order.push('close'); });
+  r.destroy(new Error('boom'));
+  console.log(
+    'destroy sync: destroyed=' + r.destroyed + ' closed=' + r.closed +
+      ' errored=' + (r.errored && r.errored.message)
+  );
+  process.nextTick(function () {
+    console.log(
+      'destroy async: ' + order.join(' then ') +
+        ' (isDestroyed=' + stream.isDestroyed(r) + ')'
+    );
+  });
+
+  const w = new stream.Writable({ write: function (_c, _e, cb) { cb(); } });
+  stream.finished(w).then(
+    function () { console.log('premature  : resolved'); },
+    function (e) { console.log('premature  : ' + e.code + ' (' + e.message + ')'); }
+  );
+  w.destroy();
+})();
 const factsFile = path.join(dir, 'facts.txt');
 fs.writeFileSync(factsFile, require('./lib/facts.js')().map(function (r) {
   return r[0] + ' = ' + r[1];
@@ -791,7 +820,12 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - **stream** — Readable / Writable / Duplex / Transform / PassThrough, real backpressure,
   pipe(), pipeline(), finished(), stream/promises, plus fs.createReadStream and
   fs.createWriteStream; the request is a Readable and the response a Writable,
-  so req.pipe(res) works
+  so req.pipe(res) works. Several pieces of Node's own stream core are vendored
+  and run as-is: Readable.from, high-water-mark resolution, the state predicates,
+  and now the real destroy/close chain
+- **destroy() + finished()** — destroy, _undestroy and the error/close emit order
+  come from Node's internal/streams/destroy.js; finished() rejects a close that
+  beats the writable half with ERR_STREAM_PREMATURE_CLOSE
 - **Chunked transfer-encoding** — a response without Content-Length streams as chunked,
   and the client side de-chunks it again
 - **npm client (milestone 4)** — "Install deps" fetches the dependencies declared in
@@ -820,9 +854,9 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 
 - Subdomain preview routing on a static host (only the dev server has the wildcard DNS)
 - Real TLS (the https module is the http surface under a TLS-shaped name)
-- Object-mode objectMode edge cases, byte-exact read(n) splitting
-- npm lifecycle scripts and .bin shims (both need a process to spawn: no child_process here)
+- Buffer pooling (allocUnsafe / from(string) do not carve from an 8 KB slab)
 - npm/yarn/pnpm filesystem specs (file:, git+, link:)
+- A real async_hooks, so end-of-stream's AsyncResource plumbing can be vendored too
 - webpack (esbuild, rollup and Vite are milestones 5/5b/5c)
 `,
 };

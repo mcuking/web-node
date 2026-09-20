@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 更进一步——把 **`internal/streams/destroy.js` 真源码接进来**（`destroy`/`_undestroy` + `[kState]` 位域适配）并让 `finished()` 用真谓词（含 `ERR_STREAM_PREMATURE_CLOSE`）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -38,11 +38,12 @@
 | M10 | **扩大 vendoring**（真源码 `internal/streams/state.js` 接管 highWaterMark） | ✅ 完成 |
 | M11 | **修 stream 核心 bug**（同步 push 递归、异步迭代错误传播）+ 真源码 `Readable.from` | ✅ 完成 |
 | M12 | **对齐流状态形状**（`_readableState`/`_writableState`）+ 真源码谓词 | ✅ 完成 |
+| M13 | **vendor `internal/streams/destroy.js`**（真 `destroy`/`_undestroy` + `[kState]` 位域）+ `finished()` 接真谓词 | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **173/173 通过** · `vite build` 绿（worker ~332KB / index ~10.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **183/183 通过** · `vite build` 绿（worker ~344KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -120,17 +121,48 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **接真源码 `internal/streams/utils.js` 剩下的谓词 + `destroy`**：`isDestroyed`/`isFinished`/`isWritableEnded`/`isReadableAborted` 等已可直接用；`internal/streams/destroy.js` 依赖 `process.nextTick`/`async_hooks`，接它之前要先把 `emitErrorNT` 链路对齐。
+1. **接真源码 `internal/streams/end-of-stream.js`**：把现在手写的 `finished()` 换成真实现。它依赖 `internal/async_hooks`（`enabledHooksExist`）/`internal/async_context_frame`/`internal/util`/`internal/validators`，要么先起一个能 no-op 的 `async_hooks` 层，要么跟 vendoring 一起兼容。
 2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 3. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
-4. **stream 遗留（M8 尾声）**：`stream.finished` 的回调形式返回的是 no-op `cleanup()`。
-5. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
-4. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
-5. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
+4. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
+5. **stream 剩余**：接真 `readable.js`/`writable.js`（M12/M13 已把 `_readableState`/`_writableState` 与 `[kState]` 就位，接口渐渐够用了）。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M13 接真源码 `internal/streams/destroy.js` + `finished()` 用真谓词
+
+**目标**：把 DEVLOG「下一步」里的第 1 项做完——流的状态形状（M12）已经对齐，现在把**真实的 destroy 链**接进来。
+
+**改了什么**
+
+1. **新增真源码 `internal/streams/destroy.js`**（`npm run vendor`，manifest 现有 12 个文件）。它导出 `destroy` / `undestroy` / `errorOrDestroy`，是 Node 自己生命周期管理的实现。
+2. **`[kState]` 位域适配层**（`stream.ts`）：vendored destroy 不再藏在 `#private`，而是把 `_readableState`/`_writableState` 上那个 symbol 键控的位域（`kDestroyed`/`kClosed`/`kCloseEmitted`/`kErrorEmitted`…）做成**读写视图**：读时由实时字段重算，写时把生命周期位折回字段。这样 `w[kState] |= kDestroyed` 这种真源码写法能直接驱动我们的流，不需要第二份事实源；构造期常量（`kObjectMode`/`kAutoDestroy`/`kEmitClose`/`kConstructed`）和错误对象本身仍归我们所有。
+   - 为此给两个 state 视图补上必要的**可写属性**（Node 的 state 是可变对象）：`errored`/`destroyed`/`closed`/`closeEmitted`/`errorEmitted`/`constructed`，以及 `undestroy` 会重置的 `reading`/`ended`/`endEmitted`（readable）与 `ending`/`finished`/`finalCalled`/`prefinished`（writable）。
+3. **`destroy()` 改走真源码**：`Readable`/`Writable`/`Duplex` 的 `destroy()` 不再是手写的“置位 + defer 发射”，而是 `streamDestroy.destroy.call(this, err)`。顺序仍严格是 **nextTick 里先 `error` 后 `close`**（`emitErrorCloseNT`），且 `destroy()` 同步就把 `destroyed`/`closed`/`errored` 置好、但一帧不发射——与真 Node 逐条对上。
+4. **`_undestroy()`**：`destroy.js` 的重置函数落在 `Readable.prototype`/`Writable.prototype`（Node 的受保护名，`net.js` 会调），可把已销毁的流重新置活。
+5. **`finished()` 用真谓词重写**：不再只是听到 `end`/`finish`/`close` 就 resolve。现在它：
+   - 用 `isReadableFinished`/`isWritableFinished`/`isDestroyed`/`willEmitClose` 判断“已完成”；
+   - 已完成的流在**下一 tick** 异步回调（对齐 Node 的 immediate result）；
+   - `close` 早于两半完成时，报真 `ERR_STREAM_PREMATURE_CLOSE`（除非是带错误的 destroy，那就报那个错误）；
+   - **回调形式返回真正能用的 `cleanup()`**（移除自己挂的监听器）——修掉 DEVLOG 里记的“返回 no-op”遗留。
+6. **公开谓词补齐**：`stream.isDestroyed` 现在与 Node 一致地导出（公开谓词就是 `isDestroyed`/`isDisturbed`/`isErrored`/`isReadable`/`isWritable` 五个）。
+7. **`internal/errors` 补码**：`ERR_MULTIPLE_CALLBACK`、`ERR_STREAM_PREMATURE_CLOSE`（destroy.js/end-of-stream.js 需要）。
+
+**为什么**
+
+- destroy 是流生命周期里最容易写错的部分（重入、错误聚合、close 只发一次、半关闭）；用真源码能一次性把这些边界拉齐。
+- `finished()` 之前把“提前关闭”当正常结束，会把真错误吞掉；现在能区分“正常结束”与“被提前关掉”。
+
+**验证**（期望值全部先跑真 Node v22.19.0 实测）
+
+- 单测：173 → **183**（新增 `test/stream-destroy.test.ts` 10 条：destroy 顺序/幂等/同步标志、`isDestroyed`、`_undestroy` 重置、`finished` 的 premature-close / destroy-error / cleanup / 干净结束）。
+- 浏览器端到端（本机 5199 + Chrome CDP）打印：`destroy sync: destroyed=true closed=true errored=boom`、`destroy async: error:boom then close (isDestroyed=true)`、`premature  : ERR_STREAM_PREMATURE_CLOSE (Premature close)`。
+
+**涉及文件**
+
+新增：`vendor/node-lib/internal/streams/destroy.js`（+ MANIFEST）、`test/stream-destroy.test.ts`。修改：`tools/vendor.mjs`、`src/node-runtime/builtins/vendored-builtins.ts`、`src/node-runtime/builtins/internal-shims.ts`、`src/node-runtime/builtins/stream.ts`、`src/demo-project.ts`。
 
 ### 2026-09-20 · M12 对齐流状态形状 + 接真源码谓词
 

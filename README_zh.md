@@ -95,6 +95,12 @@ pipeline(fs.createReadStream('/project/a.txt'), new Transform({
 `finished()`、`stream/promises`、`fs.createReadStream` / `fs.createWriteStream` 均已实现，
 高水位之上的 `write()`/`push()` 返回 `false` 并在排空后发 `'drain'`（背压真实生效）。
 
+流的核心已逐步换成 **Node 真源码**（`internal/streams/state.js`、`from.js`、`utils.js`、
+`destroy.js`）：默认高水位、`Readable.from`、`isReadable`/`isWritable`/`isDisturbed`/
+`isErrored`/`isDestroyed` 谓词，以及 `destroy()` / `_undestroy()` 生命周期。因此
+`destroy(err)` 会在下一 tick 依次发 `error`、`close`；`finished()` 遇到“writable 未完成就
+close”会报 `ERR_STREAM_PREMATURE_CLOSE`。
+
 响应到浏览器也是**真流式**：SW 直接把 `ReadableStream` 交给浏览器，`res.write()` / SSE / 大文件
 边产生边到达（HTML 例外，为注入 `<base>` 先缓冲）。连接默认 keep-alive，服务端支持 pipelining，
 客户端按端口做连接池。`https` 是 `http` 的同名壳（虚拟网络无 TLS）。
@@ -116,7 +122,7 @@ M6 把 npm 客户端补到实用：
 - **peer 依赖**：缺失的 peer 自动装到根 `node_modules`（npm 7+ 行为）。
 - **平台过滤**：仅不匹配当前平台（`linux`/`wasm32`）的 `optionalDependencies` 静默跳过。
 
-未支持：生命周期脚本与 `.bin` shim（都需能 spawn 进程，而运行时没有 `child_process`）、`file:`/`git+` 说明符。
+未支持：`file:`/`git+`/`link:` 说明符。（生命周期脚本与 `.bin` shim 已可用：它们跑在运行时自带的 `child_process` 表面之上，见里程碑 7。）
 
 ## 构建工具（M5）
 
@@ -215,6 +221,14 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M5e | Vite HMR 在页内跑通（走 BroadcastChannel，非 WebSocket） | ✅ |
 | M5f | HMR 收尾（CSS `css-update` + 按端口隔离通道） | ✅ |
 | M6 | npm 收尾（lockfile + 完整性校验 + peer 自动安装） | ✅ |
+| M7 | `child_process` + 受控 spawn 面（fork/exec/spawn + mini-shell） | ✅ |
+| M7 | npm `.bin` shim + 生命周期脚本 | ✅ |
+| M8 | stream 收尾（字节精确 `read(n)` + objectMode 分离 + `autoDestroy`） | ✅ |
+| M9 | Buffer 共享内存（`slice`/`subarray`、`from(ArrayBuffer)` 视图） | ✅ |
+| M10 | 扩大 vendoring —— 真源码 `internal/streams/state.js` 接管 hwm | ✅ |
+| M11 | 修 stream 核心 bug + 真源码 `Readable.from` | ✅ |
+| M12 | 对齐流状态形状（`_readableState`/`_writableState`）+ 真谓词 | ✅ |
+| M13 | vendor `internal/streams/destroy.js`（真 `destroy`/`_undestroy` + `[kState]` 位域）+ `finished()` 接真谓词 | ✅ |
 
 ## 改动约定
 

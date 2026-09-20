@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-20T03:39:14.662Z",
+  "generatedAt": "2026-09-20T03:45:35.229Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -68,6 +68,13 @@
       "sha256": "76f2a40f2e1b799a575116036549bf5eca5f69b9038a77b1016eee823e51625f",
       "upstreamSha256": "76f2a40f2e1b799a575116036549bf5eca5f69b9038a77b1016eee823e51625f",
       "bytes": 8930,
+      "patches": []
+    },
+    {
+      "path": "internal/streams/destroy.js",
+      "sha256": "74aaae64ff7e4553fbf981baffb1f1dab7748c1e3fedfbef59eb8ab9ed4ec22d",
+      "upstreamSha256": "74aaae64ff7e4553fbf981baffb1f1dab7748c1e3fedfbef59eb8ab9ed4ec22d",
+      "bytes": 7355,
       "patches": []
     },
     {

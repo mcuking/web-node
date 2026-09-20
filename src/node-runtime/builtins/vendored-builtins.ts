@@ -40,6 +40,12 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     origin: 'node-source',
   },
   {
+    id: 'internal/streams/destroy',
+    vendorPath: 'internal/streams/destroy.js',
+    origin: 'node-source',
+    deps: ['internal/errors', 'internal/streams/utils'],
+  },
+  {
     id: 'path',
     aliases: ['node:path'],
     vendorPath: 'path.js',

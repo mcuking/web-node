@@ -177,6 +177,14 @@ pipeline(fs.createReadStream('/project/a.txt'), new Transform({
 above the high-water mark and emit `'drain'` once the buffer empties, so
 backpressure propagates for real instead of buffering whole bodies in memory.
 
+Several pieces of Node's own stream core are vendored and executed as-is
+(`internal/streams/state.js`, `from.js`, `utils.js`, `destroy.js`): the default
+high-water marks, `Readable.from`, the `isReadable`/`isWritable`/`isDisturbed`/
+`isErrored`/`isDestroyed` predicates, and the `destroy()` / `_undestroy()`
+lifecycle. `destroy(err)` therefore emits `error` then `close` on the next tick,
+and `finished()` rejects a `close` that beats the writable half with
+`ERR_STREAM_PREMATURE_CLOSE`.
+
 ## npm
 
 Hit **Install deps** and the client resolves your `package.json` dependencies
@@ -189,8 +197,8 @@ const ms = require('ms');
 ms(60000); // '1m'
 ```
 
-Not yet: lifecycle scripts and `.bin` shims (both need a process to spawn —
-there is no `child_process` here), and `file:` / `git+` / `link:` specifiers.
+Not yet: `file:` / `git+` / `link:` specifiers. Lifecycle scripts and `.bin`
+shims run against the runtime's own `child_process` surface (milestone 7).
 
 ## Build tools (M5)
 
@@ -308,6 +316,14 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M5e | Vite HMR in the tab (over BroadcastChannel, not a WebSocket) | ✅ Done |
 | M5f | HMR wrap-up — CSS `css-update` + per-port channel isolation | ✅ Done |
 | M6 | npm wrap-up — `package-lock.json`, integrity checks, peer auto-install | ✅ Done |
+| M7 | `child_process` + a controlled spawn surface (fork/exec/spawn + mini-shell) | ✅ Done |
+| M7 | npm `.bin` shims + lifecycle scripts (JS shims, dep and root scripts) | ✅ Done |
+| M8 | Stream wrap-up — byte-exact `read(n)`, objectMode split, `autoDestroy` | ✅ Done |
+| M9 | Buffer shared memory — `slice`/`subarray`, `from(ArrayBuffer)` views | ✅ Done |
+| M10 | Wider vendoring — real `internal/streams/state.js` drives the high-water marks | ✅ Done |
+| M11 | Fix stream core bugs (sync push recursion, async-iter error) + real `Readable.from` | ✅ Done |
+| M12 | Align the stream state shape (`_readableState`/`_writableState`) + real predicates | ✅ Done |
+| M13 | Vendor `internal/streams/destroy.js` (real `destroy`/`_undestroy` + `[kState]` bits) and run `finished()` on the real predicates | ✅ Done |
 
 ## Contributing
 
