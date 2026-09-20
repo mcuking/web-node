@@ -16,9 +16,13 @@ export const DEMO_FILES: Record<string, string> = {
       scripts: { start: 'node index.js', postinstall: 'node lib/report.js > postinstall.txt' },
       dependencies: {
         ms: '^2.1.3',
-        'esbuild-wasm': '^0.28.2',
+        // Pinned to the 0.21 line: Vite 5.4 drives esbuild through its 0.21 API,
+        // and a mismatched esbuild-wasm throws on transforms Vite asks for.
+        'esbuild-wasm': '^0.21.5',
         '@rollup/wasm-node': '^4.63.3',
         vite: '^5.4.0',
+        vue: '^3.5.0',
+        '@vitejs/plugin-vue': '^5.2.0',
         postcss: '^8.4.43',
         picocolors: '^1.0.0',
         'source-map-js': '^1.2.0',
@@ -692,6 +696,7 @@ const NM = path.join(ROOT, 'node_modules');
     return;
   }
   const vite = await import('vite');
+  const { default: vue } = await import('@vitejs/plugin-vue');
   console.log('tool        : vite v' + vite.version + ' (running in the tab)');
 
   // Vite expects the native esbuild addon. A tab cannot load one, so the runtime
@@ -706,6 +711,7 @@ const NM = path.join(ROOT, 'node_modules');
   const result = await vite.build({
     root: SITE,
     logLevel: 'silent',
+    plugins: [vue()],
     build: { write: false, minify: false },
   });
   const bundle = Array.isArray(result) ? result[0] : result;
@@ -729,27 +735,48 @@ const NM = path.join(ROOT, 'node_modules');
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>web-node · vite</title>
+    <title>web-node · vue + vite</title>
   </head>
   <body>
-    <h1 id="app"></h1>
+    <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
 `,
 
-  '/project/site/src/main.js': `import { greet } from './message.js';
+  // Milestone 18: a real framework. The app is a Vue 3 single-file component;
+  // @vitejs/plugin-vue compiles the SFC (script setup + template) inside the
+  // tab, so the same Vite buttons now drive a real Vue app.
+  '/project/site/src/App.vue': `<script setup>
+import { ref } from 'vue';
+
+defineProps({ greeting: { type: String, default: 'Hello' } });
+const count = ref(0);
+</script>
+
+<template>
+  <h1>{{ greeting }}</h1>
+  <button type="button" @click="count++">count is {{ count }}</button>
+  <p class="hint">A real Vue 3 single-file component, compiled by Vite in the tab.</p>
+</template>
+`,
+
+  '/project/site/src/main.js': `import { createApp } from 'vue';
+import App from './App.vue';
+import { greet } from './message.js';
 import './style.css';
 
-const el = document.getElementById('app');
-el.textContent = greet('vite');
+// App.vue is compiled by @vitejs/plugin-vue; the greeting comes from the plain
+// module below, so the Vue plugin cannot hot-swap that one for us.
+const app = createApp(App, { greeting: greet('vite') });
+app.mount('#app');
 
-// Accept updates to message.js and re-render in place - no full reload. The
-// callback gets the *new* module, so read the fresh export from it (the old
-// \`greet\` binding inside this module is not re-executed).
+// Accept updates to message.js and remount with the *new* greeting - no full
+// reload. The callback gets the fresh module, so read the export from it.
 if (import.meta.hot) {
   import.meta.hot.accept('./message.js', function (mod) {
-    el.textContent = mod.greet('vite');
+    app.unmount();
+    createApp(App, { greeting: mod.greet('vite') }).mount('#app');
   });
 }
 `,
@@ -853,6 +880,7 @@ function vfsWatchPlugin() {
     return;
   }
   const vite = await import('vite');
+  const { default: vue } = await import('@vitejs/plugin-vue');
   console.log('tool        : vite v' + vite.version + ' dev server (in the tab)');
 
   const esbuild = await import('esbuild');
@@ -864,7 +892,12 @@ function vfsWatchPlugin() {
   const server = await vite.createServer({
     root: SITE,
     logLevel: 'error',
-    plugins: [vfsWatchPlugin()],
+    plugins: [vue(), vfsWatchPlugin()],
+    // Vite pre-bundles bare deps with esbuild, and esbuild-wasm has no file
+    // system (its reads throw "not implemented on js"). With a framework in the
+    // graph that pre-bundling is required, so turn it off and let Vite serve
+    // the dependencies' own ESM sources straight out of node_modules instead.
+    optimizeDeps: { disabled: true },
     server: {
       host: '127.0.0.1',
       port: PORT,
@@ -946,6 +979,11 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
   esbuild→esbuild-wasm and rollup→@rollup/wasm-node, so Vite boots on the virtual
   file system and produces a real production bundle (site/index.html +
   site/dist/assets/*.js) — no server, no Node process
+- **Vue 3 single-file components (milestone 18)** — the demo site is a real Vue
+  SFC (a script-setup block plus a template). @vitejs/plugin-vue compiles it in
+  the tab, so "Vite build" produces a production Vue bundle and "Vite dev"
+  serves a live, interactive Vue app in the Preview (the counter button works),
+  HMR included. esbuild-wasm is pinned to the 0.21 line that Vite 5.4 expects
 - CommonJS + a subset of ESM (static import/export)
 - In-memory VFS persisted to OPFS (reload the page and your files are still here)
 
