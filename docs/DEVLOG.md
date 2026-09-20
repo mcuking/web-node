@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -33,11 +33,12 @@
 | M6 | **npm 收尾**（lockfile + 完整性校验 + peer 自动安装） | ✅ 完成 |
 | M7 | **child_process + 受控 spawn 面**（fork/exec/spawn + mini-shell + `ProcessHost`） | ✅ 完成 |
 | M7 | **npm `.bin` shim + 生命周期脚本**（JS shim + 依赖/根项目脚本） | ✅ 完成 |
+| M8 | **stream 收尾**（字节精确 `read(n)` + `objectMode` 分离 + `autoDestroy` + `readable` 驱动 + chunk 交付 `Buffer`） | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **136/136 通过** · `vite build` 绿（worker ~307KB / index ~10.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **145/145 通过** · `vite build` 绿（worker ~309KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -65,7 +66,6 @@
 **MVP 限制**（已知）：
 - **子域名路由仅在 dev server 可用**：`<port>.localhost:5199` 需要 dev 中间件与 `<port>.localhost` 的 wildcard DNS（浏览器把 `*.localhost` 解析到 loopback）。构建产物 / `vite preview` / GitHub Pages 没有这个 wildcard，自动回退到路径前缀 `/preview/<port>/`（`src/ui/preview-url.ts` 按环境选）。
 - 路径前缀模式下：绝对路径资源（`/app.js`）会落在前缀外；HTML 响应会注入 `<base>` 修正**相对路径**资源。dev 子域名模式没有此限制（每个预览是真实源）。
-- `Readable.read(n)` 字节模式下是「整块交付」而非精确切 n 字节（`data`/`pipe()` 路径是精确的）；objectMode 只支持基本形态。
 
 ### stream 层怎么走通的（前置）
 
@@ -117,14 +117,42 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 按优先级：
 
 1. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
-2. **stream 收尾**：`read(n)` 字节精确切分、`autoDestroy` 细节、`objectMode` 边界。
-3. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
+2. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
+3. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
+4. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
+5. **stream 遗留（M8 尾声）**：`stream.finished` 的回调形式返回的是 no-op `cleanup()`；`read(n)` 的 `n` 大于 hwm 时未按 Node 向上取整到 hwm。
 4. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 5. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M8 stream 收尾：字节精确 `read(n)` + `objectMode` 分离 + `autoDestroy`
+
+**目标**：把 stream 里几处「近似 Node 行为」换成真语义。这些都是真 Node 与 web-node **可观测差异**，不是内部实现洁癖。
+
+**改了什么**
+
+- **`read(n)` 字节精确**：字节模式下 `read(3)` 从缓冲里精确切出 3 字节（需要时切碎一个 chunk 并把尾巴 `subarray` 留下），而不是交出整个缓冲 chunk。objectMode 仍然一次一个值；无参 `read()` 取走全部。
+- **暂停模式由 `readable` 驱动**：新增 `#emittedReadable` / `#needReadable` 与合并延迟的 `#emitReadable()`（Node 语义：只在事件真正发出后才清标记，故一串 `push()` 只产生一个 `readable`）。`on('readable')` 现在会启动 `_read`（之前完全不会，paused 消费者永远拿不到数据）。
+- **`readableObjectMode` / `writableObjectMode` 成为真实 getter**（之前是 `undefined`）。`Readable.from` 仍默认 objectMode，并且按 Node 把 `highWaterMark` 默认设为 **1**（惰性，不被无界 source 撑爆）。
+- **objectMode 的 writable 不再把字符串重编码成 Buffer**：`decodeStrings` 在 objectMode 下强制为 false（Node 同此），所以 `w.write('str')` 交到 `_write` 的是字符串本身。
+- **`autoDestroy`（默认开）**：`end`/`finish` 之后关闭流，且 `close` 触发时 `destroyed === true`（`end` 触发时仍为 `false`——与 Node 顺序一致）。用一个 `WeakMap` 注册表记录「读端/写端是否已完成」，**Duplex 要两端都完成才关**，避免半关（这是之前直接 `emit('close')` 的旧行为会踩的坑）。关闭走「软关闭」：置位 `destroyed` + 发 `close`，**不重入 `_destroy`**（否则 `http.ClientRequest` 会把 socket abort 掉）；这也与旧的 `emit('close')` 行为等价。
+- **字节 chunk 一律交付 `Buffer`**：真 Node v22 下 `push('ab')` / `push(Uint8Array)` 到达 `data` / `read()` 时都是 `Buffer`，所以 `chunk.toString()` 应该是「解码」而不是「列出字节」。新增 `toBuffer()`，在 `#decode` 的字节-无编码分支包装。
+- **文件头过时说明更新**：原先写着「`read(n)` 不精确切分、无 objectMode 分离、无 autoDestroy」，现已不成立。
+- **demo**：stream 段落新增 pull API 展示（`readable` + `read(32)` 精确读 + `autoDestroy: closed, destroyed=true`）。
+
+**为什么**
+
+- 一条一条都是拿真 Node 当基准量出来的：`Readable.from(...).read(3)`、`read()` 无参同步 push、`data` 的 chunk 类型（`Buffer.isBuffer`）、`w.write('str')` 在 objectMode 下到底交什么、`end`/`close` 时的 `destroyed`、`Readable.from` 的 hwm。基准程序在 `/tmp/m8/` 下跑，输出逐条对齐。
+- `read(n)` 不准、paused 模式完全不工作、objectMode 把字符串转 Buffer——这些会让任何真 Node 库（解析器、协议实现、流式压缩）在页内静默算错。
+
+**涉及文件**
+
+修改：`src/node-runtime/builtins/stream.ts`、`test/stream.test.ts`（+9 条回归）、`src/demo-project.ts`。
+
+**验证**：`tsc --noEmit` 干净 · `vitest run` **145/145**（stream 从 18 → 26 条）· `vite build` 绿 · 浏览器端到端：`read stream : 197 bytes in 13 chunks of <=16` / `read(32) : 197 bytes in 7 exact reads` / `autoDestroy : closed, destroyed=true`。
 
 ### 2026-09-20 · M7 进程表面：`child_process` + mini-shell + npm `.bin`/生命周期脚本
 
