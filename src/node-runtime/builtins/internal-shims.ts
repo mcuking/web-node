@@ -26,28 +26,76 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_WEB_NODE_NOT_IMPLEMENTED: '[web-node] %s is not implemented.',
 };
 
+/**
+ * Node's `ERR_*` classes extend the matching built-in error type, and keep that
+ * type's `name`; the code lives on `.code` only
+ * (`new Readable({highWaterMark:-1})` is a `TypeError` whose `.code` is
+ * `ERR_INVALID_ARG_VALUE`).
+ */
+const ERROR_BASES: Record<string, ErrorConstructor> = {
+  ERR_INVALID_ARG_TYPE: TypeError,
+  ERR_INVALID_ARG_VALUE: TypeError,
+  ERR_OUT_OF_RANGE: RangeError,
+  ERR_INVALID_URI: TypeError,
+  ERR_MISSING_ARGS: TypeError,
+  ERR_UNKNOWN_FILE_EXTENSION: TypeError,
+  ERR_UNSUPPORTED_ESM_URL_SCHEME: TypeError,
+};
+
 class NodeError extends Error {
   code: string;
   constructor(code: string, message: string, ...args: unknown[]) {
-    let msg = message;
     let i = 0;
-    msg = msg.replace(/%[sdj]/g, () => String(args[i++]));
-    super(msg);
+    super(message.replace(/%[sdj]/g, () => String(args[i++])));
     this.code = code;
-    this.name = 'Error';
   }
 }
 
-function makeErrorClass(code: string): new (...args: unknown[]) => NodeError {
-  const template = ERROR_CODES[code] ?? code;
-  const cls = class extends NodeError {
-    constructor(...args: unknown[]) {
-      super(code, template, ...args);
-      this.name = code.replace(/^ERR_/, '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+/** A couple of codes format their message conditionally rather than by template. */
+function inspectArg(value: unknown): string {
+  if (typeof value === 'string') return `'${value}'`;
+  if (typeof value === 'bigint') return `${value}n`;
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
     }
-  };
-  Object.defineProperty(cls, 'name', { value: code });
-  return cls;
+  }
+  return String(value);
+}
+
+const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
+  // Node: "The property 'options.highWaterMark' is invalid. Received -1" —
+  // 'property' whenever the name looks like a dotted path, else 'argument'.
+  ERR_INVALID_ARG_VALUE: (args) => {
+    const [name, value, reason] = args as [string, unknown, string?];
+    const type = String(name).includes('.') ? 'property' : 'argument';
+    return `The ${type} '${name}' ${reason ?? 'is invalid'}. Received ${inspectArg(value)}`;
+  },
+};
+
+function formatError(code: string, args: unknown[]): string {
+  const formatter = CUSTOM_FORMATTERS[code];
+  if (formatter) return formatter(args);
+  const template = ERROR_CODES[code] ?? code;
+  let i = 0;
+  return template.replace(/%[sdj]/g, () => String(args[i++]));
+}
+
+function makeErrorClass(code: string): new (...args: unknown[]) => Error {
+  const Base = (ERROR_BASES[code] ?? Error) as ErrorConstructor;
+  class NodeErr extends Base {
+    code = code;
+    constructor(...args: unknown[]) {
+      super(formatError(code, args));
+    }
+  }
+  // Node keeps the built-in type's name on both the class and its instances.
+  Object.defineProperty(NodeErr, 'name', { value: Base.name });
+  return NodeErr as unknown as new (...args: unknown[]) => Error;
 }
 
 function createErrorsBindingContext(): Record<string, unknown> {

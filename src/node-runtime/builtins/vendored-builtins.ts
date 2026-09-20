@@ -23,6 +23,12 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     deps: ['internal/errors'],
   },
   {
+    id: 'internal/streams/state',
+    vendorPath: 'internal/streams/state.js',
+    origin: 'node-source',
+    deps: ['internal/errors', 'internal/validators'],
+  },
+  {
     id: 'path',
     aliases: ['node:path'],
     vendorPath: 'path.js',

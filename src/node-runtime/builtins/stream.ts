@@ -32,13 +32,26 @@ import type { BuiltinSpec, BuiltinInitContext } from './types';
  *     with `destroyed === true` by the time `close` fires; a duplex waits for
  *     both halves.
  *   - Paused-mode consumers are driven by the `readable` event.
+ *   - High-water marks come from Node's own `internal/streams/state.js`
+ *     (vendored verbatim), so defaults, Duplex per-side keys
+ *     (`readableHighWaterMark`/`writableHighWaterMark`, `readableObjectMode`/
+ *     `writableObjectMode`) and validation match the real implementation.
  */
-
-const DEFAULT_HWM = 16 * 1024;
-const OBJECT_HWM = 16;
 
 type AnyChunk = unknown;
 type WriteDone = (err?: Error | null) => void;
+
+/**
+ * High-water-mark resolution is delegated to `internal/streams/state.js`; we
+ * only adapt our per-instance object-mode flags to the `state` shape it wants.
+ */
+type DuplexKey = 'readableHighWaterMark' | 'writableHighWaterMark';
+type HwmResolver = (
+  objectMode: boolean,
+  options: Record<string, unknown>,
+  duplexKey: DuplexKey,
+  isDuplex: boolean,
+) => number;
 
 /** Effective size of a chunk for high-water-mark accounting. */
 function chunkSize(chunk: AnyChunk, objectMode: boolean): number {
@@ -48,6 +61,29 @@ function chunkSize(chunk: AnyChunk, objectMode: boolean): number {
   if (ArrayBuffer.isView(chunk)) return (chunk as ArrayBufferView).byteLength;
   if (chunk instanceof ArrayBuffer) return chunk.byteLength;
   return 1;
+}
+
+/** Node caps a single read at 1 GiB. */
+const MAX_HWM = 0x40000000;
+
+/**
+ * `read(n)` with `n` above the current high-water mark raises it, rounded up to
+ * a power of two so it cannot creep upwards in tiny steps (Node's
+ * `computeNewHighWaterMark`).
+ */
+function computeNewHighWaterMark(n: number): number {
+  if (n > MAX_HWM) {
+    const err = new RangeError(`The value of "size" is out of range. It must be <= 1GiB. Received ${n}`);
+    (err as { code?: string }).code = 'ERR_OUT_OF_RANGE';
+    throw err;
+  }
+  n--;
+  n |= n >>> 1;
+  n |= n >>> 2;
+  n |= n >>> 4;
+  n |= n >>> 8;
+  n |= n >>> 16;
+  return n + 1;
 }
 
 function toBytes(chunk: AnyChunk): Uint8Array {
@@ -132,8 +168,15 @@ function wstate(self: object): WritableState {
   return s;
 }
 
-function initWritable(self: object, options: Record<string, unknown> = {}): void {
-  const objectMode = !!options.objectMode;
+function initWritable(
+  self: object,
+  options: Record<string, unknown> = {},
+  resolveHwm: HwmResolver,
+  isDuplex = false,
+): void {
+  // Node: `objectMode` wins, then the Duplex-specific side flag; a plain
+  // Writable ignores `writableObjectMode`.
+  const objectMode = !!(options.objectMode || (isDuplex && options.writableObjectMode));
   W_STATE.set(self, {
     buffer: [],
     length: 0,
@@ -143,7 +186,7 @@ function initWritable(self: object, options: Record<string, unknown> = {}): void
     finished: false,
     needDrain: false,
     corked: 0,
-    hwm: typeof options.highWaterMark === 'number' ? (options.highWaterMark as number) : objectMode ? OBJECT_HWM : DEFAULT_HWM,
+    hwm: resolveHwm(objectMode, options, 'writableHighWaterMark', isDuplex),
     objectMode,
     // Node forces `decodeStrings` off in object mode: a string is a value to
     // pass through, not bytes to re-encode as a Buffer.
@@ -179,9 +222,23 @@ export const streamSpec: BuiltinSpec = {
   id: 'stream',
   aliases: ['node:stream'],
   origin: 'web-node',
-  deps: ['events'],
+  deps: ['events', 'internal/streams/state'],
   init: (ctx: BuiltinInitContext) => {
     const { EventEmitter } = ctx.require('events') as { EventEmitter: new () => EmitterLike };
+    const { getHighWaterMark, getDefaultHighWaterMark, setDefaultHighWaterMark } = ctx.require(
+      'internal/streams/state',
+    ) as {
+      getHighWaterMark: (
+        state: { objectMode: boolean },
+        options: Record<string, unknown>,
+        duplexKey: DuplexKey,
+        isDuplex: boolean,
+      ) => number;
+      getDefaultHighWaterMark: (objectMode: boolean) => number;
+      setDefaultHighWaterMark: (objectMode: boolean, value: number) => void;
+    };
+    const resolveHwm: HwmResolver = (objectMode, options, duplexKey, isDuplex) =>
+      getHighWaterMark({ objectMode }, options, duplexKey, isDuplex);
     const { Buffer: Buffer_ } = ctx.require('buffer') as {
       Buffer: {
         new (size: number): Uint8Array;
@@ -236,16 +293,11 @@ export const streamSpec: BuiltinSpec = {
       /** The consumer asked for data (`read()`/`readable`) but got none yet. */
       #needReadable = false;
 
-      constructor(options: Record<string, unknown> = {}) {
+      constructor(options: Record<string, unknown> = {}, isDuplex = false) {
         super();
-        this.#objectMode = !!options.objectMode;
+        this.#objectMode = !!(options.objectMode || (isDuplex && options.readableObjectMode));
         this.#autoDestroy = options.autoDestroy !== false;
-        this.#hwm =
-          typeof options.highWaterMark === 'number'
-            ? (options.highWaterMark as number)
-            : this.#objectMode
-              ? OBJECT_HWM
-              : DEFAULT_HWM;
+        this.#hwm = resolveHwm(this.#objectMode, options, 'readableHighWaterMark', isDuplex);
         if (typeof options.read === 'function') {
           (this as unknown as Record<string, unknown>)._read = (options.read as (...a: unknown[]) => void).bind(this);
         }
@@ -484,6 +536,9 @@ export const streamSpec: BuiltinSpec = {
 
         const explicit = n !== undefined && !Number.isNaN(n);
         const want = explicit ? Math.max(0, Math.floor(n as number)) : 0;
+
+        // Asking for more than the current hwm raises it, as in Node.
+        if (explicit && want > this.#hwm) this.#hwm = computeNewHighWaterMark(want);
 
         if (explicit && want === 0 && this.#needReadable && (this.#length >= this.#hwm || this.#ended)) {
           this.#emitReadable();
@@ -743,7 +798,7 @@ export const streamSpec: BuiltinSpec = {
 
       constructor(options: Record<string, unknown> = {}) {
         super();
-        initWritable(this, options);
+        initWritable(this, options, resolveHwm);
         if (typeof options.write === 'function') {
           (this as unknown as Record<string, unknown>)._write = (options.write as (...a: unknown[]) => void).bind(this);
         }
@@ -936,8 +991,8 @@ export const streamSpec: BuiltinSpec = {
 
     class Duplex extends Readable {
       constructor(options: Record<string, unknown> = {}) {
-        super(options);
-        initWritable(this, options);
+        super(options, true);
+        initWritable(this, options, resolveHwm, true);
         const self = this as unknown as Record<string, unknown>;
         if (typeof options.write === 'function') self._write = (options.write as (...a: unknown[]) => void).bind(this);
         if (typeof options.final === 'function') self._final = (options.final as (...a: unknown[]) => void).bind(this);
@@ -1127,8 +1182,10 @@ export const streamSpec: BuiltinSpec = {
       compose,
       isReadable,
       isWritable,
+      getDefaultHighWaterMark,
+      setDefaultHighWaterMark,
       promises,
-      default: { Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished },
+      default: { Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished, getDefaultHighWaterMark, setDefaultHighWaterMark },
       /** Non-standard: lets `net`/`http`/`fs` share the exact same base classes. */
       _base: { Readable, Writable, Duplex, Transform, PassThrough },
     };

@@ -22,6 +22,7 @@ const FILES = [
   'internal/constants.js',
   'internal/encoding/util.js',
   'internal/querystring.js',
+  'internal/streams/state.js',
   'path.js',
   'querystring.js',
 ];
