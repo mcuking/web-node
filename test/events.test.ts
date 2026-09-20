@@ -4,7 +4,8 @@ import { NodeRuntime } from '../src/node-runtime/runtime';
 
 /**
  * `events` is now Node's real `events.js`, not a Map-backed shim. Every
- * expectation below was read off a real Node v22.19.0 first.
+ * expectation below was read off a real Node first, and the oracle is now fnm
+ * Node v26.9.0 (see docs/DEVLOG.md).
  */
 function boot() {
   const vfs = new MemoryVfs({ cwd: '/project' });

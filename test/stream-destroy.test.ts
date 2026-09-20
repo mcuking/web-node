@@ -5,8 +5,8 @@ import { NodeRuntime } from '../src/node-runtime/runtime';
 /**
  * `destroy()` / `_undestroy()` / `finished()` now run on the vendored real
  * source (vendor/node-lib/internal/streams/destroy.js + the predicates from
- * internal/streams/utils.js). Every expectation below was read off a real
- * Node v22.19.0 first.
+ * internal/streams/utils.js). Every expectation below was read off a real Node
+ * first; the oracle is now fnm Node v26.9.0.
  */
 function boot() {
   const vfs = new MemoryVfs({ cwd: '/project' });

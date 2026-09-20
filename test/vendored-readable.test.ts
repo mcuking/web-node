@@ -4,10 +4,11 @@ import { NodeRuntime } from '../src/node-runtime/runtime';
 
 /**
  * The real `internal/streams/readable.js` is vendored and loadable: it is the
- * base the public `stream` module will be rebuilt on (see DEVLOG "next steps").
+ * base the public `stream` module is now built on (see DEVLOG).
  * It only needs the pieces we already ship — the real `events.js` for its
  * `_events` storage, the vendored state/utils/destroy/end-of-stream, and the
- * `[kState]` bits those agree on. Expectations match Node v22.19.0.
+ * `[kState]` bits those agree on. Expectations match a real Node; the oracle is
+ * now fnm Node v26.9.0 (the same line as the vendored lib/ checkout).
  */
 function boot() {
   const vfs = new MemoryVfs({ cwd: '/project' });

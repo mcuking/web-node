@@ -9,15 +9,15 @@
 - **在线 demo**：<https://mcuking.github.io/web-node/>（装依赖、跑 demo 项目、点 **⚡ Vite build**，全在标签页里）
 - **开发日志 / 进度 / 下一步**：`docs/DEVLOG.md` ← **每次改动都往这里追加**
 - 设计文档：`docs/superpowers/specs/2026-09-17-web-node-design.md`
-- 上游源码：`/Users/tangjianghong/Downloads/node`（Node.js v26.9.1）
+- 上游源码：`/Users/tangjianghong/Downloads/node`（Node.js **v26.9.1-dev**，`v26.9.0-1-g7a3437d`）
 
 ## 开发
 
-> ⚠️ 用 fnm 的独立 Node v22.19.0，不要用 ClawHive 内置 Electron Node
-> （Electron Node 会让 rollup 原生模块 dlopen 代码签名失败）。
+> ⚠️ 用 fnm 的独立 Node（**v26.9.0**，与上游 vendored 源码同版本；v22.19.0 也保留），
+> 不要用 ClawHive 内置 Electron Node（Electron Node 会让 rollup 原生模块 dlopen 代码签名失败）。
 
 ```bash
-export PATH="/Users/tangjianghong/Library/Application Support/fnm/node-versions/v22.19.0/installation/bin:$PATH"
+export PATH="/Users/tangjianghong/Library/Application Support/fnm/node-versions/v26.9.0/installation/bin:$PATH"
 
 npm install
 npm run dev        # http://localhost:5173

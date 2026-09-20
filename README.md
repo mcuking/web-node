@@ -10,7 +10,7 @@ Run Node.js source code in the browser — a WebContainer-style runtime.
   demo project, hit **⚡ Vite build** — all inside the tab)
 - **Dev log / progress / next steps**: [`docs/DEVLOG.md`](docs/DEVLOG.md) ← **append an entry after every change**
 - Design doc: [`docs/superpowers/specs/2026-09-17-web-node-design.md`](docs/superpowers/specs/2026-09-17-web-node-design.md)
-- Upstream sources: local checkout of Node.js (v26.9.1), vendored via `tools/`
+- Upstream sources: local checkout of Node.js (v26.9.1-dev, `v26.9.0-1-g7a3437d`), vendored via `tools/`
 
 ## How it works
 
@@ -75,12 +75,13 @@ top of it sit three virtual subsystems:
 
 ## Development
 
-> ⚠️ Use an independent Node v22.19.0 from fnm — not the host app's bundled
-> Electron Node. The Electron Node makes rollup's native module fail `dlopen`
-> with a code-signing error.
+> ⚠️ Use an independent Node from fnm (v26.9.0, which matches the version the
+> upstream sources are vendored from; v22.19.0 is also installed) — not the host
+> app's bundled Electron Node. The Electron Node makes rollup's native module
+> fail `dlopen` with a code-signing error.
 
 ```bash
-export PATH="/Users/tangjianghong/Library/Application Support/fnm/node-versions/v22.19.0/installation/bin:$PATH"
+export PATH="/Users/tangjianghong/Library/Application Support/fnm/node-versions/v26.9.0/installation/bin:$PATH"
 
 npm install
 npm run dev        # http://localhost:5173

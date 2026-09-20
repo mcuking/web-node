@@ -6,8 +6,9 @@ import { NodeRuntime } from '../src/node-runtime/runtime';
  * `finished()` is now Node's real end-of-stream (vendored from
  * internal/streams/end-of-stream.js), not a hand-written approximation. As in
  * Node, `stream.finished(stream[, options], callback)` requires a callback; the
- * promise form is `stream.promises.finished`. Options match Node v22.19.0 (the
- * vendored source itself is the newer lib/ checkout — see docs/DEVLOG.md).
+ * promise form is `stream.promises.finished`. Options match a real Node; the
+ * oracle is now fnm Node v26.9.0, the same line the vendored lib/ checkout is
+ * from (see docs/DEVLOG.md).
  */
 function boot() {
   const vfs = new MemoryVfs({ cwd: '/project' });

@@ -129,12 +129,29 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 3. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。M16 把 child 的生命周期事件改为**订阅时延一个 macrotask**（让 stdout 的 `data` 先于 `exit`，对齐真 Node）；若后续发现时序副作用，可再评估。
 4. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
 5. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M16 后 worker 达 **~550KB**）；若在意体积，可改成按文件 code-split。
-6. **统一 oracle 版本（重要）**：vendored 真源码来自 `/Users/tangjianghong/Downloads/node`，而该 checkout **是 Node v26.9.1-dev**，不是 fnm v22.19.0。大部分语义两版一致，但已有可观测差异（例：v26 在无人监听时跳过 EOF 处的空 `readable` 事件 → `end signals=1`，v22 是 2）。后续要么统一改用同版本的源码树，要么在断言里注明版本（现测试已按 vendored 源的真实行为写，并在注释里标注）。
+6. ~~**统一 oracle 版本**~~ ✅ **已解决（2026-09-20）**：vendored 真源码来自 `/Users/tangjianghong/Downloads/node`，是 **Node v26.9.1-dev**（`v26.9.0-1-g7a3437d`），与旧基准 fnm **v22.19.0** 不是一套。已用 fnm 装 **v26.9.0**（距 vendored 只差一个 commit）作为新基准；实测确认 v26.9.0 与 vendored 源行为一致（例：EOF 处 `end signals=1`，v22 为 2）。**后续 oracle 一律用 v26.9.0**：`export PATH="/Users/tangjianghong/Library/Application Support/fnm/node-versions/v26.9.0/installation/bin:$PATH"`。
 7. **补 `internal/async_hooks` / `internal/util/inspect` 等 shim 的保真度**；把 `internal/streams/duplexify` 的 `internal/blob` 从 `isBlob` stub 扩到真 `Blob` 包装（当前够用）。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · oracle 切到 fnm Node v26.9.0
+
+**目标**：M16 发现 vendored 真源码是 **Node v26.9.1-dev**，而旧实测基准是 fnm **v22.19.0**（非同一版本）。统一基准。
+
+**做了什么**
+- `fnm install 26.9.0`（最新发行版；距 vendored checkout 的 `v26.9.0-1-g7a3437d` 只差一个 commit）。
+- 实测比对 v26.9.0 vs v22.19.0 vs vendored：
+  - **EOF `readable` 事件次数**：v26 = `1` / v22 = `2` / vendored = `1` ✅
+  - HWM 背压 `write` 返回值：v26 `true,true,false,false, needDrain=true` — 与测试期望一致
+  - `getDefaultHighWaterMark()` = 65536 / obj = 16；`_readableState.readable` = `undefined`；`finished()` 无 callback → `ERR_INVALID_ARG_TYPE`；`Readable.from(array).toArray()` 保类型
+- 结论：**vendored 源对 Node 26 忠实**，v26.9.0 可当新基准。
+
+**为什么** 基准与真源码版本不一致会让「断言对齐」变得含糊（到底对不对得上 Node）。现统一到 v26.9.0。
+
+**涉及文件**：`docs/DEVLOG.md`、`README.md`、`README_zh.md`（开发说明改用 v26.9.0 路径；附注 v22.19.0 仍保留）。测试无需改动（断言本就是 v26 行为）。
+
 
 ### 2026-09-20 · M16 整套 stream 换成真 Node 源码
 

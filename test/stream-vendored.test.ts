@@ -9,8 +9,8 @@ import { NodeRuntime } from '../src/node-runtime/runtime';
  * the default high-water marks, Writable/Duplex/Transform, the pipeline and
  * finished helpers, compose(), the async operators, and `stream.promises`.
  *
- * Values read off a real Node v22.19.0 unless noted (the vendored lib/ checkout
- * is the newer 26.x line — see docs/DEVLOG.md).
+ * Values read off a real Node and reconciled with the vendored lib/ checkout;
+ * the oracle is now fnm Node v26.9.0 (see docs/DEVLOG.md).
  */
 function boot(): { stream: any; require: (id: string) => any } {
   const vfs = new MemoryVfs({ cwd: '/project' });

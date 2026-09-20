@@ -4,8 +4,8 @@ import { NodeRuntime } from '../src/node-runtime/runtime';
 
 /**
  * `stream.addAbortSignal` is the vendored internal/streams/add-abort-signal.js,
- * replacing a stub that used to throw "not implemented". Expectations match
- * Node v22.19.0.
+ * replacing a stub that used to throw "not implemented". Expectations match a
+ * real Node, oracle fnm Node v26.9.0.
  */
 function boot() {
   const vfs = new MemoryVfs({ cwd: '/project' });
