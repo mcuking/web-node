@@ -37,11 +37,12 @@
 | M9 | **Buffer 共享内存**（`slice`/`subarray` + `from(ArrayBuffer)` 返回视图） | ✅ 完成 |
 | M10 | **扩大 vendoring**（真源码 `internal/streams/state.js` 接管 highWaterMark） | ✅ 完成 |
 | M11 | **修 stream 核心 bug**（同步 push 递归、异步迭代错误传播）+ 真源码 `Readable.from` | ✅ 完成 |
+| M12 | **对齐流状态形状**（`_readableState`/`_writableState`）+ 真源码谓词 | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **164/164 通过** · `vite build` 绿（worker ~313KB / index ~10.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **173/173 通过** · `vite build` 绿（worker ~332KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -119,7 +120,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **继续扩大 vendoring**：`internal/streams/{utils,legacy}.js`（纯 JS）可用，但 `utils` 的谓词（`isReadable`/`isWritable`/`isDestroyed`/`isDisturbed`/`isErrored`）要读流状态位（`_readableState`/`_writableState`），得先把我们的流状态形状对齐 Node（它现在完全没暴露这两个对象）。建议下一步做「流状态形状对齐 + 真谓词」。
+1. **接真源码 `internal/streams/utils.js` 剩下的谓词 + `destroy`**：`isDestroyed`/`isFinished`/`isWritableEnded`/`isReadableAborted` 等已可直接用；`internal/streams/destroy.js` 依赖 `process.nextTick`/`async_hooks`，接它之前要先把 `emitErrorNT` 链路对齐。
 2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 3. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
 4. **stream 遗留（M8 尾声）**：`stream.finished` 的回调形式返回的是 no-op `cleanup()`。
@@ -130,6 +131,29 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M12 对齐流状态形状 + 接真源码谓词
+
+**背景**：`Readable.from` 用的是真源码，但它只是冰山一角。Node 的 `internal/streams/utils.js`（`isReadable`/`isWritable`/`isDisturbed`/`isErrored`/`isDestroyed`…）全部建立在 `_readableState`/`_writableState` 之上；我们的流把这些状态藏在 `#private` 字段里，外界看不到，所以只能自己手写鸭子类型谓词。这一步先把状态形状对齐 Node，再接真谓词。
+
+**改了什么**
+
+1. **流状态对外可见**（`stream.ts`）：`Readable` 新增 `_readableState`，`Writable` 新增 `_writableState`，两者都是**身份稳定**的视图对象，属性用 getter 实时读内部状态（与 Node 一致：`r._readableState === r._readableState`）。字段包括 `objectMode`/`highWaterMark`/`buffer`/`length`/`ended`/`endEmitted`/`destroyed`/`closed`/`errored`/`errorEmitted`/`autoDestroy`/`emitClose`/`readable`/`dataEmitted` 等。
+2. **公开 getter 对齐 Node**：`readable`（改为访问器：destroy/error/end 后为 false）、`readableEnded`、`readableAborted`、`readableDidRead`、`readableEncoding`、`readableBuffer`、`errored`、`closed`、`writableEnded`（Node 语义是 **end() 已调用**，即 kEnding，非 finish）、`writableFinished`、`writableCorked`、`writableAborted`、`writableBuffer`、`writableErrored`。`destroyed` 补上 setter（`http`/`net` 会手动置位）。
+3. **新增错误/数据追踪**：`#dataEmitted`（`readableDidRead`/`isDisturbed` 依赖）、`#errored`/`#errorEmitted`、writable 的 `errorEmitted`、`finishEmitted`（`writableFinished` 真义是 finish 已发射）。`destroy()` 现在会记下错误并置 `closed`。
+4. **vendoring `internal/streams/utils.js`**（11 个文件）：`stream.isReadable/isWritable/isDisturbed/isErrored` 不再是自己写的鸭子类型，而是 Node 官方谓词。
+
+**为什么**
+
+- 之前 `stream.isReadable(x)` 只是 `typeof x.read === 'function'`：已结束的流仍报 `true`，没有 `isDisturbed`/`isErrored`，与 Node 差异大。
+- 状态形状是后续接真 `readable.js`/`writable.js`（需 kState 位域）的先决条件；先把外部可见契约（`_readableState`）立对。
+- `writableEnded`/`writableFinished` 语义错位（之前 `writableEnded` 返回的是 finish 后的值）已修正。
+
+**涉及文件**
+
+新增：`vendor/node-lib/internal/streams/utils.js`（+ MANIFEST）、`test/stream-state.test.ts`（9 条，期望值全部来自真 Node v22 实测）。修改：`tools/vendor.mjs`、`src/node-runtime/builtins/vendored-builtins.ts`、`src/node-runtime/builtins/stream.ts`、`src/demo-project.ts`。
+
+**验证**：`tsc --noEmit` 干净 · `vitest run` **173/173** · 浏览器端到端：`predicates : live isReadable=true / ended isReadable=false isDisturbed=true`。
 
 ### 2026-09-20 · M11 修两个 stream 核心 bug + `Readable.from` 改用真源码
 

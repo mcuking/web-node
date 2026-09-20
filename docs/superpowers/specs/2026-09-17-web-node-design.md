@@ -184,7 +184,7 @@ web-node/
 
 > 本表按里程碑进展刷新（当前至 **M10**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
 >
-> **vendoring 进展**：`internal/streams/state.js`（highWaterMark）、`internal/streams/from.js`（`Readable.from`）、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`path.js`、`querystring.js`、`internal/per_context/*` 已用 Node 真源码。
+> **vendoring 进展**：`internal/streams/state.js`（highWaterMark）、`internal/streams/from.js`（`Readable.from`）、`internal/streams/utils.js`（`isReadable`/`isWritable`/`isDisturbed`/`isErrored`）、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`path.js`、`querystring.js`、`internal/per_context/*` 已用 Node 真源码。
 
 | 限制 | 说明 |
 |---|---|
@@ -201,10 +201,10 @@ web-node/
 
 ## 10. 后续里程碑
 
-已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、vendoring：stream state + Readable.from（M10/M11）。
+已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、vendoring：stream state + Readable.from（M10/M11）、流状态形状 + 真谓词（M12）。
 
 接下来：
 
-1. **流状态形状对齐 + 真谓词**：先把 `_readableState`/`_writableState` 等对齐 Node，再接 `internal/streams/utils.js` 的真谓词（`isReadable`/`isWritable`/`isDestroyed`/`isDisturbed`/`isErrored`）与 `stream.destroy`。这是后续接入真 `readable/writable`（需 kState 位域）的前置。
+1. **继续 vendoring 流模块**：`internal/streams/utils.js` 已接；下一步接 `internal/streams/destroy.js`（需先对齐 `emitErrorNT`/`nextTick` 链路）与 `internal/streams/legacy.js`（`Stream` 基类），再考虑 `internal/fixed_queue.js`。
 2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 3. **性能**：把热点 binding（buffer/fs）替换为 wasm；引入 SharedArrayBuffer + Atomics 做同步 syscall。
