@@ -83,18 +83,61 @@ export const errorsBinding: BindingFactory = () => ({
 });
 
 /** `performance` binding: high-resolution timing. */
-export const performanceBinding: BindingFactory = (ctx) => ({
-  now: () => ctx.now(),
-  timeOrigin: 0,
-  mark: () => undefined,
-  clearMark: () => undefined,
-  measure: () => undefined,
-  clearMeasures: () => undefined,
-  getEntries: () => [],
-  getEntriesByName: () => [],
-  getEntriesByType: () => [],
-  setupGarbageCollectionTracking: () => undefined,
-});
+/**
+ * `performance` binding.
+ *
+ * Mirrors `src/node_perf.cc` / `src/node_perf_common.h`: the milestone enum
+ * (index-aligned with `NODE_PERFORMANCE_MILESTONES`), the milestone array, and
+ * `now`. The browser `performance` global already provides the clock, so
+ * `now()` is milliseconds since the origin and the two origin milestones are
+ * derived from `performance.timeOrigin` (Node stores them in nanoseconds /
+ * microseconds respectively — see `PerformanceState::Initialize`).
+ */
+const MILESTONES = {
+  TIME_ORIGIN_TIMESTAMP: 0,
+  TIME_ORIGIN: 1,
+  ENVIRONMENT: 2,
+  NODE_START: 3,
+  V8_START: 4,
+  LOOP_START: 5,
+  LOOP_EXIT: 6,
+  BOOTSTRAP_COMPLETE: 7,
+};
+
+const PERF_CONSTANTS = {
+  NODE_PERFORMANCE_MILESTONE_TIME_ORIGIN_TIMESTAMP: MILESTONES.TIME_ORIGIN_TIMESTAMP,
+  NODE_PERFORMANCE_MILESTONE_TIME_ORIGIN: MILESTONES.TIME_ORIGIN,
+  NODE_PERFORMANCE_MILESTONE_ENVIRONMENT: MILESTONES.ENVIRONMENT,
+  NODE_PERFORMANCE_MILESTONE_NODE_START: MILESTONES.NODE_START,
+  NODE_PERFORMANCE_MILESTONE_V8_START: MILESTONES.V8_START,
+  NODE_PERFORMANCE_MILESTONE_LOOP_START: MILESTONES.LOOP_START,
+  NODE_PERFORMANCE_MILESTONE_LOOP_EXIT: MILESTONES.LOOP_EXIT,
+  NODE_PERFORMANCE_MILESTONE_BOOTSTRAP_COMPLETE: MILESTONES.BOOTSTRAP_COMPLETE,
+  NODE_PERFORMANCE_MILESTONE_INVALID: 8,
+};
+
+export const performanceBinding: BindingFactory = (ctx) => {
+  const host = (globalThis as { performance?: { timeOrigin?: number } }).performance;
+  const timeOriginMs = host?.timeOrigin ?? Date.now() - ctx.now();
+  const milestones = new Array<number>(8).fill(-1);
+  milestones[MILESTONES.TIME_ORIGIN_TIMESTAMP] = timeOriginMs * 1e3; // microseconds
+  milestones[MILESTONES.TIME_ORIGIN] = timeOriginMs * 1e6; // nanoseconds
+
+  return {
+    now: () => ctx.now(),
+    timeOrigin: timeOriginMs,
+    constants: PERF_CONSTANTS,
+    milestones,
+    mark: () => undefined,
+    clearMark: () => undefined,
+    measure: () => undefined,
+    clearMeasures: () => undefined,
+    getEntries: () => [],
+    getEntriesByName: () => [],
+    getEntriesByType: () => [],
+    setupGarbageCollectionTracking: () => undefined,
+  };
+};
 
 /** `process_methods` binding: process primitives. */
 export const processMethodsBinding: BindingFactory = (ctx) => ({

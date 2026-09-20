@@ -16,7 +16,6 @@ import {
   internalTraceSigintSpec,
   internalWebStreamsAdaptersSpec,
   internalEventsSymbolsSpec,
-  internalEventTargetSpec,
   internalBootstrapRealmSpec,
   internalUrlSpec,
 } from './internal-shims';
@@ -56,7 +55,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalEncodingSpec,
   internalTraceSigintSpec,
   internalEventsSymbolsSpec,
-  internalEventTargetSpec,
   internalWebStreamsAdaptersSpec,
   internalStreamIterSpec,
   internalStreamIterTypesSpec,

@@ -23,6 +23,36 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     deps: ['internal/errors'],
   },
   {
+    id: 'internal/webidl',
+    vendorPath: 'internal/webidl.js',
+    origin: 'node-source',
+    // Pure JS: only `internal/util` + `internal/util/types` (+ primordials).
+    deps: ['internal/util', 'internal/util/types'],
+  },
+  {
+    id: 'internal/perf/utils',
+    vendorPath: 'internal/perf/utils.js',
+    origin: 'node-source',
+    // Reads the `performance` binding (milestones/constants/now) at load time.
+    deps: [],
+  },
+  {
+    id: 'internal/event_target',
+    vendorPath: 'internal/event_target.js',
+    origin: 'node-source',
+    // Node's own file eagerly `require('events')`s at the top, so `events` is
+    // deliberately *not* listed here (the loader materialises it on demand when
+    // the module body runs, by which point `events` is no longer loading).
+    deps: [
+      'internal/errors',
+      'internal/validators',
+      'internal/util',
+      'internal/util/inspect',
+      'internal/webidl',
+      'internal/perf/utils',
+    ],
+  },
+  {
     id: 'internal/util/types',
     vendorPath: 'internal/util/types.js',
     origin: 'node-source',
@@ -400,7 +430,11 @@ export const vendoredBuiltins: BuiltinSpec[] = [
       'internal/events/abort_listener',
       'internal/fixed_queue',
       'internal/events/symbols',
-      'internal/event_target',
+      // `internal/event_target` is *not* an eager dep: Node's own events.js only
+      // pulls it in lazily (inside `on`/`once`/`getMaxListeners`), and making it
+      // eager here would deadlock the circular load (event_target eagerly
+      // requires events, which would then be `loading` and hand back a partial,
+      // empty `module.exports`).
     ],
   },
   {

@@ -60,6 +60,8 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL:
     "Unexpected argument '%s'. This command does not take positional arguments",
   ERR_PARSE_ARGS_UNKNOWN_OPTION: "Unknown option '%s'",
+  ERR_EVENT_RECURSION: 'The event "%s" is already being dispatched',
+  ERR_MISSING_OPTION: '%s is required',
 };
 
 /**
@@ -110,6 +112,8 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_PARSE_ARGS_INVALID_OPTION_VALUE: TypeError,
   ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL: TypeError,
   ERR_PARSE_ARGS_UNKNOWN_OPTION: TypeError,
+  ERR_EVENT_RECURSION: Error,
+  ERR_MISSING_OPTION: TypeError,
 };
 
 class NodeError extends Error {
@@ -781,25 +785,8 @@ export const internalUrlSpec: BuiltinSpec = {
 };
 
 // ---------------------------------------------------------------------------
-// internal/event_target
+// internal/events/symbols
 // ---------------------------------------------------------------------------
-//
-// There is no Web `EventTarget` in this realm yet; callers gate on
-// `isEventTarget()` anyway, so answering `false` keeps their non-EventTarget
-// path (the common one) intact.
-
-export const internalEventTargetSpec: BuiltinSpec = {
-  id: 'internal/event_target',
-  origin: 'web-node',
-  init: () => ({
-    isEventTarget: (): boolean => false,
-    kEvents: Symbol('kEvents'),
-    kResistStopPropagation: Symbol('kResistStopPropagation'),
-    // Used by the stream operators to hold a weak reference to the resource
-    // that should keep an abort listener alive. We keep it as a plain marker.
-    kWeakHandler: Symbol('kWeakHandler'),
-  }),
-};
 
 export const internalEventsSymbolsSpec: BuiltinSpec = {
   id: 'internal/events/symbols',
