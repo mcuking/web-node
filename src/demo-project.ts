@@ -227,6 +227,29 @@ console.log(
     console.log('stream fam : transform=' + out.join('') + ' compose=' + composed.join(''));
   }, 10);
 })();
+// async_hooks is real Node source too (lib/async_hooks.js + internal/async_hooks.js
+// + internal/async_local_storage/*), on a JS async_wrap binding. Each tick and
+// timer is a real async resource, so a hook fires for them and AsyncLocalStorage
+// carries its store across the async boundary.
+(function () {
+  const ah = require('async_hooks');
+  const seen = [];
+  const hook = ah.createHook({
+    init: function (_id, type) { seen.push('init:' + type); },
+  });
+  hook.enable();
+  const als = new ah.AsyncLocalStorage();
+  als.run({ user: 'tang' }, function () {
+    process.nextTick(function () { seen.push('tick=' + JSON.stringify(als.getStore())); });
+    setTimeout(function () { seen.push('timer=' + JSON.stringify(als.getStore())); }, 5);
+  });
+  // Synchronous, so only the tick + timer scheduled above are reported.
+  hook.disable();
+  setTimeout(function () {
+    console.log('async_hooks: ' + seen.join(' / '));
+    console.log('als outside : ' + als.getStore());
+  }, 15);
+})();
 const factsFile = path.join(dir, 'facts.txt');
 fs.writeFileSync(factsFile, require('./lib/facts.js')().map(function (r) {
   return r[0] + ' = ' + r[1];
@@ -896,6 +919,12 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - **Events** — events is Node's real events.js (the _events/_eventsCount shape,
   prependListener, errorMonitor, captureRejections, the once/on helpers), and
   stream.addAbortSignal is the real internal/streams/add-abort-signal.js
+- **async_hooks (milestone 12)** — async_hooks is Node's real source too
+  (lib/async_hooks.js + internal/async_hooks.js + internal/async_local_storage/*),
+  running on a JS async_wrap binding that keeps the async id stack. Each
+  nextTick and timer is a real async resource, so createHook fires
+  init/before/after for them and AsyncLocalStorage carries its store across a
+  nextTick / setTimeout boundary
 - **Chunked transfer-encoding** — a response without Content-Length streams as chunked,
   and the client side de-chunks it again
 - **npm client (milestone 4)** — "Install deps" fetches the dependencies declared in
@@ -926,7 +955,8 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - Real TLS (the https module is the http surface under a TLS-shaped name)
 - Buffer pooling (allocUnsafe / from(string) do not carve from an 8 KB slab)
 - npm/yarn/pnpm filesystem specs (file:, git+, link:)
-- A real async_hooks (so the vendored end-of-stream can take its AsyncResource branch)
+- Promise hooks (async_hooks sees timers/ticks, but V8 promises are not
+  instrumented, so promiseResolve never fires)
 - webpack (esbuild, rollup and Vite are milestones 5/5b/5c)
 `,
 };
