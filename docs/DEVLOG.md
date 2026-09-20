@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**；M14 再把 **`internal/streams/end-of-stream.js` 接进来**（`finished()` 就是真实现）；M15 换掉自研 `EventEmitter`，改用 **Node 真 `events.js`**（`_events` 形状 / `prependListener` / `errorMonitor` / `captureRejections`），并把 `stream.addAbortSignal` 接到真源码；M16 把**整个 `stream` 模块换成真源码**（`lib/stream.js` + `internal/streams/*`：Readable/Writable/Duplex/Transform/PassThrough/pipeline/finished/compose/duplexPair/operators + `stream/promises`），删掉手写 stream；M17 把 **`async_hooks` 也换成真源码**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*`），落在自研 `async_wrap` 绑定上，并让 tick / timer 成为真 async resource——hook 会触发、`AsyncLocalStorage` 能跨异步边界传 store。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**；M14 再把 **`internal/streams/end-of-stream.js` 接进来**（`finished()` 就是真实现）；M15 换掉自研 `EventEmitter`，改用 **Node 真 `events.js`**（`_events` 形状 / `prependListener` / `errorMonitor` / `captureRejections`），并把 `stream.addAbortSignal` 接到真源码；M16 把**整个 `stream` 模块换成真源码**（`lib/stream.js` + `internal/streams/*`：Readable/Writable/Duplex/Transform/PassThrough/pipeline/finished/compose/duplexPair/operators + `stream/promises`），删掉手写 stream；M17 把 **`async_hooks` 也换成真源码**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*`），落在自研 `async_wrap` 绑定上，并让 tick / timer 成为真 async resource——hook 会触发、`AsyncLocalStorage` 能跨异步边界传 store；M18 把**真框架**跑了起来——@vitejs/plugin-vue 在页内编译 **Vue 3 SFC**，`vite build` 产出生产 Vue bundle、`createServer` 在预览里跑真实可交互 Vue 应用（计数器可点、HMR 生效）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -43,11 +43,12 @@
 | M15 | **vendor Node 真 `events.js`**（替换自研 EventEmitter）+ 真 `stream.addAbortSignal`；`internal/streams/readable.js` 已 vendor 并就绪 | ✅ 完成 |
 | M16 | **整套 stream 换真源码**（`lib/stream.js` + `internal/streams/*`：Writable/Duplex/Transform/PassThrough/pipeline/compose/duplexPair/operators + `stream/promises`），删除手写 stream | ✅ 完成 |
 | M17 | **真 `async_hooks`**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` 换成真源码，落在自研 `async_wrap` 绑定上）+ tick/timer 真实 async resource（hook 会触发、`AsyncLocalStorage` 跨异步边界传 store） | ✅ 完成 |
+| M18 | **真框架跑起来**：@vitejs/plugin-vue 在页内编译 **Vue 3 单文件组件**（SFC），`vite build` 出生产 Vue bundle、`createServer` 在预览里跑真实可交互 Vue 应用（计数器可点、HMR 生效） | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **226/226 通过** · `vite build` 绿（worker ~596KB / index ~10.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **227/227 通过** · `vite build` 绿（worker ~597KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -125,17 +126,38 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. ~~**给 `internal/async_hooks` 一个真实实现**~~ ✅ **已解决（2026-09-20，M17）**：`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` 已换真源码，落在自研 `async_wrap` 绑定上；tick/timer 现在是真 async resource，hook 会触发、`AsyncLocalStorage` 能跨异步边界传 store。剩下的已知缺口只有 **promise hooks**（不插桩 V8 promise）。
-2. **promise hooks（M17 跲尾，可选）**：`async_hooks` 现在看得见 tick/timer/AsyncResource，但 V8 promise 未插桩，`promiseResolve` 不响。真做需要 `promiseHook` 级别的插桩，代价大，先放着。
-3. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
-4. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。M16 把 child 的生命周期事件改为**订阅时延一个 macrotask**（让 stdout 的 `data` 先于 `exit`，对齐真 Node）；若后续发现时序副作用，可再评估。
-5. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
-6. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M16 后 worker 达 **~596KB**）；若在意体积，可改成按文件 code-split。
-7. **补 `internal/async_hooks` / `internal/util/inspect` 等 shim 的保真度**；把 `internal/streams/duplexify` 的 `internal/blob` 从 `isBlob` stub 扩到真 `Blob` 包装（当前够用）。
+1. ~~**给 `internal/async_hooks` 一个真实实现**~~ ✅ **已解决（2026-09-20，M17）**。
+2. ~~**跑一个真前端框架**~~ ✅ **已解决（2026-09-20，M18）**：@vitejs/plugin-vue 在页内编译 Vue 3 SFC，`vite build` 出生产 bundle、dev server 在预览里跑真实可交互应用（计数器可点 + HMR）。顺带修了两个真问题：**Vite 5.4 的依赖预打包（esbuild）在无文件系统下不可用**（改用 `optimizeDeps.disabled`，让 Vite 直接供 node_modules 的 ESM 源码）、**esbuild-wasm 必须钉在 Vite 5.4 驱动的 0.21 线**。
+3. **promise hooks（M17 跲尾，可选）**：`async_hooks` 现在看得见 tick/timer/AsyncResource，但 V8 promise 未插桩，`promiseResolve` 不响。真做需要 `promiseHook` 级别的插桩，代价大，先放着。
+4. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
+5. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。M16 把 child 的生命周期事件改为**订阅时延一个 macrotask**（让 stdout 的 `data` 先于 `exit`，对齐真 Node）；若后续发现时序副作用，可再评估。
+6. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
+7. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M16 后 worker 达 **~597KB**）；若在意体积，可改成按文件 code-split。
+8. **补 `internal/util/inspect` 等 shim 的保真度**；把 `internal/streams/duplexify` 的 `internal/blob` 从 `isBlob` stub 扩到真 `Blob` 包装（当前够用）。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M18 真框架跑起来（Vue 3 SFC，Vite 在页内编译）
+
+**目标**：把 DEVLOG「下一步」里的“前端生态验证”做成真东西——不再只是“能跑 Vite”，而是让页内 Vite 真的编译并驱动一个 **Vue 3 单文件组件**应用。
+
+**改了什么**
+
+1. **demo 的站点换成真 Vue SFC**：`site/src/App.vue` 是 `script setup` + `template`（一个 `ref` 计数器 + `defineProps`），`site/src/main.js` 用 `createApp(App, { greeting })` 挂载，并保留 `import.meta.hot.accept('./message.js', ...)` 一段——改 `message.js` 会**重挂载**拿到新 greeding，而不是整页刷新。
+2. **Vite 构建 / dev 都挂上 `@vitejs/plugin-vue`**：`Vite build` → 真 Vue 生产 bundle（产物含 Vue 运行时 + 编译后的渲染函数）；`Vite dev` → 在预览里跑真实可交互的 Vue 应用（计数器可点）、且 HMR 生效。
+3. **demo 依赖表加 `vue` / `@vitejs/plugin-vue` / `vite` / `esbuild-wasm` 等**，npm 安装后即可用。
+4. **两个真坑的修复**（都写进了注释）：
+   - **Vite 5.4 的依赖预打包（`optimizeDeps`）走 esbuild，而 esbuild-wasm 没有文件系统**（读文件直接 `not implemented on js`）。有框架在场时预打包是必需的，于是 `optimizeDeps: { disabled: true }`，让 Vite 跳过预打包，直接从 node_modules 供各依赖**自己的 ESM 源码**。
+   - **esbuild-wasm 必须钉在 0.21 线**（`^0.21.5`）：Vite 5.4 按 esbuild 0.21 的 API 驱动它，版本不匹配会在转换时直接抛错。
+5. **新增 `test/_m18.test.ts`**（可行性回归）：把 `/tmp/v18` 的 `node_modules`（vue + vite + plugin-vue + esbuild-wasm + rollup wasm）灌进 VFS，跑两条路径并断言：生产构建产物含 Vue 渲染代码（`createElementBlock`）与模板文案；dev server 把 `/src/App.vue` 按需编成 JS（响应体无 `<template>` 标签）、把 bare import 重写成 `/node_modules/vue/...`。
+
+**为什么**：前序里程碑把 Vite 本体、dev server、HMR 一个个跑通了，但“真框架”是另一道关——SFC 编译要插件链、`<template>` 要模板编译器、运行时要有响应式。它能跑起来，才说明 vendoring / VFS / ESM loader / HMR 这一整套组合是真的够用。
+
+**验证**：`vitest run` **227/227**（+1）· 浏览器端到端（本地 dev server + 跨源预览 iframe）：预览里 Vue 应用渲染、点按钮 `count is 0 → 3` 响应式生效、`__vue_app__` 挂载、改 `message.js` 触发 HMR 重挂载、`Vite build` 出 Vue bundle + CSS。截图已存。
+
+**顺带**：把 `test/child-process.test.ts` 里 4 处固定 `await tick(20)` 换成“等到输出稳定”的辅助函数——固定 sleep 在并行满载时会偶发超时（本轮就偶发了一次）；断言不变，只是把等待变稳。
 
 ### 2026-09-20 · M17 真 `async_hooks`（+ 真实 async resource 的 tick / timer）
 

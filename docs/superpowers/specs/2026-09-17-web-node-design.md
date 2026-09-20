@@ -202,11 +202,11 @@ web-node/
 
 ## 10. 后续里程碑
 
-已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、整套 stream + events 换真源码（M10–M16）、真 `async_hooks` + `AsyncLocalStorage`（M17）。
+已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、整套 stream + events 换真源码（M10–M16）、真 `async_hooks` + `AsyncLocalStorage`（M17）、真框架跑起来（M18，Vue 3 SFC 在页内被 Vite 编译并运行）。
 
 接下来：
 
 1. **promise hooks（M17 遗留，可选）**：要让 `createHook` 的 `promiseResolve` 真响，需要 V8 promise 级插桩，代价大，暂缓。
 2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 3. **性能**：把热点 binding（buffer/fs）替换为 wasm；引入 SharedArrayBuffer + Atomics 做同步 syscall。
-4. **前端生态验证**：在页内跑一个真实前端工具链（已能跑 Vite / rollup / esbuild），把 vendoring 收益兑换成“真能跑起来的东西”。
+4. **更多框架 / 工具链**：React（SWC / Babel）、Svelte、TypeScript 项目、Tailwind / PostCSS 管线。
