@@ -35,7 +35,7 @@ const fs = require('fs');
 const os = require('os');
 const http = require('http');
 const { EventEmitter } = require('events');
-const { Transform, pipeline } = require('stream');
+const { Transform, pipeline, Readable } = require('stream');
 
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
 
@@ -119,6 +119,29 @@ pipeline(
     console.log('pipeline    : ' + (err ? 'error ' + err.message : 'facts-upper.txt written'));
   }
 );
+
+// The pull API: a paused consumer driven by the 'readable' event, reading an
+// exact byte count at a time (never a whole buffered chunk), and closing itself
+// when the stream ends.
+const pull = new Readable({ read: function () {} });
+pull.push(fs.readFileSync(factsFile));
+pull.push(null);
+let pulled = 0;
+let pulls = 0;
+pull.on('readable', function () {
+  let chunk;
+  while ((chunk = pull.read(32)) !== null) {
+    pulled += chunk.length;
+    pulls++;
+  }
+});
+pull.on('end', function () {
+  console.log('read(32)    : ' + pulled + ' bytes in ' + pulls + ' exact reads');
+});
+pull.on('close', function () {
+  // autoDestroy (on by default) closes the stream once it has ended.
+  console.log('autoDestroy : closed, destroyed=' + pull.destroyed);
+});
 console.log('');
 
 // --- child_process (milestone 7) ---
