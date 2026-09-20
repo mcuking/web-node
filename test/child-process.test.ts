@@ -22,6 +22,25 @@ const decoder = new TextDecoder();
 
 const tick = (ms = 8): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Wait until `out` has settled (no change for a couple of turns) or the deadline
+// passes. A bare fixed sleep is racy under a loaded, parallel test run.
+async function waitForOutput(out: string[], ms = 2000): Promise<string> {
+  const deadline = Date.now() + ms;
+  let last = out.join('');
+  let stable = 0;
+  while (Date.now() < deadline) {
+    await tick(10);
+    const now = out.join('');
+    if (now !== last) {
+      last = now;
+      stable = 0;
+    } else if (now.length > 0 && ++stable >= 3) {
+      break;
+    }
+  }
+  return out.join('');
+}
+
 function makeVfs(files: Record<string, string | Uint8Array>): MemoryVfs {
   const vfs = new MemoryVfs({ cwd: '/project' });
   vfs.mkdir('/project', { recursive: true });
@@ -204,8 +223,7 @@ describe('child_process', () => {
     });
     const { runtime, out } = bootRuntime(vfs);
     runtime.runMain('/project/index.js');
-    await tick(20);
-    expect(out.join('')).toBe('rc 0 "ONE\\n"\n');
+    expect(await waitForOutput(out)).toBe('rc 0 "ONE\\n"\n');
   });
 
   it('feeds a shell pipeline stage by stage', async () => {
@@ -224,8 +242,7 @@ describe('child_process', () => {
     });
     const { runtime, out } = bootRuntime(vfs);
     runtime.runMain('/project/index.js');
-    await tick(20);
-    expect(out.join('')).toBe('pipe "<42>"\n');
+    expect(await waitForOutput(out)).toBe('pipe "<42>"\n');
   });
 
   it('emits an error event for a program that cannot start', async () => {
@@ -259,8 +276,7 @@ describe('child_process', () => {
     });
     const { runtime, out } = bootRuntime(vfs);
     runtime.runMain('/project/index.js');
-    await tick(20);
-    expect(out.join('')).toBe('stdin:ping\n');
+    expect(await waitForOutput(out)).toBe('stdin:ping\n');
   });
 
   it('honours a timeout by killing a long-running program', async () => {
@@ -275,8 +291,7 @@ describe('child_process', () => {
     });
     const { runtime, out } = bootRuntime(vfs);
     runtime.runMain('/project/index.js');
-    await tick(120);
-    expect(out.join('')).toBe('killed true\n');
+    expect(await waitForOutput(out)).toBe('killed true\n');
   });
 
   it('runs synchronously when the program is synchronous', () => {
