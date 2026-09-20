@@ -13,6 +13,19 @@ export const processSpec: BuiltinSpec = {
     const EventEmitter = (ctx.require('events') as { EventEmitter: new () => unknown }).EventEmitter;
     const binding = ctx.binding;
 
+    // Lazily loaded (see `internal/process/task_queues.js` — Node requires
+    // async_hooks lazily here too), so a plain `require('process')` does not
+    // pull the whole async-context machinery in.
+    let asyncHooks: {
+      newAsyncId: () => number;
+      getDefaultTriggerAsyncId: () => number;
+      emitInit: (asyncId: number, type: string, triggerAsyncId: number, resource: unknown) => void;
+      emitBefore: (asyncId: number, triggerAsyncId: number, resource: unknown) => void;
+      emitAfter: (asyncId: number) => void;
+      emitDestroy: (asyncId: number) => void;
+    } | null = null;
+    const hooks = () => (asyncHooks ??= ctx.require('internal/async_hooks') as typeof asyncHooks)!;
+
     function makeStream(write: (s: string) => void, isTTY: boolean) {
       return {
         write(chunk: unknown, _enc?: unknown, cb?: () => void): boolean {
@@ -124,7 +137,23 @@ export const processSpec: BuiltinSpec = {
         throw new Error('unreachable');
       }
       nextTick(fn: (...args: unknown[]) => void, ...args: unknown[]): void {
-        binding.nextTick(fn, ...args);
+        // Node models each tick as a TickObject async resource
+        // (`internal/process/task_queues.js`), which is what lets async_hooks
+        // see it and AsyncLocalStorage carry its store across a nextTick.
+        const ah = hooks();
+        const asyncId = ah.newAsyncId();
+        const triggerAsyncId = ah.getDefaultTriggerAsyncId();
+        const resource = { asyncId, triggerAsyncId };
+        ah.emitInit(asyncId, 'TickObject', triggerAsyncId, resource);
+        binding.nextTick(() => {
+          ah.emitBefore(asyncId, triggerAsyncId, resource);
+          try {
+            fn(...args);
+          } finally {
+            ah.emitAfter(asyncId);
+          }
+          ah.emitDestroy(asyncId);
+        });
       }
       hrtime(prev?: [number, number]): [number, number] {
         const now = (process as unknown as { hrtime: { bigint: () => bigint } }).hrtime.bigint();

@@ -5,6 +5,8 @@ export const symbolsBinding: BindingFactory = () => {
   const make = (name: string): symbol => Symbol(name);
   return {
     async_id_symbol: make('async_id_symbol'),
+    trigger_async_id_symbol: make('trigger_async_id_symbol'),
+    resource_symbol: make('resource_symbol'),
     handle_onclose: make('handle_onclose'),
     owner_symbol: make('owner_symbol'),
     onread_optimise: make('onread_optimise'),
@@ -29,8 +31,47 @@ export const symbolsBinding: BindingFactory = () => {
   };
 };
 
+/** `task_queue` binding: the microtask sink (`AsyncHooks` destroy queue etc.). */
+export const taskQueueBinding: BindingFactory = (ctx) => ({
+  enqueueMicrotask: (fn: () => void) => ctx.nextTick(fn),
+  runMicrotasks: () => undefined,
+});
+
+/**
+ * `async_context_frame` binding: the continuation-preserved embedder data used
+ * by `AsyncContextFrame`. We ship the non-`--async-context-frame` path, but the
+ * binding still has to exist because vendored `internal/async_context_frame.js`
+ * reads it at module load.
+ */
+export const asyncContextFrameBinding: BindingFactory = () => {
+  let continuationPreservedEmbedderData: unknown;
+  return {
+    getContinuationPreservedEmbedderData: () => continuationPreservedEmbedderData,
+    setContinuationPreservedEmbedderData: (value: unknown) => {
+      continuationPreservedEmbedderData = value;
+    },
+  };
+};
+
 /** `errors` binding: source-map + uncaught-exception plumbing. */
 export const errorsBinding: BindingFactory = () => ({
+  // `Environment::ExitCode` (read off a real Node). `internal/async_hooks` uses
+  // kGenericUserError when a hook callback throws.
+  exitCodes: {
+    kNoFailure: 0,
+    kGenericUserError: 1,
+    kInternalJSParseError: 3,
+    kInternalJSEvaluationFailure: 4,
+    kV8FatalError: 5,
+    kInvalidFatalExceptionMonkeyPatching: 6,
+    kExceptionInFatalExceptionHandler: 7,
+    kInvalidCommandLineArgument: 9,
+    kBootstrapFailure: 10,
+    kInvalidCommandLineArgument2: 12,
+    kUnsettledTopLevelAwait: 13,
+    kStartupSnapshotFailure: 14,
+    kAbort: 134,
+  },
   setSourceMapsEnabled: () => undefined,
   setPrepareStackTraceCallback: () => undefined,
   triggerUncaughtException: () => undefined,

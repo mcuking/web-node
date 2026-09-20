@@ -246,6 +246,55 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     deps: ['internal/errors', 'internal/streams/utils', 'internal/streams/pipeline', 'internal/streams/end-of-stream'],
   },
   {
+    id: 'internal/async_hooks',
+    vendorPath: 'internal/async_hooks.js',
+    origin: 'node-source',
+    // No eager deps: Node requires `internal/util/inspect`, `internal/options`
+    // and `internal/promise_hooks` lazily from inside this file.
+    deps: [],
+  },
+  {
+    id: 'internal/promise_hooks',
+    vendorPath: 'internal/promise_hooks.js',
+    origin: 'node-source',
+    deps: ['internal/util', 'internal/validators'],
+  },
+  {
+    id: 'internal/async_context_frame',
+    vendorPath: 'internal/async_context_frame.js',
+    origin: 'node-source',
+  },
+  {
+    id: 'internal/async_local_storage/run_scope',
+    vendorPath: 'internal/async_local_storage/run_scope.js',
+    origin: 'node-source',
+  },
+  {
+    id: 'internal/async_local_storage/async_hooks',
+    vendorPath: 'internal/async_local_storage/async_hooks.js',
+    origin: 'node-source',
+    deps: [
+      'internal/validators',
+      'internal/async_hooks',
+      'async_hooks',
+      'internal/async_local_storage/run_scope',
+      'internal/util',
+    ],
+  },
+  {
+    id: 'async_hooks',
+    aliases: ['node:async_hooks'],
+    vendorPath: 'async_hooks.js',
+    origin: 'node-source',
+    deps: [
+      'internal/errors',
+      'internal/util',
+      'internal/validators',
+      'internal/async_hooks',
+      'internal/async_context_frame',
+    ],
+  },
+  {
     id: 'events',
     aliases: ['node:events'],
     vendorPath: 'events.js',

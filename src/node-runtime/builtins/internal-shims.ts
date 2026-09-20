@@ -15,6 +15,9 @@ import { notImplemented } from '../errors';
 
 export const ERROR_CODES: Record<string, string> = {
   ERR_INVALID_ARG_TYPE: 'The "%s" argument must be of type %s. Received %s',
+  ERR_ASYNC_CALLBACK: '%s must be a function',
+  ERR_ASYNC_TYPE: 'Invalid name for async "type": %s',
+  ERR_INVALID_ASYNC_ID: 'Invalid %s value: %s',
   ERR_STREAM_NULL_VALUES: 'May not write null values to stream',
   ERR_MULTIPLE_CALLBACK: 'Callback called multiple times',
   ERR_STREAM_PREMATURE_CLOSE: 'Premature close',
@@ -50,6 +53,9 @@ export const ERROR_CODES: Record<string, string> = {
  */
 const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_INVALID_ARG_TYPE: TypeError,
+  ERR_ASYNC_CALLBACK: TypeError,
+  ERR_ASYNC_TYPE: TypeError,
+  ERR_INVALID_ASYNC_ID: RangeError,
   ERR_INVALID_ARG_VALUE: TypeError,
   ERR_OUT_OF_RANGE: RangeError,
   ERR_INVALID_URI: TypeError,
@@ -457,6 +463,9 @@ export const internalUtilSpec: BuiltinSpec = {
 const OPTION_DEFAULTS: Record<string, unknown> = {
   '--experimental-stream-iter': false,
   '--experimental-stream-iter-compat': false,
+  // The browser tab cannot switch to `AsyncContextFrame`; the default
+  // (async_hooks-based) AsyncLocalStorage is the one we ship.
+  '--async-context-frame': false,
   '--no-deprecation': false,
   '--trace-deprecation': false,
   '--throw-deprecation': false,
@@ -752,68 +761,6 @@ export const internalFsGlobSpec: BuiltinSpec = {
     globSync: (): never => {
       throw notImplemented('api', 'fs.globSync', 'Glob matching is outside the MVP whitelist.');
     },
-  }),
-};
-
-// ---------------------------------------------------------------------------
-// internal/async_hooks
-// ---------------------------------------------------------------------------
-//
-// The runtime has no async-context tracking, so `enabledHooksExist()` is always
-// false and `AsyncResource` degrades to running its callback synchronously. That
-// is exactly the branch vendored code takes when hooks are off, so callers that
-// guard on `enabledHooksExist()` stay correct.
-
-export const internalAsyncHooksSpec: BuiltinSpec = {
-  id: 'internal/async_hooks',
-  origin: 'web-node',
-  init: () => {
-    class AsyncResource {
-      type: string;
-      constructor(type: string) {
-        this.type = type;
-      }
-      runInAsyncScope<T>(fn: (...args: unknown[]) => T, thisArg?: unknown, ...args: unknown[]): T {
-        return fn.apply(thisArg, args);
-      }
-      emitDestroy(): this {
-        return this;
-      }
-      asyncId(): number {
-        return 0;
-      }
-      triggerAsyncId(): number {
-        return 0;
-      }
-    }
-    return {
-      AsyncResource,
-      enabledHooksExist: () => false,
-      hasAsyncHooks: () => false,
-      getHookArrays: () => [[], [], [], [], [], []],
-      asyncWrapProviders: new Map<string, number>(),
-    };
-  },
-};
-
-// ---------------------------------------------------------------------------
-// internal/async_context_frame
-// ---------------------------------------------------------------------------
-//
-// There is no continuation-preserved embedder data here, so `current()` is
-// always undefined and the getter/setter are inert. Vendored code guards on
-// `AsyncContextFrame.current() || enabledHooksExist()`, which is false, so this
-// only has to answer the probe honestly.
-
-export const internalAsyncContextFrameSpec: BuiltinSpec = {
-  id: 'internal/async_context_frame',
-  origin: 'web-node',
-  init: () => ({
-    current: (): undefined => undefined,
-    has: (): boolean => false,
-    get: (): undefined => undefined,
-    set: (): undefined => undefined,
-    setContinuationPreservedEmbedderData: (): undefined => undefined,
   }),
 };
 

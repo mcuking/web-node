@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-20T05:29:54.310Z",
+  "generatedAt": "2026-09-20T06:11:02.645Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -187,6 +187,48 @@
       "sha256": "7835f56dd55679da79eb676af0daa57fd23a87e811a2fce709965a83311bb74c",
       "upstreamSha256": "7835f56dd55679da79eb676af0daa57fd23a87e811a2fce709965a83311bb74c",
       "bytes": 4486,
+      "patches": []
+    },
+    {
+      "path": "internal/async_hooks.js",
+      "sha256": "cd790a1bd161d5979d15c7a250fc540931e6170ffb06948b76acb77a8ea28533",
+      "upstreamSha256": "cd790a1bd161d5979d15c7a250fc540931e6170ffb06948b76acb77a8ea28533",
+      "bytes": 20695,
+      "patches": []
+    },
+    {
+      "path": "internal/promise_hooks.js",
+      "sha256": "1b2d7268017e67bbde07b27d51e80ff90385505b003876ee0ebc49411e7f1ae8",
+      "upstreamSha256": "1b2d7268017e67bbde07b27d51e80ff90385505b003876ee0ebc49411e7f1ae8",
+      "bytes": 3074,
+      "patches": []
+    },
+    {
+      "path": "internal/async_context_frame.js",
+      "sha256": "d8f8b52582fed7e01207e6a541b057a60ef05d78128b1f5c540cc4bb1bb4a667",
+      "upstreamSha256": "d8f8b52582fed7e01207e6a541b057a60ef05d78128b1f5c540cc4bb1bb4a667",
+      "bytes": 1579,
+      "patches": []
+    },
+    {
+      "path": "internal/async_local_storage/async_hooks.js",
+      "sha256": "1cb819e7580f2d7e8795149a91190db281a54ee92309836d410fd7510c112852",
+      "upstreamSha256": "1cb819e7580f2d7e8795149a91190db281a54ee92309836d410fd7510c112852",
+      "bytes": 4222,
+      "patches": []
+    },
+    {
+      "path": "internal/async_local_storage/run_scope.js",
+      "sha256": "b90752745991b6372b12e64e01037bc0a03fde4daeb23e21b146fe4839a7ba8a",
+      "upstreamSha256": "b90752745991b6372b12e64e01037bc0a03fde4daeb23e21b146fe4839a7ba8a",
+      "bytes": 487,
+      "patches": []
+    },
+    {
+      "path": "async_hooks.js",
+      "sha256": "19669397a9b2ece553eacde7a9be2a50df82e0528b6b1fe8cb01bc83e9d9b550",
+      "upstreamSha256": "19669397a9b2ece553eacde7a9be2a50df82e0528b6b1fe8cb01bc83e9d9b550",
+      "bytes": 8477,
       "patches": []
     },
     {

@@ -231,6 +231,13 @@ export class NodeRuntime {
     this.console = this.realm.require('console') as Record<string, unknown>;
     this.Buffer = (this.realm.require('buffer') as { Buffer: unknown }).Buffer;
 
+    // Node's bootstrap hands `internal/async_hooks`' `nativeHooks` to the
+    // `async_wrap` binding (`setupHooks(...)` in lib/internal/bootstrap/node.js).
+    // Doing the same here is what lets a queued `destroy` reach the JS hook
+    // implementation instead of being dropped.
+    const asyncHooks = this.realm.require('internal/async_hooks') as { nativeHooks: unknown };
+    (this.realm.internalBinding('async_wrap') as { setupHooks: (h: unknown) => void }).setupHooks(asyncHooks.nativeHooks);
+
     // Build the sandbox global object shared by all user modules. This is what
     // makes `process` / `Buffer` / `console` resolve inside user code without
     // touching the host realm's globals (which matters under Vitest).

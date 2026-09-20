@@ -8,7 +8,9 @@ import { fsBinding } from './fs';
 import { timersBinding } from './timers';
 import { utilBinding } from './util';
 import { bufferBinding } from './buffer';
+import { asyncWrapBinding } from './async_wrap';
 import {
+  asyncContextFrameBinding,
   errorsBinding,
   icuBinding,
   messagingBinding,
@@ -17,6 +19,7 @@ import {
   processMethodsBinding,
   stringDecoderBinding,
   symbolsBinding,
+  taskQueueBinding,
   uvBinding,
 } from './misc';
 
@@ -38,6 +41,9 @@ const REGISTRY: Record<string, (ctx: BindingContext) => Record<string, unknown>>
   icu: icuBinding,
   messaging: messagingBinding,
   uv: uvBinding,
+  task_queue: taskQueueBinding,
+  async_wrap: asyncWrapBinding,
+  async_context_frame: asyncContextFrameBinding,
 };
 
 /** Bindings Node internal code knows about but that we deliberately do not ship. */
@@ -60,7 +66,6 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'dtls',
   'cares_wrap',
   'http_parser',
-  'task_queue',
   'encoding_binding',
   'blob',
   'url',
@@ -72,7 +77,6 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'profiler',
   'builtins',
   'options',
-  'async_wrap',
   'sqlite',
   'vfs',
   'report',

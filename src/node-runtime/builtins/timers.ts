@@ -8,12 +8,27 @@ export const timersSpec: BuiltinSpec = {
   init: (ctx: BuiltinInitContext) => {
     const binding = ctx.binding.timers;
 
+    // Lazily loaded so `timers` does not depend on async_hooks at boot (Node's
+    // own `internal/timers` requires it lazily for the same reason).
+    let asyncHooks: {
+      newAsyncId: () => number;
+      getDefaultTriggerAsyncId: () => number;
+      emitInit: (asyncId: number, type: string, triggerAsyncId: number, resource: unknown) => void;
+      emitBefore: (asyncId: number, triggerAsyncId: number, resource: unknown) => void;
+      emitAfter: (asyncId: number) => void;
+      emitDestroy: (asyncId: number) => void;
+    } | null = null;
+    const hooks = () => (asyncHooks ??= ctx.require('internal/async_hooks') as typeof asyncHooks)!;
+
     class Timeout {
       _id: number;
       _kind: 'timeout' | 'interval' | 'immediate';
       _destroyed = false;
       _repeat: number | null;
       _callback: (...args: unknown[]) => void;
+      /** `async_id_symbol` / `trigger_async_id_symbol`, as on a real Timeout. */
+      _asyncId = -1;
+      _triggerAsyncId = 0;
 
       constructor(id: number, kind: Timeout['_kind'], callback: (...a: unknown[]) => void, repeat: number | null) {
         this._id = id;
@@ -39,20 +54,58 @@ export const timersSpec: BuiltinSpec = {
       close(): void {
         this._destroyed = true;
         binding.clearTimeout(this._id);
+        if (this._asyncId > 0) hooks().emitDestroy(this._asyncId);
       }
     }
 
+    /**
+     * Create the async resource for a timer before it is scheduled, mirroring
+     * `lib/internal/timers.js` (`emitInit(asyncId, 'Timeout', trigger, this)`).
+     * This is what makes `async_hooks` and `AsyncLocalStorage` see timers.
+     */
+    function track(
+      timeout: Timeout,
+      type: 'Timeout' | 'Immediate',
+      fire: (cb: () => void) => number,
+      cb: () => void,
+    ): number {
+      const ah = hooks();
+      const asyncId = ah.newAsyncId();
+      const triggerAsyncId = timeout._triggerAsyncId || ah.getDefaultTriggerAsyncId();
+      timeout._asyncId = asyncId;
+      timeout._triggerAsyncId = triggerAsyncId;
+      ah.emitInit(asyncId, type, triggerAsyncId, timeout);
+      return fire(() => {
+        ah.emitBefore(asyncId, triggerAsyncId, timeout);
+        try {
+          cb();
+        } finally {
+          ah.emitAfter(asyncId);
+        }
+        if (timeout._repeat === null) ah.emitDestroy(asyncId);
+      });
+    }
+
     function setTimeout(cb: (...a: unknown[]) => void, ms?: number, ...args: unknown[]): Timeout {
-      const id = binding.setTimeout(cb, ms ?? 1, ...args);
-      return new Timeout(id, 'timeout', cb, null);
+      const ah = hooks();
+      const t = new Timeout(-1, 'timeout', cb, null);
+      t._triggerAsyncId = ah.getDefaultTriggerAsyncId();
+      t._id = track(t, 'Timeout', (wrapped) => binding.setTimeout(wrapped, ms ?? 1), () => cb(...args));
+      return t;
     }
     function setInterval(cb: (...a: unknown[]) => void, ms?: number, ...args: unknown[]): Timeout {
-      const id = binding.setInterval(cb, ms ?? 1, ...args);
-      return new Timeout(id, 'interval', cb, ms ?? 1);
+      const ah = hooks();
+      const t = new Timeout(-1, 'interval', cb, ms ?? 1);
+      t._triggerAsyncId = ah.getDefaultTriggerAsyncId();
+      t._id = track(t, 'Timeout', (wrapped) => binding.setInterval(wrapped, ms ?? 1), () => cb(...args));
+      return t;
     }
     function setImmediate(cb: (...a: unknown[]) => void, ...args: unknown[]): Timeout {
-      const id = binding.setImmediate(cb, ...args);
-      return new Timeout(id, 'immediate', cb, null);
+      const ah = hooks();
+      const t = new Timeout(-1, 'immediate', cb, null);
+      t._triggerAsyncId = ah.getDefaultTriggerAsyncId();
+      t._id = track(t, 'Immediate', (wrapped) => binding.setImmediate(wrapped), () => cb(...args));
+      return t;
     }
     function clearTimeout(t?: Timeout | number): void {
       if (t === undefined) return;
@@ -60,6 +113,7 @@ export const timersSpec: BuiltinSpec = {
       else {
         t._destroyed = true;
         binding.clearTimeout(t._id);
+        if (t._asyncId > 0) hooks().emitDestroy(t._asyncId);
       }
     }
     function clearInterval(t?: Timeout | number): void {
@@ -68,6 +122,7 @@ export const timersSpec: BuiltinSpec = {
       else {
         t._destroyed = true;
         binding.clearInterval(t._id);
+        if (t._asyncId > 0) hooks().emitDestroy(t._asyncId);
       }
     }
     function clearImmediate(t?: Timeout | number): void {
@@ -76,6 +131,7 @@ export const timersSpec: BuiltinSpec = {
       else {
         t._destroyed = true;
         binding.clearImmediate(t._id);
+        if (t._asyncId > 0) hooks().emitDestroy(t._asyncId);
       }
     }
 

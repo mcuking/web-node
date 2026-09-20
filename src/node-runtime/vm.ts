@@ -14,6 +14,7 @@ export type CjsRequire = (request: string) => unknown;
 export const CJS_PARAMS = [
   'exports',
   'require',
+  'internalBinding',
   'module',
   '__filename',
   '__dirname',
@@ -25,6 +26,7 @@ export const CJS_PARAMS = [
 export type CjsFunction = (
   exports: CjsExports,
   require: CjsRequire,
+  internalBinding: (name: string) => Record<string, unknown>,
   module: { exports: unknown },
   __filename: string,
   __dirname: string,

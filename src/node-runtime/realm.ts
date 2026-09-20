@@ -145,6 +145,7 @@ export class Realm {
       fn(
         rec.exports,
         (request: string) => this.require(request),
+        (name: string) => this.internalBinding(name),
         moduleObj,
         key,
         dirname,
@@ -173,7 +174,7 @@ export class Realm {
     }
     const fn = compileCjs(src, 'internal/per_context/primordials.js');
     const moduleObj = { exports: bag };
-    fn(bag, () => ({}), moduleObj, 'internal/per_context/primordials.js', 'internal/per_context', bag, this.privateSymbols, this.perIsolateSymbols);
+    fn(bag, () => ({}), (name: string) => this.internalBinding(name), moduleObj, 'internal/per_context/primordials.js', 'internal/per_context', bag, this.privateSymbols, this.perIsolateSymbols);
     return bag;
   }
 
