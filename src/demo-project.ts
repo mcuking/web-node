@@ -59,6 +59,12 @@ const buf = Buffer.from('hello web-node');
 console.log('hex         :', buf.toString('hex'));
 console.log('base64      :', buf.toString('base64'));
 console.log('slice       :', buf.slice(0, 5).toString());
+// slice/subarray alias the backing store, like Node: writing the view writes
+// the original.
+const backing = Buffer.from([1, 2, 3, 4]);
+const view = backing.subarray(1, 3);
+view[0] = 99;
+console.log('view shares :', backing[1] === 99);
 console.log('');
 
 // --- fs over the virtual file system ---
