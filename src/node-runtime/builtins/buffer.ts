@@ -5,8 +5,8 @@ import type { BuiltinSpec, BuiltinInitContext } from './types';
  *
  * This is our own implementation (roadmap: vendor lib/internal/buffer.js once
  * the internal/errors + internal/validators + util/types shim layer grows).
- * Slicing copies rather than aliases; that is a deliberate simplification for
- * MVP and is documented in the design spec.
+ * `slice`/`subarray` and `from(arrayBuffer)` alias the backing store, as in
+ * Node; `from(string|Buffer|TypedArray)` copies.
  */
 const MAX_LENGTH = 0x7fffffff;
 
@@ -143,6 +143,13 @@ export const bufferSpec: BuiltinSpec = {
         return out;
       }
 
+      // A Buffer that aliases `bytes`' memory. Node's slice/subarray and
+      // from(ArrayBuffer) all return views, so writes on either side are seen
+      // by the other.
+      static #viewOver(bytes: Uint8Array): Buffer {
+        return new Buffer(bytes.buffer as ArrayBuffer, bytes.byteOffset, bytes.byteLength);
+      }
+
       static from(value: unknown, encodingOrOffset?: unknown, length?: unknown): Buffer {
         if (typeof value === 'string') {
           return Buffer.#copyFrom(fromString(value, typeof encodingOrOffset === 'string' ? encodingOrOffset : 'utf8'));
@@ -150,7 +157,8 @@ export const bufferSpec: BuiltinSpec = {
         if (isAnyArrayBuffer(value)) {
           const offset = typeof encodingOrOffset === 'number' ? encodingOrOffset : 0;
           const len = typeof length === 'number' ? length : (value as ArrayBuffer).byteLength - offset;
-          return Buffer.#copyFrom(new Uint8Array(value as ArrayBuffer, offset, len));
+          // Node shares the ArrayBuffer here rather than copying it.
+          return new Buffer(value as ArrayBuffer, offset, len);
         }
         if (ArrayBuffer.isView(value) || Array.isArray(value)) {
           return Buffer.#copyFrom(Uint8Array.from(value as ArrayLike<number>));
@@ -306,11 +314,11 @@ export const bufferSpec: BuiltinSpec = {
       }
 
       slice(start?: number, end?: number): Buffer {
-        return Buffer.#copyFrom(Uint8Array.prototype.slice.call(this, start, end) as Uint8Array);
+        return Buffer.#viewOver(Uint8Array.prototype.subarray.call(this, start, end) as Uint8Array);
       }
 
       subarray(start?: number, end?: number): Buffer {
-        return Buffer.#copyFrom(Uint8Array.prototype.slice.call(this, start, end) as Uint8Array);
+        return Buffer.#viewOver(Uint8Array.prototype.subarray.call(this, start, end) as Uint8Array);
       }
 
       readUInt8(offset = 0): number {
