@@ -160,7 +160,7 @@ console.log(
   });
 
   const w = new stream.Writable({ write: function (_c, _e, cb) { cb(); } });
-  stream.finished(w).then(
+  stream.promises.finished(w).then(
     function () { console.log('premature  : resolved'); },
     function (e) { console.log('premature  : ' + e.code + ' (' + e.message + ')'); }
   );
@@ -168,18 +168,19 @@ console.log(
 })();
 // finished() IS Node's end-of-stream (internal/streams/end-of-stream.js): a real
 // AbortSignal rejects it with an AbortError, and it runs its own options object.
+// As in Node, finished takes a callback — the promise form is stream/promises.
 (function () {
   const stream = require('stream');
   const r = new stream.Readable({ read: function () {} });
   const ac = new AbortController();
-  const p = stream.finished(r, { signal: ac.signal });
+  const p = stream.promises.finished(r, { signal: ac.signal });
   ac.abort();
   p.then(
     function () { console.log('end-of-strm: resolved'); },
     function (e) { console.log('end-of-strm: ' + e.name + ' / ' + e.code); }
   );
   const w = new stream.Writable({ write: function (_c, _e, cb) { cb(); } });
-  stream.finished(w, { readable: false }).then(function () {
+  stream.promises.finished(w, { readable: false }).then(function () {
     console.log('end-of-strm: readable:false waited for the writable half');
   });
   w.end('done');
@@ -202,6 +203,29 @@ console.log(
   r.on('error', function (e) { console.log('abortsignal: ' + e.name + ' / ' + e.code); });
   stream.addAbortSignal(ac.signal, r);
   ac.abort();
+})();
+// Readable/Writable/Duplex/Transform/PassThrough are Node's own classes now, and
+// so are compose() and the async operators (map/filter): the whole module is the
+// vendored lib/stream.js, not a hand-written stand-in.
+(function () {
+  const stream = require('stream');
+  const upper = new stream.Transform({
+    transform: function (chunk, _enc, cb) { cb(null, String(chunk).toUpperCase()); },
+  });
+  const out = [];
+  upper.on('data', function (chunk) { out.push(String(chunk)); });
+  upper.end('duplex');
+  const composite = stream.compose(
+    new stream.Transform({
+      transform: function (chunk, _enc, cb) { cb(null, String(chunk) + '!'); },
+    })
+  );
+  const composed = [];
+  composite.on('data', function (chunk) { composed.push(String(chunk)); });
+  composite.end('compose');
+  setTimeout(function () {
+    console.log('stream fam : transform=' + out.join('') + ' compose=' + composed.join(''));
+  }, 10);
 })();
 const factsFile = path.join(dir, 'facts.txt');
 fs.writeFileSync(factsFile, require('./lib/facts.js')().map(function (r) {
@@ -865,6 +889,10 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
   internal/streams/end-of-stream.js, so it honours the options object (readable/
   writable overrides, an AbortSignal → AbortError) and rejects a close that beats
   the writable half with ERR_STREAM_PREMATURE_CLOSE
+- **Streams are the real thing** — the entire stream module is Node's own source
+  (lib/stream.js + internal/streams/*): Readable, Writable, Duplex, Transform,
+  PassThrough, pipeline, finished, compose, duplexPair, the async operators
+  (map/filter/toArray), and stream/promises. There is no hand-written stream left
 - **Events** — events is Node's real events.js (the _events/_eventsCount shape,
   prependListener, errorMonitor, captureRejections, the once/on helpers), and
   stream.addAbortSignal is the real internal/streams/add-abort-signal.js

@@ -117,10 +117,12 @@ describe('stream (base classes)', () => {
       drained = true;
     });
 
-    // The first write is dispatched immediately; the rest queue up.
+    // The first write is dispatched immediately; the rest queue up. Node flags
+    // the write that reaches the high-water mark (`length < highWaterMark`
+    // afterwards), so the third write already reports backpressure.
     expect(writable.write('1')).toBe(true);
     expect(writable.write('2')).toBe(true);
-    expect(writable.write('3')).toBe(true);
+    expect(writable.write('3')).toBe(false);
     expect(writable.write('4')).toBe(false);
     expect(writable.writableNeedDrain).toBe(true);
 
@@ -264,11 +266,14 @@ describe('stream (base classes)', () => {
 
   it('finished() resolves a promise when a stream ends', async () => {
     const { runtime } = boot({});
-    const { Readable, finished } = streams(runtime);
+    const { Readable } = streams(runtime);
+    const promises = runtime.realm.require('stream/promises') as unknown as {
+      finished: (s: unknown) => Promise<void>;
+    };
 
     const readable = Readable.from([]);
     readable.resume();
-    await expect(finished(readable)).resolves.toBeUndefined();
+    await expect(promises.finished(readable)).resolves.toBeUndefined();
   });
 
   it('read(n) is byte-exact and splits buffered chunks', async () => {
@@ -327,12 +332,13 @@ describe('stream (base classes)', () => {
     });
     run();
     await waitFor(() => out.join('').includes('end signals'));
-    // Node emits `readable` once when data arrives and once more, empty, before
-    // `end` — a paused reader relies on both. Contrast with `data`, which never
-    // fires here.
+    // A paused reader sees `readable` when data arrives. Whether a second,
+    // empty `readable` is emitted before `end` is version-specific: the vendored
+    // lib/ checkout (Node 26.x) skips an unobserved EOF emission, so a listener
+    // attached after `push(null)` sees it exactly once here.
     expect(out.join('')).toContain('chunk a');
     expect(out.join('')).toContain('chunk b');
-    expect(out.join('')).toContain('end signals=2');
+    expect(out.join('')).toContain('end signals=1');
   });
 
   it('delivers byte chunks as Buffers, not bare Uint8Arrays', async () => {

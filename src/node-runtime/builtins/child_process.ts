@@ -63,6 +63,11 @@ export const childProcessSpec: BuiltinSpec = {
     /** Node defers every lifecycle event past the current tick; so do we. */
     const defer = (fn: () => void): void => binding.nextTick(fn as (...a: unknown[]) => void);
 
+    /** Defer past the next tick *and* the microtask drain (a macrotask). */
+    const deferMacro = (fn: () => void): void => {
+      binding.timers.setTimeout(fn as (...a: unknown[]) => void, 0);
+    };
+
     interface ExecOptions {
       cwd?: string;
       env?: Record<string, string>;
@@ -141,10 +146,19 @@ export const childProcessSpec: BuiltinSpec = {
       bind(handle: ChildHandleLike): void {
         this.#handle = handle;
         this.pid = handle.pid;
-        handle.onStdout((chunk) => this.stdout.push(chunk));
-        handle.onStderr((chunk) => this.stderr.push(chunk));
-        handle.onExit((result) => {
-          defer(() => this.#finish(result));
+        // Subscribe on a later turn, not synchronously. The virtual child has
+        // already run to completion inside `spawn()`, so its output is replayed
+        // on subscribe; replaying synchronously would land before the caller's
+        // `stdout.on('data')` has put the readable into flowing mode (Node
+        // defers `resume_`), buffering the output past `exit`. A macrotask gives
+        // the resume a full turn to run first, so the order matches Node:
+        // spawn → data → exit → close.
+        deferMacro(() => {
+          handle.onStdout((chunk) => this.stdout.push(chunk));
+          handle.onStderr((chunk) => this.stderr.push(chunk));
+          handle.onExit((result) => {
+            defer(() => this.#finish(result));
+          });
         });
       }
 

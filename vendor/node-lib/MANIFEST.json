@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-20T04:27:04.996Z",
+  "generatedAt": "2026-09-20T05:29:54.310Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -103,6 +103,83 @@
       "sha256": "6071b2ae0f5fd5c0dd1f87ed9ba6d994778fdef47ff8569dded3ea3a35c53db5",
       "upstreamSha256": "6071b2ae0f5fd5c0dd1f87ed9ba6d994778fdef47ff8569dded3ea3a35c53db5",
       "bytes": 61947,
+      "patches": []
+    },
+    {
+      "path": "internal/streams/writable.js",
+      "sha256": "2aa0dd9f76ceca631601c06b65085741b51e1853fd9d8177af5f18d7ef5ee8d8",
+      "upstreamSha256": "2aa0dd9f76ceca631601c06b65085741b51e1853fd9d8177af5f18d7ef5ee8d8",
+      "bytes": 33756,
+      "patches": []
+    },
+    {
+      "path": "internal/streams/duplex.js",
+      "sha256": "e2b5d781357dff0e742517a3fb451750477a394d2306186ca119b671f71261d5",
+      "upstreamSha256": "e2b5d781357dff0e742517a3fb451750477a394d2306186ca119b671f71261d5",
+      "bytes": 6547,
+      "patches": []
+    },
+    {
+      "path": "internal/streams/transform.js",
+      "sha256": "af0424491c8b4de48df33f57955d2d501bbaed8d80393a45a0fae84c62459af9",
+      "upstreamSha256": "af0424491c8b4de48df33f57955d2d501bbaed8d80393a45a0fae84c62459af9",
+      "bytes": 7123,
+      "patches": []
+    },
+    {
+      "path": "internal/streams/passthrough.js",
+      "sha256": "52bed2d31129172fce7fb4d5dd1c0c45f59cc9185964cd6069c63ed4219163ec",
+      "upstreamSha256": "52bed2d31129172fce7fb4d5dd1c0c45f59cc9185964cd6069c63ed4219163ec",
+      "bytes": 1762,
+      "patches": []
+    },
+    {
+      "path": "internal/streams/pipeline.js",
+      "sha256": "96fcda8c76b24bdd763df8dec9cf5eb02acb2100ca2cf86994e4165022febfb9",
+      "upstreamSha256": "96fcda8c76b24bdd763df8dec9cf5eb02acb2100ca2cf86994e4165022febfb9",
+      "bytes": 12720,
+      "patches": []
+    },
+    {
+      "path": "internal/streams/compose.js",
+      "sha256": "89aff34359d6f6d28a8939a9250fdc56c26faacc27f9f276ee5cb38709ec4e39",
+      "upstreamSha256": "89aff34359d6f6d28a8939a9250fdc56c26faacc27f9f276ee5cb38709ec4e39",
+      "bytes": 5221,
+      "patches": []
+    },
+    {
+      "path": "internal/streams/operators.js",
+      "sha256": "656f0f0c3128c77bdc43d0f237eb4531e8d2f085fb2554363aeba854789ac1d9",
+      "upstreamSha256": "656f0f0c3128c77bdc43d0f237eb4531e8d2f085fb2554363aeba854789ac1d9",
+      "bytes": 8832,
+      "patches": []
+    },
+    {
+      "path": "internal/streams/duplexpair.js",
+      "sha256": "693d2e9525a62d7847cf4e4a35990eea34fe5f065e6357ecb3b1c8504a42f4bc",
+      "upstreamSha256": "693d2e9525a62d7847cf4e4a35990eea34fe5f065e6357ecb3b1c8504a42f4bc",
+      "bytes": 2038,
+      "patches": []
+    },
+    {
+      "path": "internal/streams/duplexify.js",
+      "sha256": "507d9fbf1d2a644f7b9f69a12d6c91fe94fecdc5199ad640f94e77e70c564e7c",
+      "upstreamSha256": "507d9fbf1d2a644f7b9f69a12d6c91fe94fecdc5199ad640f94e77e70c564e7c",
+      "bytes": 8565,
+      "patches": []
+    },
+    {
+      "path": "stream.js",
+      "sha256": "3dec4d8da73ac37b6fcfd812ed252c12bf8355ccdc71ac6d669e76288f2a1857",
+      "upstreamSha256": "3dec4d8da73ac37b6fcfd812ed252c12bf8355ccdc71ac6d669e76288f2a1857",
+      "bytes": 5099,
+      "patches": []
+    },
+    {
+      "path": "stream/promises.js",
+      "sha256": "29606bc43e45922f0b39f633cad11d607afa2afcb35f3f1dcfe296219243031e",
+      "upstreamSha256": "29606bc43e45922f0b39f633cad11d607afa2afcb35f3f1dcfe296219243031e",
+      "bytes": 917,
       "patches": []
     },
     {

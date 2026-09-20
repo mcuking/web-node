@@ -32,6 +32,13 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_UNKNOWN_FILE_EXTENSION: 'Unknown file extension "%s" for %s',
   ERR_MODULE_NOT_FOUND: 'Cannot find module \'%s\' imported from %s',
   ERR_UNSUPPORTED_ESM_URL_SCHEME: 'Only file and data URLs are supported by the default ESM loader. Received protocol \'%s\'',
+  ERR_ILLEGAL_CONSTRUCTOR: 'Illegal constructor',
+  ERR_STREAM_ALREADY_FINISHED: 'Cannot call %s after a stream was finished',
+  ERR_STREAM_CANNOT_PIPE: 'Cannot pipe, not readable',
+  ERR_STREAM_DESTROYED: 'Cannot call %s after a stream was destroyed',
+  ERR_STREAM_UNABLE_TO_PIPE: 'Cannot pipe to a closed or destroyed stream',
+  ERR_STREAM_WRITE_AFTER_END: 'write after end',
+  ERR_INTERNAL_ASSERTION: '%s',
   ERR_WEB_NODE_NOT_IMPLEMENTED: '[web-node] %s is not implemented.',
 };
 
@@ -58,6 +65,13 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_UNKNOWN_ENCODING: TypeError,
   ERR_UNKNOWN_FILE_EXTENSION: TypeError,
   ERR_UNSUPPORTED_ESM_URL_SCHEME: TypeError,
+  ERR_ILLEGAL_CONSTRUCTOR: TypeError,
+  ERR_STREAM_ALREADY_FINISHED: Error,
+  ERR_STREAM_CANNOT_PIPE: Error,
+  ERR_STREAM_DESTROYED: Error,
+  ERR_STREAM_UNABLE_TO_PIPE: Error,
+  ERR_STREAM_WRITE_AFTER_END: Error,
+  ERR_INTERNAL_ASSERTION: Error,
 };
 
 class NodeError extends Error {
@@ -94,6 +108,10 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
     return `The ${type} '${name}' ${reason ?? 'is invalid'}. Received ${inspectArg(value)}`;
   },
   ERR_INVALID_ARG_TYPE: formatInvalidArgType,
+  ERR_INVALID_RETURN_VALUE: (args) => {
+    const [input, name, value] = args as [string, string, unknown];
+    return `Expected ${input} to be returned from the "${name}" function but got ${determineSpecificType(value)}.`;
+  },
   // Node's builder drops the parenthesised detail when nothing was passed.
   ERR_UNHANDLED_ERROR: (args) =>
     args.length === 0 || args[0] === undefined ? 'Unhandled error.' : `Unhandled error. (${String(args[0])})`,
@@ -384,6 +402,19 @@ export const internalUtilSpec: BuiltinSpec = {
         for (let i = index; i + 1 < list.length; i++) list[i] = list[i + 1];
         list.pop();
       },
+      // Node renames functions for error/stack readability (internal/util.js).
+      assignFunctionName: <T>(name: string | symbol, fn: T, descriptor?: object): T => {
+        const label =
+          typeof name === 'string' ? name : `[${String((name as symbol).description)}]`;
+        Object.defineProperty(fn as object, 'name', {
+          writable: false,
+          enumerable: false,
+          configurable: true,
+          ...descriptor,
+          value: label,
+        });
+        return fn;
+      },
       isWindows: false,
       isMacOS: false,
       isLinux: true,
@@ -402,7 +433,12 @@ export const internalUtilSpec: BuiltinSpec = {
       SideEffectFreeRegExpPrototypeSymbolReplace: (r: RegExp, s: string, v: string) => s.replace(r, v),
       Buffer: undefined,
       customInspectSymbol: Symbol.for('nodejs.util.inspect.custom'),
-      promisify: undefined,
+      // `lib/stream.js` tags `pipeline`/`finished` with `promisify.custom`
+      // so `util.promisify(pipeline)` yields the promises form. Only the
+      // marker is consulted here, so the callable itself stays a stub.
+      promisify: Object.assign((fn: unknown) => fn, {
+        custom: Symbol.for('nodejs.util.promisify.custom'),
+      }),
       isPromise: (v: unknown) => v instanceof Promise,
       isRegExp: (v: unknown) => v instanceof RegExp,
       toUSVString: (s: string) => s,
@@ -473,18 +509,138 @@ export const internalDebuglogSpec: BuiltinSpec = {
 // all loaded on demand. They stay explicit throws so a caller that reaches them
 // sees why, instead of a silent `undefined`.
 
-export const internalComposeSpec: BuiltinSpec = {
-  id: 'internal/streams/compose',
+// ---------------------------------------------------------------------------
+// internal/abort_controller
+// ---------------------------------------------------------------------------
+//
+// Node's real internal/abort_controller.js is built on its own EventTarget,
+// webidl converters and js_transferable plumbing — none of which exist here.
+// The host realm already provides spec-compliant AbortController/AbortSignal, so
+// we re-export those under Node's module id.
+
+export const internalAbortControllerSpec: BuiltinSpec = {
+  id: 'internal/abort_controller',
   origin: 'web-node',
-  init: () =>
-    new Proxy(
-      {},
-      {
-        get: (): never => {
-          throw notImplemented('api', 'stream.compose', 'compose is outside the MVP whitelist.');
-        },
+  deps: ['internal/errors', 'internal/validators'],
+  init: (ctx: BuiltinInitContext) => {
+    const errors = ctx.require('internal/errors') as {
+      codes: Record<string, new (...args: unknown[]) => Error>;
+    };
+    const AbortSignalCtor = AbortSignal;
+    return {
+      AbortController,
+      AbortSignal,
+      // Node's `aborted(signal, resource)` resolves once the signal aborts.
+      aborted: async (signal: AbortSignal, resource: unknown): Promise<void> => {
+        if (signal === undefined || !('aborted' in Object(signal))) {
+          throw new errors.codes.ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
+        }
+        if (resource === undefined) {
+          throw new errors.codes.ERR_INVALID_ARG_TYPE('resource', 'Object', resource);
+        }
+        if (signal.aborted) return;
+        await new Promise<void>((resolve) => {
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        });
       },
-    ),
+      transferableAbortSignal: (signal: AbortSignal) => signal,
+      transferableAbortController: () => new AbortController(),
+      _AbortSignalCtor: AbortSignalCtor,
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// internal/buffer
+// ---------------------------------------------------------------------------
+//
+// Node's FastBuffer is a bare Uint8Array subclass constructed from
+// `(arrayBuffer, byteOffset, length)`. That is the only shape vendored source
+// (`lib/stream.js` `_uint8ArrayToBuffer`) asks for.
+
+export const internalBufferSpec: BuiltinSpec = {
+  id: 'internal/buffer',
+  origin: 'web-node',
+  deps: ['buffer'],
+  init: (ctx: BuiltinInitContext) => {
+    // Node's `Buffer` extends `FastBuffer`, so a chunk funneled through
+    // `_uint8ArrayToBuffer` still answers `Buffer.isBuffer() === true`. Reuse
+    // the runtime's own Buffer class to keep that invariant (and its methods).
+    const { Buffer } = ctx.require('buffer') as { Buffer: new (...args: never[]) => Uint8Array };
+    return { FastBuffer: Buffer };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// internal/util/types
+// ---------------------------------------------------------------------------
+//
+// The typed-array predicates Node builds over V8 intrinsics, expressed against
+// the host's ArrayBuffer.isView + Object.prototype.toString classification.
+
+export const internalUtilTypesSpec: BuiltinSpec = {
+  id: 'internal/util/types',
+  origin: 'web-node',
+  init: () => {
+    const tag = (v: unknown): string | undefined =>
+      ArrayBuffer.isView(v) ? Object.prototype.toString.call(v).slice(8, -1) : undefined;
+    const is = (name: string) => (v: unknown): boolean => tag(v) === name;
+    return {
+      isArrayBufferView: (v: unknown): boolean => ArrayBuffer.isView(v),
+      isTypedArray: (v: unknown): boolean => tag(v) !== undefined && tag(v) !== 'DataView',
+      isDataView: is('DataView'),
+      isUint8Array: is('Uint8Array'),
+      isUint8ClampedArray: is('Uint8ClampedArray'),
+      isUint16Array: is('Uint16Array'),
+      isUint32Array: is('Uint32Array'),
+      isInt8Array: is('Int8Array'),
+      isInt16Array: is('Int16Array'),
+      isInt32Array: is('Int32Array'),
+      isFloat16Array: is('Float16Array'),
+      isFloat32Array: is('Float32Array'),
+      isFloat64Array: is('Float64Array'),
+      isBigInt64Array: is('BigInt64Array'),
+      isBigUint64Array: is('BigUint64Array'),
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// internal/assert
+// ---------------------------------------------------------------------------
+
+export const internalAssertSpec: BuiltinSpec = {
+  id: 'internal/assert',
+  origin: 'web-node',
+  deps: ['internal/errors'],
+  init: (ctx: BuiltinInitContext) => {
+    const codes = (ctx.require('internal/errors') as {
+      codes: Record<string, new (...args: unknown[]) => Error>;
+    }).codes;
+    const fail = (message?: string): never => {
+      throw new codes.ERR_INTERNAL_ASSERTION(message);
+    };
+    const assert = (value: unknown, message?: string): void => {
+      if (!value) fail(message);
+    };
+    return Object.assign(assert, { fail }) as unknown as Record<string, unknown>;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// internal/blob
+// ---------------------------------------------------------------------------
+//
+// Only `isBlob` is read by the lazily-loaded duplexify path; the host realm's
+// Blob is the real thing.
+
+export const internalBlobSpec: BuiltinSpec = {
+  id: 'internal/blob',
+  origin: 'web-node',
+  init: () => ({
+    isBlob: (value: unknown): boolean =>
+      typeof Blob !== 'undefined' && value instanceof Blob,
+  }),
 };
 
 export const internalWebStreamsAdaptersSpec: BuiltinSpec = {
@@ -568,6 +724,9 @@ export const internalEventTargetSpec: BuiltinSpec = {
     isEventTarget: (): boolean => false,
     kEvents: Symbol('kEvents'),
     kResistStopPropagation: Symbol('kResistStopPropagation'),
+    // Used by the stream operators to hold a weak reference to the resource
+    // that should keep an abort listener alive. We keep it as a plain marker.
+    kWeakHandler: Symbol('kWeakHandler'),
   }),
 };
 

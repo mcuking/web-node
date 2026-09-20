@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**；M14 再把 **`internal/streams/end-of-stream.js` 接进来**（`finished()` 就是真实现）；M15 换掉自研 `EventEmitter`，改用 **Node 真 `events.js`**（`_events` 形状 / `prependListener` / `errorMonitor` / `captureRejections`），并把 `stream.addAbortSignal` 接到真源码。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**；M14 再把 **`internal/streams/end-of-stream.js` 接进来**（`finished()` 就是真实现）；M15 换掉自研 `EventEmitter`，改用 **Node 真 `events.js`**（`_events` 形状 / `prependListener` / `errorMonitor` / `captureRejections`），并把 `stream.addAbortSignal` 接到真源码；M16 把**整个 `stream` 模块换成真源码**（`lib/stream.js` + `internal/streams/*`：Readable/Writable/Duplex/Transform/PassThrough/pipeline/finished/compose/duplexPair/operators + `stream/promises`），删掉手写 stream。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -41,11 +41,12 @@
 | M13 | **vendor `internal/streams/destroy.js`**（真 `destroy`/`_undestroy` + `[kState]` 位域）+ `finished()` 接真谓词 | ✅ 完成 |
 | M14 | **vendor `internal/streams/end-of-stream.js`**（真 `eos`/`finished`，含 options + AbortSignal）| ✅ 完成 |
 | M15 | **vendor Node 真 `events.js`**（替换自研 EventEmitter）+ 真 `stream.addAbortSignal`；`internal/streams/readable.js` 已 vendor 并就绪 | ✅ 完成 |
+| M16 | **整套 stream 换真源码**（`lib/stream.js` + `internal/streams/*`：Writable/Duplex/Transform/PassThrough/pipeline/compose/duplexPair/operators + `stream/promises`），删除手写 stream | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **210/210 通过** · `vite build` 绿（worker ~468KB / index ~10.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **220/220 通过** · `vite build` 绿（worker ~550KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -123,16 +124,44 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **把整套 stream 换成真 Node 源码**（readable 已 vendor 并验证可跑）：要一次拉入 `writable.js` / `duplex.js` / `transform.js` / `passthrough.js` / `pipeline.js` / `duplexpair.js` / `operators.js` / `lib/stream.js`。已确认还缺的 shim：`internal/util.assignFunctionName`、`internal/abort_controller`（用全局 `AbortController`/`AbortSignal`）、`internal/buffer`（`FastBuffer`）、`internal/util/types`（`isArrayBufferView`/`isUint8Array`）、`internal/assert`、`internal/streams/duplexify`。这是**一次原子替换**，做完才能删掉现有手写 stream（~1650 行）。
-2. **给 `internal/async_hooks` 一个真实（哪怕最小）实现**，让 vendored 代码能走 `AsyncResource` 分支（end-of-stream / readable 现在都只能走 `enabledHooksExist() === false` 那条路）。
-3. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
-4. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
-5. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
-6. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M15 因此 +110KB）；若在意体积，可改成按文件 code-split。
+1. **给 `internal/async_hooks` 一个真实（哪怕最小）实现**，让 vendored 代码能走 `AsyncResource` 分支（end-of-stream / readable 现在都只能走 `enabledHooksExist() === false` 那条路）。
+2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
+3. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。M16 把 child 的生命周期事件改为**订阅时延一个 macrotask**（让 stdout 的 `data` 先于 `exit`，对齐真 Node）；若后续发现时序副作用，可再评估。
+4. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
+5. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M16 后 worker 达 **~550KB**）；若在意体积，可改成按文件 code-split。
+6. **统一 oracle 版本（重要）**：vendored 真源码来自 `/Users/tangjianghong/Downloads/node`，而该 checkout **是 Node v26.9.1-dev**，不是 fnm v22.19.0。大部分语义两版一致，但已有可观测差异（例：v26 在无人监听时跳过 EOF 处的空 `readable` 事件 → `end signals=1`，v22 是 2）。后续要么统一改用同版本的源码树，要么在断言里注明版本（现测试已按 vendored 源的真实行为写，并在注释里标注）。
+7. **补 `internal/async_hooks` / `internal/util/inspect` 等 shim 的保真度**；把 `internal/streams/duplexify` 的 `internal/blob` 从 `isBlob` stub 扩到真 `Blob` 包装（当前够用）。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M16 整套 stream 换成真 Node 源码
+
+**目标**：把 M15「下一步」第 1 项做完——不再手写 stream，整个 `stream` 模块直接用 Node 的源码。
+
+**改了什么**
+
+1. **新 vendor 11 个文件**：`stream.js`、`stream/promises.js`、`internal/streams/{writable,duplex,transform,passthrough,pipeline,compose,operators,duplexpair,duplexify}.js`（manifest 18 → **29** 个文件）。
+2. **删除自写 `src/node-runtime/builtins/stream.ts`**（~1650 行）：公开 `stream` / `node:stream` / `stream/promises` / `node:stream/promises` 现在就是真源码。
+3. **补齐 shim**：`internal/abort_controller`（转发全局 `AbortController`/`AbortSignal`）、`internal/buffer`（`FastBuffer` = 本运行时的 `Buffer`，保 `Buffer.isBuffer()` 不变）、`internal/util/types`（`isArrayBufferView`/`isUint8Array` 等）、`internal/assert`、`internal/blob`（`isBlob`）；`internal/util` 补 `assignFunctionName` + `promisify.custom`；`internal/event_target` 补 `kWeakHandler`；`internal/errors` 补 `ERR_ILLEGAL_CONSTRUCTOR` / `ERR_STREAM_ALREADY_FINISHED` / `ERR_STREAM_{CANNOT_PIPE,DESTROYED,UNABLE_TO_PIPE,WRITE_AFTER_END}` / `ERR_INTERNAL_ASSERTION` / `ERR_INVALID_RETURN_VALUE`（含 formatter）。
+4. **模块加载器修一个循环依赖 bug**：`stream.js` 中途会把 `module.exports` 换成 `Stream`（legacy 的 Stream），而 `duplexpair.js` / `stream/promises.js` 又反向 `require('stream')`。`realm.ts` 的 `require` 之前只回一个快照值，看不到中途重赋值；改为保留 live 的 `module.exports` 引用（`ModuleRecord.moduleObj`），循环 require 就能拿到已赋值的部分。
+5. **`process.nextTick` 改成真正独立的队列**：原来直接用 `queueMicrotask`，导致嵌套 nextTick 被排到已有 promise 微任务之后（`a,b,m,c`）；现按 Node 语义排空到尽才跑微任务（`a,b,c,m`）。
+6. **child_process 生命周期事件延一个 macrotask**：虚拟 child 在 `spawn()` 里同步跑完，stdout 是订阅时回放；同步回放会落在调用方 `stdout.on('data')` 之前（此时 `resume_` 未跑、`kSync` 未清）→ 输出被缓到 `exit` 之后。改为延一个 macrotask 再订阅，顺序对齐真 Node：**spawn → data → exit → close**。
+7. **http 的 outgoing 关闭 autoDestroy**：`ClientRequest` / `ServerResponse` 都是 `Writable` 子类，真 Writable 在 `finish` 后会自动 destroy → 触发 `_destroy` → 提前断开 socket（`socket hang up`）。Node 的 `OutgoingMessage` 本就是 `autoDestroy:false`，照此设。
+
+**发现（写进下一节）**：真源码来自 `/Users/tangjianghong/Downloads/node`，而它是 **Node v26.9.1-dev**，与断言基准 fnm **v22.19.0** 不是同一版本。多数语义一致，但有可观测差异，例：v26 在没人监听时跳过 EOF 处的空 `readable` 事件（`end signals=1`，v22 为 2）。测试已按 vendored 源的真实行为写并加了版本注释。
+
+**为什么** 自己维护一份 stream 会持续跟 Node 行为发散（增量、背压、`afterFinished`、`pipe` 错误传播……）；换成真源码后这些语义与 `stream/promises`、`operators`、`compose` 一次性对齐，也让上层（`fs`/`http`/`net`）坐的底座变成 Node 自己的。
+
+**验证**（先跑真 Node v22.19.0 实测，v26 差异处已注明）
+- 单测：**210 → 220**（新增 `test/stream-vendored.test.ts` 10 条；之前基于旧行为的断言同步修正：`stream.finished` 需 callback（promise 用 `stream.promises`）、`state.readable/writable` 为 `undefined`、HWM 边界 `write` 返回 false、EOF `readable` 次数）。
+- 浏览器端到端：`stream fam : transform=DUPLEX compose=compose!`、`events : prepend then on (maxListeners=10)`、`abortsignal: AbortError / ABORT_ERR`、`pipeline : facts-upper.txt written`、`premature : ERR_STREAM_PREMATURE_CLOSE (Premature close)`。
+
+**代价 / 取舍**：`vendored.ts` 是 eager 加载，worker **468KB → ~550KB**（整套 stream 真源码）。已在「下一步」记了改按需加载。
+
+**涉及文件**
+新增：`vendor/node-lib/{stream.js,stream/promises.js,internal/streams/{writable,duplex,transform,passthrough,pipeline,compose,operators,duplexpair,duplexify}.js}`（+ MANIFEST）；`test/stream-vendored.test.ts`。删除：`src/node-runtime/builtins/stream.ts`。修改：`tools/vendor.mjs`、`src/node-runtime/builtins/{index,vendored-builtins,internal-shims,http,child_process}.ts`、`src/node-runtime/{realm,runtime}.ts`、`test/{stream,stream-state,stream-eos,stream-destroy}.test.ts`、`src/demo-project.ts`、`README.md`、`README_zh.md`。
 
 ### 2026-09-20 · M15 换成真 `events.js`（并探清 stream 整模块替换的完整依赖）
 

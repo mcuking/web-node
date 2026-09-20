@@ -99,13 +99,13 @@ describe('finished()', () => {
     const stream = boot();
     const r = stream.Readable.from([]);
     r.resume();
-    await expect(stream.finished(r)).resolves.toBeUndefined();
+    await expect(stream.promises.finished(r)).resolves.toBeUndefined();
   });
 
   it('rejects with ERR_STREAM_PREMATURE_CLOSE when closed before finishing', async () => {
     const stream = boot();
     const w = new stream.Writable({ write(_c: unknown, _e: string, cb: () => void) { setTimeout(cb, 5); } });
-    const p = stream.finished(w);
+    const p = stream.promises.finished(w);
     w.destroy();
     await expect(p).rejects.toMatchObject({ message: 'Premature close', code: 'ERR_STREAM_PREMATURE_CLOSE' });
   });
@@ -113,7 +113,7 @@ describe('finished()', () => {
   it('rejects with the error a destroyed stream was destroyed with', async () => {
     const stream = boot();
     const w = new stream.Writable({ write(_c: unknown, _e: string, cb: () => void) { setTimeout(cb, 5); } });
-    const p = stream.finished(w);
+    const p = stream.promises.finished(w);
     w.destroy(new Error('nope'));
     await expect(p).rejects.toThrow('nope');
   });

@@ -30,6 +30,9 @@ type ModuleState = 'unloaded' | 'loading' | 'loaded';
 
 interface ModuleRecord {
   exports: Record<string, unknown>;
+  // Kept for vendored modules so a circular `require` observes live
+  // reassignments of `module.exports` (Node's `stream.js` swaps it out mid-file).
+  moduleObj?: { exports: unknown };
   state: ModuleState;
   spec: BuiltinSpec;
 }
@@ -120,8 +123,11 @@ export class Realm {
   }
 
   #materialize(key: string, rec: ModuleRecord): unknown {
-    if (rec.state === 'loaded') return rec.exports;
-    if (rec.state === 'loading') return rec.exports; // circular import: hand back the partial exports
+    if (rec.state === 'loaded') return rec.moduleObj ? rec.moduleObj.exports : rec.exports;
+    // Circular import: hand back whatever exports exist so far. For vendored
+    // modules that is the live `module.exports`, so a reassignment earlier in
+    // the file (e.g. `module.exports = Stream`) is already visible.
+    if (rec.state === 'loading') return rec.moduleObj ? rec.moduleObj.exports : rec.exports;
     rec.state = 'loading';
 
     // Ensure declared dependencies exist first (mirrors Node's ordered bootstrap).
@@ -134,6 +140,7 @@ export class Realm {
       }
       const fn = compileCjs(src, rec.spec.vendorPath);
       const moduleObj = { exports: rec.exports };
+      rec.moduleObj = moduleObj;
       const dirname = key.startsWith('internal/') ? `internal/${key.split('/').slice(1, -1).join('/')}` : '/';
       fn(
         rec.exports,

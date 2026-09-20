@@ -456,7 +456,9 @@ export const httpSpec: BuiltinSpec = {
       }
 
       constructor(socket: NetSocket) {
-        super({});
+        // Node's OutgoingMessage is a plain Stream that does not auto-destroy on
+        // `finish`; our ServerResponse is a Writable, so opt out explicitly.
+        super({ autoDestroy: false });
         this.socket = socket;
       }
 
@@ -815,7 +817,8 @@ export const httpSpec: BuiltinSpec = {
       #response: IncomingMessage | null = null;
 
       constructor(options: RequestOptions | string, cb?: (res: IncomingMessage) => void) {
-        super();
+        // See ServerResponse: outgoing messages never auto-destroy on finish.
+        super({ autoDestroy: false });
         const opts = normalizeOptions(options);
         this.method = (opts.method ?? 'GET').toUpperCase();
         this.path = opts.path ?? '/';

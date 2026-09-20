@@ -113,6 +113,8 @@ export class NodeRuntime {
   #timers = new Map<number, ReturnType<typeof nativeSetTimeout>>();
   #nextTimerId = 1;
   #exitCode: number | null = null;
+  #nextTickQueue: Array<() => void> = [];
+  #nextTickScheduled = false;
 
   constructor(opts: RuntimeOptions) {
     this.vfs = opts.vfs;
@@ -149,7 +151,25 @@ export class NodeRuntime {
         this.#exitCode = code;
         throw new ProcessExit(code);
       },
-      nextTick: (fn, ...args) => queueMicrotask(() => fn(...args)),
+      // Node's `process.nextTick` is its own queue that drains to exhaustion
+      // before any promise microtask runs (and before the event loop turns).
+      // A bare `queueMicrotask` would interleave nested nextTicks behind
+      // already-queued promise jobs, which reorders stream/lifecycle events.
+      nextTick: (fn, ...args) => {
+        this.#nextTickQueue.push(() => fn(...args));
+        if (this.#nextTickScheduled) return;
+        this.#nextTickScheduled = true;
+        queueMicrotask(() => {
+          try {
+            for (let i = 0; i < this.#nextTickQueue.length; i++) {
+              this.#nextTickQueue[i]();
+            }
+          } finally {
+            this.#nextTickQueue.length = 0;
+            this.#nextTickScheduled = false;
+          }
+        });
+      },
       timers: {
         setTimeout: (fn, ms, ...args) => {
           const id = this.#nextTimerId++;

@@ -61,7 +61,9 @@ describe('readable state shape', () => {
       errorEmitted: false,
       autoDestroy: true,
       emitClose: true,
-      readable: true,
+      // `readable` is not a field of the internal state (it is a getter on
+      // Readable.prototype), so it reads as undefined here — same as Node.
+      readable: undefined,
       dataEmitted: false,
       flowing: null,
       reading: false,
@@ -136,7 +138,7 @@ describe('writable state shape', () => {
       emitClose: true,
       needDrain: false,
       ending: false,
-      writable: true,
+      writable: undefined,
     });
   });
 
@@ -240,7 +242,7 @@ describe('stream predicates (internal/streams/utils.js)', () => {
       closed: true,
       destroyed: true,
       errored: null,
-      stateReadable: true,
+      stateReadable: undefined,
     });
   });
 

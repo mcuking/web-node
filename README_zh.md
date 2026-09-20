@@ -95,8 +95,12 @@ pipeline(fs.createReadStream('/project/a.txt'), new Transform({
 `finished()`、`stream/promises`、`fs.createReadStream` / `fs.createWriteStream` 均已实现，
 高水位之上的 `write()`/`push()` 返回 `false` 并在排空后发 `'drain'`（背压真实生效）。
 
-流的核心已逐步换成 **Node 真源码**（`internal/streams/state.js`、`from.js`、`utils.js`、
-`destroy.js`、`end-of-stream.js`、`add-abort-signal.js`），`events` 也换成了真 `events.js`：
+**整个 `stream` 模块就是 Node 真源码**（`lib/stream.js` + `internal/streams/*`）：
+`Readable` / `Writable` / `Duplex` / `Transform` / `PassThrough` / `pipeline` /
+`finished` / `compose` / `duplexPair` / 异步操作符（`map`/`filter`/`toArray`）/
+`stream/promises` —— 不再有手写 stream。流的核心内部（`internal/streams/`
+`state.js`、`from.js`、`utils.js`、`destroy.js`、`end-of-stream.js`、
+`add-abort-signal.js`）也都是真源码，`events` 同样是真 `events.js`：
 真 `EventEmitter` 形状（`_events` / `prependListener` / `errorMonitor` /
 `captureRejections`）、默认高水位、`Readable.from`、谓词、`destroy()` / `_undestroy()`、
 `finished()` / `eos()`、`addAbortSignal()`。因此
@@ -234,6 +238,7 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M13 | vendor `internal/streams/destroy.js`（真 `destroy`/`_undestroy` + `[kState]` 位域）+ `finished()` 接真谓词 | ✅ |
 | M14 | vendor `internal/streams/end-of-stream.js` —— `finished()`/`eos()` 就是真源码（options + AbortSignal） | ✅ |
 | M15 | vendor 真 `events.js`（换掉自研 EventEmitter）+ 真 `stream.addAbortSignal` | ✅ |
+| M16 | **整套 stream 换真源码**（`lib/stream.js` + `internal/streams/*`：Writable/Duplex/Transform/PassThrough/pipeline/compose/duplexPair/operators + `stream/promises`），删除手写 stream | ✅ |
 
 ## 改动约定
 

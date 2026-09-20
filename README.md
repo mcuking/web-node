@@ -177,11 +177,16 @@ pipeline(fs.createReadStream('/project/a.txt'), new Transform({
 above the high-water mark and emit `'drain'` once the buffer empties, so
 backpressure propagates for real instead of buffering whole bodies in memory.
 
-Several pieces of Node's own core are vendored and executed as-is
-(`events.js`, and in the stream layer `internal/streams/state.js`, `from.js`,
-`utils.js`, `destroy.js`, `end-of-stream.js`, `add-abort-signal.js`): the real
-`EventEmitter` (its `_events` shape, `prependListener`, `errorMonitor`,
-`captureRejections`), the default high-water marks, `Readable.from`, the
+The whole `stream` module is Node's own source (`lib/stream.js` plus the
+`internal/streams/*` internals) — `Readable`, `Writable`, `Duplex`, `Transform`,
+`PassThrough`, `pipeline`, `finished`, `compose`, `duplexPair`, the async
+operators (`map`/`filter`/`toArray`) and `stream/promises`. There is no
+hand-written stream left. Several other pieces of Node's own core are vendored
+and executed as-is (`events.js`, and in the stream layer `internal/streams/`
+`state.js`, `from.js`, `utils.js`, `destroy.js`, `end-of-stream.js`,
+`add-abort-signal.js`): the real `EventEmitter` (its `_events` shape,
+`prependListener`, `errorMonitor`, `captureRejections`), the default high-water
+marks, `Readable.from`, the
 `isReadable`/`isWritable`/`isDisturbed`/`isErrored`/`isDestroyed` predicates,
 the `destroy()` / `_undestroy()` lifecycle, `finished()` / `eos()`, and
 `addAbortSignal()`.
@@ -331,6 +336,7 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M13 | Vendor `internal/streams/destroy.js` (real `destroy`/`_undestroy` + `[kState]` bits) and run `finished()` on the real predicates | ✅ Done |
 | M14 | Vendor `internal/streams/end-of-stream.js` — `finished()`/`eos()` are the real source, options + AbortSignal included | ✅ Done |
 | M15 | Vendor Node's real `events.js` (replacing the custom EventEmitter) + the real `stream.addAbortSignal` | ✅ Done |
+| M16 | The whole `stream` module is Node's real source (`lib/stream.js` + `internal/streams/*`): Writable/Duplex/Transform/PassThrough/pipeline/compose/duplexPair/operators + `stream/promises`; the hand-written stream is gone | ✅ Done |
 
 ## Contributing
 

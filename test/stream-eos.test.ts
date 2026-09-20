@@ -4,9 +4,10 @@ import { NodeRuntime } from '../src/node-runtime/runtime';
 
 /**
  * `finished()` is now Node's real end-of-stream (vendored from
- * internal/streams/end-of-stream.js), not a hand-written approximation. Every
- * expectation below was read off a real Node v22.19.0 first, including the
- * options object and the AbortSignal path.
+ * internal/streams/end-of-stream.js), not a hand-written approximation. As in
+ * Node, `stream.finished(stream[, options], callback)` requires a callback; the
+ * promise form is `stream.promises.finished`. Options match Node v22.19.0 (the
+ * vendored source itself is the newer lib/ checkout — see docs/DEVLOG.md).
  */
 function boot() {
   const vfs = new MemoryVfs({ cwd: '/project' });
@@ -29,7 +30,7 @@ describe('finished() is the vendored end-of-stream', () => {
     const stream = boot();
     const r = stream.Readable.from([]);
     r.resume();
-    await expect(stream.finished(r)).resolves.toBeUndefined();
+    await expect(stream.promises.finished(r)).resolves.toBeUndefined();
   });
 
   it('resolves on an already-ended readable', async () => {
@@ -39,13 +40,13 @@ describe('finished() is the vendored end-of-stream', () => {
       r.on('end', () => res());
       r.resume();
     });
-    await expect(stream.finished(r)).resolves.toBeUndefined();
+    await expect(stream.promises.finished(r)).resolves.toBeUndefined();
   });
 
   it('honours options.readable:false and waits for the writable half', async () => {
     const stream = boot();
     const w = new stream.Writable({ write(_c: unknown, _e: string, cb: () => void) { cb(); } });
-    const p = stream.finished(w, { readable: false });
+    const p = stream.promises.finished(w, { readable: false });
     w.end('x');
     await expect(p).resolves.toBeUndefined();
   });
@@ -53,7 +54,7 @@ describe('finished() is the vendored end-of-stream', () => {
   it('rejects with ERR_STREAM_PREMATURE_CLOSE on a close that beats a half', async () => {
     const stream = boot();
     const w = new stream.Writable({ write(_c: unknown, _e: string, cb: () => void) { setTimeout(cb, 5); } });
-    const p = stream.finished(w);
+    const p = stream.promises.finished(w);
     w.destroy();
     await expect(p).rejects.toMatchObject({ message: 'Premature close', code: 'ERR_STREAM_PREMATURE_CLOSE' });
   });
@@ -61,7 +62,7 @@ describe('finished() is the vendored end-of-stream', () => {
   it('rejects with the error the stream was destroyed with', async () => {
     const stream = boot();
     const w = new stream.Writable({ write(_c: unknown, _e: string, cb: () => void) { setTimeout(cb, 5); } });
-    const p = stream.finished(w);
+    const p = stream.promises.finished(w);
     w.destroy(new Error('nope'));
     await expect(p).rejects.toThrow('nope');
   });
@@ -70,7 +71,7 @@ describe('finished() is the vendored end-of-stream', () => {
     const stream = boot();
     const r = new stream.Readable({ read() {} });
     const ac = new AbortController();
-    const p = stream.finished(r, { signal: ac.signal });
+    const p = stream.promises.finished(r, { signal: ac.signal });
     ac.abort();
     await expect(p).rejects.toMatchObject({ name: 'AbortError', code: 'ABORT_ERR' });
   });
@@ -80,7 +81,7 @@ describe('finished() is the vendored end-of-stream', () => {
     const r = new stream.Readable({ read() {} });
     const ac = new AbortController();
     ac.abort();
-    await expect(stream.finished(r, { signal: ac.signal })).rejects.toMatchObject({
+    await expect(stream.promises.finished(r, { signal: ac.signal })).rejects.toMatchObject({
       name: 'AbortError',
       code: 'ABORT_ERR',
     });

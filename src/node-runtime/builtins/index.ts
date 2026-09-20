@@ -1,10 +1,13 @@
 import type { BuiltinSpec } from './types';
 
 import {
+  internalAbortControllerSpec,
   internalAbortListenerSpec,
+  internalAssertSpec,
   internalAsyncContextFrameSpec,
   internalAsyncHooksSpec,
-  internalComposeSpec,
+  internalBlobSpec,
+  internalBufferSpec,
   internalDebuglogSpec,
   internalErrorsSpec,
   internalFsGlobSpec,
@@ -12,6 +15,7 @@ import {
   internalStreamIterSpec,
   internalStreamIterTypesSpec,
   internalUtilSpec,
+  internalUtilTypesSpec,
   internalValidatorsSpec,
   internalWebStreamsAdaptersSpec,
   internalUtilInspectSpec,
@@ -38,7 +42,6 @@ import { moduleSpec } from './module';
 import { netSpec } from './net';
 import { httpSpec } from './http';
 import { httpsSpec } from './https';
-import { streamSpec, streamPromisesSpec } from './stream';
 import { childProcessSpec } from './child_process';
 
 /** Every builtin the runtime knows about, in dependency-friendly order. */
@@ -47,6 +50,11 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalErrorsSpec,
   internalValidatorsSpec,
   internalUtilSpec,
+  internalUtilTypesSpec,
+  internalBufferSpec,
+  internalAssertSpec,
+  internalBlobSpec,
+  internalAbortControllerSpec,
   internalFsGlobSpec,
   internalAsyncHooksSpec,
   internalAsyncContextFrameSpec,
@@ -56,7 +64,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalUtilInspectSpec,
   internalEventsSymbolsSpec,
   internalEventTargetSpec,
-  internalComposeSpec,
   internalWebStreamsAdaptersSpec,
   internalStreamIterSpec,
   internalStreamIterTypesSpec,
@@ -74,9 +81,8 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   moduleSpec,
   // milestone 3: networking
   netSpec,
-  // milestone 4: streams (fs/http are built on these)
-  streamSpec,
-  streamPromisesSpec,
+  // milestone 4: streams (fs/http are built on these) — `stream`/`stream/promises`
+  // are the vendored Node source (see vendored-builtins.ts)
   fsSpec,
   fsPromisesSpec,
   perfHooksSpec,
