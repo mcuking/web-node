@@ -129,7 +129,7 @@ primordials.js（真源码）→ domexception.js / messageport.js（真源码）
 `primordials.js`：引擎缺少 `Float16Array` / `Iterator` 时跳过而非崩溃（3 处，语义等价）。这是**唯一**对真源码的修改。
 
 ### 为什么其余不 vendored
-`internal/errors.js` 是环形依赖枢纽（errors ↔ util ↔ inspect ↔ validators），全量 vendoring 会牵出 231 个文件。因此 `internal/errors` / `internal/validators` / `internal/util` / `internal/fs/glob` 由我们提供**最小等价 shim**（`src/node-runtime/builtins/internal-shims.ts`），只实现 vendored 文件实际用到的导出。例外：`internal/util/types.js` 与 `internal/util/inspect.js` 本身很小且依赖面可控，已换成真源码（M21/M22），只把它们脚下的 binding/shim 补齐。
+`internal/errors.js` 是环形依赖枢纽（errors ↔ util ↔ inspect ↔ validators），全量 vendoring 会牵出 231 个文件。因此 `internal/errors` / `internal/util` / `internal/fs/glob` / `internal/errors/error_source` 由我们提供**最小等价 shim**（`src/node-runtime/builtins/internal-shims.ts`），只实现 vendored 文件实际用到的导出。例外：`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/validators.js`、`assert.js` + `internal/assert/*` 本身不大且依赖面可控，已换成真源码（M21–M23），只把它们脚下的 binding/shim 补齐。
 
 ---
 
@@ -184,7 +184,7 @@ web-node/
 
 > 本表按里程碑进展刷新（当前至 **M17**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
 >
-> **vendoring 进展**：`lib/stream.js` + `internal/streams/*`（整套流）、`lib/events.js`、`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` + `internal/promise_hooks.js`、`lib/path.js`、`lib/querystring.js`、`lib/punycode.js`、`lib/domain.js`、`lib/diagnostics_channel.js`、`lib/string_decoder.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/streams/{state,from,utils}.js`、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`internal/per_context/*` 已用 Node 真源码（MANIFEST 41 个文件）。
+> **vendoring 进展**：`lib/stream.js` + `internal/streams/*`（整套流）、`lib/events.js`、`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` + `internal/promise_hooks.js`、`lib/path.js`、`lib/querystring.js`、`lib/punycode.js`、`lib/domain.js`、`lib/diagnostics_channel.js`、`lib/string_decoder.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/validators.js`、`assert.js`、`internal/assert/{utils,assertion_error,myers_diff}.js`、`internal/streams/{state,from,utils}.js`、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`internal/per_context/*` 已用 Node 真源码（MANIFEST 49 个文件）。
 
 | 限制 | 说明 |
 |---|---|
@@ -202,7 +202,7 @@ web-node/
 
 ## 10. 后续里程碑
 
-已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、整套 stream + events 换真源码（M10–M16）、真 `async_hooks` + `AsyncLocalStorage`（M17）、真框架跑起来（M18，Vue 3 SFC 在页内被 Vite 编译并运行）、更多 vendored 真源码（M19）、真 `string_decoder`（M20）、真 `internal/util/types`（M21）、真 `internal/util/inspect`（M22）。
+已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、整套 stream + events 换真源码（M10–M16）、真 `async_hooks` + `AsyncLocalStorage`（M17）、真框架跑起来（M18，Vue 3 SFC 在页内被 Vite 编译并运行）、更多 vendored 真源码（M19）、真 `string_decoder`（M20）、真 `internal/util/types`（M21）、真 `internal/util/inspect`（M22）、真断言栈（M23：`assert` + `internal/validators` + `isDeepStrictEqual`，且堆栈带真文件名）。
 
 接下来：
 

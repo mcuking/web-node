@@ -351,13 +351,15 @@ checkout; every patch we do apply is listed in the manifest's `patches` field.
 
 **Current coverage** (revision `7a3437d`, v26.9.1-dev):
 
-- **41 files vendored** — the whole `stream` layer, `events`, `async_hooks`
+- **49 files vendored** — the whole `stream` layer, `events`, `async_hooks`
   (+ `internal/async_local_storage/*`, `internal/promise_hooks`), `path`,
   `querystring`, `punycode`, `domain`, `diagnostics_channel`, `string_decoder`,
+  `assert` (+ `internal/assert/*`), `internal/validators`,
   `internal/util/types`, `internal/util/inspect` (the real `util.inspect`),
-  and the `internal/*` pieces they need (`primordials`, `fixed_queue`,
-  `constants`, `encoding/util`, `streams/state`, `streams/destroy`,
-  `per_context/*`, …).
+  `internal/util/comparisons` (the real `isDeepStrictEqual`),
+  `internal/util/colors`, and the `internal/*` pieces they need (`primordials`,
+  `fixed_queue`, `constants`, `encoding/util`, `streams/state`,
+  `streams/destroy`, `per_context/*`, …).
 - **29 of the 58 top-level `lib/*.js` modules are provided** — either as
   vendored source, or by our own implementation where the real file needs a
   native layer that cannot exist in a tab.

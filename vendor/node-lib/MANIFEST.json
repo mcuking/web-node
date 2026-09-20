@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-20T07:10:25.118Z",
+  "generatedAt": "2026-09-20T07:39:46.562Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -61,6 +61,55 @@
       "sha256": "35faf926aca12d7bfc0716f8e77a34609f9e0bb12b6fe5c8d424cea268c2455b",
       "upstreamSha256": "35faf926aca12d7bfc0716f8e77a34609f9e0bb12b6fe5c8d424cea268c2455b",
       "bytes": 101911,
+      "patches": []
+    },
+    {
+      "path": "internal/util/colors.js",
+      "sha256": "f6b6702f24abe359726f05115767142148bcd5f87b84896dab47488db08af516",
+      "upstreamSha256": "f6b6702f24abe359726f05115767142148bcd5f87b84896dab47488db08af516",
+      "bytes": 1321,
+      "patches": []
+    },
+    {
+      "path": "internal/util/comparisons.js",
+      "sha256": "0e927e13e9c4224c964153d8484e99b24755f72844f05dd8ebc5660172e0a93a",
+      "upstreamSha256": "0e927e13e9c4224c964153d8484e99b24755f72844f05dd8ebc5660172e0a93a",
+      "bytes": 30336,
+      "patches": []
+    },
+    {
+      "path": "internal/validators.js",
+      "sha256": "dd61b9cb7af5c18b46f2029c2f06b0fc2638d1cd870fe65934966e840e88e1c2",
+      "upstreamSha256": "dd61b9cb7af5c18b46f2029c2f06b0fc2638d1cd870fe65934966e840e88e1c2",
+      "bytes": 19476,
+      "patches": []
+    },
+    {
+      "path": "internal/assert.js",
+      "sha256": "03940c9b646255b631d3a95cf2a9ad156d587db8b0ac223d1a87f3fd5531a807",
+      "upstreamSha256": "03940c9b646255b631d3a95cf2a9ad156d587db8b0ac223d1a87f3fd5531a807",
+      "bytes": 445,
+      "patches": []
+    },
+    {
+      "path": "internal/assert/assertion_error.js",
+      "sha256": "41ebb0538f7707b144042ea4ac1085db1268751f8a727760f09fb06d720e6ba4",
+      "upstreamSha256": "41ebb0538f7707b144042ea4ac1085db1268751f8a727760f09fb06d720e6ba4",
+      "bytes": 14267,
+      "patches": []
+    },
+    {
+      "path": "internal/assert/myers_diff.js",
+      "sha256": "811f14c9c9f0a85b39cc2925dc351f9ce6d0ce0f4e0426802c72e5bf0d905ea6",
+      "upstreamSha256": "811f14c9c9f0a85b39cc2925dc351f9ce6d0ce0f4e0426802c72e5bf0d905ea6",
+      "bytes": 5361,
+      "patches": []
+    },
+    {
+      "path": "internal/assert/utils.js",
+      "sha256": "ba5e3fb23642dbd2973efac622a9bef88afeba93e25f15d6927fb111251c16d7",
+      "upstreamSha256": "ba5e3fb23642dbd2973efac622a9bef88afeba93e25f15d6927fb111251c16d7",
+      "bytes": 5416,
       "patches": []
     },
     {
@@ -292,6 +341,13 @@
       "sha256": "50ebfa7db26d22f4fed8fd96b141fa49d00c18e224ef9d74a5a77fde1774e697",
       "upstreamSha256": "50ebfa7db26d22f4fed8fd96b141fa49d00c18e224ef9d74a5a77fde1774e697",
       "bytes": 4518,
+      "patches": []
+    },
+    {
+      "path": "assert.js",
+      "sha256": "e87a46a29cc96a9bc6025475220ca0c54e083a7d9aa53708919d0971506e87e2",
+      "upstreamSha256": "e87a46a29cc96a9bc6025475220ca0c54e083a7d9aa53708919d0971506e87e2",
+      "bytes": 26559,
       "patches": []
     }
   ]

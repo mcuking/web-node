@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**；M14 再把 **`internal/streams/end-of-stream.js` 接进来**（`finished()` 就是真实现）；M15 换掉自研 `EventEmitter`，改用 **Node 真 `events.js`**（`_events` 形状 / `prependListener` / `errorMonitor` / `captureRejections`），并把 `stream.addAbortSignal` 接到真源码；M16 把**整个 `stream` 模块换成真源码**（`lib/stream.js` + `internal/streams/*`：Readable/Writable/Duplex/Transform/PassThrough/pipeline/finished/compose/duplexPair/operators + `stream/promises`），删掉手写 stream；M17 把 **`async_hooks` 也换成真源码**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*`），落在自研 `async_wrap` 绑定上，并让 tick / timer 成为真 async resource——hook 会触发、`AsyncLocalStorage` 能跨异步边界传 store；M18 把**真框架**跑了起来——@vitejs/plugin-vue 在页内编译 **Vue 3 SFC**，`vite build` 产出生产 Vue bundle、`createServer` 在预览里跑真实可交互 Vue 应用（计数器可点、HMR 生效）；M19 又拉了一批量：**真 `punycode.js` / `domain.js` / `diagnostics_channel.js`**（后两者跑在真 `async_hooks` 上，`diagnostics_channel` 配一个小 JS binding）；M20 把 **`string_decoder` 也换成真源码**——把 `src/string_decoder.cc` 那个 native 状态机用 JS 逐字节重写（`bindings/string_decoder.ts`）；M21 再把 **`internal/util/types.js` 与 `src/node_types.cc`** 搬过来（`types` binding 对齐 native 表面，`util.types` 直接指向真模块）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**；M14 再把 **`internal/streams/end-of-stream.js` 接进来**（`finished()` 就是真实现）；M15 换掉自研 `EventEmitter`，改用 **Node 真 `events.js`**（`_events` 形状 / `prependListener` / `errorMonitor` / `captureRejections`），并把 `stream.addAbortSignal` 接到真源码；M16 把**整个 `stream` 模块换成真源码**（`lib/stream.js` + `internal/streams/*`：Readable/Writable/Duplex/Transform/PassThrough/pipeline/finished/compose/duplexPair/operators + `stream/promises`），删掉手写 stream；M17 把 **`async_hooks` 也换成真源码**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*`），落在自研 `async_wrap` 绑定上，并让 tick / timer 成为真 async resource——hook 会触发、`AsyncLocalStorage` 能跨异步边界传 store；M18 把**真框架**跑了起来——@vitejs/plugin-vue 在页内编译 **Vue 3 SFC**，`vite build` 产出生产 Vue bundle、`createServer` 在预览里跑真实可交互 Vue 应用（计数器可点、HMR 生效）；M19 又拉了一批量：**真 `punycode.js` / `domain.js` / `diagnostics_channel.js`**（后两者跑在真 `async_hooks` 上，`diagnostics_channel` 配一个小 JS binding）；M20 把 **`string_decoder` 也换成真源码**——把 `src/string_decoder.cc` 那个 native 状态机用 JS 逐字节重写（`bindings/string_decoder.ts`）；M21 再把 **`internal/util/types.js` 与 `src/node_types.cc`** 搬过来（`types` binding 对齐 native 表面，`util.types` 直接指向真模块）；M22 把 **真 `internal/util/inspect.js`** 整份搬来（`util.inspect` / `util.format` / `formatWithOptions` 就是真源码，并修了一个只有生产 minify 才会暴露的 `<Buffer …>` bug）；M23 把**断言栈**整体换成真源码：**`lib/assert.js` + `internal/assert/{utils,assertion_error,myers_diff}` + `internal/util/comparisons`（真 `isDeepStrictEqual`）+ `internal/util/colors` + 真 `internal/validators.js`**，并给每个编译单元打 `sourceURL` —— 从此**堆栈里有真文件名**、`assert.ok(falsy)` 能还原出触发表达式（如 `assert.ok(0)`）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -48,6 +48,7 @@
 | M20 | **真 `string_decoder`**：把 `src/string_decoder.cc` 的 native 解码状态机用 JS 逐字节重写（`bindings/string_decoder.ts`），`lib/string_decoder.js` 换真源码；删掉自研实现 | ✅ 完成 |
 | M21 | **真 `internal/util/types`**：vendor `lib/internal/util/types.js`，`types` binding 对齐 `src/node_types.cc` 表面（补 `isBigIntObject`、修 boxed-primitive 语义、去掉多余的 wasm 谓词）；`util.types` 指向真模块 | ✅ 完成 |
 | M22 | **真 `internal/util/inspect`**：vendor `lib/internal/util/inspect.js`（`util.inspect` / `format` / `formatWithOptions` 换真源码）；补 `util` binding 的 `constants`/`getOwnNonIndexProperties`/`previewEntries`，新增 `internal/bootstrap/realm`、`internal/url` shim；`console` 改走真 `formatWithOptions`；`Buffer` 补 `hexSlice` + `<Buffer>` 自定义 inspect | ✅ 完成 |
+| M23 | **真断言栈**：vendor `lib/assert.js` + `internal/assert/{utils,assertion_error,myers_diff}` + `internal/util/comparisons`（真 `isDeepStrictEqual`）+ `internal/util/colors` + 真 `internal/validators.js`；补 `internal/errors` 的断言 code 与 `HideStackFramesError`、`constants.os`、`buffer.compare`、`url.isURL`；编译器给每个单元打 `sourceURL`（新增 `source-registry`），堆栈从此有真文件名，`assert.ok(falsy)` 能还原触发表达式 | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
@@ -136,20 +137,45 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 2c. ~~**`string_decoder` 换真源码**~~ ✅ **已解决（2026-09-20，M20）**：把 `src/string_decoder.cc` 的 native 解码状态机用 JS 重写（`bindings/string_decoder.ts`），真 `lib/string_decoder.js` 直接跑在上面；并让 `internal/util` 的 `normalizeEncoding`/`encodingsMap` 与 Node 对齐。
 2d. ~~**`internal/util/types` 换真源码**~~ ✅ **已解决（2026-09-20，M21）**：真 `lib/internal/util/types.js` + `types` binding 对齐 `src/node_types.cc`；`util.types` 直接指向真模块。
 2e. ~~**`internal/util/inspect` 换真源码**~~ ✅ **已解决（2026-09-20，M22）**：真 `lib/internal/util/inspect.js`（`util.inspect`/`format`/`formatWithOptions`）；补 `util` binding 的 `constants`/`getOwnNonIndexProperties`/`previewEntries`，新增 `internal/bootstrap/realm` + `internal/url` shim，`console` 走真 `formatWithOptions`，`Buffer` 补 `hexSlice` + `<Buffer>` 自定义 inspect。剩余近似：`getPromiseDetails` 恒 pending、`getProxyDetails` 恒 undefined（V8 不同步暴露）。
+2f. ~~**`assert` 与 `internal/validators` 换真源码**~~ ✅ **已解决（2026-09-20，M23）**：真 `lib/assert.js` + `internal/assert/{utils,assertion_error,myers_diff}` + `internal/util/comparisons`（真 `isDeepStrictEqual`）+ 真 `internal/validators.js`；补 `internal/errors` 的断言 code、`constants.os`、`buffer.compare`、`url.isURL`；编译器给每个单元打 `sourceURL`（新增 `source-registry`），堆栈从此有真文件名，`assert.ok(falsy)` 能还原真表达式。差异：`getErrorSourceExpression` 无 tokenizer（嵌入表达式的调用会返回整条语句）、`HideStackFramesError` 不真隐帧。
 3. **继续 vendoring（按 ROI 排序）**：
    - **`internal/fs/*`**：我们已是自研 `fs`，其上层模块（`fs/promises`、`internal/fs/*`）可逐个尝试真源码。
-   - **`internal/validators.js` / `internal/errors.js`**：目前是 shim，真文件依赖 `internal/util` 与 `internal/assert`，成本可能可控。
+   - **`internal/errors.js`**：目前仍是 shim（断言已逼它长大一截）。真文件是环形依赖枢纽（211 文件），全量 vendoring 不现实，但可继续按需拓宽。
    - **`util` 里剩下的自研块**：`promisify`/`callbackify`/`inherits`/`deprecate`/`parseArgs`/`styleText` 仍是我们自己写的，可逐步向 `lib/internal/util.js` 靠拢。
 4. **promise hooks（M17 跲尾，可选）**：`async_hooks` 现在看得见 tick/timer/AsyncResource，但 V8 promise 未插桩，`promiseResolve` 不响。真做需要 `promiseHook` 级别的插桩，代价大，先放着。
 5. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 6. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。M16 把 child 的生命周期事件改为**订阅时延一个 macrotask**（让 stdout 的 `data` 先于 `exit`，对齐真 Node）；若后续发现时序副作用，可再评估。
 7. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
-8. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M22 后 worker 达 **~757KB**，其中 inspect.js ~100KB）；若在意体积，可改成按文件 code-split。
+8. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M23 后 worker 达 **~861KB**，其中 inspect 100KB、assert 家族 ~60KB）；若在意体积，可改成按文件 code-split。
 9. **补 `internal/util/inspect` 等 shim 的保真度**；把 `internal/streams/duplexify` 的 `internal/blob` 从 `isBlob` stub 扩到真 `Blob` 包装（当前够用）。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M23 真 `assert` 全家桶（+ 真 `internal/validators`，+ 真 `isDeepStrictEqual`，+ 堆栈真文件名）
+
+**目标**：`assert` 一直是我们手写的 112 行简化版，`internal/validators` 也只是一堆 no-op 占位。真 `lib/assert.js` 是纯 JS，于是按惯例把整条断言栈搬过来。
+
+**改了什么**
+
+1. **vendor 8 个文件**（MANIFEST 41 → **49**）：`assert.js`、`internal/assert.js`、`internal/assert/utils.js`、`internal/assert/assertion_error.js`、`internal/assert/myers_diff.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/validators.js`。
+2. **`assert` builtin 换成真源码**：删掉手写 `assert-impl.ts`，`assert` / `assert.ok` / `strict` / `deepStrictEqual` / `partialDeepStrictEqual` / `throws` / `match` / Myers 彩色 diff / `AssertionError` 全是 Node 的。
+3. **`internal/validators` 换成真源码**：删掉 no-op shim；`validateString` / `validateObject`（位域）/ `validateInteger` / `validateOneOf` … 现在是真的会报错的，报错文案也与 Node 一致。
+4. **`util.isDeepStrictEqual` 换成真 `internal/util/comparisons`**（手写版只比较可枚举自属性；真版处理 Map/Set/typed array/循环引用/prototype）。
+5. **`internal/errors` shim 补齐断言用到的 code**：`ERR_AMBIGUOUS_ARGUMENT` / `ERR_ASSERTION` / `ERR_CONSTRUCT_CALL_REQUIRED` / `ERR_INVALID_THIS` / `ERR_UNKNOWN_SIGNAL` / `ERR_SOCKET_BAD_PORT`，并给每个 code 类挂上 `HideStackFramesError` 静态属性（validators 会解构它）。
+6. **`internal/util` shim 补 `setOwnProperty`**；新增 `internal/errors/error_source` shim。
+7. **`constants` binding 改成 Node 命名空间形状**：补 `os: { signals, errno, priority, dlopen, UV_UDP_REUSEADDR }`（validators 读 `internalBinding('constants').os.signals`），并把 unix 信号表补全。
+8. **`buffer` binding 补 `compare`**（comparisons 用它短路 buffer 相等），**`url` builtin 补 `isURL` / `isURLInstance`**。
+9. **编译器给每个单元打 `sourceURL` + 新增 `source-registry`**（新文件 `src/node-runtime/source-registry.ts`）：loader 给用户/依赖模块、`compileCjs` 给 vendored 模块都追加 `//# sourceURL=…` 并登记源码。收益：① **堆栈里出现真文件名**（不再是 `<anonymous>`）；② `internal/errors/error_source` 能从 CallSite 找回源码行，`assert.ok(falsy)` 于是能打印真表达式。
+10. **新测试 `test/assert.test.ts`（7 条）**：期望值全部先跑真 Node v26.9.0 取得；覆盖相等/不等/深度 diff（逐字节 Myers 输出）/throws/match/fail/自定义消息、`assert.ok(falsy)` 的表达式还原、`util.isDeepStrictEqual` 的结构比较，以及真 validators 的报错文案。
+11. **与 Node 的差异（已在代码注释与测试里写明）**：
+    - `getErrorSourceExpression` 走的是「CallSite + sourceURL + 源码登记」这条路，而非 V8 内部的 `getErrorSourcePositions`；它没有真的 tokenizer，所以**嵌在表达式中间**的调用会返回整条语句（到 `;` / 匹配 `)` 为止），而 Node 会精确到子表达式。`new Function` 包裹会让行号偏移 **+2**，代码里显式抵消了。
+    - `HideStackFramesError` 只是别名同一个类，**不会真的隐藏栈帧**（我们无法改写已捕获的 stack）。
+
+**验证**：`tsc --noEmit` 干净 · `vitest run` **266/266**（+7）· `vite build` 绿（worker 757 → **860.74KB**）。
+
+**涉及文件**：`tools/vendor.mjs`、`vendor/node-lib/{assert.js,internal/assert.js,internal/assert/*,internal/util/comparisons.js,internal/util/colors.js,internal/validators.js}` + MANIFEST、`src/node-runtime/source-registry.ts`（新）、`src/node-runtime/vm.ts`、`src/node-runtime/loader/index.ts`、`src/node-runtime/bindings/{constants.ts,buffer.ts}`、`src/node-runtime/builtins/{index.ts,internal-shims.ts,util.ts,url.ts,vendored-builtins.ts}`、删除 `src/node-runtime/builtins/assert-impl.ts`、`test/assert.test.ts`（新）、`README.md`/`README_zh.md`、`docs/superpowers/specs/2026-09-17-web-node-design.md`。
 
 ### 2026-09-20 · M22 真 `internal/util/inspect`（`util.inspect` / `util.format` 换成真源码）
 

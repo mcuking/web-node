@@ -26,6 +26,31 @@ const SIGNALS: Record<string, number> = {
   SIGPIPE: 13,
   SIGALRM: 14,
   SIGTERM: 15,
+  SIGSTKFLT: 16,
+  SIGCHLD: 17,
+  SIGCONT: 18,
+  SIGSTOP: 19,
+  SIGTSTP: 20,
+  SIGTTIN: 21,
+  SIGTTOU: 22,
+  SIGURG: 23,
+  SIGXCPU: 24,
+  SIGXFSZ: 25,
+  SIGVTALRM: 26,
+  SIGPROF: 27,
+  SIGWINCH: 28,
+  SIGIO: 29,
+  SIGPWR: 30,
+  SIGSYS: 31,
+};
+
+const PRIORITY = {
+  PRIORITY_LOW: 19,
+  PRIORITY_BELOW_NORMAL: 10,
+  PRIORITY_NORMAL: 0,
+  PRIORITY_ABOVE_NORMAL: -7,
+  PRIORITY_HIGH: -14,
+  PRIORITY_HIGHEST: -20,
 };
 
 /**
@@ -44,13 +69,16 @@ export const constantsBinding: BindingFactory = () => {
     errno,
     errnoMessage: {},
     signals: SIGNALS,
-    priority: {
-      PRIORITY_LOW: 19,
-      PRIORITY_BELOW_NORMAL: 10,
-      PRIORITY_NORMAL: 0,
-      PRIORITY_ABOVE_NORMAL: -7,
-      PRIORITY_HIGH: -14,
-      PRIORITY_HIGHEST: -20,
+    priority: PRIORITY,
+    // Node namespaces the binding's contents (`internalBinding('constants').os`,
+    // `.fs`, …). `internal/validators` reads `.os.signals`; keep the flat keys
+    // as aliases for the runtime's own callers.
+    os: {
+      UV_UDP_REUSEADDR: 4,
+      dlopen: {},
+      errno,
+      signals: SIGNALS,
+      priority: PRIORITY,
     },
     fs: {
       O_RDONLY,

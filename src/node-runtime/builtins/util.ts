@@ -28,20 +28,12 @@ export const utilSpec: BuiltinSpec = {
     // now the real vendored source, so use it directly.
     const types = ctx.require('internal/util/types') as Record<string, (v: unknown) => boolean>;
 
-    function isDeepStrictEqual(a: unknown, b: unknown): boolean {
-      if (a === b) return true;
-      if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
-      if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
-      if (a instanceof RegExp && b instanceof RegExp) return a.toString() === b.toString();
-      const ak = Object.keys(a as object);
-      const bk = Object.keys(b as object);
-      if (ak.length !== bk.length) return false;
-      for (const k of ak) {
-        if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
-        if (!isDeepStrictEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
-      }
-      return true;
-    }
+    // `util.isDeepStrictEqual` is Node's real structural comparison (handles
+    // Map/Set/typed arrays/cycles/prototypes); the hand-rolled version that
+    // used to live here was a shallow approximation.
+    const { isDeepStrictEqual } = ctx.require('internal/util/comparisons') as {
+      isDeepStrictEqual: (a: unknown, b: unknown) => boolean;
+    };
 
     function promisify(original: (...args: unknown[]) => unknown): (...args: unknown[]) => Promise<unknown> {
       if (typeof original !== 'function') throw new TypeError('The "original" argument must be of type function');

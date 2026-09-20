@@ -83,6 +83,16 @@ export const urlSpec: BuiltinSpec = {
       URLSearchParams,
       pathToFileURL,
       fileURLToPath,
+      // Node's `internal/url` predicates. `isURL` duck-types a WHATWG URL
+      // (lib/internal/url.js); `isURLInstance` normally checks an internal
+      // brand, which the host's URL does not carry, so we fall back to
+      // `instanceof`.
+      isURL: (self: unknown): boolean => {
+        const u = self as { href?: unknown; protocol?: unknown; auth?: unknown; path?: unknown } | null;
+        return Boolean(u && u.href && u.protocol && u.auth === undefined && u.path === undefined);
+      },
+      isURLInstance: (value: unknown): boolean =>
+        typeof value === 'object' && value !== null && value instanceof URL,
       urlToHttpOptions: (u: URL) => ({
         protocol: u.protocol,
         hostname: u.hostname.startsWith('[') ? u.hostname.slice(1, -1) : u.hostname,

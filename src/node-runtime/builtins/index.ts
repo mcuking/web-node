@@ -3,17 +3,16 @@ import type { BuiltinSpec } from './types';
 import {
   internalAbortControllerSpec,
   internalAbortListenerSpec,
-  internalAssertSpec,
   internalBlobSpec,
   internalBufferSpec,
   internalDebuglogSpec,
   internalErrorsSpec,
+  internalErrorSourceSpec,
   internalFsGlobSpec,
   internalOptionsSpec,
   internalStreamIterSpec,
   internalStreamIterTypesSpec,
   internalUtilSpec,
-  internalValidatorsSpec,
   internalWebStreamsAdaptersSpec,
   internalEventsSymbolsSpec,
   internalEventTargetSpec,
@@ -34,7 +33,6 @@ import { consoleSpec } from './console';
 import { timersSpec } from './timers';
 import { processSpec } from './process';
 import { osSpec } from './os';
-import { assertSpec } from './assert-impl';
 import { moduleSpec } from './module';
 import { netSpec } from './net';
 import { httpSpec } from './http';
@@ -45,10 +43,9 @@ import { childProcessSpec } from './child_process';
 export const ALL_BUILTINS: BuiltinSpec[] = [
   // internal shims
   internalErrorsSpec,
-  internalValidatorsSpec,
+  internalErrorSourceSpec,
   internalUtilSpec,
   internalBufferSpec,
-  internalAssertSpec,
   internalBootstrapRealmSpec,
   internalUrlSpec,
   internalBlobSpec,
@@ -71,7 +68,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   timersSpec,
   processSpec,
   osSpec,
-  assertSpec,
   moduleSpec,
   // milestone 3: networking
   netSpec,

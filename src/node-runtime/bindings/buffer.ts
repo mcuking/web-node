@@ -24,4 +24,24 @@ export const bufferBinding: BindingFactory = () => ({
       return false;
     }
   },
+  // `binding.compare(a, b)` (src/node_buffer.cc): byte-wise compare of two
+  // views, normalized to -1/0/1 (first by bytes, then by length). Used by
+  // `internal/util/comparisons` to short-circuit buffer equality.
+  compare: (a: ArrayBufferView | ArrayBuffer, b: ArrayBufferView | ArrayBuffer): number => {
+    const av = toBytes(a);
+    const bv = toBytes(b);
+    const len = Math.min(av.length, bv.length);
+    for (let i = 0; i < len; i++) {
+      if (av[i] !== bv[i]) return av[i] < bv[i] ? -1 : 1;
+    }
+    if (av.length === bv.length) return 0;
+    return av.length < bv.length ? -1 : 1;
+  },
 });
+
+function toBytes(view: ArrayBufferView | ArrayBuffer): Uint8Array {
+  if (ArrayBuffer.isView(view)) {
+    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  }
+  return new Uint8Array(view as ArrayBuffer);
+}

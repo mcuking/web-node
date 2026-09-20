@@ -42,6 +42,80 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     ],
   },
   {
+    id: 'internal/util/colors',
+    vendorPath: 'internal/util/colors.js',
+    origin: 'node-source',
+    // `internal/tty` is only pulled in when FORCE_COLOR is set, which never
+    // happens in the browser, so it is deliberately left unregistered.
+    deps: [],
+  },
+  {
+    id: 'internal/validators',
+    vendorPath: 'internal/validators.js',
+    origin: 'node-source',
+    deps: ['internal/errors', 'internal/util', 'internal/util/types'],
+  },
+  {
+    id: 'internal/assert',
+    vendorPath: 'internal/assert.js',
+    origin: 'node-source',
+    deps: ['internal/errors'],
+  },
+  {
+    id: 'internal/assert/myers_diff',
+    vendorPath: 'internal/assert/myers_diff.js',
+    origin: 'node-source',
+    deps: ['internal/errors', 'internal/util/colors'],
+  },
+  {
+    id: 'internal/assert/assertion_error',
+    vendorPath: 'internal/assert/assertion_error.js',
+    origin: 'node-source',
+    deps: [
+      'internal/errors',
+      'internal/util',
+      'internal/util/colors',
+      'internal/util/inspect',
+      'internal/validators',
+      'internal/assert/myers_diff',
+    ],
+  },
+  {
+    id: 'internal/assert/utils',
+    vendorPath: 'internal/assert/utils.js',
+    origin: 'node-source',
+    deps: [
+      'internal/errors',
+      'internal/errors/error_source',
+      'internal/util',
+      'internal/util/inspect',
+      'internal/assert/assertion_error',
+    ],
+  },
+  {
+    id: 'internal/util/comparisons',
+    vendorPath: 'internal/util/comparisons.js',
+    origin: 'node-source',
+    // `internal/crypto/keys` is only reached for real KeyObject/CryptoKey
+    // values, which this runtime never produces (no OpenSSL).
+    deps: ['buffer', 'internal/assert', 'internal/url', 'internal/util', 'internal/util/types'],
+  },
+  {
+    id: 'assert',
+    vendorPath: 'assert.js',
+    origin: 'node-source',
+    deps: [
+      'internal/assert',
+      'internal/assert/utils',
+      'internal/errors',
+      'internal/util',
+      'internal/util/comparisons',
+      'internal/util/inspect',
+      'internal/util/types',
+      'internal/validators',
+    ],
+  },
+  {
     id: 'internal/streams/state',
     vendorPath: 'internal/streams/state.js',
     origin: 'node-source',

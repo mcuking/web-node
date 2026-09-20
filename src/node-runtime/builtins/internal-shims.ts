@@ -1,5 +1,6 @@
 import type { BuiltinSpec, BuiltinInitContext } from './types';
 import { notImplemented } from '../errors';
+import { getCompiledSource } from '../source-registry';
 
 /**
  * Shims for the `internal/*` modules that our vendored Node source depends on.
@@ -43,6 +44,12 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_STREAM_WRITE_AFTER_END: 'write after end',
   ERR_INTERNAL_ASSERTION: '%s',
   ERR_WEB_NODE_NOT_IMPLEMENTED: '[web-node] %s is not implemented.',
+  ERR_AMBIGUOUS_ARGUMENT: 'The "%s" argument is ambiguous. %s',
+  ERR_ASSERTION: '%s',
+  ERR_CONSTRUCT_CALL_REQUIRED: 'Class constructor %s cannot be invoked without `new`',
+  ERR_INVALID_THIS: 'Value of "this" must be of type %s',
+  ERR_UNKNOWN_SIGNAL: 'Unknown signal: %s',
+  ERR_SOCKET_BAD_PORT: 'Port should be %s. Received %s',
 };
 
 /**
@@ -78,6 +85,13 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_STREAM_UNABLE_TO_PIPE: Error,
   ERR_STREAM_WRITE_AFTER_END: Error,
   ERR_INTERNAL_ASSERTION: Error,
+  ERR_AMBIGUOUS_ARGUMENT: TypeError,
+  ERR_ASSERTION: Error,
+  ERR_CONSTRUCT_CALL_REQUIRED: TypeError,
+  ERR_INVALID_THIS: TypeError,
+  ERR_INVALID_RETURN_VALUE: TypeError,
+  ERR_UNKNOWN_SIGNAL: TypeError,
+  ERR_SOCKET_BAD_PORT: RangeError,
 };
 
 class NodeError extends Error {
@@ -121,6 +135,13 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
   // Node's builder drops the parenthesised detail when nothing was passed.
   ERR_UNHANDLED_ERROR: (args) =>
     args.length === 0 || args[0] === undefined ? 'Unhandled error.' : `Unhandled error. (${String(args[0])})`,
+  // `validatePort(name, port, allowZero = true)` picks the expected range by
+  // whether zero is allowed (lib/internal/errors.js).
+  ERR_SOCKET_BAD_PORT: (args) => {
+    const [name, port, allowZero = true] = args as [string, unknown, boolean?];
+    const range = allowZero ? '>= 0 && <= 65535' : '> 0 && <= 65535';
+    return `Port should be ${range}. Received ${inspectArg(port)}`;
+  },
 };
 
 function formatError(code: string, args: unknown[]): string {
@@ -260,6 +281,10 @@ function makeErrorClass(code: string): new (...args: unknown[]) => Error {
   }
   // Node keeps the built-in type's name on both the class and its instances.
   Object.defineProperty(NodeErr, 'name', { value: Base.name });
+  // Node exposes a `HideStackFramesError` companion on each code (used by
+  // `internal/validators` so validation frames vanish from the stack). Our
+  // runtime cannot rewrite captured stacks, so it aliases the same class.
+  Object.defineProperty(NodeErr, 'HideStackFramesError', { value: NodeErr, configurable: true });
   return NodeErr as unknown as new (...args: unknown[]) => Error;
 }
 
@@ -327,80 +352,113 @@ export const internalErrorsSpec: BuiltinSpec = {
 };
 
 // ---------------------------------------------------------------------------
-// internal/validators
+// internal/errors/error_source
 // ---------------------------------------------------------------------------
+//
+// Node reconstructs the offending source line + expression from the *structured*
+// error stack (a V8-internal `getErrorSourcePositions` binding, plus a source
+// map lookup and a lazy acorn tokenizer). Userland cannot read those positions,
+// so we approximate: read the CallSite of the frame the error was captured at
+// and look the line text up in the compiled-source registry (see
+// `source-registry.ts`, fed by the module loader / `compileCjs`). The result is
+// the offending expression, e.g. `assert.ok(0)`.
+//
+// Difference from Node: we do not run a real tokenizer over the line, so a call
+// embedded mid-expression yields the whole statement up to the `;`/matching `)`
+// rather than the exact sub-expression.
 
-export const internalValidatorsSpec: BuiltinSpec = {
-  id: 'internal/validators',
+export const internalErrorSourceSpec: BuiltinSpec = {
+  id: 'internal/errors/error_source',
   origin: 'web-node',
-  init: (ctx: BuiltinInitContext) => {
-    const codes = (ctx.require('internal/errors') as { codes: Record<string, new (...a: unknown[]) => Error> }).codes;
+  init: () => {
+    interface StackFrame {
+      getFileName?: () => string | null;
+      getScriptNameOrSourceURL?: () => string | null;
+      getLineNumber?: () => number | null;
+      getColumnNumber?: () => number | null;
+    }
 
-    function assert(cond: unknown, code: string, ...args: unknown[]): void {
-      if (!cond) {
-        const Ctor = codes[code];
-        throw Ctor ? new Ctor(...args) : new Error(String(code));
+    // `new Function(...)` wraps the body as
+    //   function anonymous(<params>\n) {\n<body>\n}
+    // so V8 reports body line N as N + 2. Both the vendored modules and user
+    // modules are compiled that way, so every registry entry carries the offset.
+    const FUNCTION_WRAPPER_LINES = 2;
+
+    // Node reads V8's structured error positions; userland cannot. Instead we
+    // read the CallSite of the frame that `Error.captureStackTrace(err, fn)`
+    // targeted and look the line text up in the compiled-source registry.
+    // The `error` handed in is always a throwaway object (assert's
+    // `getErrMessage`), so mutating its `.stack` is harmless.
+    function location(error: unknown): { sourceLine: string; startColumn: number } | undefined {
+      if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return undefined;
+      const ErrorCtor = Error as unknown as {
+        prepareStackTrace?: (err: unknown, frames: unknown[]) => unknown;
+      };
+      const prev = ErrorCtor.prepareStackTrace;
+      ErrorCtor.prepareStackTrace = (_err: unknown, frames: unknown[]) => frames;
+      let frames: unknown;
+      try {
+        frames = (error as { stack?: unknown }).stack;
+      } catch {
+        frames = undefined;
+      } finally {
+        ErrorCtor.prepareStackTrace = prev;
       }
+      const frame = Array.isArray(frames) ? (frames[0] as StackFrame | undefined) : undefined;
+      if (!frame) return undefined;
+      // `getFileName()` is null for `Function`-constructor scripts; the
+      // `//# sourceURL=` tag shows up through `getScriptNameOrSourceURL()`.
+      const file =
+        (typeof frame.getScriptNameOrSourceURL === 'function' ? frame.getScriptNameOrSourceURL() : null) ??
+        (typeof frame.getFileName === 'function' ? frame.getFileName() : null);
+      const line = typeof frame.getLineNumber === 'function' ? frame.getLineNumber() : null;
+      const col = typeof frame.getColumnNumber === 'function' ? frame.getColumnNumber() : null;
+      const source = getCompiledSource(file);
+      if (source === undefined || line === null || line < 1) return undefined;
+      const sourceLine = source.split('\n')[line - 1 - FUNCTION_WRAPPER_LINES];
+      if (sourceLine === undefined) return undefined;
+      return { sourceLine, startColumn: col === null ? 0 : col - 1 };
+    }
+
+    // Walk left over the member-access chain so the reported expression keeps
+    // its receiver (`assert.ok`, not `ok`), mirroring `getFirstExpression`.
+    function expressionStart(line: string, startColumn: number): number {
+      let i = startColumn;
+      while (i > 0 && (line[i] === '(' || line[i] === ' ' || line[i] === '\t')) i--;
+      while (i > 0) {
+        const c = line[i - 1];
+        if (/[A-Za-z0-9_$\].]/.test(c) || c === '?' || c === '[' || c === ')' || c === "'" || c === '"') i--;
+        else break;
+      }
+      return i;
+    }
+
+    // End at the matching closing paren, or the first top-level `;`.
+    function expressionEnd(line: string, startColumn: number): number {
+      let depth = 0;
+      for (let i = startColumn; i < line.length; i++) {
+        const c = line[i];
+        if (c === '(') depth++;
+        else if (c === ')') {
+          depth--;
+          if (depth === 0) return i + 1;
+        } else if (c === ';' && depth === 0) return i;
+      }
+      return line.length;
     }
 
     return {
-      validateAbortSignal: () => undefined,
-      validateAbortSignalArray: () => undefined,
-      validateArray: (v: unknown, name: string) =>
-        assert(Array.isArray(v), 'ERR_INVALID_ARG_TYPE', name, 'Array', v),
-      validateBoolean: (v: unknown, name: string) =>
-        assert(typeof v === 'boolean', 'ERR_INVALID_ARG_TYPE', name, 'boolean', v),
-      validateBooleanArray: () => undefined,
-      validateBuffer: () => undefined,
-      validateDictionary: () => undefined,
-      validateEncoding: () => undefined,
-      validateFiniteNumber: (v: unknown, name: string) =>
-        assert(typeof v === 'number' && Number.isFinite(v), 'ERR_INVALID_ARG_TYPE', name, 'number', v),
-      validateFunction: (v: unknown, name: string) =>
-        assert(typeof v === 'function', 'ERR_INVALID_ARG_TYPE', name, 'Function', v),
-      validateInteger: (v: unknown, name: string) =>
-        assert(Number.isInteger(v), 'ERR_INVALID_ARG_TYPE', name, 'integer', v),
-      validateNumber: (v: unknown, name: string) =>
-        assert(typeof v === 'number', 'ERR_INVALID_ARG_TYPE', name, 'number', v),
-      validateObject: (v: unknown, name: string, options = 0) => {
-        // Node passes a bitfield here (kValidateObjectAllow*); older callers in
-        // this runtime passed an object, which we still accept.
-        const bits =
-          typeof options === 'object' && options !== null
-            ? ((options as { allowArray?: boolean }).allowArray ? 2 : 0) |
-              ((options as { allowFunction?: boolean }).allowFunction ? 4 : 0)
-            : (options as number);
-        const allowNullable = (bits & 1) !== 0;
-        const allowArray = (bits & 2) !== 0;
-        const allowFunction = (bits & 4) !== 0;
-        const nullable = allowNullable ? false : v === null;
-        const array = allowArray ? false : Array.isArray(v);
-        const notObject = typeof v !== 'object' && !(allowFunction && typeof v === 'function');
-        assert(!(nullable || array || notObject), 'ERR_INVALID_ARG_TYPE', name, 'Object', v);
+      getErrorSourceLocation: location,
+      getErrorSourceExpression: (error: unknown) => {
+        const loc = location(error);
+        if (loc === undefined) return undefined;
+        const { sourceLine, startColumn } = loc;
+        const from = expressionStart(sourceLine, startColumn);
+        const to = expressionEnd(sourceLine, startColumn);
+        return sourceLine.slice(from, to).trim();
       },
-      validateOneOf: () => undefined,
-      validatePlainFunction: () => undefined,
-      validatePort: (v: unknown, name: string) =>
-        assert(Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 65535, 'ERR_OUT_OF_RANGE', name, '>= 0 && <= 65535', String(v)),
-      validateSignalName: () => undefined,
-      validateString: (v: unknown, name: string) =>
-        assert(typeof v === 'string', 'ERR_INVALID_ARG_TYPE', name, 'string', v),
-      validateStringArray: () => undefined,
-      validateStringWithoutNullBytes: () => undefined,
-      validateThisInternalField: () => undefined,
-      validateUndefined: () => undefined,
-      validateUnion: () => undefined,
-      validateLinkHeaderValue: () => undefined,
-      validateIgnoreOption: () => undefined,
-      validateAbortSignalOnly: () => undefined,
-      // Property-filter bits for `validateObject`, mirroring
-      // `lib/internal/validators.js`.
-      kValidateObjectAllowNullable: 1 << 0,
-      kValidateObjectAllowArray: 1 << 1,
-      kValidateObjectAllowFunction: 1 << 2,
     };
   },
-  deps: ['internal/errors'],
 };
 
 // ---------------------------------------------------------------------------
@@ -605,6 +663,17 @@ export const internalUtilSpec: BuiltinSpec = {
       isPromise: (v: unknown) => v instanceof Promise,
       isRegExp: (v: unknown) => v instanceof RegExp,
       toUSVString: (s: string) => s,
+      // `internal/util.js`'s setOwnProperty: define a plain own property and
+      // return the value so it can be used inline.
+      setOwnProperty: <T>(obj: object, key: PropertyKey, value: T): T => {
+        Object.defineProperty(obj, key, {
+          configurable: true,
+          enumerable: true,
+          value,
+          writable: true,
+        });
+        return value;
+      },
     };
   },
 };
@@ -734,35 +803,6 @@ export const internalBufferSpec: BuiltinSpec = {
     // the runtime's own Buffer class to keep that invariant (and its methods).
     const { Buffer } = ctx.require('buffer') as { Buffer: new (...args: never[]) => Uint8Array };
     return { FastBuffer: Buffer };
-  },
-};
-
-// ---------------------------------------------------------------------------
-// internal/util/types
-// ---------------------------------------------------------------------------
-//
-// The typed-array predicates Node builds over V8 intrinsics, expressed against
-// the host's ArrayBuffer.isView + Object.prototype.toString classification.
-
-// ---------------------------------------------------------------------------
-// internal/assert
-// ---------------------------------------------------------------------------
-
-export const internalAssertSpec: BuiltinSpec = {
-  id: 'internal/assert',
-  origin: 'web-node',
-  deps: ['internal/errors'],
-  init: (ctx: BuiltinInitContext) => {
-    const codes = (ctx.require('internal/errors') as {
-      codes: Record<string, new (...args: unknown[]) => Error>;
-    }).codes;
-    const fail = (message?: string): never => {
-      throw new codes.ERR_INTERNAL_ASSERTION(message);
-    };
-    const assert = (value: unknown, message?: string): void => {
-      if (!value) fail(message);
-    };
-    return Object.assign(assert, { fail }) as unknown as Record<string, unknown>;
   },
 };
 

@@ -24,6 +24,13 @@ const FILES = [
   'internal/querystring.js',
   'internal/util/types.js',
   'internal/util/inspect.js',
+  'internal/util/colors.js',
+  'internal/util/comparisons.js',
+  'internal/validators.js',
+  'internal/assert.js',
+  'internal/assert/assertion_error.js',
+  'internal/assert/myers_diff.js',
+  'internal/assert/utils.js',
   'internal/streams/state.js',
   'internal/streams/from.js',
   'internal/streams/utils.js',
@@ -57,6 +64,7 @@ const FILES = [
   'domain.js',
   'diagnostics_channel.js',
   'string_decoder.js',
+  'assert.js',
 ];
 
 /**

@@ -8,7 +8,9 @@
  * up by the C++ embedder).
  */
 
-export type CjsExports = Record<string, unknown>;
+import { registerCompiledSource } from './source-registry';
+
+type CjsExports = Record<string, unknown>;
 export type CjsRequire = (request: string) => unknown;
 
 export const CJS_PARAMS = [
@@ -46,9 +48,14 @@ export class CompileError extends Error {
 
 /** Wrap CJS source into a function. The generic parameter list keeps the shape identical to Node. */
 export function compileCjs(source: string, filename: string): CjsFunction {
+  // Tag the unit with a `node:`-style URL so stack frames read like Node's
+  // (`node:internal/util/inspect`) and remember the text for source-line recovery.
+  const url = `node:${filename}`;
+  registerCompiledSource(url, source);
+  const code = `${source}\n//# sourceURL=${url}`;
   try {
     // eslint-disable-next-line no-new-func
-    return new Function(...(CJS_PARAMS as unknown as string[]), source) as unknown as CjsFunction;
+    return new Function(...(CJS_PARAMS as unknown as string[]), code) as unknown as CjsFunction;
   } catch (err) {
     throw new CompileError(filename, err);
   }
