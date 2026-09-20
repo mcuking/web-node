@@ -65,12 +65,6 @@ export const unsupportedSpecs: BuiltinSpec[] = [
       }),
   },
   {
-    id: 'child_process',
-    aliases: ['node:child_process'],
-    origin: 'web-node',
-    init: () => unsupported('child_process'),
-  },
-  {
     id: 'v8',
     aliases: ['node:v8'],
     origin: 'web-node',

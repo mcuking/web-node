@@ -189,9 +189,9 @@ describe('NodeRuntime — core', () => {
     const { stdout, error } = run({
       '/project/index.js': `
         const tty = require('tty');
-        const cp = require('child_process');
+        const zlib = require('zlib');
         console.log('isatty', tty.isatty(1));
-        try { cp.execSync('ls'); } catch (e) { console.log('threw', /child_process\.execSync/.test(e.message)); }
+        try { zlib.deflateSync('x'); } catch (e) { console.log('threw', /zlib\.deflateSync/.test(e.message)); }
       `,
     });
     expect(error).toBeNull();

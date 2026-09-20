@@ -1,5 +1,6 @@
 import type { Vfs } from '../vfs';
 import type { VirtualNetwork } from '../net/network';
+import type { ProcessHost } from '../proc/host';
 
 /**
  * Everything a binding is allowed to see about the host. Bindings never reach
@@ -14,6 +15,13 @@ export interface BindingContext {
    * bridge dials it from outside the worker.
    */
   network: VirtualNetwork;
+  /**
+   * The controlled spawn surface. Node reaches the OS through `uv_spawn`; we
+   * reach this instead. It is the *only* way user code can cause another
+   * program to run, `child_process` is written against it, and npm drives
+   * lifecycle scripts through it.
+   */
+  spawn: ProcessHost;
   env: Record<string, string>;
   argv: string[];
   execPath: string;

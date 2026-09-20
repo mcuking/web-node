@@ -1,5 +1,7 @@
 import type { BindingContext } from './bindings/context';
 import type { Vfs } from './vfs';
+import type { ProcessHost } from './proc/host';
+import { createProcessHost } from './proc/host';
 import { VirtualNetwork } from './net/network';
 import { Realm } from './realm';
 import { ModuleLoader } from './loader';
@@ -62,6 +64,17 @@ const HOST_GLOBALS = [
   'caches',
 ];
 
+/**
+ * Native-binary tools are aliased to their WASM counterparts: a browser tab can
+ * not load a .node addon, so `require('rollup')`/`require('esbuild')` resolve to
+ * the WASM builds that ship the same public API. Module constant so spawned
+ * programs can inherit exactly the same map.
+ */
+const MODULE_ALIASES: Record<string, string> = {
+  rollup: '@rollup/wasm-node',
+  esbuild: 'esbuild-wasm',
+};
+
 export interface RuntimeOptions {
   vfs: Vfs;
   argv?: string[];
@@ -71,6 +84,8 @@ export interface RuntimeOptions {
   installGlobals?: boolean;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
+  /** Fired when a spawned program starts or finishes (diagnostics only). */
+  onChildEvent?: (event: { type: 'spawn' | 'exit'; pid: number; command: string; code?: number | null }) => void;
 }
 
 interface TimerHandle {
@@ -89,6 +104,8 @@ export class NodeRuntime {
   readonly loader: ModuleLoader;
   readonly bindingCtx: BindingContext;
   readonly network: VirtualNetwork;
+  /** The controlled spawn surface (`child_process` + npm lifecycle scripts). */
+  readonly spawn: ProcessHost;
   readonly process: Record<string, unknown>;
   readonly console: Record<string, unknown>;
   readonly Buffer: unknown;
@@ -103,13 +120,29 @@ export class NodeRuntime {
     const env = opts.env ?? {};
     const onStdout = opts.onStdout ?? (() => undefined);
     const onStderr = opts.onStderr ?? (() => undefined);
+    const execPath = opts.execPath ?? '/bin/node';
+
+    // The spawn surface is created before the realm, but it only reaches the
+    // realm/loader lazily (through the closures below), so the ordering is safe.
+    const spawn = createProcessHost({
+      vfs: opts.vfs,
+      realm: () => this.realm,
+      loader: () => this.loader,
+      globals: () => this.sandboxGlobals,
+      aliases: () => ({ ...MODULE_ALIASES }),
+      activeCount: () => this.#timers.size,
+      execPath,
+      baseEnv: env,
+      onChildEvent: (event) => opts.onChildEvent?.(event),
+    });
 
     const bindingCtx: BindingContext = {
       vfs: opts.vfs,
       network: new VirtualNetwork(),
+      spawn,
       env,
       argv,
-      execPath: opts.execPath ?? '/bin/node',
+      execPath,
       writeStdout: onStdout,
       writeStderr: onStderr,
       exit: (code: number) => {
@@ -155,13 +188,15 @@ export class NodeRuntime {
     };
     this.bindingCtx = bindingCtx;
     this.network = bindingCtx.network;
+    this.spawn = spawn;
 
     this.realm = new Realm(bindingCtx);
     this.loader = new ModuleLoader(this.realm, opts.vfs);
     // Native-binary tools are aliased to their WASM counterparts: a browser tab
     // cannot load a .node addon, so `require('rollup')`/`require('esbuild')`
-    // resolve to the WASM builds that ship the same public API.
-    this.loader.setAliases({ rollup: '@rollup/wasm-node', esbuild: 'esbuild-wasm' });
+    // resolve to the WASM builds that ship the same public API. Spawned programs
+    // inherit the same aliases, which is why the map is a module constant.
+    this.loader.setAliases(MODULE_ALIASES);
     // `module.createRequire(...)` needs more than a lookup: bundled tooling calls
     // `require.resolve(id)` to map an id to a path without loading it.
     const loader = this.loader;
@@ -265,6 +300,9 @@ export class NodeRuntime {
     this.loader.reset();
     this.#clearAllTimers();
     this.network.reset();
+    // Children belong to the run that started them: like teardown of a process
+    // group, nothing survives into the next Run.
+    this.spawn.reset();
     this.#exitCode = null;
   }
 
@@ -281,7 +319,14 @@ export class NodeRuntime {
    * harness) and the installer remains unit-testable without network access.
    */
   async installDependencies(
-    opts: { cwd?: string; includeDev?: boolean; onLog?: (message: string) => void; fetch?: FetchLike } = {},
+    opts: {
+      cwd?: string;
+      includeDev?: boolean;
+      onLog?: (message: string) => void;
+      onOutput?: (chunk: Uint8Array, stream: 'stdout' | 'stderr') => void;
+      runScripts?: boolean;
+      fetch?: FetchLike;
+    } = {},
   ): Promise<InstallResult> {
     const fetchImpl = opts.fetch ?? (typeof fetch === 'function' ? (fetch.bind(globalThis) as unknown as FetchLike) : undefined);
     if (!fetchImpl) throw new Error('npm install requires a fetch implementation');
@@ -290,6 +335,12 @@ export class NodeRuntime {
       fetch: fetchImpl,
       includeDev: opts.includeDev ?? false,
       log: opts.onLog,
+      // Lifecycle scripts run on the same controlled spawn surface user code
+      // gets, so `npm install` never needs a capability `child_process` lacks.
+      host: this.spawn,
+      env: { ...(this.bindingCtx.env as Record<string, string>) },
+      runScripts: opts.runScripts,
+      onOutput: opts.onOutput,
     });
   }
 

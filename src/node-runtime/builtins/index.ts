@@ -28,6 +28,7 @@ import { netSpec } from './net';
 import { httpSpec } from './http';
 import { httpsSpec } from './https';
 import { streamSpec, streamPromisesSpec } from './stream';
+import { childProcessSpec } from './child_process';
 
 /** Every builtin the runtime knows about, in dependency-friendly order. */
 export const ALL_BUILTINS: BuiltinSpec[] = [
@@ -64,6 +65,8 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   ...unsupportedSpecs,
   httpSpec,
   httpsSpec,
+  // milestone 7: the controlled spawn surface
+  childProcessSpec,
 ];
 
 /** Ids that are user-visible core modules (no `internal/` prefix). */

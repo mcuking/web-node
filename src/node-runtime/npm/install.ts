@@ -10,16 +10,23 @@
  * that still satisfies the declared range is reused, so resolution (and its
  * network round trips) is skipped entirely.
  *
- * Still out of scope (recorded as limitations): lifecycle scripts and `.bin`
- * shims — both need a process to spawn, and the runtime has no
- * `child_process` — plus npm/yarn/pnpm filesystem specs (`file:`, `git+`,
- * `link:`).
+ * After the tree is written the installer does the two things npm does next:
+ * it writes `node_modules/.bin` shims (as JavaScript, see `bin.ts`) and it runs
+ * each package's `preinstall`/`install`/`postinstall` followed by the root
+ * project's lifecycle (see `scripts.ts`). Script execution needs a spawn
+ * surface and is therefore skipped when no `host` is supplied.
+ *
+ * Still out of scope (recorded as limitations): npm/yarn/pnpm filesystem specs
+ * (`file:`, `git+`, `link:`) and `npm run` itself.
  */
 
 import type { Vfs } from '../vfs';
+import type { ProcessHost } from '../proc/host';
 import * as p from '../vfs/posix';
 import { createRegistry, type FetchLike, type PackageManifest, type RegistryClient } from './registry';
 import { extractTarball } from './tarball';
+import { binEntriesFor, writeBinShims, type BinEntry } from './bin';
+import { runDependencyScripts, runRootScripts, DEFAULT_SCRIPT_TIMEOUT_MS, type ScriptOutcome } from './scripts';
 import { maxSatisfying, satisfies } from './semver';
 import { verifyIntegrity } from './integrity';
 import { buildLockfile, lockedByName, lockEntryFor, readLockfile, writeLockfile, type LockedPackage } from './lockfile';
@@ -34,10 +41,14 @@ export interface InstallResult {
   /** Number of package directories written into `node_modules`. */
   packages: number;
   installed: InstalledPackage[];
-  /** Non-fatal problems (skipped deps, unsupported specs, …). */
+  /** Non-fatal problems (skipped deps, unsupported specs, failed scripts, …). */
   warnings: string[];
   /** How many packages were reused from the lockfile instead of resolved. */
   fromLockfile: number;
+  /** `.bin` command names that were linked. */
+  binLinks?: string[];
+  /** Lifecycle events that actually ran, as `package@version event`. */
+  lifecycle?: string[];
 }
 
 export interface InstallOptions {
@@ -57,6 +68,19 @@ export interface InstallOptions {
    */
   platform?: string;
   arch?: string;
+  /**
+   * The spawn surface used to run lifecycle scripts. Without it the install
+   * still completes — it just skips scripts, as `--ignore-scripts` would.
+   */
+  host?: ProcessHost;
+  /** Environment for lifecycle scripts (defaults to the runtime's own). */
+  env?: Record<string, string>;
+  /** Run `preinstall`/`install`/`postinstall`/`prepare` (default true). */
+  runScripts?: boolean;
+  /** Per-script wall-clock limit. */
+  scriptTimeoutMs?: number;
+  /** Streamed script output. */
+  onOutput?: (chunk: Uint8Array, stream: 'stdout' | 'stderr') => void;
 }
 
 /** A dependency resolved to a concrete version, however we got there. */
@@ -125,6 +149,7 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
     version?: string;
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
+    scripts?: Record<string, string>;
   };
 
   const rootDeps: Record<string, string> = { ...(rootPkg.dependencies ?? {}) };
@@ -133,7 +158,7 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
 
   if (Object.keys(rootDeps).length === 0) {
     log('nothing to install — no dependencies declared');
-    return { packages: 0, installed: [], warnings: [], fromLockfile: 0 };
+    return { packages: 0, installed: [], warnings: [], fromLockfile: 0, binLinks: [], lifecycle: [] };
   }
 
   // A locked version that still satisfies the range is reused as-is: no
@@ -297,6 +322,8 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
   const extracted = new Map<string, Awaited<ReturnType<typeof extractTarball>>>();
   const installed: InstalledPackage[] = [];
   const lockPackages: Array<{ path: string; entry: LockedPackage }> = [];
+  /** Every package directory written, in placement order (used for bins/scripts). */
+  const packageDirs: Array<{ dir: string; manifest: { name?: string; version?: string; bin?: string | Record<string, string>; scripts?: Record<string, string> } }> = [];
 
   for (const { nmDir, resolved } of placements) {
     const key = `${resolved.name}@${resolved.version}`;
@@ -327,6 +354,26 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
     }
     installed.push({ name: resolved.name, version: resolved.version, path: dir });
 
+    // The extracted `package.json` is the authority for `bin` and `scripts`:
+    // it is what a lockfile-reused install has too, and it keeps those fields
+    // out of the lockfile schema.
+    let installedManifest: (typeof packageDirs)[number]['manifest'] = {
+      name: resolved.name,
+      version: resolved.version,
+      bin: resolved.bin,
+    };
+    const installedPkgPath = p.join(dir, 'package.json');
+    if (vfs.exists(installedPkgPath)) {
+      try {
+        installedManifest = JSON.parse(decode(vfs.readFile(installedPkgPath))) as typeof installedManifest;
+        installedManifest.name ??= resolved.name;
+        installedManifest.version ??= resolved.version;
+      } catch (err) {
+        warnings.push(`${resolved.name}@${resolved.version}: unreadable package.json (${(err as Error).message})`);
+      }
+    }
+    packageDirs.push({ dir, manifest: installedManifest });
+
     const manifest: PackageManifest = {
       name: resolved.name,
       version: resolved.version,
@@ -353,5 +400,52 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
     writeLockfile(vfs, opts.cwd, buildLockfile(rootPkg, lockPackages));
   }
 
-  return { packages: installed.length, installed, warnings, fromLockfile };
+  // ---- .bin shims -------------------------------------------------------
+
+  const binEntries: BinEntry[] = [];
+  for (const { dir, manifest } of packageDirs) {
+    binEntries.push(...binEntriesFor(vfs, dir, manifest.name ?? p.basename(dir), manifest.bin));
+  }
+  const bins = writeBinShims(vfs, binEntries);
+  warnings.push(...bins.warnings);
+  if (bins.written.size > 0) log(`linked ${bins.written.size} bin(s): ${[...bins.written.keys()].sort().join(', ')}`);
+
+  // ---- lifecycle scripts ------------------------------------------------
+
+  const lifecycle: string[] = [];
+  if (opts.host) {
+    const scriptOptions = {
+      host: opts.host,
+      vfs,
+      cwd: opts.cwd,
+      initCwd: opts.cwd,
+      baseEnv: opts.env ?? {},
+      timeoutMs: opts.scriptTimeoutMs ?? DEFAULT_SCRIPT_TIMEOUT_MS,
+      ignoreScripts: opts.runScripts === false,
+      warnings,
+      onOutput: opts.onOutput,
+      log,
+    };
+    const record = (outcomes: ScriptOutcome[]): void => {
+      for (const outcome of outcomes) lifecycle.push(`${outcome.package} ${outcome.event}`);
+    };
+    // npm runs a dependency's scripts as it installs that dependency; running
+    // them after the whole tree exists is a documented approximation that keeps
+    // `.bin` shims available to every script.
+    for (const { dir, manifest } of packageDirs) {
+      record(await runDependencyScripts(scriptOptions, dir, manifest));
+    }
+    record(await runRootScripts(scriptOptions, { ...rootPkg, scripts: rootPkg.scripts }));
+  } else if (opts.runScripts !== false) {
+    warnings.push('lifecycle scripts skipped: no spawn surface was supplied');
+  }
+
+  return {
+    packages: installed.length,
+    installed,
+    warnings,
+    fromLockfile,
+    binLinks: [...bins.written.keys()].sort(),
+    lifecycle,
+  };
 }

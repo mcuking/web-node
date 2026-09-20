@@ -8,6 +8,20 @@ const USER_CJS_PARAMS = ['exports', 'require', 'module', '__filename', '__dirnam
 const EXTENSIONS = ['', '.js', '.cjs', '.mjs', '.json'];
 
 /**
+ * Drop a leading `#!` line.
+ *
+ * Node does this for the main module, and it matters more here than there: a
+ * program reached through a `.bin` shim starts with `#!/usr/bin/env node` (both
+ * npm's shims and ours do), and handing that byte pair to `new Function` is a
+ * syntax error rather than a shebang.
+ */
+export function stripShebang(source: string): string {
+  if (!source.startsWith('#!')) return source;
+  const newline = source.indexOf('\n');
+  return newline === -1 ? '' : source.slice(newline + 1);
+}
+
+/**
  * Sentinel returned when a `browser` field maps a specifier to `false`
  * ("this module is empty in the browser"). Resolving to a real VFS path would
  * either miss or pick up the Node-only file we were told to drop.
@@ -399,19 +413,26 @@ export class ModuleLoader {
     return this.loadModule(resolved);
   };
 
-  /** Load a module by absolute VFS path. */
-  loadModule(absPath: string): unknown {
+  /**
+   * Load a module by absolute VFS path.
+   *
+   * `sourceOverride` lets the runtime execute a module whose text does not come
+   * from the VFS — `node -e` / `node -p` inside a spawned program. Everything
+   * else about the load (resolution root, module type, wrapper parameters) is
+   * derived from the path exactly as usual.
+   */
+  loadModule(absPath: string, sourceOverride?: string): unknown {
     const cached = this.#cache.get(absPath);
-    if (cached) return cached.exports;
+    if (cached && sourceOverride === undefined) return cached.exports;
 
-    if (absPath.endsWith('.json')) {
+    if (absPath.endsWith('.json') && sourceOverride === undefined) {
       const text = new TextDecoder().decode(this.#vfs.readFile(absPath));
       const exports = JSON.parse(text);
       this.#cache.set(absPath, { exports, state: 'loaded' });
       return exports;
     }
 
-    const source = new TextDecoder().decode(this.#vfs.readFile(absPath));
+    const source = stripShebang(sourceOverride ?? new TextDecoder().decode(this.#vfs.readFile(absPath)));
     const isEsm = absPath.endsWith('.mjs') || (absPath.endsWith('.js') && this.#isPackageEsm(absPath));
 
     const mod: UserModule = { exports: {}, state: 'loading' };
