@@ -62,6 +62,12 @@ function fromString(str: string, encoding: string): Uint8Array {
   }
 }
 
+function hexSliceFn(bytes: Uint8Array, start = 0, end = bytes.length): string {
+  let s = '';
+  for (let i = start; i < end; i++) s += bytes[i].toString(16).padStart(2, '0');
+  return s;
+}
+
 function toStringFn(bytes: Uint8Array, encoding = 'utf8', start = 0, end = bytes.length): string {
   const slice = bytes.subarray(start, end);
   switch (encoding) {
@@ -133,7 +139,14 @@ export const bufferSpec: BuiltinSpec = {
   id: 'buffer',
   aliases: ['node:buffer'],
   origin: 'web-node',
-  init: (_ctx: BuiltinInitContext) => {
+  init: (ctx: BuiltinInitContext) => {
+    const customInspectSymbol = (ctx.require('internal/util') as { customInspectSymbol: symbol })
+      .customInspectSymbol;
+    const utilBinding = ctx.internalBinding('util') as {
+      constants: { ALL_PROPERTIES: number; ONLY_ENUMERABLE: number };
+      getOwnNonIndexProperties: (obj: object, filter?: number) => (string | symbol)[];
+    };
+
     class Buffer extends Uint8Array {
       static poolSize = 8192;
 
@@ -248,6 +261,12 @@ export const bufferSpec: BuiltinSpec = {
 
       toJSON(): { type: 'Buffer'; data: number[] } {
         return { type: 'Buffer', data: Array.from(this) };
+      }
+
+      // Hex dump of a byte range. The vendored `internal/util/inspect.js`
+      // reaches for this to render `[Uint8Contents]` for ArrayBuffers.
+      hexSlice(start = 0, end = this.length): string {
+        return hexSliceFn(this, start, end);
       }
 
       equals(other: Uint8Array): boolean {
@@ -471,6 +490,53 @@ export const bufferSpec: BuiltinSpec = {
         return this;
       }
     }
+
+    // Override how buffers are presented by util.inspect(), mirroring
+    // `lib/buffer.js`: `<Buffer 01 02>` (50 bytes max by default).
+    let INSPECT_MAX_BYTES = 50;
+    (Buffer.prototype as unknown as Record<symbol, unknown>)[customInspectSymbol] = function inspect(
+      this: Uint8Array,
+      _recurseTimes: number,
+      inspectCtx?: { showHidden?: boolean },
+    ): string {
+      const max = INSPECT_MAX_BYTES;
+      const actualMax = Math.min(max, this.length);
+      const remaining = this.length - max;
+      let str = hexSliceFn(this, 0, actualMax).replace(/(.{2})/g, '$1 ').trim();
+      if (remaining > 0) str += ` ... ${remaining} more byte${remaining > 1 ? 's' : ''}`;
+      if (inspectCtx) {
+        const filter = inspectCtx.showHidden
+          ? utilBinding.constants.ALL_PROPERTIES
+          : utilBinding.constants.ONLY_ENUMERABLE;
+        const obj: Record<string | symbol, unknown> = { __proto__: null } as unknown as Record<string | symbol, unknown>;
+        let extras = false;
+        for (const key of utilBinding.getOwnNonIndexProperties(this, filter)) {
+          extras = true;
+          obj[key] = (this as unknown as Record<string | symbol, unknown>)[key];
+        }
+        if (extras) {
+          if (this.length !== 0) str += ', ';
+          const utilInspect = (ctx.require('internal/util/inspect') as {
+            inspect: (v: unknown, o?: unknown) => string;
+          }).inspect;
+          // '[Object: null prototype] {'.length === 26; slice off the braces.
+          str += utilInspect(obj, { ...inspectCtx, breakLength: Infinity, compact: true }).slice(27, -2);
+        }
+      }
+      let constructorName = 'Buffer';
+      try {
+        const { constructor } = this as { constructor?: { name?: string } };
+        if (constructor && Object.prototype.hasOwnProperty.call(constructor, 'name')) {
+          constructorName = constructor.name ?? 'Buffer';
+        }
+      } catch {
+        /* keep the default name */
+      }
+      return `<${constructorName} ${str}>`;
+    };
+    (Buffer.prototype as unknown as Record<string, unknown>).inspect = (
+      Buffer.prototype as unknown as Record<symbol, unknown>
+    )[customInspectSymbol];
 
     const SlowBuffer = (size: number): Buffer => Buffer.alloc(size);
 

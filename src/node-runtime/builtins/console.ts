@@ -7,11 +7,18 @@ export const consoleSpec: BuiltinSpec = {
   origin: 'web-node',
   deps: ['util'],
   init: (ctx: BuiltinInitContext) => {
-    const util = ctx.require('util') as { format: (f: unknown, ...a: unknown[]) => string; inspect: (v: unknown) => string };
+    const util = ctx.require('util') as {
+      formatWithOptions: (o: unknown, ...a: unknown[]) => string;
+      inspect: (v: unknown, o?: unknown) => string;
+    };
     const binding = ctx.binding;
 
-    function stringify(value: unknown): string {
-      return typeof value === 'string' ? value : util.inspect(value);
+    // Console writes go through the real formatter (`util.formatWithOptions`)
+    // with no colours, exactly like `lib/internal/console/constructor.js`. That
+    // is what makes `console.log('%o', x)` interpolate instead of printing the
+    // placeholder literally.
+    function format(args: unknown[]): string {
+      return util.formatWithOptions({}, ...args);
     }
 
     class Console {
@@ -25,7 +32,7 @@ export const consoleSpec: BuiltinSpec = {
       }
 
       log(...args: unknown[]): void {
-        this.#stdout(this.#groupIndent + args.map(stringify).join(' ') + '\n');
+        this.#stdout(this.#groupIndent + format(args) + '\n');
       }
       info(...args: unknown[]): void {
         this.log(...args);
@@ -34,20 +41,20 @@ export const consoleSpec: BuiltinSpec = {
         this.log(...args);
       }
       warn(...args: unknown[]): void {
-        this.#stderr(this.#groupIndent + args.map(stringify).join(' ') + '\n');
+        this.#stderr(this.#groupIndent + format(args) + '\n');
       }
       error(...args: unknown[]): void {
         this.warn(...args);
       }
       trace(...args: unknown[]): void {
         const err = new Error();
-        this.#stderr(this.#groupIndent + 'Trace: ' + args.map(stringify).join(' ') + '\n' + (err.stack ?? '') + '\n');
+        this.#stderr(this.#groupIndent + 'Trace: ' + format(args) + '\n' + (err.stack ?? '') + '\n');
       }
-      dir(obj: unknown): void {
-        this.log(util.inspect(obj));
+      dir(obj: unknown, options?: unknown): void {
+        this.log(util.inspect(obj, options));
       }
       assert(condition: unknown, ...args: unknown[]): void {
-        if (!condition) this.#stderr('Assertion failed' + (args.length ? ': ' + args.map(stringify).join(' ') : '') + '\n');
+        if (!condition) this.#stderr('Assertion failed' + (args.length ? ': ' + format(args) : '') + '\n');
       }
       count(label = 'default'): void {
         this.log(`${label}: 1`);

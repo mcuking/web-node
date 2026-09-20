@@ -15,9 +15,10 @@ import {
   internalUtilSpec,
   internalValidatorsSpec,
   internalWebStreamsAdaptersSpec,
-  internalUtilInspectSpec,
   internalEventsSymbolsSpec,
   internalEventTargetSpec,
+  internalBootstrapRealmSpec,
+  internalUrlSpec,
 } from './internal-shims';
 import { vendoredBuiltins } from './vendored-builtins';
 import { bufferSpec } from './buffer';
@@ -48,13 +49,14 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalUtilSpec,
   internalBufferSpec,
   internalAssertSpec,
+  internalBootstrapRealmSpec,
+  internalUrlSpec,
   internalBlobSpec,
   internalAbortControllerSpec,
   internalFsGlobSpec,
   internalAbortListenerSpec,
   internalOptionsSpec,
   internalDebuglogSpec,
-  internalUtilInspectSpec,
   internalEventsSymbolsSpec,
   internalEventTargetSpec,
   internalWebStreamsAdaptersSpec,

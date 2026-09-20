@@ -47,6 +47,7 @@
 | M19 | **更多 vendored 真源码**：`punycode.js`、`domain.js`、`diagnostics_channel.js`（跑在真 `async_hooks` 上，配 JS `diagnostics_channel` binding） | ✅ 完成 |
 | M20 | **真 `string_decoder`**：把 `src/string_decoder.cc` 的 native 解码状态机用 JS 逐字节重写（`bindings/string_decoder.ts`），`lib/string_decoder.js` 换真源码；删掉自研实现 | ✅ 完成 |
 | M21 | **真 `internal/util/types`**：vendor `lib/internal/util/types.js`，`types` binding 对齐 `src/node_types.cc` 表面（补 `isBigIntObject`、修 boxed-primitive 语义、去掉多余的 wasm 谓词）；`util.types` 指向真模块 | ✅ 完成 |
+| M22 | **真 `internal/util/inspect`**：vendor `lib/internal/util/inspect.js`（`util.inspect` / `format` / `formatWithOptions` 换真源码）；补 `util` binding 的 `constants`/`getOwnNonIndexProperties`/`previewEntries`，新增 `internal/bootstrap/realm`、`internal/url` shim；`console` 改走真 `formatWithOptions`；`Buffer` 补 `hexSlice` + `<Buffer>` 自定义 inspect | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
@@ -134,20 +135,43 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 2b. ~~**继续拉 vendored 真源码**~~ ✅ **已解决（2026-09-20，M19）**：`punycode.js` / `domain.js` / `diagnostics_channel.js` 已换真源码（后两者就坐在真 `async_hooks` 上）。下面“继续 vendoring”一节给出下一步批次的候选。
 2c. ~~**`string_decoder` 换真源码**~~ ✅ **已解决（2026-09-20，M20）**：把 `src/string_decoder.cc` 的 native 解码状态机用 JS 重写（`bindings/string_decoder.ts`），真 `lib/string_decoder.js` 直接跑在上面；并让 `internal/util` 的 `normalizeEncoding`/`encodingsMap` 与 Node 对齐。
 2d. ~~**`internal/util/types` 换真源码**~~ ✅ **已解决（2026-09-20，M21）**：真 `lib/internal/util/types.js` + `types` binding 对齐 `src/node_types.cc`；`util.types` 直接指向真模块。
+2e. ~~**`internal/util/inspect` 换真源码**~~ ✅ **已解决（2026-09-20，M22）**：真 `lib/internal/util/inspect.js`（`util.inspect`/`format`/`formatWithOptions`）；补 `util` binding 的 `constants`/`getOwnNonIndexProperties`/`previewEntries`，新增 `internal/bootstrap/realm` + `internal/url` shim，`console` 走真 `formatWithOptions`，`Buffer` 补 `hexSlice` + `<Buffer>` 自定义 inspect。剩余近似：`getPromiseDetails` 恒 pending、`getProxyDetails` 恒 undefined（V8 不同步暴露）。
 3. **继续 vendoring（按 ROI 排序）**：
-   - **`internal/util/inspect.js`**（3067 行，真 `util.inspect`）：需 `internal/url` / `internal/bootstrap/realm` 等一批 shim。
    - **`internal/fs/*`**：我们已是自研 `fs`，其上层模块（`fs/promises`、`internal/fs/*`）可逐个尝试真源码。
    - **`internal/validators.js` / `internal/errors.js`**：目前是 shim，真文件依赖 `internal/util` 与 `internal/assert`，成本可能可控。
+   - **`util` 里剩下的自研块**：`promisify`/`callbackify`/`inherits`/`deprecate`/`parseArgs`/`styleText` 仍是我们自己写的，可逐步向 `lib/internal/util.js` 靠拢。
 4. **promise hooks（M17 跲尾，可选）**：`async_hooks` 现在看得见 tick/timer/AsyncResource，但 V8 promise 未插桩，`promiseResolve` 不响。真做需要 `promiseHook` 级别的插桩，代价大，先放着。
 5. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 6. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。M16 把 child 的生命周期事件改为**订阅时延一个 macrotask**（让 stdout 的 `data` 先于 `exit`，对齐真 Node）；若后续发现时序副作用，可再评估。
 7. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
-8. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M21 后 worker 达 **~653KB**）；若在意体积，可改成按文件 code-split。
+8. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M22 后 worker 达 **~757KB**，其中 inspect.js ~100KB）；若在意体积，可改成按文件 code-split。
 9. **补 `internal/util/inspect` 等 shim 的保真度**；把 `internal/streams/duplexify` 的 `internal/blob` 从 `isBlob` stub 扩到真 `Blob` 包装（当前够用）。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M22 真 `internal/util/inspect`（`util.inspect` / `util.format` 换成真源码）
+
+**目标**：`util.inspect` 一直是自研的极简版（只处理标量/数组/对象）。真文件 `lib/internal/util/inspect.js`（3067 行）是纯 JS，所以按惯例把它整份搬过来，只补它脚下缺的 native/shim。
+
+**改了什么**
+
+1. **vendor `lib/internal/util/inspect.js`**（MANIFEST 40 → **41**）。
+2. **`util` builtin**：`inspect`/`format`/`formatWithOptions` 直接指向真模块（连同 `inspect.custom`、`inspect.defaultOptions`、`inspect.colors`），删掉自研格式化/遍历实现。
+3. **`util` binding 对齐 `src/node_util.cc`**：新增 `constants`（V8 promise 状态 kPending/kFulfilled/kRejected、exit-info 字段、property filters ALL_PROPERTIES/ONLY_ENUMERABLE/SKIP_STRINGS/SKIP_SYMBOLS，值照 `v8-promise.h`/`v8-object.h`）；`getOwnNonIndexProperties` 按 filter 位（ONLY_ENUMERABLE/SKIP_STRINGS/SKIP_SYMBOLS）取值；`previewEntries` 实现 Map/Set/Array 条目预览与 `[entries, isKeyValue]` 慢路径。
+4. **新增两个 shim spec**：`internal/bootstrap/realm`（真源码只用到 `BuiltinModule.exists(id)`，对着 realm 的公开模块表判定）、`internal/url`（`url` builtin 已含 WHATWG + file-URL 助手，直接 re-export）。
+5. **`internal/util` shim 补**：`isError`（native error 或 `Error[Symbol.hasInstance]`）、`join`、`removeColors`。
+6. **`internal/errors` 补 `isStackOverflowError`**（真实实现，缓存本 realm 的栈溢出 name/message）。
+7. **`internal/validators` 对齐 Node**：新增 `kValidateObjectAllowNullable/Array/Function`（1/2/4），`validateObject` 改按位域判定（旧对象参数仍兼容）。
+8. **`buffer` 补两样**：`Buffer.prototype.hexSlice(start,end)`（真 inspect 渲染 `[Uint8Contents]` 需要）与 `Buffer.prototype[inspect.custom]`（复刻 `lib/buffer.js`，得到 `<Buffer 01 02>`）。
+9. **`console` 改走真 `util.formatWithOptions({}, …)`**（对齐 `lib/internal/console/constructor.js`）——修了 `console.log('%o', x)` 直出占位符的 bug。
+10. **新测试 `test/util-inspect.test.ts`**（9 条）：期望值全部先跑真 Node v26.9.0 取得；覆盖 depth/sorted/showHidden/maxStringLength、Map/Set/WeakMap/typed/Buffer/Date/RegExp、ArrayBuffer 内容转储、循环引用 `<ref *1>`、`format`/`formatWithOptions`、`inspect.custom` 与 `colors`、无栈错误 `[Error: x]`，以及 console.log 端到端。
+11. **两处 JS 无法复刻的差异，已在测试里显式断言为近似**：`getProxyDetails` 恒 `undefined`（Proxy 不可探测）→ 代理打印成普通对象；`getPromiseDetails` 恒 `kPending`（V8 不同步暴露 promise 状态）→ 已 settle 的 promise 仍打 `<pending>`。真 Node 分别为 `Proxy({ a: 1 })` 与 `Promise { 1 }`。
+
+**验证**：`tsc --noEmit` 干净 · `vitest run` **258/258**（+9）· `vite build` 绿（worker 653 → 757KB，inspect.js ~100KB 已计入；改按需加载是待办）。
+
+**涉及文件**：`tools/vendor.mjs`、`vendor/node-lib/internal/util/inspect.js` + MANIFEST、`src/node-runtime/bindings/util.ts`、`src/node-runtime/builtins/{util.ts,console.ts,internal-shims.ts,vendored-builtins.ts,index.ts,buffer.ts}`、`test/util-inspect.test.ts`、`README.md`/`README_zh.md`、`docs/superpowers/specs/2026-09-17-web-node-design.md`。
 
 ### 2026-09-20 · M21 真 `internal/util/types`（+ `src/node_types.cc` 对齐）
 

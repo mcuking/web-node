@@ -280,6 +280,31 @@ function createErrorsBindingContext(): Record<string, unknown> {
       }
     },
     hideStackFrames: <T extends (...args: never[]) => unknown>(fn: T): T => fn,
+    // Node probes a real stack overflow once to learn this realm's error
+    // name/message, then matches future errors against those. Kept faithful
+    // (and cached), since `util.inspect` uses it to decide whether to print
+    // or rethrow an error's stack.
+    isStackOverflowError: (() => {
+      let name: string | undefined;
+      let message: string | undefined;
+      return (err: unknown): boolean => {
+        if (message === undefined) {
+          try {
+            const overflowStack = (): void => overflowStack();
+            overflowStack();
+          } catch (e) {
+            name = (e as Error).name;
+            message = (e as Error).message;
+          }
+        }
+        return (
+          err !== null &&
+          typeof err === 'object' &&
+          (err as Error).name === name &&
+          (err as Error).message === message
+        );
+      };
+    })(),
     aggregateTwoErrors: (innerError: unknown, outerError: unknown) => outerError ?? innerError,
     isErrorStackTraceLimitWritable: () => false,
     uvException: (e: { errno?: number; code?: string; syscall?: string; path?: string; message?: string }) =>
@@ -337,13 +362,21 @@ export const internalValidatorsSpec: BuiltinSpec = {
         assert(Number.isInteger(v), 'ERR_INVALID_ARG_TYPE', name, 'integer', v),
       validateNumber: (v: unknown, name: string) =>
         assert(typeof v === 'number', 'ERR_INVALID_ARG_TYPE', name, 'number', v),
-      validateObject: (v: unknown, name: string, opts?: { allowArray?: boolean; allowFunction?: boolean }) => {
-        const ok =
-          v !== null &&
-          typeof v === 'object' &&
-          (opts?.allowArray === true || !Array.isArray(v)) &&
-          (opts?.allowFunction === true || typeof v !== 'function');
-        assert(ok, 'ERR_INVALID_ARG_TYPE', name, 'Object', v);
+      validateObject: (v: unknown, name: string, options = 0) => {
+        // Node passes a bitfield here (kValidateObjectAllow*); older callers in
+        // this runtime passed an object, which we still accept.
+        const bits =
+          typeof options === 'object' && options !== null
+            ? ((options as { allowArray?: boolean }).allowArray ? 2 : 0) |
+              ((options as { allowFunction?: boolean }).allowFunction ? 4 : 0)
+            : (options as number);
+        const allowNullable = (bits & 1) !== 0;
+        const allowArray = (bits & 2) !== 0;
+        const allowFunction = (bits & 4) !== 0;
+        const nullable = allowNullable ? false : v === null;
+        const array = allowArray ? false : Array.isArray(v);
+        const notObject = typeof v !== 'object' && !(allowFunction && typeof v === 'function');
+        assert(!(nullable || array || notObject), 'ERR_INVALID_ARG_TYPE', name, 'Object', v);
       },
       validateOneOf: () => undefined,
       validatePlainFunction: () => undefined,
@@ -360,6 +393,11 @@ export const internalValidatorsSpec: BuiltinSpec = {
       validateLinkHeaderValue: () => undefined,
       validateIgnoreOption: () => undefined,
       validateAbortSignalOnly: () => undefined,
+      // Property-filter bits for `validateObject`, mirroring
+      // `lib/internal/validators.js`.
+      kValidateObjectAllowNullable: 1 << 0,
+      kValidateObjectAllowArray: 1 << 1,
+      kValidateObjectAllowFunction: 1 << 2,
     };
   },
   deps: ['internal/errors'],
@@ -457,7 +495,39 @@ export const internalUtilSpec: BuiltinSpec = {
       return fn;
     }
 
+    function removeColors(str: string): string {
+      // eslint-disable-next-line no-control-regex
+      return str.replace(/\u001b\[\d\d?m/g, '');
+    }
+
+    // `internal/util.js`'s `isError`: a native error, or anything for which
+    // `Error[Symbol.hasInstance]` answers true (covers cross-realm errors).
+    function isError(e: unknown): boolean {
+      return (
+        Object.prototype.toString.call(e) === '[object Error]' ||
+        Function.prototype[Symbol.hasInstance].call(Error, e)
+      );
+    }
+
+    // The built-in Array#join is slower than this hand-rolled loop, which is
+    // why Node ships its own; `internal/util/inspect.js` imports it as `join`.
+    function join(output: unknown[], separator: string): string {
+      let str = '';
+      if (output.length !== 0) {
+        const lastIndex = output.length - 1;
+        for (let i = 0; i < lastIndex; i++) {
+          str += output[i];
+          str += separator;
+        }
+        str += output[lastIndex];
+      }
+      return str;
+    }
+
     return {
+      isError,
+      join,
+      removeColors,
       kEmptyObject: Object.freeze({}),
       // Node's in-place removal used by EventEmitter's listener lists.
       spliceOne: (list: unknown[], index: number): void => {
@@ -762,20 +832,38 @@ export const internalStreamIterTypesSpec: BuiltinSpec = {
 // it (events.js, and the stream sources next) only format short values for error
 // messages, so this reuses the runtime's public `util.inspect`.
 
-export const internalUtilInspectSpec: BuiltinSpec = {
-  id: 'internal/util/inspect',
+// ---------------------------------------------------------------------------
+// internal/bootstrap/realm
+// ---------------------------------------------------------------------------
+//
+// Real `internal/bootstrap/realm.js` is the builtin registry itself; in this
+// runtime the realm owns that table. The only thing the vendored source we
+// ship reaches for is `BuiltinModule.exists(id)` (used while colouring stack
+// frames), so we expose exactly that over the realm's public module list.
+
+export const internalBootstrapRealmSpec: BuiltinSpec = {
+  id: 'internal/bootstrap/realm',
   origin: 'web-node',
-  deps: ['util'],
-  init: (ctx: BuiltinInitContext) => {
-    const util = ctx.require('util') as { inspect: (v: unknown, o?: unknown) => string };
-    return {
-      inspect: (value: unknown, opts?: unknown): string => util.inspect(value, opts),
-      // Used to elide a run of repeated stack frames; `null` just means "no run".
-      identicalSequenceRange: (): null => null,
-      formatWithOptions: (_o: unknown, f: string, ...a: unknown[]): string =>
-        [f, ...a].map((x) => (typeof x === 'string' ? x : util.inspect(x))).join(' '),
-    };
-  },
+  init: (ctx: BuiltinInitContext) => ({
+    BuiltinModule: {
+      exists: (id: string): boolean =>
+        typeof id === 'string' && ctx.builtinModuleIds.includes(id.startsWith('node:') ? id.slice(5) : id),
+    },
+  }),
+};
+
+// ---------------------------------------------------------------------------
+// internal/url
+// ---------------------------------------------------------------------------
+//
+// `internal/url` in Node carries the WHATWG implementation plus file-URL
+// helpers. We already expose all of that on the `url` builtin, so the internal
+// alias simply re-exports it. Loading is lazy in the vendored inspect code.
+
+export const internalUrlSpec: BuiltinSpec = {
+  id: 'internal/url',
+  origin: 'web-node',
+  init: (ctx: BuiltinInitContext) => ctx.require('url') as Record<string, unknown>,
 };
 
 // ---------------------------------------------------------------------------

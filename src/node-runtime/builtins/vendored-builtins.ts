@@ -28,6 +28,20 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     origin: 'node-source',
   },
   {
+    id: 'internal/util/inspect',
+    vendorPath: 'internal/util/inspect.js',
+    origin: 'node-source',
+    deps: [
+      'internal/util',
+      'internal/util/types',
+      'internal/errors',
+      'internal/assert',
+      'internal/bootstrap/realm',
+      'internal/validators',
+      'buffer',
+    ],
+  },
+  {
     id: 'internal/streams/state',
     vendorPath: 'internal/streams/state.js',
     origin: 'node-source',
