@@ -11,6 +11,7 @@ import { bufferBinding } from './buffer';
 import { asyncWrapBinding } from './async_wrap';
 import {
   asyncContextFrameBinding,
+  diagnosticsChannelBinding,
   errorsBinding,
   icuBinding,
   messagingBinding,
@@ -41,6 +42,7 @@ const REGISTRY: Record<string, (ctx: BindingContext) => Record<string, unknown>>
   icu: icuBinding,
   messaging: messagingBinding,
   uv: uvBinding,
+  diagnostics_channel: diagnosticsChannelBinding,
   task_queue: taskQueueBinding,
   async_wrap: asyncWrapBinding,
   async_context_frame: asyncContextFrameBinding,

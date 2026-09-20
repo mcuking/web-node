@@ -51,6 +51,9 @@ const FILES = [
   'events.js',
   'path.js',
   'querystring.js',
+  'punycode.js',
+  'domain.js',
+  'diagnostics_channel.js',
 ];
 
 /**

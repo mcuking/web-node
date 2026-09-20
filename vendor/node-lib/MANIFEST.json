@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-20T06:11:02.645Z",
+  "generatedAt": "2026-09-20T06:40:06.998Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -250,6 +250,27 @@
       "sha256": "513ace4440c97fcaf3da958598be85f136eb044c6045b06dcac945395c4a7b56",
       "upstreamSha256": "513ace4440c97fcaf3da958598be85f136eb044c6045b06dcac945395c4a7b56",
       "bytes": 14576,
+      "patches": []
+    },
+    {
+      "path": "punycode.js",
+      "sha256": "c5c75d5f31323affefa3595e63b3c50bca8bf7a2766936699e20460398e61717",
+      "upstreamSha256": "c5c75d5f31323affefa3595e63b3c50bca8bf7a2766936699e20460398e61717",
+      "bytes": 12959,
+      "patches": []
+    },
+    {
+      "path": "domain.js",
+      "sha256": "929feafebae8bb251c3980a4fd2c25d90185de8c53fb6d4d13f5444eb13d4a30",
+      "upstreamSha256": "929feafebae8bb251c3980a4fd2c25d90185de8c53fb6d4d13f5444eb13d4a30",
+      "bytes": 16113,
+      "patches": []
+    },
+    {
+      "path": "diagnostics_channel.js",
+      "sha256": "1e7374a84f0f52893f1d315535e9db18cf36de84a151e432c434028606216d84",
+      "upstreamSha256": "1e7374a84f0f52893f1d315535e9db18cf36de84a151e432c434028606216d84",
+      "bytes": 17464,
       "patches": []
     }
   ]

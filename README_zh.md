@@ -239,6 +239,20 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M14 | vendor `internal/streams/end-of-stream.js` —— `finished()`/`eos()` 就是真源码（options + AbortSignal） | ✅ |
 | M15 | vendor 真 `events.js`（换掉自研 EventEmitter）+ 真 `stream.addAbortSignal` | ✅ |
 | M16 | **整套 stream 换真源码**（`lib/stream.js` + `internal/streams/*`：Writable/Duplex/Transform/PassThrough/pipeline/compose/duplexPair/operators + `stream/promises`），删除手写 stream | ✅ |
+| M17 | **真 `async_hooks`**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` 落在自研 JS `async_wrap` 绑定上）；tick/timer 是真 async resource，hook 会触发、`AsyncLocalStorage` 能跨异步边界传 store | ✅ |
+| M18 | **真框架**——@vitejs/plugin-vue 在页内编译 **Vue 3 SFC**；`vite build` 出生产 Vue bundle，dev server 在预览里跑真实可交互应用（含 HMR） | ✅ |
+| M19 | **更多 vendored 真源码**——`punycode.js`、`domain.js`、`diagnostics_channel.js`（跑在真 `async_hooks` 上，配一个小 JS binding） | ✅ |
+
+## Vendored 真源码现状
+
+Node 的 `lib/` 里可原样复用的文件直接取真源码（内容哈希 + 上游 revision 记在 `vendor/node-lib/MANIFEST.json`），不自己重写；`npm run vendor` 从本地 Node checkout 重新生成，我们打过的每个 patch 都列在 manifest 里。
+
+**当前覆盖**（revision `7a3437d`，v26.9.1-dev）：
+
+- **38 个文件**已 vendor：整套 `stream` 层、`events`、`async_hooks`（+ `internal/async_local_storage/*`、`internal/promise_hooks`）、`path`、`querystring`、`punycode`、`domain`、`diagnostics_channel`，以及它们依赖的 `internal/*`（`primordials`、`fixed_queue`、`constants`、`encoding/util`、`streams/state`、`streams/destroy`、`per_context/*` 等）。
+- **58 个顶层 `lib/*.js` 里已有 29 个可用**——要么是 vendored 真源码，要么是因为真文件依赖浏览器里不存在的 native 层，改由我们自研实现。
+
+**能搬与不能搬**：Node `lib/` 约 420 个 `.js`。"全搬"不是复制活：绝大多数直接坐在 native binding（V8 C++ API、libuv handle、raw socket、native addon、模组 loader）上，浏览器没有对应物。所以规则是——**纯 JS 层原样 vendor，下面的 native 层用 JS 重写**（`async_hooks` 的 `async_wrap` 就是这么做的）。剩下的大缺口是根本无浏览器故事的那些（`http2`、`dgram`、`tls`/`_tls_*`、`cluster`、`worker_threads`、`inspector`、`repl`、`vm`/`wasi`、`sqlite`、`sea`），以及值得做的 native 层重写（`internal/util/inspect.js`、native `string_decoder`、`internal/fs/*`）。
 
 ## 改动约定
 

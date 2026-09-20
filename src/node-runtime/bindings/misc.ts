@@ -152,6 +152,28 @@ export const messagingBinding: BindingFactory = () => ({
   isBuildingSnapshot: () => false,
 });
 
+/** `diagnostics_channel` binding: the native subscriber table. */
+export const diagnosticsChannelBinding: BindingFactory = () => {
+  // The JS side re-reads this through the binding on every subscribe (the
+  // buffer is "replaced when native storage grows"), and increments/decrements
+  // slots by index. A plain array keeps that contract.
+  const subscribers: number[] = [];
+  const active = new Set<number>();
+  void active;
+  return {
+    subscribers,
+    notifyChannelActive: (index: number) => {
+      active.add(index);
+    },
+    notifyChannelInactive: (index: number) => {
+      active.delete(index);
+    },
+    // No native addons exist in this tab, so there are no channels to link.
+    // The callback is still accepted (the module calls it at load).
+    linkNativeChannel: (_cb: (name: string, index: number) => unknown) => {},
+  };
+};
+
 /** `uv` binding: the event loop. We expose an explicit "no pending work" view. */
 export const uvBinding: BindingFactory = () => ({
   hrtime: () => [0, 0],

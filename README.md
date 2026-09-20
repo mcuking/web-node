@@ -338,6 +338,43 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M14 | Vendor `internal/streams/end-of-stream.js` — `finished()`/`eos()` are the real source, options + AbortSignal included | ✅ Done |
 | M15 | Vendor Node's real `events.js` (replacing the custom EventEmitter) + the real `stream.addAbortSignal` | ✅ Done |
 | M16 | The whole `stream` module is Node's real source (`lib/stream.js` + `internal/streams/*`): Writable/Duplex/Transform/PassThrough/pipeline/compose/duplexPair/operators + `stream/promises`; the hand-written stream is gone | ✅ Done |
+| M17 | Real `async_hooks` — `lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` on a JS `async_wrap` binding; tick/timer are real async resources, so hooks fire and `AsyncLocalStorage` carries a store across async edges | ✅ Done |
+| M18 | Real framework — `@vitejs/plugin-vue` compiles a **Vue 3 SFC** in the tab; `vite build` emits a production Vue bundle and the dev server serves a live, interactive app (HMR included) | ✅ Done |
+| M19 | More vendored source — real `punycode.js`, `domain.js` and `diagnostics_channel.js` (over the real `async_hooks`, on a small JS binding) | ✅ Done |
+
+## Vendored Node source
+
+Where a module in Node's `lib/` is reusable as-is, we take it verbatim (content
+hash + upstream revision recorded in `vendor/node-lib/MANIFEST.json`) instead of
+reimplementing it. `npm run vendor` re-generates that tree from a local Node
+checkout; every patch we do apply is listed in the manifest's `patches` field.
+
+**Current coverage** (revision `7a3437d`, v26.9.1-dev):
+
+- **38 files vendored** — the whole `stream` layer, `events`, `async_hooks`
+  (+ `internal/async_local_storage/*`, `internal/promise_hooks`), `path`,
+  `querystring`, `punycode`, `domain`, `diagnostics_channel`, and the
+  `internal/*` pieces they need (`primordials`, `fixed_queue`, `constants`,
+  `encoding/util`, `streams/state`, `streams/destroy`, `per_context/*`, …).
+- **29 of the 58 top-level `lib/*.js` modules are provided** — either as
+  vendored source, or by our own implementation where the real file needs a
+  native layer that cannot exist in a tab.
+
+### What can and cannot be moved over
+
+Node's `lib/` has ~420 `.js` files. Moving "all of them" is not a copy job: the
+large majority sit directly on native bindings (V8 C++ APIs, libuv handles, raw
+sockets, native addons, the module loader) that have no browser equivalent. So
+the rule is: **vendor the pure-JS layers verbatim, and reimplement only the
+native layer underneath them in JS** — exactly what `async_wrap` does for
+`async_hooks` and what the `string_decoder` binding would need for the real
+decoder. A file is vendorable when its only dependencies are shims we already
+provide; everything else is a binding away.
+
+The remaining large gaps are the ones with no browser story at all (`http2`,
+`dgram`, `tls`/`_tls_*`, `cluster`, `worker_threads`, `inspector`, `repl`,
+`vm`/`wasi`, `sqlite`, `sea`), plus native-layer reimplementations worth doing
+(`internal/util/inspect.js`, the native `string_decoder`, `internal/fs/*`).
 
 ## Contributing
 

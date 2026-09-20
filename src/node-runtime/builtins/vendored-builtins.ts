@@ -324,4 +324,37 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     origin: 'node-source',
     deps: ['buffer', 'internal/querystring'],
   },
+  {
+    id: 'punycode',
+    aliases: ['node:punycode'],
+    vendorPath: 'punycode.js',
+    origin: 'node-source',
+    deps: [],
+  },
+  {
+    id: 'domain',
+    aliases: ['node:domain'],
+    vendorPath: 'domain.js',
+    origin: 'node-source',
+    deps: [
+      'events',
+      'async_hooks',
+      'internal/errors',
+      'internal/util',
+      'internal/async_hooks',
+    ],
+  },
+  {
+    id: 'diagnostics_channel',
+    aliases: ['node:diagnostics_channel'],
+    vendorPath: 'diagnostics_channel.js',
+    origin: 'node-source',
+    deps: [
+      'internal/errors',
+      'internal/validators',
+      'internal/util',
+      'internal/util/types',
+      'async_hooks',
+    ],
+  },
 ];

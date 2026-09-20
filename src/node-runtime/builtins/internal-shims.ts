@@ -428,6 +428,36 @@ export const internalUtilSpec: BuiltinSpec = {
       once,
       deprecate,
       deprecateProperty: () => undefined,
+      // `domain` keeps a ref-counted weak handle to each Domain; it only needs
+      // get/incRef/decRef, so a plain WeakRef wrapper matches Node's shape.
+      WeakReference: class WeakReference<T extends object> {
+        #weak: WeakRef<T>;
+        #strong: T | null = null;
+        #refCount = 0;
+        constructor(object: T) {
+          this.#weak = new WeakRef(object);
+        }
+        incRef(): number {
+          this.#refCount++;
+          if (this.#refCount === 1) {
+            const derefed = this.#weak.deref();
+            if (derefed !== undefined) this.#strong = derefed;
+          }
+          return this.#refCount;
+        }
+        decRef(): number {
+          this.#refCount--;
+          if (this.#refCount === 0) this.#strong = null;
+          return this.#refCount;
+        }
+        get(): T | undefined {
+          return this.#weak.deref();
+        }
+        destroy(): void {
+          this.#strong = null;
+          this.#refCount = 0;
+        }
+      },
       normalizeEncoding: (enc?: string): string | undefined => (enc ? String(enc).toLowerCase() : enc),
       isArrayBufferView: (v: unknown): boolean => ArrayBuffer.isView(v),
       isInsideNodeModules: () => false,
@@ -610,6 +640,9 @@ export const internalUtilTypesSpec: BuiltinSpec = {
       isFloat64Array: is('Float64Array'),
       isBigInt64Array: is('BigInt64Array'),
       isBigUint64Array: is('BigUint64Array'),
+      // `diagnostics_channel` reads this to decide whether a subscription's
+      // result should be awaited; Node keeps it here too.
+      isPromise: (v: unknown): boolean => v instanceof Promise,
     };
   },
 };
