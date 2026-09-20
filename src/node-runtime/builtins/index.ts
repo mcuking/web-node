@@ -6,13 +6,14 @@ import {
   internalBlobSpec,
   internalBufferSpec,
   internalDebuglogSpec,
+  internalEncodingSpec,
   internalErrorsSpec,
   internalErrorSourceSpec,
   internalFsGlobSpec,
   internalOptionsSpec,
   internalStreamIterSpec,
   internalStreamIterTypesSpec,
-  internalUtilSpec,
+  internalTraceSigintSpec,
   internalWebStreamsAdaptersSpec,
   internalEventsSymbolsSpec,
   internalEventTargetSpec,
@@ -28,7 +29,6 @@ import { cryptoSpec } from './crypto';
 import { urlSpec } from './url';
 import { dnsSpec, dnsPromisesSpec } from './dns';
 import { unsupportedSpecs } from './unsupported';
-import { utilSpec } from './util';
 import { consoleSpec } from './console';
 import { timersSpec } from './timers';
 import { processSpec } from './process';
@@ -44,7 +44,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   // internal shims
   internalErrorsSpec,
   internalErrorSourceSpec,
-  internalUtilSpec,
   internalBufferSpec,
   internalBootstrapRealmSpec,
   internalUrlSpec,
@@ -54,6 +53,8 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalAbortListenerSpec,
   internalOptionsSpec,
   internalDebuglogSpec,
+  internalEncodingSpec,
+  internalTraceSigintSpec,
   internalEventsSymbolsSpec,
   internalEventTargetSpec,
   internalWebStreamsAdaptersSpec,
@@ -63,7 +64,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   ...vendoredBuiltins,
   // our implementations
   bufferSpec,
-  utilSpec,
   consoleSpec,
   timersSpec,
   processSpec,

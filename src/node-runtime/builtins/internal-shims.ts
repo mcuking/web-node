@@ -50,6 +50,16 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_INVALID_THIS: 'Value of "this" must be of type %s',
   ERR_UNKNOWN_SIGNAL: 'Unknown signal: %s',
   ERR_SOCKET_BAD_PORT: 'Port should be %s. Received %s',
+  ERR_NO_CRYPTO: 'Node.js is not compiled with OpenSSL crypto support',
+  ERR_NO_TYPESCRIPT: 'Node.js is not compiled with TypeScript support',
+  ERR_WEBASSEMBLY_NOT_SUPPORTED:
+    'WebAssembly is not supported in this environment, but is required for %s',
+  ERR_FALSY_VALUE_REJECTION: 'Promise was rejected with falsy value',
+  ERR_INVALID_MIME_SYNTAX: 'The MIME syntax for a %s in "%s" is invalid',
+  ERR_PARSE_ARGS_INVALID_OPTION_VALUE: '%s',
+  ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL:
+    "Unexpected argument '%s'. This command does not take positional arguments",
+  ERR_PARSE_ARGS_UNKNOWN_OPTION: "Unknown option '%s'",
 };
 
 /**
@@ -92,10 +102,22 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_INVALID_RETURN_VALUE: TypeError,
   ERR_UNKNOWN_SIGNAL: TypeError,
   ERR_SOCKET_BAD_PORT: RangeError,
+  ERR_NO_CRYPTO: Error,
+  ERR_NO_TYPESCRIPT: Error,
+  ERR_WEBASSEMBLY_NOT_SUPPORTED: Error,
+  ERR_FALSY_VALUE_REJECTION: Error,
+  ERR_INVALID_MIME_SYNTAX: TypeError,
+  ERR_PARSE_ARGS_INVALID_OPTION_VALUE: TypeError,
+  ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL: TypeError,
+  ERR_PARSE_ARGS_UNKNOWN_OPTION: TypeError,
 };
 
 class NodeError extends Error {
   code: string;
+  errno?: number;
+  syscall?: string;
+  address?: string;
+  port?: number;
   constructor(code: string, message: string, ...args: unknown[]) {
     let i = 0;
     super(message.replace(/%[sdj]/g, () => String(args[i++])));
@@ -141,6 +163,27 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
     const [name, port, allowZero = true] = args as [string, unknown, boolean?];
     const range = allowZero ? '>= 0 && <= 65535' : '> 0 && <= 65535';
     return `Port should be ${range}. Received ${inspectArg(port)}`;
+  },
+  // The `at <index>` suffix is only added when the invalid position is known.
+  ERR_INVALID_MIME_SYNTAX: (args) => {
+    const [production, str, invalidIndex] = args as [string, string, number];
+    const suffix = invalidIndex !== -1 ? ` at ${invalidIndex}` : '';
+    return `The MIME syntax for a ${production} in "${str}" is invalid${suffix}`;
+  },
+  ERR_PARSE_ARGS_UNKNOWN_OPTION: (args) => {
+    const [option, allowPositionals] = args as [string, boolean];
+    const suggest = allowPositionals
+      ? `. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- ${JSON.stringify(option)}`
+      : '';
+    return `Unknown option '${option}'${suggest}`;
+  },
+};
+
+/** Codes whose constructed error carries extra own properties beyond `code`. */
+const CUSTOM_PROPS: Record<string, (err: Record<string, unknown>, args: unknown[]) => void> = {
+  // Node keeps the rejected value on the error for callers to inspect.
+  ERR_FALSY_VALUE_REJECTION: (err, args) => {
+    err.reason = args[0];
   },
 };
 
@@ -273,10 +316,12 @@ function formatInvalidArgType(args: unknown[]): string {
 
 function makeErrorClass(code: string): new (...args: unknown[]) => Error {
   const Base = (ERROR_BASES[code] ?? Error) as ErrorConstructor;
+  const initProps = CUSTOM_PROPS[code];
   class NodeErr extends Base {
     code = code;
     constructor(...args: unknown[]) {
       super(formatError(code, args));
+      if (initProps) initProps(this as unknown as Record<string, unknown>, args);
     }
   }
   // Node keeps the built-in type's name on both the class and its instances.
@@ -342,6 +387,53 @@ function createErrorsBindingContext(): Record<string, unknown> {
     genericNodeError: (message: string, errorProperties?: Record<string, unknown>): Error =>
       Object.assign(new Error(message), errorProperties),
     kEnhanceStackBeforeInspector: Symbol('kEnhanceStackBeforeInspector'),
+    // There is no libuv here, so no errno table: `uvErrmapGet` always misses and
+    // callers fall back to Node's own `['UNKNOWN', 'unknown error']`. The error
+    // classes below still carry the `errno`/`code`/`syscall` shape Node exposes.
+    uvErrmapGet: () => undefined,
+    /** `util._errnoException`'s backing class (lib/internal/errors.js). */
+    ErrnoException: class ErrnoException extends NodeError {
+      constructor(err: number, syscall: string, original?: string) {
+        const code = String(err);
+        super(code, original ? `${syscall} ${code} ${original}` : `${syscall} ${code}`);
+        this.errno = err;
+        this.syscall = syscall;
+      }
+    },
+    /** The deprecated host-port variant, still imported by `lib/util.js`. */
+    ExceptionWithHostPort: class ExceptionWithHostPort extends NodeError {
+      constructor(err: number, syscall: string, address?: string, port?: number, additional?: string) {
+        const code = String(err);
+        let details = '';
+        if (port && port > 0) details = ` ${address}:${port}`;
+        else if (address) details = ` ${address}`;
+        if (additional) details += ` - Local (${additional})`;
+        super(code, `${syscall} ${code}${details}`);
+        this.errno = err;
+        this.syscall = syscall;
+        this.address = address;
+        if (port) this.port = port;
+      }
+    },
+    /** The current host-port form (lib/internal/errors.js). */
+    UVExceptionWithHostPort: class UVExceptionWithHostPort extends NodeError {
+      constructor(err: number, syscall: string, address?: string, port?: number) {
+        const code = 'UNKNOWN';
+        const uvmsg = 'unknown error';
+        let details = '';
+        if (port && port > 0) details = ` ${address}:${port}`;
+        else if (address) details = ` ${address}`;
+        super(code, `${syscall} ${code}: ${uvmsg}${details}`);
+        this.errno = err;
+        this.syscall = syscall;
+        this.address = address;
+        if (port) this.port = port;
+      }
+    },
+    // Node stores stack-decoration callbacks here and consults them from a real
+    // `Error.prepareStackTrace`; we cannot install one globally, so this stays an
+    // inert store that `decorateErrorStack` can write to without crashing.
+    overrideStackTrace: new WeakMap(),
   };
 }
 
@@ -455,223 +547,6 @@ export const internalErrorSourceSpec: BuiltinSpec = {
         const from = expressionStart(sourceLine, startColumn);
         const to = expressionEnd(sourceLine, startColumn);
         return sourceLine.slice(from, to).trim();
-      },
-    };
-  },
-};
-
-// ---------------------------------------------------------------------------
-// internal/util
-// ---------------------------------------------------------------------------
-
-export const internalUtilSpec: BuiltinSpec = {
-  id: 'internal/util',
-  origin: 'web-node',
-  init: (ctx) => {
-    // `encodingsMap` / `normalizeEncoding` are Node's own (lib/internal/util.js):
-    // `StringDecoder` canonicalizes the encoding name and then stores the
-    // numeric code pulled from the binding. Kept faithful so the vendored
-    // `string_decoder.js` behaves exactly like the real one.
-    const { encodings } = ctx.internalBinding('string_decoder') as { encodings: string[] };
-    const encodingsMap: Record<string, number> = { __proto__: null } as unknown as Record<string, number>;
-    for (let i = 0; i < encodings.length; ++i) encodingsMap[encodings[i]] = i;
-
-    function normalizeEncoding(enc?: string): string | undefined {
-      if (enc == null || enc === 'utf8' || enc === 'utf-8') return 'utf8';
-      switch (enc.length) {
-        case 4:
-          if (enc === 'UTF8') return 'utf8';
-          if (enc === 'ucs2' || enc === 'UCS2') return 'utf16le';
-          enc = enc.toLowerCase();
-          if (enc === 'utf8') return 'utf8';
-          if (enc === 'ucs2') return 'utf16le';
-          break;
-        case 3:
-          if (enc === 'hex' || enc === 'HEX' || enc.toLowerCase() === 'hex') return 'hex';
-          break;
-        case 5:
-          if (enc === 'ascii') return 'ascii';
-          if (enc === 'ucs-2') return 'utf16le';
-          if (enc === 'UTF-8') return 'utf8';
-          if (enc === 'ASCII') return 'ascii';
-          if (enc === 'UCS-2') return 'utf16le';
-          enc = enc.toLowerCase();
-          if (enc === 'utf-8') return 'utf8';
-          if (enc === 'ascii') return 'ascii';
-          if (enc === 'ucs-2') return 'utf16le';
-          break;
-        case 6:
-          if (enc === 'base64') return 'base64';
-          if (enc === 'latin1' || enc === 'binary') return 'latin1';
-          if (enc === 'BASE64') return 'base64';
-          if (enc === 'LATIN1' || enc === 'BINARY') return 'latin1';
-          enc = enc.toLowerCase();
-          if (enc === 'base64') return 'base64';
-          if (enc === 'latin1' || enc === 'binary') return 'latin1';
-          break;
-        case 7:
-          if (enc === 'utf16le' || enc === 'UTF16LE' || enc.toLowerCase() === 'utf16le') return 'utf16le';
-          break;
-        case 8:
-          if (enc === 'utf-16le' || enc === 'UTF-16LE' || enc.toLowerCase() === 'utf-16le') return 'utf16le';
-          break;
-        case 9:
-          if (enc === 'base64url' || enc === 'BASE64URL' || enc.toLowerCase() === 'base64url') return 'base64url';
-          break;
-        default:
-          if (enc === '') return 'utf8';
-      }
-      return undefined;
-    }
-
-    function getLazy(initializer: () => unknown): () => unknown {
-      let value: unknown;
-      let initialized = false;
-      return function lazyValue() {
-        if (!initialized) {
-          value = initializer();
-          initialized = true;
-        }
-        return value;
-      };
-    }
-
-    function once<T extends (...args: never[]) => unknown>(callback: T): T {
-      let called = false;
-      let value: unknown;
-      return function onceWrapper(this: unknown, ...args: never[]) {
-        if (!called) {
-          called = true;
-          value = callback.apply(this, args);
-        }
-        return value;
-      } as unknown as T;
-    }
-
-    function deprecate<T extends (...args: never[]) => unknown>(fn: T, _msg: string, _code?: string): T {
-      return fn;
-    }
-
-    function removeColors(str: string): string {
-      // eslint-disable-next-line no-control-regex
-      return str.replace(/\u001b\[\d\d?m/g, '');
-    }
-
-    // `internal/util.js`'s `isError`: a native error, or anything for which
-    // `Error[Symbol.hasInstance]` answers true (covers cross-realm errors).
-    function isError(e: unknown): boolean {
-      return (
-        Object.prototype.toString.call(e) === '[object Error]' ||
-        Function.prototype[Symbol.hasInstance].call(Error, e)
-      );
-    }
-
-    // The built-in Array#join is slower than this hand-rolled loop, which is
-    // why Node ships its own; `internal/util/inspect.js` imports it as `join`.
-    function join(output: unknown[], separator: string): string {
-      let str = '';
-      if (output.length !== 0) {
-        const lastIndex = output.length - 1;
-        for (let i = 0; i < lastIndex; i++) {
-          str += output[i];
-          str += separator;
-        }
-        str += output[lastIndex];
-      }
-      return str;
-    }
-
-    return {
-      isError,
-      join,
-      removeColors,
-      kEmptyObject: Object.freeze({}),
-      // Node's in-place removal used by EventEmitter's listener lists.
-      spliceOne: (list: unknown[], index: number): void => {
-        for (let i = index; i + 1 < list.length; i++) list[i] = list[i + 1];
-        list.pop();
-      },
-      // Node renames functions for error/stack readability (internal/util.js).
-      assignFunctionName: <T>(name: string | symbol, fn: T, descriptor?: object): T => {
-        const label =
-          typeof name === 'string' ? name : `[${String((name as symbol).description)}]`;
-        Object.defineProperty(fn as object, 'name', {
-          writable: false,
-          enumerable: false,
-          configurable: true,
-          ...descriptor,
-          value: label,
-        });
-        return fn;
-      },
-      isWindows: false,
-      isMacOS: false,
-      isLinux: true,
-      getLazy,
-      once,
-      deprecate,
-      deprecateProperty: () => undefined,
-      // `domain` keeps a ref-counted weak handle to each Domain; it only needs
-      // get/incRef/decRef, so a plain WeakRef wrapper matches Node's shape.
-      WeakReference: class WeakReference<T extends object> {
-        #weak: WeakRef<T>;
-        #strong: T | null = null;
-        #refCount = 0;
-        constructor(object: T) {
-          this.#weak = new WeakRef(object);
-        }
-        incRef(): number {
-          this.#refCount++;
-          if (this.#refCount === 1) {
-            const derefed = this.#weak.deref();
-            if (derefed !== undefined) this.#strong = derefed;
-          }
-          return this.#refCount;
-        }
-        decRef(): number {
-          this.#refCount--;
-          if (this.#refCount === 0) this.#strong = null;
-          return this.#refCount;
-        }
-        get(): T | undefined {
-          return this.#weak.deref();
-        }
-        destroy(): void {
-          this.#strong = null;
-          this.#refCount = 0;
-        }
-      },
-      normalizeEncoding,
-      encodingsMap,
-      isArrayBufferView: (v: unknown): boolean => ArrayBuffer.isView(v),
-      isInsideNodeModules: () => false,
-      getCallerLocation: () => undefined,
-      getSystemErrorName: (code: number) => String(code),
-      isErrorLike: (v: unknown) => v instanceof Error,
-      getStringWidth: (s: string) => s.length,
-      defineLazyProperties: () => undefined,
-      SideEffectFreeRegExpPrototypeSymbolReplace: (r: RegExp, s: string, v: string) => s.replace(r, v),
-      Buffer: undefined,
-      customInspectSymbol: Symbol.for('nodejs.util.inspect.custom'),
-      // `lib/stream.js` tags `pipeline`/`finished` with `promisify.custom`
-      // so `util.promisify(pipeline)` yields the promises form. Only the
-      // marker is consulted here, so the callable itself stays a stub.
-      promisify: Object.assign((fn: unknown) => fn, {
-        custom: Symbol.for('nodejs.util.promisify.custom'),
-      }),
-      isPromise: (v: unknown) => v instanceof Promise,
-      isRegExp: (v: unknown) => v instanceof RegExp,
-      toUSVString: (s: string) => s,
-      // `internal/util.js`'s setOwnProperty: define a plain own property and
-      // return the value so it can be used inline.
-      setOwnProperty: <T>(obj: object, key: PropertyKey, value: T): T => {
-        Object.defineProperty(obj, key, {
-          configurable: true,
-          enumerable: true,
-          value,
-          writable: true,
-        });
-        return value;
       },
     };
   },
@@ -998,4 +873,38 @@ export const internalAbortListenerSpec: BuiltinSpec = {
 
     return { addAbortListener };
   },
+};
+
+// ---------------------------------------------------------------------------
+// internal/encoding
+// ---------------------------------------------------------------------------
+//
+// `lib/util.js` exposes `TextEncoder`/`TextDecoder` through this module. Real
+// `internal/encoding.js` is a full streaming decoder built on `internal/buffer`
+// and the single-byte codec tables; the host realm already ships spec-compliant
+// `TextEncoder`/`TextDecoder`, so those are re-exported directly.
+
+export const internalEncodingSpec: BuiltinSpec = {
+  id: 'internal/encoding',
+  origin: 'web-node',
+  init: () => ({
+    TextEncoder,
+    TextDecoder,
+  }),
+};
+
+// ---------------------------------------------------------------------------
+// internal/util/trace_sigint
+// ---------------------------------------------------------------------------
+//
+// `util.setTraceSigInt` arms a native SIGINT watchdog for `--trace-sigint`; there
+// is no signal surface here, so it is an inert no-op exactly like Node's when
+// the flag is off.
+
+export const internalTraceSigintSpec: BuiltinSpec = {
+  id: 'internal/util/trace_sigint',
+  origin: 'web-node',
+  init: () => ({
+    setTraceSigInt: (_enable: boolean): void => undefined,
+  }),
 };

@@ -145,6 +145,9 @@ export class NodeRuntime {
       env,
       argv,
       execPath,
+      // Evaluated lazily (after `this.realm` is assigned) so bindings such as
+      // `util.defineLazyProperties` can reach the module registry.
+      requireBuiltin: (id: string) => this.realm.require(id),
       writeStdout: onStdout,
       writeStderr: onStderr,
       exit: (code: number) => {

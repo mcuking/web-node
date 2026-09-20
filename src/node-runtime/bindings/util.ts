@@ -25,10 +25,127 @@ const kPending = 0;
 const kFulfilled = 1;
 const kRejected = 2;
 
+/**
+ * `privateSymbols` are minted once per binding table so a given embedder symbol
+ * is the same object everywhere it is read (Node hands out fixed C++ symbols).
+ */
+const PRIVATE_SYMBOLS = {
+  arrow_message_private_symbol: Symbol('arrow_message_private_symbol'),
+  decorated_private_symbol: Symbol('decorated_private_symbol'),
+};
+
 const isArrayIndex = (key: string): boolean => {
   const i = Number(key);
   return Number.isInteger(i) && i >= 0 && String(i) === key;
 };
+
+/** Node's `trim_spaces`: strip leading/trailing spaces, tabs and newlines. */
+function trimSpaces(input: string): string {
+  let start = 0;
+  let end = input.length;
+  while (start < end && (input[start] === ' ' || input[start] === '\t' || input[start] === '\n')) start++;
+  while (end > start && (input[end - 1] === ' ' || input[end - 1] === '\t' || input[end - 1] === '\n')) end--;
+  return input.slice(start, end);
+}
+
+/**
+ * A direct port of `Dotenv::ParseContent` (src/node_dotenv.cc) backing
+ * `util.parseEnv`. Kept faithful so our dotenv parsing matches Node's:
+ * comments, the `export ` prefix, `'`/`"`/backtick quoting, `\n` expansion in
+ * double quotes, trailing `#` comments on bare values, and last-wins duplicates.
+ */
+export function parseEnv(input: string): Record<string, string> {
+  const store: Record<string, string> = Object.create(null) as Record<string, string>;
+  let content = input.replace(/\r/g, '');
+  content = trimSpaces(content);
+  while (content.length > 0) {
+    // Skip empty lines and comments.
+    if (content[0] === '\n' || content[0] === '#') {
+      const nl = content.indexOf('\n');
+      content = nl !== -1 ? content.slice(nl + 1) : '';
+      continue;
+    }
+    // First `=` or newline in a single pass.
+    let eqOrNl = -1;
+    for (let k = 0; k < content.length; k++) {
+      if (content[k] === '=' || content[k] === '\n') {
+        eqOrNl = k;
+        break;
+      }
+    }
+    if (eqOrNl === -1 || content[eqOrNl] === '\n') {
+      if (eqOrNl !== -1) {
+        content = trimSpaces(content.slice(eqOrNl + 1));
+        continue;
+      }
+      break;
+    }
+    let key = trimSpaces(content.slice(0, eqOrNl));
+    content = content.slice(eqOrNl + 1);
+
+    // `KEY=` (no value, end of line) stores an empty string.
+    if (content.length === 0 || content[0] === '\n') {
+      store[key] = '';
+      continue;
+    }
+    content = trimSpaces(content);
+    if (key.length === 0) continue;
+    if (key.startsWith('export ')) key = trimSpaces(key.slice(7));
+    if (content.length === 0) {
+      store[key] = '';
+      break;
+    }
+
+    // Double-quoted values expand `\n` into real newlines.
+    if (content[0] === '"') {
+      const closing = content.indexOf('"', 1);
+      if (closing !== -1) {
+        const value = content.slice(1, closing).replace(/\\n/g, '\n');
+        store[key] = value;
+        const nl = content.indexOf('\n', closing + 1);
+        content = nl !== -1 ? content.slice(nl + 1) : '';
+        continue;
+      }
+    }
+
+    if (content[0] === "'" || content[0] === '"' || content[0] === '`') {
+      const quote = content[0];
+      const closing = content.indexOf(quote, 1);
+      if (closing === -1) {
+        const nl = content.indexOf('\n');
+        if (nl !== -1) {
+          store[key] = content.slice(0, nl);
+          content = content.slice(nl + 1);
+        } else {
+          store[key] = content;
+          break;
+        }
+      } else {
+        store[key] = content.slice(1, closing);
+        const nl = content.indexOf('\n', closing + 1);
+        content = nl !== -1 ? content.slice(nl + 1) : '';
+        continue;
+      }
+    } else {
+      const nl = content.indexOf('\n');
+      if (nl !== -1) {
+        let value = content.slice(0, nl);
+        const hash = value.indexOf('#');
+        if (hash !== -1) value = value.slice(0, hash);
+        store[key] = trimSpaces(value);
+        content = content.slice(nl + 1);
+      } else {
+        let value = content;
+        const hash = value.indexOf('#');
+        if (hash !== -1) value = content.slice(0, hash);
+        store[key] = trimSpaces(value);
+        content = '';
+      }
+    }
+    content = trimSpaces(content);
+  }
+  return store;
+}
 
 export const utilBinding: BindingFactory = (ctx: BindingContext) => ({
   constants: {
@@ -124,9 +241,50 @@ export const utilBinding: BindingFactory = (ctx: BindingContext) => ({
   getHeapSpaceStatistics: () => [],
   setPromiseHooks: () => undefined,
   getStringWidth: (str: string): number => str.length,
-  sleep: () => {
-    throw new Error('synchronous sleep is not available in web-node');
+  // Node blocks the thread here (`uv_sleep`); `Atomics.wait` is the closest
+  // thing JS offers and is available inside our worker / the test harness.
+  sleep: (msec: number): void => {
+    const sab = new SharedArrayBuffer(4);
+    Atomics.wait(new Int32Array(sab), 0, 0, msec);
   },
+  // Handed to `lib/internal/util.js`; the two symbols are stable per process.
+  privateSymbols: PRIVATE_SYMBOLS,
+  constructSharedArrayBuffer: (byteLength: number): SharedArrayBuffer => new SharedArrayBuffer(byteLength),
+  // There are no file descriptors here; internal callers only use this to pick
+  // a read path, so reporting a regular file is the honest, inert answer.
+  guessHandleType: (_fd: number): string => 'FILE',
+  /**
+   * Port of `node::DefineLazyProperties` (src/node_util.cc): define one lazy
+   * data property per key whose getter requires `id` and reads `mod[key]`,
+   * caching the result after first access (matching V8's lazy data property).
+   */
+  defineLazyProperties: (
+    target: object,
+    id: string,
+    keys: string[],
+    enumerable = true,
+  ): void => {
+    for (const key of keys) {
+      let resolved = false;
+      let cached: unknown;
+      Object.defineProperty(target, key, {
+        enumerable,
+        configurable: true,
+        get(): unknown {
+          if (!resolved) {
+            const mod = ctx.requireBuiltin?.(id) as Record<string, unknown> | undefined;
+            if (mod === undefined) {
+              throw new Error(`internalBinding('util').defineLazyProperties: no require for ${id}`);
+            }
+            cached = mod[key];
+            resolved = true;
+          }
+          return cached;
+        },
+      });
+    }
+  },
+  parseEnv,
   arrayBufferViewHasBuffer: (v: ArrayBufferView): boolean => v.buffer !== undefined,
   getOwnPropertyDescriptors: (o: object) => Object.getOwnPropertyDescriptors(o),
   noSideEffectsToString: (v: unknown) => String(v),

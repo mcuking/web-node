@@ -457,4 +457,61 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     origin: 'node-source',
     deps: ['buffer', 'internal/util', 'internal/errors'],
   },
+  {
+    id: 'internal/util',
+    vendorPath: 'internal/util.js',
+    origin: 'node-source',
+    // `internal/validators` / `path` / `internal/url` / `vm` / the process
+    // helpers are only pulled in lazily from inside the functions that need
+    // them, so they are deliberately not eager deps (validators depends on this
+    // module in turn).
+    deps: ['internal/errors', 'internal/options', 'internal/assert'],
+  },
+  {
+    id: 'internal/util/diff',
+    vendorPath: 'internal/util/diff.js',
+    origin: 'node-source',
+    deps: ['internal/validators', 'internal/assert/myers_diff'],
+  },
+  {
+    id: 'internal/util/parse_args/utils',
+    vendorPath: 'internal/util/parse_args/utils.js',
+    origin: 'node-source',
+    deps: ['internal/validators'],
+  },
+  {
+    id: 'internal/util/parse_args/parse_args',
+    vendorPath: 'internal/util/parse_args/parse_args.js',
+    origin: 'node-source',
+    deps: [
+      'internal/validators',
+      'internal/util/parse_args/utils',
+      'internal/errors',
+      'internal/util',
+      'internal/options',
+    ],
+  },
+  {
+    id: 'internal/mime',
+    vendorPath: 'internal/mime.js',
+    origin: 'node-source',
+    deps: ['internal/errors'],
+  },
+  {
+    id: 'util',
+    aliases: ['node:util'],
+    vendorPath: 'util.js',
+    origin: 'node-source',
+    deps: [
+      'internal/errors',
+      'buffer',
+      'internal/util/inspect',
+      'internal/util/debuglog',
+      'internal/validators',
+      'internal/streams/utils',
+      'internal/util/types',
+      'internal/options',
+      'internal/util',
+    ],
+  },
 ];

@@ -175,4 +175,9 @@ export const uvBinding: BindingFactory = () => ({
   getLibuvNow: () => Date.now(),
   updateTime: () => undefined,
   guessHandleType: () => 'FILE',
+  // There is no libuv error table here, so the errno map is empty and every
+  // name/message lookup falls back to Node's `Unknown system error <n>` shape.
+  getErrorMap: () => new Map(),
+  getErrorMessage: (errno: number) => `Unknown system error ${errno}`,
+  errname: () => undefined,
 });

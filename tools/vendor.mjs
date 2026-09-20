@@ -26,6 +26,11 @@ const FILES = [
   'internal/util/inspect.js',
   'internal/util/colors.js',
   'internal/util/comparisons.js',
+  'internal/util.js',
+  'internal/util/diff.js',
+  'internal/util/parse_args/parse_args.js',
+  'internal/util/parse_args/utils.js',
+  'internal/mime.js',
   'internal/validators.js',
   'internal/assert.js',
   'internal/assert/assertion_error.js',
@@ -65,6 +70,7 @@ const FILES = [
   'diagnostics_channel.js',
   'string_decoder.js',
   'assert.js',
+  'util.js',
 ];
 
 /**

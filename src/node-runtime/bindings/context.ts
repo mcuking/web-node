@@ -43,6 +43,12 @@ export interface BindingContext {
   };
   now(): number;
   hrtime(): [number, number];
+  /**
+   * Resolve a builtin/internal module by id. Used only by bindings that must
+   * lazily reach another module (e.g. `defineLazyProperties`), mirroring the
+   * `Require` hook the real C++ embedder hands to V8 lazy properties.
+   */
+  requireBuiltin?(id: string): unknown;
 }
 
 export type BindingFactory = (ctx: BindingContext) => Record<string, unknown>;
