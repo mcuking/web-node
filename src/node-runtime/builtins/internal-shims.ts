@@ -378,11 +378,10 @@ export const internalErrorSourceSpec: BuiltinSpec = {
       getColumnNumber?: () => number | null;
     }
 
-    // `new Function(...)` wraps the body as
-    //   function anonymous(<params>\n) {\n<body>\n}
-    // so V8 reports body line N as N + 2. Both the vendored modules and user
-    // modules are compiled that way, so every registry entry carries the offset.
-    const FUNCTION_WRAPPER_LINES = 2;
+    // Compiled units are wrapped by `compileTagged` (a one-line indirect eval),
+    // which — unlike `new Function` — does not shift line numbers, so a frame's
+    // line is the source line as-is.
+    const FUNCTION_WRAPPER_LINES = 0;
 
     // Node reads V8's structured error positions; userland cannot. Instead we
     // read the CallSite of the frame that `Error.captureStackTrace(err, fn)`

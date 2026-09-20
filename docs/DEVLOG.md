@@ -167,13 +167,14 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 6. **`internal/util` shim 补 `setOwnProperty`**；新增 `internal/errors/error_source` shim。
 7. **`constants` binding 改成 Node 命名空间形状**：补 `os: { signals, errno, priority, dlopen, UV_UDP_REUSEADDR }`（validators 读 `internalBinding('constants').os.signals`），并把 unix 信号表补全。
 8. **`buffer` binding 补 `compare`**（comparisons 用它短路 buffer 相等），**`url` builtin 补 `isURL` / `isURLInstance`**。
-9. **编译器给每个单元打 `sourceURL` + 新增 `source-registry`**（新文件 `src/node-runtime/source-registry.ts`）：loader 给用户/依赖模块、`compileCjs` 给 vendored 模块都追加 `//# sourceURL=…` 并登记源码。收益：① **堆栈里出现真文件名**（不再是 `<anonymous>`）；② `internal/errors/error_source` 能从 CallSite 找回源码行，`assert.ok(falsy)` 于是能打印真表达式。
+9. **编译器给每个单元打 `sourceURL` + 新增 `source-registry`**（新文件 `src/node-runtime/source-registry.ts`）：loader 给用户/依赖模块、`compileCjs` 给 vendored 模块都登记源码并追加 `//# sourceURL=…`。收益：① **堆栈里出现真文件名**（不再是 `<anonymous>`）；② `internal/errors/error_source` 能从 CallSite 找回源码行，`assert.ok(falsy)` 于是能打印真表达式。
+   - 同时把编译路径从 `new Function(...params, body)` 换成 **`compileTagged`——单行 `(function(...params){ body\n//# sourceURL=url\n})` 的间接 `eval`**。原因：V8 的 `Function` 包装会吃掉两行，导致所有帧报 `line+2`（实测 `/project/index.js:3:26` 其实是第 1 行），而单行 eval 包装的偏移为 **0**，堆栈行号与源码一一对应（已加回归测试）。
 10. **新测试 `test/assert.test.ts`（7 条）**：期望值全部先跑真 Node v26.9.0 取得；覆盖相等/不等/深度 diff（逐字节 Myers 输出）/throws/match/fail/自定义消息、`assert.ok(falsy)` 的表达式还原、`util.isDeepStrictEqual` 的结构比较，以及真 validators 的报错文案。
 11. **与 Node 的差异（已在代码注释与测试里写明）**：
-    - `getErrorSourceExpression` 走的是「CallSite + sourceURL + 源码登记」这条路，而非 V8 内部的 `getErrorSourcePositions`；它没有真的 tokenizer，所以**嵌在表达式中间**的调用会返回整条语句（到 `;` / 匹配 `)` 为止），而 Node 会精确到子表达式。`new Function` 包裹会让行号偏移 **+2**，代码里显式抵消了。
+    - `getErrorSourceExpression` 走的是「CallSite + sourceURL + 源码登记」这条路，而非 V8 内部的 `getErrorSourcePositions`；它没有真的 tokenizer，所以**嵌在表达式中间**的调用会返回整条语句（到 `;` / 匹配 `)` 为止），而 Node 会精确到子表达式。
     - `HideStackFramesError` 只是别名同一个类，**不会真的隐藏栈帧**（我们无法改写已捕获的 stack）。
 
-**验证**：`tsc --noEmit` 干净 · `vitest run` **266/266**（+7）· `vite build` 绿（worker 757 → **860.74KB**）。
+**验证**：`tsc --noEmit` 干净 · `vitest run` **267/267**（+8）· `vite build` 绿（worker 757 → **860.74KB**）。
 
 **涉及文件**：`tools/vendor.mjs`、`vendor/node-lib/{assert.js,internal/assert.js,internal/assert/*,internal/util/comparisons.js,internal/util/colors.js,internal/validators.js}` + MANIFEST、`src/node-runtime/source-registry.ts`（新）、`src/node-runtime/vm.ts`、`src/node-runtime/loader/index.ts`、`src/node-runtime/bindings/{constants.ts,buffer.ts}`、`src/node-runtime/builtins/{index.ts,internal-shims.ts,util.ts,url.ts,vendored-builtins.ts}`、删除 `src/node-runtime/builtins/assert-impl.ts`、`test/assert.test.ts`（新）、`README.md`/`README_zh.md`、`docs/superpowers/specs/2026-09-17-web-node-design.md`。
 

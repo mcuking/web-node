@@ -142,6 +142,34 @@ describe('vendored: assert', () => {
     );
   });
 
+  it('attributes stack frames to the real file and line', () => {
+    const vfs = new MemoryVfs({ cwd: '/project' });
+    vfs.mkdir('/project', { recursive: true });
+    vfs.writeFile(
+      '/project/index.js',
+      new TextEncoder().encode(
+        [
+          'function f() {',
+          "  throw new Error('x');",
+          '}',
+          "try { f(); } catch (e) { console.log('L:' + e.stack.split('\\n')[1].trim()); }",
+        ].join('\n'),
+      ),
+    );
+    const out: string[] = [];
+    const runtime = new NodeRuntime({
+      vfs,
+      argv: ['/project/index.js'],
+      installGlobals: false,
+      onStdout: (c) => out.push(typeof c === 'string' ? c : new TextDecoder().decode(c as Uint8Array)),
+      onStderr: () => {},
+    });
+    runtime.runMain('/project/index.js');
+    // The throwing statement is on line 2; the frame must say so (the indirect
+    // eval wrapper in compileTagged keeps V8's line offset at zero).
+    expect(out.join('')).toBe('L:at f (/project/index.js:2:9)\n');
+  });
+
   it('gives util.isDeepStrictEqual the real structural comparison', () => {
     const { util } = boot();
     expect(util.isDeepStrictEqual({ a: 1 }, { a: 1 })).toBe(true);

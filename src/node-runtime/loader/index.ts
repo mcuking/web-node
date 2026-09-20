@@ -3,7 +3,7 @@ import type { Vfs } from '../vfs';
 import * as p from '../vfs/posix';
 import { transformEsmToCjs, EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING } from './esm-transform';
 import { notImplemented } from '../errors';
-import { registerCompiledSource } from '../source-registry';
+import { compileTagged } from '../vm';
 
 const USER_CJS_PARAMS = ['exports', 'require', 'module', '__filename', '__dirname'] as const;
 const EXTENSIONS = ['', '.js', '.cjs', '.mjs', '.json'];
@@ -446,8 +446,6 @@ export class ModuleLoader {
     // `<anonymous>` — and lets `internal/errors/error_source` recover the source
     // line for assertions like `assert.ok`.
     const sourceUrl = isEsm ? `file://${absPath}` : absPath;
-    registerCompiledSource(sourceUrl, code);
-    const taggedCode = `${code}\n//# sourceURL=${sourceUrl}`;
 
     // Real ESM has no `__filename`/`__dirname`/`require`/`exports` in scope, and
     // modules routinely declare their own (`const require = createRequire(...)`,
@@ -460,8 +458,7 @@ export class ModuleLoader {
 
     let fn: (...args: unknown[]) => void;
     try {
-      // eslint-disable-next-line no-new-func
-      fn = new Function(...params, taggedCode) as unknown as (...args: unknown[]) => void;
+      fn = compileTagged(params, code, sourceUrl) as unknown as (...args: unknown[]) => void;
     } catch (err) {
       this.#cache.delete(absPath);
       throw new Error(`Failed to compile ${absPath}: ${err instanceof Error ? err.message : String(err)}`);
