@@ -96,9 +96,10 @@ pipeline(fs.createReadStream('/project/a.txt'), new Transform({
 高水位之上的 `write()`/`push()` 返回 `false` 并在排空后发 `'drain'`（背压真实生效）。
 
 流的核心已逐步换成 **Node 真源码**（`internal/streams/state.js`、`from.js`、`utils.js`、
-`destroy.js`、`end-of-stream.js`）：默认高水位、`Readable.from`、
-`isReadable`/`isWritable`/`isDisturbed`/`isErrored`/`isDestroyed` 谓词、
-`destroy()` / `_undestroy()` 生命周期，以及 `finished()` / `eos()`。因此
+`destroy.js`、`end-of-stream.js`、`add-abort-signal.js`），`events` 也换成了真 `events.js`：
+真 `EventEmitter` 形状（`_events` / `prependListener` / `errorMonitor` /
+`captureRejections`）、默认高水位、`Readable.from`、谓词、`destroy()` / `_undestroy()`、
+`finished()` / `eos()`、`addAbortSignal()`。因此
 `destroy(err)` 会在下一 tick 依次发 `error`、`close`；`finished()` 就是真的 end-of-stream：
 吃 options（`readable`/`writable` 覆盖、`AbortSignal` → `AbortError`），“writable 未完成就
 close”会报 `ERR_STREAM_PREMATURE_CLOSE`。
@@ -232,6 +233,7 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M12 | 对齐流状态形状（`_readableState`/`_writableState`）+ 真谓词 | ✅ |
 | M13 | vendor `internal/streams/destroy.js`（真 `destroy`/`_undestroy` + `[kState]` 位域）+ `finished()` 接真谓词 | ✅ |
 | M14 | vendor `internal/streams/end-of-stream.js` —— `finished()`/`eos()` 就是真源码（options + AbortSignal） | ✅ |
+| M15 | vendor 真 `events.js`（换掉自研 EventEmitter）+ 真 `stream.addAbortSignal` | ✅ |
 
 ## 改动约定
 

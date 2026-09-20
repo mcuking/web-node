@@ -4,14 +4,22 @@ import {
   internalAbortListenerSpec,
   internalAsyncContextFrameSpec,
   internalAsyncHooksSpec,
+  internalComposeSpec,
+  internalDebuglogSpec,
   internalErrorsSpec,
   internalFsGlobSpec,
+  internalOptionsSpec,
+  internalStreamIterSpec,
+  internalStreamIterTypesSpec,
   internalUtilSpec,
   internalValidatorsSpec,
+  internalWebStreamsAdaptersSpec,
+  internalUtilInspectSpec,
+  internalEventsSymbolsSpec,
+  internalEventTargetSpec,
 } from './internal-shims';
 import { vendoredBuiltins } from './vendored-builtins';
 import { bufferSpec } from './buffer';
-import { eventsSpec } from './events';
 import { fsSpec } from './fs';
 import { fsPromisesSpec } from './fs-promises';
 import { perfHooksSpec } from './perf-hooks';
@@ -43,11 +51,19 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalAsyncHooksSpec,
   internalAsyncContextFrameSpec,
   internalAbortListenerSpec,
+  internalOptionsSpec,
+  internalDebuglogSpec,
+  internalUtilInspectSpec,
+  internalEventsSymbolsSpec,
+  internalEventTargetSpec,
+  internalComposeSpec,
+  internalWebStreamsAdaptersSpec,
+  internalStreamIterSpec,
+  internalStreamIterTypesSpec,
   // vendored real Node source
   ...vendoredBuiltins,
   // our implementations
   bufferSpec,
-  eventsSpec,
   utilSpec,
   consoleSpec,
   timersSpec,

@@ -354,6 +354,8 @@ export const streamSpec: BuiltinSpec = {
     'internal/streams/from',
     'internal/streams/utils',
     'internal/streams/destroy',
+    'internal/streams/end-of-stream',
+    'internal/streams/add-abort-signal',
   ],
   init: (ctx: BuiltinInitContext) => {
     const { EventEmitter } = ctx.require('events') as { EventEmitter: new () => EmitterLike };
@@ -1585,9 +1587,18 @@ export const streamSpec: BuiltinSpec = {
         finished(stream, options) as Promise<void>,
     };
 
-    function addAbortSignal(): never {
-      throw new Error('[web-node] stream.addAbortSignal is not implemented');
+    // Node's real addAbortSignal (internal/streams/add-abort-signal.js): an
+    // aborted signal destroys the stream with an AbortError, and the listener
+    // is detached through the vendor's own `eos(...)` cleanup hook.
+    const addAbortModule = ctx.require('internal/streams/add-abort-signal') as {
+      addAbortSignal: (signal: AbortSignal, s: unknown) => unknown;
+      addAbortSignalNoValidate: (signal: AbortSignal, s: unknown) => unknown;
+    };
+    function addAbortSignal(signal: AbortSignal, s: EmitterLike): EmitterLike {
+      return addAbortModule.addAbortSignal(signal, s) as EmitterLike;
     }
+    const addAbortSignalNoValidate = (signal: AbortSignal, s: EmitterLike): EmitterLike =>
+      addAbortModule.addAbortSignalNoValidate(signal, s) as EmitterLike;
     function compose(): never {
       throw new Error('[web-node] stream.compose is not implemented');
     }
@@ -1620,6 +1631,7 @@ export const streamSpec: BuiltinSpec = {
         PassThrough,
         pipeline,
         finished,
+        addAbortSignal,
         isDestroyed: streamUtils.isDestroyed,
         isReadable: streamUtils.isReadable,
         isWritable: streamUtils.isWritable,

@@ -18,6 +18,12 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_STREAM_NULL_VALUES: 'May not write null values to stream',
   ERR_MULTIPLE_CALLBACK: 'Callback called multiple times',
   ERR_STREAM_PREMATURE_CLOSE: 'Premature close',
+  ERR_METHOD_NOT_IMPLEMENTED: 'The %s method is not implemented',
+  ERR_STREAM_ITER_MISSING_FLAG: 'The stream/iter API requires the --experimental-stream-iter flag',
+  ERR_STREAM_PUSH_AFTER_EOF: 'stream.push() after EOF',
+  ERR_STREAM_UNSHIFT_AFTER_END_EVENT: 'stream.unshift() after end event',
+  ERR_UNHANDLED_ERROR: 'Unhandled error. (%s)',
+  ERR_UNKNOWN_ENCODING: 'Unknown encoding: %s',
   ERR_INVALID_ARG_VALUE: 'The argument \'%s\' is invalid. Received %s',
   ERR_INVALID_URI: 'URI malformed',
   ERR_OUT_OF_RANGE: 'The value of "%s" is out of range. It must be %s. Received %s',
@@ -44,6 +50,12 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_STREAM_NULL_VALUES: TypeError,
   ERR_MULTIPLE_CALLBACK: Error,
   ERR_STREAM_PREMATURE_CLOSE: Error,
+  ERR_METHOD_NOT_IMPLEMENTED: Error,
+  ERR_STREAM_ITER_MISSING_FLAG: TypeError,
+  ERR_STREAM_PUSH_AFTER_EOF: Error,
+  ERR_STREAM_UNSHIFT_AFTER_END_EVENT: Error,
+  ERR_UNHANDLED_ERROR: Error,
+  ERR_UNKNOWN_ENCODING: TypeError,
   ERR_UNKNOWN_FILE_EXTENSION: TypeError,
   ERR_UNSUPPORTED_ESM_URL_SCHEME: TypeError,
 };
@@ -82,6 +94,9 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
     return `The ${type} '${name}' ${reason ?? 'is invalid'}. Received ${inspectArg(value)}`;
   },
   ERR_INVALID_ARG_TYPE: formatInvalidArgType,
+  // Node's builder drops the parenthesised detail when nothing was passed.
+  ERR_UNHANDLED_ERROR: (args) =>
+    args.length === 0 || args[0] === undefined ? 'Unhandled error.' : `Unhandled error. (${String(args[0])})`,
 };
 
 function formatError(code: string, args: unknown[]): string {
@@ -249,6 +264,10 @@ function createErrorsBindingContext(): Record<string, unknown> {
     exceptionWithHostPort: (err: unknown) => err,
     connResetException: (msg: string) => new NodeError('ECONNRESET', msg),
     setErrorSource: () => undefined,
+    // events.js builds its "leak detected" warning through these two.
+    genericNodeError: (message: string, errorProperties?: Record<string, unknown>): Error =>
+      Object.assign(new Error(message), errorProperties),
+    kEnhanceStackBeforeInspector: Symbol('kEnhanceStackBeforeInspector'),
   };
 }
 
@@ -360,6 +379,11 @@ export const internalUtilSpec: BuiltinSpec = {
 
     return {
       kEmptyObject: Object.freeze({}),
+      // Node's in-place removal used by EventEmitter's listener lists.
+      spliceOne: (list: unknown[], index: number): void => {
+        for (let i = index; i + 1 < list.length; i++) list[i] = list[i + 1];
+        list.pop();
+      },
       isWindows: false,
       isMacOS: false,
       isLinux: true,
@@ -384,6 +408,175 @@ export const internalUtilSpec: BuiltinSpec = {
       toUSVString: (s: string) => s,
     };
   },
+};
+
+// ---------------------------------------------------------------------------
+// internal/options
+// ---------------------------------------------------------------------------
+//
+// The runtime is not driven by CLI flags, so every option reads as its default
+// (a boolean flag is off). Only the flags vendored source actually probes need
+// to answer; anything else is an unknown option and throws, like Node would.
+
+const OPTION_DEFAULTS: Record<string, unknown> = {
+  '--experimental-stream-iter': false,
+  '--experimental-stream-iter-compat': false,
+  '--no-deprecation': false,
+  '--trace-deprecation': false,
+  '--throw-deprecation': false,
+  '--pending-deprecation': false,
+};
+
+export const internalOptionsSpec: BuiltinSpec = {
+  id: 'internal/options',
+  origin: 'web-node',
+  init: () => ({
+    getOptionValue: (name: string): unknown => {
+      if (name in OPTION_DEFAULTS) return OPTION_DEFAULTS[name];
+      throw notImplemented('api', `getOptionValue('${name}')`, 'The runtime is not configurable by CLI flags.');
+    },
+    getOptions: () => OPTION_DEFAULTS,
+  }),
+};
+
+// ---------------------------------------------------------------------------
+// internal/util/debuglog
+// ---------------------------------------------------------------------------
+//
+// `NODE_DEBUG=stream` based logging has no equivalent here, so `debuglog()`
+// returns the same inert function Node does when the section is not enabled
+// (callers invoke it as `debug(...)` and move on).
+
+export const internalDebuglogSpec: BuiltinSpec = {
+  id: 'internal/util/debuglog',
+  origin: 'web-node',
+  init: () => {
+    const noop = (): void => undefined;
+    return {
+      // Node never invokes the callback while the section is disabled; it only
+      // hands over the live logger once logging is first switched on.
+      debuglog: (_section: string, _cb?: (fn: () => void) => void): ((...a: unknown[]) => void) => {
+        const logger = (..._args: unknown[]): void => undefined;
+        Object.defineProperty(logger, 'enabled', { value: false, configurable: true, enumerable: true });
+        return logger;
+      },
+      format: (): string => '',
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Unimplemented Node internals reached only by lazy feature paths
+// ---------------------------------------------------------------------------
+//
+// `compose`, the Web Streams adapters and the experimental stream/iter bridge are
+// all loaded on demand. They stay explicit throws so a caller that reaches them
+// sees why, instead of a silent `undefined`.
+
+export const internalComposeSpec: BuiltinSpec = {
+  id: 'internal/streams/compose',
+  origin: 'web-node',
+  init: () =>
+    new Proxy(
+      {},
+      {
+        get: (): never => {
+          throw notImplemented('api', 'stream.compose', 'compose is outside the MVP whitelist.');
+        },
+      },
+    ),
+};
+
+export const internalWebStreamsAdaptersSpec: BuiltinSpec = {
+  id: 'internal/webstreams/adapters',
+  origin: 'web-node',
+  init: () =>
+    new Proxy(
+      {},
+      {
+        get: (): never => {
+          throw notImplemented('api', 'Readable.fromWeb / toWeb', 'Web Stream adapters are outside the MVP whitelist.');
+        },
+      },
+    ),
+};
+
+export const internalStreamIterSpec: BuiltinSpec = {
+  id: 'internal/streams/iter/classic',
+  origin: 'web-node',
+  init: () =>
+    new Proxy(
+      {},
+      {
+        get: (): never => {
+          throw notImplemented('api', 'stream/iter', 'The --experimental-stream-iter API is not implemented.');
+        },
+      },
+    ),
+};
+
+export const internalStreamIterTypesSpec: BuiltinSpec = {
+  id: 'internal/streams/iter/types',
+  origin: 'web-node',
+  init: () =>
+    new Proxy(
+      {},
+      {
+        get: (): never => {
+          throw notImplemented('api', 'stream/iter', 'The --experimental-stream-iter API is not implemented.');
+        },
+      },
+    ),
+};
+
+// ---------------------------------------------------------------------------
+// internal/util/inspect
+// ---------------------------------------------------------------------------
+//
+// Node's inspect lives in its own 2000-line module. The vendored files that want
+// it (events.js, and the stream sources next) only format short values for error
+// messages, so this reuses the runtime's public `util.inspect`.
+
+export const internalUtilInspectSpec: BuiltinSpec = {
+  id: 'internal/util/inspect',
+  origin: 'web-node',
+  deps: ['util'],
+  init: (ctx: BuiltinInitContext) => {
+    const util = ctx.require('util') as { inspect: (v: unknown, o?: unknown) => string };
+    return {
+      inspect: (value: unknown, opts?: unknown): string => util.inspect(value, opts),
+      // Used to elide a run of repeated stack frames; `null` just means "no run".
+      identicalSequenceRange: (): null => null,
+      formatWithOptions: (_o: unknown, f: string, ...a: unknown[]): string =>
+        [f, ...a].map((x) => (typeof x === 'string' ? x : util.inspect(x))).join(' '),
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// internal/event_target
+// ---------------------------------------------------------------------------
+//
+// There is no Web `EventTarget` in this realm yet; callers gate on
+// `isEventTarget()` anyway, so answering `false` keeps their non-EventTarget
+// path (the common one) intact.
+
+export const internalEventTargetSpec: BuiltinSpec = {
+  id: 'internal/event_target',
+  origin: 'web-node',
+  init: () => ({
+    isEventTarget: (): boolean => false,
+    kEvents: Symbol('kEvents'),
+    kResistStopPropagation: Symbol('kResistStopPropagation'),
+  }),
+};
+
+export const internalEventsSymbolsSpec: BuiltinSpec = {
+  id: 'internal/events/symbols',
+  origin: 'web-node',
+  init: () => ({
+    kFirstEventParam: Symbol('kFirstEventParam'),
+  }),
 };
 
 // ---------------------------------------------------------------------------

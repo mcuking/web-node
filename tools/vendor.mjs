@@ -27,6 +27,11 @@ const FILES = [
   'internal/streams/utils.js',
   'internal/streams/destroy.js',
   'internal/streams/end-of-stream.js',
+  'internal/streams/legacy.js',
+  'internal/streams/add-abort-signal.js',
+  'internal/streams/readable.js',
+  'internal/fixed_queue.js',
+  'events.js',
   'path.js',
   'querystring.js',
 ];

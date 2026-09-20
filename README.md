@@ -177,11 +177,14 @@ pipeline(fs.createReadStream('/project/a.txt'), new Transform({
 above the high-water mark and emit `'drain'` once the buffer empties, so
 backpressure propagates for real instead of buffering whole bodies in memory.
 
-Several pieces of Node's own stream core are vendored and executed as-is
-(`internal/streams/state.js`, `from.js`, `utils.js`, `destroy.js`,
-`end-of-stream.js`): the default high-water marks, `Readable.from`, the
+Several pieces of Node's own core are vendored and executed as-is
+(`events.js`, and in the stream layer `internal/streams/state.js`, `from.js`,
+`utils.js`, `destroy.js`, `end-of-stream.js`, `add-abort-signal.js`): the real
+`EventEmitter` (its `_events` shape, `prependListener`, `errorMonitor`,
+`captureRejections`), the default high-water marks, `Readable.from`, the
 `isReadable`/`isWritable`/`isDisturbed`/`isErrored`/`isDestroyed` predicates,
-the `destroy()` / `_undestroy()` lifecycle, and `finished()` / `eos()`.
+the `destroy()` / `_undestroy()` lifecycle, `finished()` / `eos()`, and
+`addAbortSignal()`.
 `destroy(err)` therefore emits `error` then `close` on the next tick, and
 `finished()` is the real end-of-stream: it takes the options object
 (`readable`/`writable` overrides, an `AbortSignal` → `AbortError`) and rejects a
@@ -327,6 +330,7 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M12 | Align the stream state shape (`_readableState`/`_writableState`) + real predicates | ✅ Done |
 | M13 | Vendor `internal/streams/destroy.js` (real `destroy`/`_undestroy` + `[kState]` bits) and run `finished()` on the real predicates | ✅ Done |
 | M14 | Vendor `internal/streams/end-of-stream.js` — `finished()`/`eos()` are the real source, options + AbortSignal included | ✅ Done |
+| M15 | Vendor Node's real `events.js` (replacing the custom EventEmitter) + the real `stream.addAbortSignal` | ✅ Done |
 
 ## Contributing
 

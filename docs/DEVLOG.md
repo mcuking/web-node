@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**（`destroy`/`_undestroy` + `[kState]` 位域适配）；M14 再把 **`internal/streams/end-of-stream.js` 接进来**——`finished()` 就是 Node 的真实现（options 对象、AbortSignal、`ERR_STREAM_PREMATURE_CLOSE`）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**；M14 再把 **`internal/streams/end-of-stream.js` 接进来**（`finished()` 就是真实现）；M15 换掉自研 `EventEmitter`，改用 **Node 真 `events.js`**（`_events` 形状 / `prependListener` / `errorMonitor` / `captureRejections`），并把 `stream.addAbortSignal` 接到真源码。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -40,11 +40,12 @@
 | M12 | **对齐流状态形状**（`_readableState`/`_writableState`）+ 真源码谓词 | ✅ 完成 |
 | M13 | **vendor `internal/streams/destroy.js`**（真 `destroy`/`_undestroy` + `[kState]` 位域）+ `finished()` 接真谓词 | ✅ 完成 |
 | M14 | **vendor `internal/streams/end-of-stream.js`**（真 `eos`/`finished`，含 options + AbortSignal）| ✅ 完成 |
+| M15 | **vendor Node 真 `events.js`**（替换自研 EventEmitter）+ 真 `stream.addAbortSignal`；`internal/streams/readable.js` 已 vendor 并就绪 | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **193/193 通过** · `vite build` 绿（worker ~357KB / index ~10.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **210/210 通过** · `vite build` 绿（worker ~468KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -122,15 +123,52 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **真 `internal/streams/readable.js` 接入**：`_readableState`/`_writableState` 与 `[kState]` 已就位，可以开始把 `Readable.prototype` 的真实现搬进来（先从 `pipe`/`unpipe`/`resume` 这些不依赖 `async_hooks` 的方法切）。
-2. **给 `internal/async_hooks` 一个真实（哪怕最小）实现**，让 vendored 代码能走 `AsyncResource` 分支（end-of-stream 现在只能走 `enabledHooksExist() === false` 那条路）。
+1. **把整套 stream 换成真 Node 源码**（readable 已 vendor 并验证可跑）：要一次拉入 `writable.js` / `duplex.js` / `transform.js` / `passthrough.js` / `pipeline.js` / `duplexpair.js` / `operators.js` / `lib/stream.js`。已确认还缺的 shim：`internal/util.assignFunctionName`、`internal/abort_controller`（用全局 `AbortController`/`AbortSignal`）、`internal/buffer`（`FastBuffer`）、`internal/util/types`（`isArrayBufferView`/`isUint8Array`）、`internal/assert`、`internal/streams/duplexify`。这是**一次原子替换**，做完才能删掉现有手写 stream（~1650 行）。
+2. **给 `internal/async_hooks` 一个真实（哪怕最小）实现**，让 vendored 代码能走 `AsyncResource` 分支（end-of-stream / readable 现在都只能走 `enabledHooksExist() === false` 那条路）。
 3. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 4. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
 5. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
+6. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M15 因此 +110KB）；若在意体积，可改成按文件 code-split。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M15 换成真 `events.js`（并探清 stream 整模块替换的完整依赖）
+
+**目标**：继续把 stream 家族换成真 Node 源码。原计划直接 vendor `internal/streams/readable.js`，而实测发现一个关键前置：
+
+> **readable.js 直接写 `this._events = {...}` 并调 `Stream.call(this, options)`**（legacy.js → `EE.call(this)`）。它用的是 Node 真 EventEmitter 的 `_events` 存储，而我们自研的 EventEmitter 是 Map + 私有字段（`#events`）——用 `.call()` 调用会直接报 `Class constructor EventEmitter cannot be invoked without 'new'`，而 `_events` 也根本不存在。
+
+所以这条路只能从地基开始：**先换 EventEmitter**。
+
+**改了什么**
+
+1. **新增真源码 `events.js`，删掉自研 `src/node-runtime/builtins/events.ts`**。公开 `events` / `node:events` 现在就是 Node 的 EventEmitter：真的 `_events` / `_eventsCount` 形状、`prependListener` 顺序、`errorMonitor`、`captureRejections`、`newListener`/`removeListener` 时序、`once`/`on` 静态辅助、`setMaxListeners`/`eventNames` 等。
+2. **新增真源码 `internal/streams/add-abort-signal.js`**，并把 `stream.addAbortSignal`（之前直接抛 `not implemented`）接到它。现在：已 aborted → 立即 `AbortError/ABORT_ERR` destroy；飞行中 abort → 同样；非 signal / 非 stream 参数报真 `ERR_INVALID_ARG_TYPE`。
+3. **新增 vendored 前置**：`internal/streams/legacy.js`、`internal/fixed_queue.js`、`internal/streams/readable.js`。其中 **`readable.js` 已 vendor 并实测可在本运行时运行**（`new Readable()`、精确 `read(n)`、`data`/`end` 事件全对），距“成为 `stream.Readable`”只差把它所在的整块一起换掉（见下一步）。
+4. **新增/补齐 shim**：`internal/options`（`getOptionValue`）、`internal/util/debuglog`（恒返回禁用态的 logger，**不调用回调**，与 Node 一致）、`internal/util/inspect`、`internal/event_target`、`internal/events/symbols`、`internal/streams/compose`（显式抛未实现）、`internal/webstreams/adapters`、`internal/streams/iter/*`；`internal/util` 补 `spliceOne`；`internal/errors` 补 `ERR_UNHANDLED_ERROR`、`ERR_METHOD_NOT_IMPLEMENTED`、`ERR_UNKNOWN_ENCODING`、`ERR_STREAM_PUSH_AFTER_EOF`、`ERR_STREAM_UNSHIFT_AFTER_END_EVENT`、`ERR_STREAM_ITER_MISSING_FLAG` 与 `genericNodeError` / `kEnhanceStackBeforeInspector`。
+
+**为什么**
+
+- 自研 EventEmitter 是底座：`fs`/`http`/`net`/`child_process`/`stream` 全都坐在它上面。换成真源码后，所有事件语义（包括 `captureRejections` 这类微妙的）自动对齐 Node，且是后续 vendor `readable.js`/`writable.js`/`net.js` 的硬前置。
+
+**代价 / 取舍**
+
+- `vendored.ts` 用 eager `import.meta.glob`，所以每个 vendor 文件都进 bundle。M15 后 worker 从 ~357KB 长到 **~468KB**（events.js 36KB + readable.js 62KB + 几个小文件）。readable.js 目前是“已就绪未接入”，這 62KB 暂时是预付成本；已在「下一步」里记了把它改按需加载的选项。
+
+**验证**（期望值全部先跑真 Node v22.19.0 实测）
+
+- 单测：193 → **210**（新增 `test/events.test.ts` 10 条、`test/stream-add-abort-signal.test.ts` 4 条、`test/vendored-readable.test.ts` 3 条）。
+- 浏览器端到端（本机 5199 + Chrome CDP）打印：`events     : prepend then on (maxListeners=10)`、`abortsignal: AbortError / ABORT_ERR`。
+
+**踩坑**
+
+- 又踩了「模板字面量内禁反引号」：给 `src/demo-project.ts` 的 `index.js` 模板加注释时写了 `` `events` ``，导致 TS 把后面的模板全解析错（报一串 `';' expected`）。已记入 MEMORY。
+
+**涉及文件**
+
+新增：`vendor/node-lib/events.js`、`vendor/node-lib/internal/streams/legacy.js`、`internal/streams/add-abort-signal.js`、`internal/streams/readable.js`、`internal/fixed_queue.js`（+ MANIFEST）；`test/events.test.ts`、`test/stream-add-abort-signal.test.ts`、`test/vendored-readable.test.ts`。删除：`src/node-runtime/builtins/events.ts`。修改：`tools/vendor.mjs`、`src/node-runtime/builtins/vendored-builtins.ts`、`src/node-runtime/builtins/internal-shims.ts`、`src/node-runtime/builtins/index.ts`、`src/node-runtime/builtins/stream.ts`、`src/demo-project.ts`。
 
 ### 2026-09-20 · M14 接真源码 `internal/streams/end-of-stream.js`
 

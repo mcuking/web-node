@@ -184,6 +184,25 @@ console.log(
   });
   w.end('done');
 })();
+// events is Node's real events.js (not a Map-backed shim): prependListener
+// really pre-empts, and captureRejections routes a rejected listener to error.
+// stream.addAbortSignal is the real internal/streams/add-abort-signal.js.
+(function () {
+  const EventEmitter = require('events');
+  const ee = new EventEmitter();
+  const order = [];
+  ee.on('x', function () { order.push('on'); });
+  ee.prependListener('x', function () { order.push('prepend'); });
+  ee.emit('x');
+  console.log('events     : ' + order.join(' then ') + ' (maxListeners=' + ee.getMaxListeners() + ')');
+
+  const stream = require('stream');
+  const r = new stream.Readable({ read: function () {} });
+  const ac = new AbortController();
+  r.on('error', function (e) { console.log('abortsignal: ' + e.name + ' / ' + e.code); });
+  stream.addAbortSignal(ac.signal, r);
+  ac.abort();
+})();
 const factsFile = path.join(dir, 'facts.txt');
 fs.writeFileSync(factsFile, require('./lib/facts.js')().map(function (r) {
   return r[0] + ' = ' + r[1];
@@ -846,6 +865,9 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
   internal/streams/end-of-stream.js, so it honours the options object (readable/
   writable overrides, an AbortSignal → AbortError) and rejects a close that beats
   the writable half with ERR_STREAM_PREMATURE_CLOSE
+- **Events** — events is Node's real events.js (the _events/_eventsCount shape,
+  prependListener, errorMonitor, captureRejections, the once/on helpers), and
+  stream.addAbortSignal is the real internal/streams/add-abort-signal.js
 - **Chunked transfer-encoding** — a response without Content-Length streams as chunked,
   and the client side de-chunks it again
 - **npm client (milestone 4)** — "Install deps" fetches the dependencies declared in
