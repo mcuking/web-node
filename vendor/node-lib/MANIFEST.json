@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-20T10:05:01.112Z",
+  "generatedAt": "2026-09-20T10:40:00.453Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -75,6 +75,62 @@
       "sha256": "7b74ae53ab97992ebc61744f76dfc84e4a3e4a40552f0d14a2a3b887d68430eb",
       "upstreamSha256": "7b74ae53ab97992ebc61744f76dfc84e4a3e4a40552f0d14a2a3b887d68430eb",
       "bytes": 18443,
+      "patches": []
+    },
+    {
+      "path": "internal/trace_events.js",
+      "sha256": "a74f0b08f5de1c5f6d1faa44274c77cdf7c3b7adb7204bdcb797b2e53df785ee",
+      "upstreamSha256": "a74f0b08f5de1c5f6d1faa44274c77cdf7c3b7adb7204bdcb797b2e53df785ee",
+      "bytes": 1896,
+      "patches": []
+    },
+    {
+      "path": "internal/util/debuglog.js",
+      "sha256": "5425cf1e4c96958f6eeb848addabb42c6ba4d23cb7bcd70e201ee53fa1b85164",
+      "upstreamSha256": "5425cf1e4c96958f6eeb848addabb42c6ba4d23cb7bcd70e201ee53fa1b85164",
+      "bytes": 12550,
+      "patches": []
+    },
+    {
+      "path": "internal/cli_table.js",
+      "sha256": "2fe1a0ac73f6101f581a70e266ba72c6a45d3260ee0d0dec024d01ee398525ca",
+      "upstreamSha256": "2fe1a0ac73f6101f581a70e266ba72c6a45d3260ee0d0dec024d01ee398525ca",
+      "bytes": 2887,
+      "patches": []
+    },
+    {
+      "path": "internal/readline/utils.js",
+      "sha256": "a0b8b7cb13da3df61bade053aebdd15d031ca8767399f726f047bcb5692d0faf",
+      "upstreamSha256": "a0b8b7cb13da3df61bade053aebdd15d031ca8767399f726f047bcb5692d0faf",
+      "bytes": 12782,
+      "patches": []
+    },
+    {
+      "path": "internal/readline/callbacks.js",
+      "sha256": "af9b691f147976bca019361b7be1095c7ef8c059353cd948e518327f2b3d6f8f",
+      "upstreamSha256": "af9b691f147976bca019361b7be1095c7ef8c059353cd948e518327f2b3d6f8f",
+      "bytes": 2754,
+      "patches": []
+    },
+    {
+      "path": "internal/console/constructor.js",
+      "sha256": "8bd0572039fd9ce33e432ad25897f01218d58dc9d3a6a0d5f79d793bba0cf674",
+      "upstreamSha256": "8bd0572039fd9ce33e432ad25897f01218d58dc9d3a6a0d5f79d793bba0cf674",
+      "bytes": 22130,
+      "patches": []
+    },
+    {
+      "path": "internal/console/global.js",
+      "sha256": "3822573834e98586cf342c37ff92e0b03eeefdb859e15f722e324b062ff04a0e",
+      "upstreamSha256": "3822573834e98586cf342c37ff92e0b03eeefdb859e15f722e324b062ff04a0e",
+      "bytes": 1880,
+      "patches": []
+    },
+    {
+      "path": "console.js",
+      "sha256": "5a90c73a304c10ef51adf6c82e25b757f567eaff5e007093a2ca4fe05c309044",
+      "upstreamSha256": "5a90c73a304c10ef51adf6c82e25b757f567eaff5e007093a2ca4fe05c309044",
+      "bytes": 1202,
       "patches": []
     },
     {

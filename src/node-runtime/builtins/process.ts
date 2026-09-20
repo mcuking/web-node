@@ -27,24 +27,28 @@ export const processSpec: BuiltinSpec = {
     const hooks = () => (asyncHooks ??= ctx.require('internal/async_hooks') as typeof asyncHooks)!;
 
     function makeStream(write: (s: string) => void, isTTY: boolean) {
-      return {
-        write(chunk: unknown, _enc?: unknown, cb?: () => void): boolean {
-          write(typeof chunk === 'string' ? chunk : String(chunk));
-          if (typeof cb === 'function') queueMicrotask(cb);
-          return true;
-        },
-        end(chunk?: unknown, cb?: () => void): void {
-          if (chunk !== undefined) this.write(chunk);
-          if (typeof cb === 'function') queueMicrotask(cb);
-        },
-        isTTY,
-        columns: 80,
-        rows: 24,
-        on: () => undefined,
-        once: () => undefined,
-        emit: () => false,
-        setDefaultEncoding: () => undefined,
+      // `process.stdout`/`process.stderr` are real Writables, like Node's — the
+      // vendored console writes through `stream.write(string, cb)` and probes
+      // `listenerCount('error')`/`once`/`removeListener`, so a bare object with a
+      // `write` method is not enough. `_write` drains synchronously (this is a
+      // file-like sync sink, not a pipe).
+      const { Writable } = ctx.require('stream') as {
+        Writable: new (opts: { write: (chunk: unknown, enc: string, cb: () => void) => void }) => {
+          isTTY: boolean;
+          columns: number;
+          rows: number;
+        };
       };
+      const stream = new Writable({
+        write(chunk, _enc, cb) {
+          write(typeof chunk === 'string' ? chunk : String(chunk));
+          cb();
+        },
+      });
+      stream.isTTY = isTTY;
+      stream.columns = 80;
+      stream.rows = 24;
+      return stream;
     }
 
     /**
@@ -122,8 +126,24 @@ export const processSpec: BuiltinSpec = {
       release = { name: 'node', sourceUrl: '', headersUrl: '' };
       config = { variables: {}, target_defaults: {}, ...({} as Record<string, unknown>) };
       allowedNodeEnvironmentFlags = new Set<string>();
-      stdout = makeStream(binding.writeStdout, false);
-      stderr = makeStream(binding.writeStderr, false);
+      #stdout?: Record<string, unknown>;
+      #stderr?: Record<string, unknown>;
+      // Lazily built so requiring `stream` does not happen while `process` is
+      // still being constructed (the real Node process exposes these as getters
+      // for the same reason). The setters exist because the spawn host assigns a
+      // pipe-backed stream onto a child's `process.stdout`/`stderr`.
+      get stdout(): Record<string, unknown> {
+        return (this.#stdout ??= makeStream(binding.writeStdout, false) as unknown as Record<string, unknown>);
+      }
+      set stdout(value: Record<string, unknown>) {
+        this.#stdout = value;
+      }
+      get stderr(): Record<string, unknown> {
+        return (this.#stderr ??= makeStream(binding.writeStderr, false) as unknown as Record<string, unknown>);
+      }
+      set stderr(value: Record<string, unknown>) {
+        this.#stderr = value;
+      }
       stdin = new StdinStream();
 
       cwd(): string {

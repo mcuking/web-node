@@ -26,6 +26,14 @@ const FILES = [
   'internal/perf/utils.js',
   'internal/event_target.js',
   'internal/abort_controller.js',
+  'internal/trace_events.js',
+  'internal/util/debuglog.js',
+  'internal/cli_table.js',
+  'internal/readline/utils.js',
+  'internal/readline/callbacks.js',
+  'internal/console/constructor.js',
+  'internal/console/global.js',
+  'console.js',
   'internal/util/types.js',
   'internal/util/inspect.js',
   'internal/util/colors.js',
@@ -76,7 +84,6 @@ const FILES = [
   'assert.js',
   'util.js',
 ];
-
 /**
  * Documented, minimal patches applied to vendored source.
  * Every patch is recorded in the manifest so provenance stays auditable.

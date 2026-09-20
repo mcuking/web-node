@@ -62,6 +62,8 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_PARSE_ARGS_UNKNOWN_OPTION: "Unknown option '%s'",
   ERR_EVENT_RECURSION: 'The event "%s" is already being dispatched',
   ERR_MISSING_OPTION: '%s is required',
+  ERR_CONSOLE_WRITABLE_STREAM: 'Console expects a writable stream instance for %s',
+  ERR_INCOMPATIBLE_OPTION_PAIR: 'Option "%s" cannot be used in combination with option "%s"',
 };
 
 /**
@@ -114,6 +116,8 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_PARSE_ARGS_UNKNOWN_OPTION: TypeError,
   ERR_EVENT_RECURSION: Error,
   ERR_MISSING_OPTION: TypeError,
+  ERR_CONSOLE_WRITABLE_STREAM: TypeError,
+  ERR_INCOMPATIBLE_OPTION_PAIR: TypeError,
 };
 
 class NodeError extends Error {
@@ -586,32 +590,6 @@ export const internalOptionsSpec: BuiltinSpec = {
     },
     getOptions: () => OPTION_DEFAULTS,
   }),
-};
-
-// ---------------------------------------------------------------------------
-// internal/util/debuglog
-// ---------------------------------------------------------------------------
-//
-// `NODE_DEBUG=stream` based logging has no equivalent here, so `debuglog()`
-// returns the same inert function Node does when the section is not enabled
-// (callers invoke it as `debug(...)` and move on).
-
-export const internalDebuglogSpec: BuiltinSpec = {
-  id: 'internal/util/debuglog',
-  origin: 'web-node',
-  init: () => {
-    const noop = (): void => undefined;
-    return {
-      // Node never invokes the callback while the section is disabled; it only
-      // hands over the live logger once logging is first switched on.
-      debuglog: (_section: string, _cb?: (fn: () => void) => void): ((...a: unknown[]) => void) => {
-        const logger = (..._args: unknown[]): void => undefined;
-        Object.defineProperty(logger, 'enabled', { value: false, configurable: true, enumerable: true });
-        return logger;
-      },
-      format: (): string => '',
-    };
-  },
 };
 
 // ---------------------------------------------------------------------------

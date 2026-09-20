@@ -273,7 +273,26 @@ export class NodeRuntime {
     );
 
     this.process = this.realm.require('process') as Record<string, unknown>;
+    // Node seeds `NODE_DEBUG` handling from `internal/process/pre_execution.js`
+    // before any user code runs. Now that `internal/util/debuglog` is the real
+    // vendored module, the same initialisation is required here — otherwise the
+    // first `debug(...)` call touches an uninitialised `debugImpls` and throws.
+    (
+      this.realm.require('internal/util/debuglog') as { initializeDebugEnv: (env?: string) => void }
+    ).initializeDebugEnv((this.process.env as Record<string, string | undefined> | undefined)?.NODE_DEBUG);
     this.console = this.realm.require('console') as Record<string, unknown>;
+    // Node's `initializeGlobalConsole` (internal/process/pre_execution.js) binds the
+    // global console's streams lazily to `process`. We do the same binding, but
+    // with *our* sandbox process: vendored modules read the free `process` global,
+    // which under Node/Vitest is the host process (tests run with
+    // `installGlobals: false`), so letting the module pick it up would route console
+    // output to the host instead of the runtime's stdout sink. The snapshot/
+    // inspector half of `initializeGlobalConsole` is a no-op here (`hasInspector`
+    // is false), so only this step is reproduced.
+    const consoleConstructor = this.realm.require('internal/console/constructor') as {
+      kBindStreamsLazy: symbol;
+    };
+    (this.console as Record<symbol, (object: unknown) => void>)[consoleConstructor.kBindStreamsLazy](this.process);
     this.Buffer = (this.realm.require('buffer') as { Buffer: unknown }).Buffer;
 
     // Node's bootstrap hands `internal/async_hooks`' `nativeHooks` to the

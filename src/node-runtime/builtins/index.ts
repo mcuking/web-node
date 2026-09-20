@@ -4,7 +4,6 @@ import {
   internalAbortListenerSpec,
   internalBlobSpec,
   internalBufferSpec,
-  internalDebuglogSpec,
   internalEncodingSpec,
   internalErrorsSpec,
   internalErrorSourceSpec,
@@ -28,7 +27,6 @@ import { cryptoSpec } from './crypto';
 import { urlSpec } from './url';
 import { dnsSpec, dnsPromisesSpec } from './dns';
 import { unsupportedSpecs } from './unsupported';
-import { consoleSpec } from './console';
 import { timersSpec } from './timers';
 import { processSpec } from './process';
 import { osSpec } from './os';
@@ -51,7 +49,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalAbortListenerSpec,
   internalJsTransferableSpec,
   internalOptionsSpec,
-  internalDebuglogSpec,
   internalEncodingSpec,
   internalTraceSigintSpec,
   internalEventsSymbolsSpec,
@@ -62,7 +59,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   ...vendoredBuiltins,
   // our implementations
   bufferSpec,
-  consoleSpec,
   timersSpec,
   processSpec,
   osSpec,

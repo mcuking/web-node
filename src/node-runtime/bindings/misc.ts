@@ -1,6 +1,24 @@
 import type { BindingFactory } from './context';
 import { notImplemented } from '../errors';
 
+/** `trace_events` binding: this runtime does not emit V8 trace events. */
+export const traceEventsBinding: BindingFactory = () => ({
+  // `usePerfetto` picks the category/marker encoding; both are valid, and the
+  // no-Perfetto branch is what a plain `trace()` call expects.
+  usePerfetto: false,
+  // `internal/trace_events` keeps one of these per category and only consults
+  // byte 0 to decide whether an event is enabled. One zeroed byte per call means
+  // "always disabled", so `trace()` stays a no-op without lying about it.
+  getCategoryEnabledBuffer: () => new Uint8Array(1),
+  trace: () => undefined,
+  getCategoryEnabledBufferSize: () => 1,
+});
+
+/** `inspector` binding: reached only from `initializeGlobalConsole` (unused). */
+export const inspectorBinding: BindingFactory = () => ({
+  console: {},
+});
+
 /** `symbols` binding: internal symbols shared across internal Node modules. */
 export const symbolsBinding: BindingFactory = () => {
   // Memoised so repeated reads of the same symbol name stay identical
@@ -196,7 +214,6 @@ export const icuBinding: BindingFactory = () => ({
   hasSmallICU: () => false,
 });
 
-/** `messaging` binding: only enough to satisfy internal code paths we ship. */
 /** `messaging` binding: the DOM-side surface (DOMException, structuredClone). */
 export const messagingBinding: BindingFactory = () => ({
   setDeserializeMainFunction: () => undefined,

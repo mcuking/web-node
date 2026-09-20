@@ -580,6 +580,9 @@ export function createProcessHost(deps: ProcessHostDeps): ProcessHost {
         on: () => stream,
         once: () => stream,
         off: () => stream,
+        addListener: () => stream,
+        removeListener: () => stream,
+        listenerCount: () => 0,
         emit: () => false,
         setDefaultEncoding: () => stream,
       };

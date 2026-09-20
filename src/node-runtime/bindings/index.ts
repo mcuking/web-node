@@ -14,12 +14,14 @@ import {
   diagnosticsChannelBinding,
   errorsBinding,
   icuBinding,
+  inspectorBinding,
   messagingBinding,
   osBinding,
   performanceBinding,
   processMethodsBinding,
   symbolsBinding,
   taskQueueBinding,
+  traceEventsBinding,
   uvBinding,
 } from './misc';
 import { stringDecoderBinding } from './string_decoder';
@@ -44,6 +46,8 @@ const REGISTRY: Record<string, (ctx: BindingContext) => Record<string, unknown>>
   uv: uvBinding,
   diagnostics_channel: diagnosticsChannelBinding,
   task_queue: taskQueueBinding,
+  trace_events: traceEventsBinding,
+  inspector: inspectorBinding,
   async_wrap: asyncWrapBinding,
   async_context_frame: asyncContextFrameBinding,
 };

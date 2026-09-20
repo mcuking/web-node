@@ -82,6 +82,63 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     origin: 'node-source',
   },
   {
+    id: 'internal/trace_events',
+    vendorPath: 'internal/trace_events.js',
+    origin: 'node-source',
+    // Pure JS over the `trace_events` binding (which we make inert).
+    deps: ['internal/constants'],
+  },
+  {
+    id: 'internal/util/debuglog',
+    vendorPath: 'internal/util/debuglog.js',
+    origin: 'node-source',
+    // `internal/util/colors` is only pulled while actually logging.
+    deps: ['internal/trace_events', 'internal/util/inspect'],
+  },
+  {
+    id: 'internal/cli_table',
+    vendorPath: 'internal/cli_table.js',
+    origin: 'node-source',
+    deps: ['internal/util/inspect'],
+  },
+  {
+    id: 'internal/readline/utils',
+    vendorPath: 'internal/readline/utils.js',
+    origin: 'node-source',
+  },
+  {
+    id: 'internal/readline/callbacks',
+    vendorPath: 'internal/readline/callbacks.js',
+    origin: 'node-source',
+    deps: ['internal/errors', 'internal/readline/utils', 'internal/validators'],
+  },
+  {
+    id: 'internal/console/constructor',
+    vendorPath: 'internal/console/constructor.js',
+    origin: 'node-source',
+    // Node lazily pulls `internal/util/colors` (on first write), `internal/cli_table`
+    // (on `table()`), `internal/readline/callbacks` (on `clear()`, TTY-only) and
+    // `internal/v8/startup_snapshot` (from `initializeGlobalConsole`, which this
+    // runtime never calls). None of those are eager edges.
+    deps: [
+      'internal/trace_events',
+      'internal/errors',
+      'internal/validators',
+      'buffer',
+      'internal/util',
+      'internal/util/inspect',
+      'internal/util/types',
+      'internal/util/debuglog',
+      'diagnostics_channel',
+    ],
+  },
+  {
+    id: 'internal/console/global',
+    vendorPath: 'internal/console/global.js',
+    origin: 'node-source',
+    deps: ['internal/console/constructor'],
+  },
+  {
     id: 'internal/util/inspect',
     vendorPath: 'internal/util/inspect.js',
     origin: 'node-source',
@@ -571,5 +628,12 @@ export const vendoredBuiltins: BuiltinSpec[] = [
       'internal/options',
       'internal/util',
     ],
+  },
+  {
+    id: 'console',
+    aliases: ['node:console'],
+    vendorPath: 'console.js',
+    origin: 'node-source',
+    deps: ['internal/console/global'],
   },
 ];
