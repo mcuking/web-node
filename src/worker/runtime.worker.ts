@@ -4,6 +4,8 @@ import { MemoryVfs, OpfsPersistence } from '../node-runtime/vfs';
 import { VENDORED } from '../node-runtime/vendored';
 import { DEMO_FILES } from '../demo-project';
 
+const decoder = new TextDecoder();
+
 /**
  * Runtime worker.
  *
@@ -238,6 +240,10 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
           cwd: req.cwd,
           includeDev: req.includeDev,
           onLog: (message) => post({ id: 0, type: 'stdout', data: message + '\n' }),
+          // Lifecycle scripts run inside the install, and their output belongs in
+          // the same terminal the install writes to.
+          onOutput: (chunk, stream) =>
+            post({ id: 0, type: stream === 'stdout' ? 'stdout' : 'stderr', data: decoder.decode(chunk) }),
         });
         if (vfs) persistence.schedule(vfs);
         post({ id: req.id, type: 'ok', result });

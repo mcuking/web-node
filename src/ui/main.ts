@@ -336,6 +336,12 @@ async function installDeps(): Promise<void> {
     if (result.fromLockfile) {
       writeTerminal(`[lock] reused ${result.fromLockfile} package(s) from package-lock.json\n`, 'sys');
     }
+    if (result.lifecycle?.length) {
+      writeTerminal(`[lifecycle] ran ${result.lifecycle.join(', ')}\n`, 'ok');
+    }
+    if (result.binLinks?.length) {
+      writeTerminal(`[bin] node_modules/.bin: ${result.binLinks.join(', ')}\n`, 'ok');
+    }
     writeTerminal(`[installed ${result.packages} package(s) in ${ms}ms — now press ▶ Run]\n`, 'ok');
     setStatus(`installed ${result.packages}`, 'ok');
     // A fresh install writes node_modules (and the lockfile) behind the UI's

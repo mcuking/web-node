@@ -35,6 +35,10 @@ export interface InstallResult {
   warnings: string[];
   /** Packages reused from `package-lock.json` without re-resolving. */
   fromLockfile?: number;
+  /** `.bin` command names linked into `node_modules/.bin`. */
+  binLinks?: string[];
+  /** Lifecycle events that ran, as `package@version event`. */
+  lifecycle?: string[];
 }
 
 /**

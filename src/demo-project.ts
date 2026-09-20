@@ -13,7 +13,7 @@ export const DEMO_FILES: Record<string, string> = {
       version: '1.0.0',
       type: 'commonjs',
       main: 'index.js',
-      scripts: { start: 'node index.js' },
+      scripts: { start: 'node index.js', postinstall: 'node lib/report.js > postinstall.txt' },
       dependencies: {
         ms: '^2.1.3',
         'esbuild-wasm': '^0.28.2',
@@ -119,6 +119,32 @@ pipeline(
     console.log('pipeline    : ' + (err ? 'error ' + err.message : 'facts-upper.txt written'));
   }
 );
+console.log('');
+
+// --- child_process (milestone 7) ---
+// A spawned program is a second module registry on the same event loop, with
+// its own process view (argv/env/cwd/stdout/stderr) and its own pipes. There is
+// no OS process, so what can be spawned is exactly what the VFS can run:
+// JavaScript. Anything else is refused by name.
+console.log('-- child_process --');
+const { execFileSync, spawnSync, exec } = require('child_process');
+
+// Synchronous listener, exactly like the desktop — output is printed here and
+// now because the child finished without ever needing the event loop.
+const report = execFileSync('node', [path.join(__dirname, 'lib', 'report.js')], { encoding: 'utf8' });
+console.log('child out   : ' + report.trim());
+
+// npm's own .bin entries are shell scripts, which a tab cannot execute. They are
+// refused by name instead of half-run — which is exactly why the installer
+// writes JavaScript shims into node_modules/.bin instead.
+const refused = spawnSync('./tool.sh', []);
+console.log('sh script   : ' + (refused.error ? refused.error.code : 'unexpectedly ran'));
+
+// The shell is a real (small) parser: pipe the output of one virtual program
+// into the next, asynchronously.
+exec('node -e "process.stdout.write(String(6 * 7))" | node ' + path.join(__dirname, 'lib', 'upper.js'), function (err, stdout) {
+  console.log('shell pipe  : ' + (err ? 'error ' + err.code : stdout));
+});
 console.log('');
 
 // --- npm (milestone 4) ---
@@ -251,6 +277,28 @@ function fib(n) {
 
 exports.fib = fib;
 exports.default = { fib };
+`,
+
+  // A program that the demo spawns, and that spawns one more level from inside
+  // the spawned program - the surface nests, because a child gets its own
+  // module registry and its own `child_process`.
+  '/project/lib/report.js': `// Runs as a *child* program (see index.js), and spawns a child of its own.
+const { execFileSync } = require('child_process');
+
+const nested = execFileSync('node', ['-e', 'process.stdout.write(String(6 * 7))'], { encoding: 'utf8' });
+console.log('spawned pid ' + process.pid + ' in ' + process.cwd() + '; its own child said ' + nested);
+`,
+
+  // The second stage of the shell pipeline demoed from index.js.
+  '/project/lib/upper.js': `let buf = '';
+process.stdin.on('data', (chunk) => (buf += chunk.toString()));
+process.stdin.on('end', () => process.stdout.write(buf.toUpperCase().trim() + ' (via pipe)'));
+`,
+
+  // A shell script - the shape npm uses for its own .bin entries. A browser tab
+  // cannot execute it, and the runtime says so rather than guessing.
+  '/project/tool.sh': `#!/bin/sh
+echo "this would run on a real POSIX host"
 `,
 
   '/project/lib/facts.js': `// Feeds the HTML that the virtual HTTP server renders.
