@@ -222,7 +222,7 @@ export const streamSpec: BuiltinSpec = {
   id: 'stream',
   aliases: ['node:stream'],
   origin: 'web-node',
-  deps: ['events', 'internal/streams/state'],
+  deps: ['events', 'buffer', 'internal/errors', 'internal/streams/state', 'internal/streams/from'],
   init: (ctx: BuiltinInitContext) => {
     const { EventEmitter } = ctx.require('events') as { EventEmitter: new () => EmitterLike };
     const { getHighWaterMark, getDefaultHighWaterMark, setDefaultHighWaterMark } = ctx.require(
@@ -256,6 +256,14 @@ export const streamSpec: BuiltinSpec = {
 
     const defer = (fn: () => void): void => ctx.binding.nextTick(fn as (...a: unknown[]) => void);
 
+    // `Readable.from` is Node's own implementation (vendor/node-lib/internal/streams/from.js):
+    // it drives the public `Readable` surface only, so it drops in as-is.
+    const from = ctx.require('internal/streams/from') as (
+      Readable: unknown,
+      iterable: unknown,
+      opts?: unknown,
+    ) => AnyChunk;
+
     /** Byte-mode chunks reach consumers as Buffers, as they do in Node. */
     const toBuffer = (chunk: AnyChunk): AnyChunk => {
       if (chunk instanceof Buffer_) return chunk;
@@ -284,6 +292,13 @@ export const streamSpec: BuiltinSpec = {
       #flowing = false;
       #paused = false;
       #reading = false;
+      /**
+       * Re-entrancy latch for `#drain`. A synchronous `push()` from inside
+       * `_read()` would otherwise call back into `#drain` -> `#maybeRead` ->
+       * `_read` ..., i.e. recurse forever (and emit the chunk twice per lap).
+       * Node avoids this with its `sync` guard; we drive the loop here instead.
+       */
+      #draining = false;
       #destroyed = false;
       #closed = false;
       #encoding: string | null = null;
@@ -382,16 +397,36 @@ export const streamSpec: BuiltinSpec = {
 
       /** Move buffered chunks to the consumer and settle `end`/`close`. */
       #drain(): void {
-        while (this.#buffer.length > 0 && this.#shouldFlow()) {
-          const chunk = this.#buffer.shift() as AnyChunk;
-          this.#length -= chunkSize(chunk, this.#objectMode);
-          this.emit('data', this.#decode(chunk));
-        }
-        if (this.#shouldFlow() && !this.#ended && this.#length < this.#hwm) this.#maybeRead();
-        // A paused consumer learns about new bytes from `readable`, not `data`.
-        if (!this.#shouldFlow() && this.#buffer.length > 0) this.#emitReadable();
-        if (this.#ended && this.#buffer.length === 0 && !this.#endEmitted && this.#shouldFlow()) {
-          this.#endReadable();
+        // A `push()` emitted from a `data` listener, or a synchronous `push()`
+        // from `_read()`, re-enters here; the latch keeps that flat (the outer
+        // pass picks the new chunks up on its next lap) instead of recursing.
+        if (this.#draining) return;
+        this.#draining = true;
+        try {
+          let progressed = true;
+          while (progressed) {
+            progressed = false;
+            while (this.#buffer.length > 0 && this.#shouldFlow()) {
+              const chunk = this.#buffer.shift() as AnyChunk;
+              this.#length -= chunkSize(chunk, this.#objectMode);
+              this.emit('data', this.#decode(chunk));
+              progressed = true;
+            }
+            if (this.#shouldFlow() && !this.#ended && this.#length < this.#hwm) {
+              const before = this.#buffer.length;
+              this.#maybeRead();
+              // A synchronous `_read()` that pushed has refilled the buffer: lap
+              // again so those chunks reach the consumer in this same pass.
+              if (this.#buffer.length > before) progressed = true;
+            }
+          }
+          // A paused consumer learns about new bytes from `readable`, not `data`.
+          if (!this.#shouldFlow() && this.#buffer.length > 0) this.#emitReadable();
+          if (this.#ended && this.#buffer.length === 0 && !this.#endEmitted && this.#shouldFlow()) {
+            this.#endReadable();
+          }
+        } finally {
+          this.#draining = false;
         }
       }
 
@@ -682,13 +717,17 @@ export const streamSpec: BuiltinSpec = {
       [Symbol.asyncIterator](): AsyncIterator<AnyChunk> {
         const queue: AnyChunk[] = [];
         let done = false;
-        let waiting: ((r: IteratorResult<AnyChunk>) => void) | null = null;
+        let failure: Error | null = null;
+        let waiting: {
+          resolve: (r: IteratorResult<AnyChunk>) => void;
+          reject: (e: Error) => void;
+        } | null = null;
 
         const deliver = (chunk: AnyChunk): void => {
           if (waiting) {
             const w = waiting;
             waiting = null;
-            w({ value: chunk, done: false });
+            w.resolve({ value: chunk, done: false });
           } else {
             queue.push(chunk);
           }
@@ -698,19 +737,32 @@ export const streamSpec: BuiltinSpec = {
           if (waiting) {
             const w = waiting;
             waiting = null;
-            w({ value: undefined, done: true });
+            w.resolve({ value: undefined, done: true });
+          }
+        };
+        // A destroy() with an error must reject a pending `next()` (and any
+        // later one), which is exactly the `for await` error path.
+        const fail = (err: Error): void => {
+          failure = err;
+          done = true;
+          if (waiting) {
+            const w = waiting;
+            waiting = null;
+            w.reject(err);
           }
         };
 
         this.on('data', deliver as (...a: never[]) => void);
         this.once('end', finish as (...a: never[]) => void);
+        this.once('error', fail as (...a: never[]) => void);
 
         return {
           next: (): Promise<IteratorResult<AnyChunk>> => {
+            if (failure) return Promise.reject(failure);
             if (queue.length > 0) return Promise.resolve({ value: queue.shift(), done: false });
             if (done) return Promise.resolve({ value: undefined, done: true });
-            return new Promise((resolve) => {
-              waiting = resolve;
+            return new Promise((resolve, reject) => {
+              waiting = { resolve, reject };
             });
           },
           return: (): Promise<IteratorResult<AnyChunk>> => {
@@ -724,43 +776,12 @@ export const streamSpec: BuiltinSpec = {
       }
 
       static from(iterable: unknown, options?: Record<string, unknown>): Readable {
-        const opts = { objectMode: true, ...(options ?? {}) } as Record<string, unknown>;
-        // `Readable.from` is lazy in Node: unless the caller picks a size, it
-        // will not buffer more than a single chunk, so an unbounded source
-        // cannot fill memory.
-        if (opts.highWaterMark === undefined) opts.highWaterMark = 1;
-        const stream = new Readable(opts);
-        const it = getIterator(iterable);
-        let stopped = false;
-
-        (stream as unknown as Record<string, unknown>)._read = (): void => {
-          if (stopped) return;
-          let result: unknown;
-          try {
-            result = it.next();
-          } catch (err) {
-            stopped = true;
-            stream.destroy(err as Error);
-            return;
-          }
-          Promise.resolve(result as IteratorResult<unknown>).then(
-            (step: IteratorResult<unknown>) => {
-              if (step.done) {
-                stopped = true;
-                stream.push(null);
-                return;
-              }
-              // If push() reports backpressure the next _read() will not come
-              // until the consumer drains, which is exactly what we want.
-              stream.push(step.value);
-            },
-            (err: Error) => {
-              stopped = true;
-              stream.destroy(err);
-            },
-          );
-        };
-        return stream;
+        // Node's own implementation (vendor/node-lib/internal/streams/from.js).
+        // It only touches the public `Readable` surface, so it drops in: strings
+        // and Buffers become a single chunk, `null` values throw
+        // ERR_STREAM_NULL_VALUES, and destroying a `from()` stream calls
+        // `iterator.return()` so an async generator's `finally` still runs.
+        return from(Readable, iterable, options) as Readable;
       }
     }
 
@@ -778,17 +799,6 @@ export const streamSpec: BuiltinSpec = {
         off += b.byteLength;
       }
       return out;
-    }
-
-    function getIterator(iterable: unknown): Iterator<unknown> {
-      const value = iterable as Record<symbol, unknown> | null;
-      if (value && typeof value[Symbol.asyncIterator] === 'function') {
-        return (value[Symbol.asyncIterator] as () => Iterator<unknown>)();
-      }
-      if (value && typeof value[Symbol.iterator] === 'function') {
-        return (value[Symbol.iterator] as () => Iterator<unknown>)();
-      }
-      throw new TypeError('Readable.from() expects an iterable or async iterable');
     }
 
     // ======================= Writable ======================================

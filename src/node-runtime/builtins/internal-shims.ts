@@ -15,6 +15,7 @@ import { notImplemented } from '../errors';
 
 export const ERROR_CODES: Record<string, string> = {
   ERR_INVALID_ARG_TYPE: 'The "%s" argument must be of type %s. Received %s',
+  ERR_STREAM_NULL_VALUES: 'May not write null values to stream',
   ERR_INVALID_ARG_VALUE: 'The argument \'%s\' is invalid. Received %s',
   ERR_INVALID_URI: 'URI malformed',
   ERR_OUT_OF_RANGE: 'The value of "%s" is out of range. It must be %s. Received %s',
@@ -38,6 +39,7 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_OUT_OF_RANGE: RangeError,
   ERR_INVALID_URI: TypeError,
   ERR_MISSING_ARGS: TypeError,
+  ERR_STREAM_NULL_VALUES: TypeError,
   ERR_UNKNOWN_FILE_EXTENSION: TypeError,
   ERR_UNSUPPORTED_ESM_URL_SCHEME: TypeError,
 };
@@ -75,6 +77,7 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
     const type = String(name).includes('.') ? 'property' : 'argument';
     return `The ${type} '${name}' ${reason ?? 'is invalid'}. Received ${inspectArg(value)}`;
   },
+  ERR_INVALID_ARG_TYPE: formatInvalidArgType,
 };
 
 function formatError(code: string, args: unknown[]): string {
@@ -83,6 +86,125 @@ function formatError(code: string, args: unknown[]): string {
   const template = ERROR_CODES[code] ?? code;
   let i = 0;
   return template.replace(/%[sdj]/g, () => String(args[i++]));
+}
+
+const CLASS_LIKE = /^[A-Z][a-zA-Z0-9]*$/;
+// Node reads these expected-type strings as primitives; anything class-shaped
+// ("Array", "Iterable") is phrased as "an instance of" instead.
+const PRIMITIVE_TYPES = [
+  'string',
+  'function',
+  'number',
+  'object',
+  'Function',
+  'Object',
+  'boolean',
+  'bigint',
+  'symbol',
+];
+
+function formatList(list: string[], conjunction: 'and' | 'or' = 'and'): string {
+  switch (list.length) {
+    case 0:
+      return '';
+    case 1:
+      return `${list[0]}`;
+    case 2:
+      return `${list[0]} ${conjunction} ${list[1]}`;
+    case 3:
+      return `${list[0]}, ${list[1]}, ${conjunction} ${list[2]}`;
+    default:
+      return `${list.slice(0, -1).join(', ')}, ${conjunction} ${list[list.length - 1]}`;
+  }
+}
+
+/** Describe a received value the way Node's `determineSpecificType` does. */
+function determineSpecificType(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  switch (typeof value) {
+    case 'bigint':
+      return `type bigint (${String(value)}n)`;
+    case 'number':
+      if (value === 0) return Object.is(value, -0) ? 'type number (-0)' : 'type number (0)';
+      if (Number.isNaN(value)) return 'type number (NaN)';
+      if (value === Infinity) return 'type number (Infinity)';
+      if (value === -Infinity) return 'type number (-Infinity)';
+      return `type number (${String(value)})`;
+    case 'boolean':
+      return value ? 'type boolean (true)' : 'type boolean (false)';
+    case 'symbol':
+      return `type symbol (${String(value)})`;
+    case 'function':
+      return `function ${(value as { name?: string }).name ?? ''}`;
+    case 'string': {
+      let s = value as string;
+      if (s.length > 28) s = `${s.slice(0, 25)}...`;
+      return s.includes("'") ? `type string (${JSON.stringify(s)})` : `type string ('${s}')`;
+    }
+    default: {
+      const ctor = (value as { constructor?: { name?: string } }).constructor;
+      const name = ctor && typeof ctor.name === 'string' ? ctor.name : '';
+      return name ? `an instance of ${name}` : String(value);
+    }
+  }
+}
+
+/** Node's full `ERR_INVALID_ARG_TYPE` builder (lib/internal/errors.js). */
+function formatInvalidArgType(args: unknown[]): string {
+  const [name, expectedRaw, actual] = args as [string, string | string[], unknown];
+  const expected = Array.isArray(expectedRaw) ? expectedRaw.slice() : [expectedRaw];
+
+  let msg = 'The ';
+  if (name.endsWith(' argument')) {
+    msg += `${name} `;
+  } else {
+    const type = name.includes('.') ? 'property' : 'argument';
+    msg += `"${name}" ${type} `;
+  }
+  msg += 'must be ';
+
+  const types: string[] = [];
+  const instances: string[] = [];
+  const other: string[] = [];
+  for (const value of expected) {
+    if (value !== null && typeof value === 'object') {
+      other.push((value as { name?: string }).name ?? String(value));
+    } else if (PRIMITIVE_TYPES.includes(value)) {
+      types.push(value.toLowerCase());
+    } else if (CLASS_LIKE.test(value)) {
+      instances.push(value);
+    } else {
+      other.push(value);
+    }
+  }
+
+  if (instances.length > 0) {
+    const pos = types.indexOf('object');
+    if (pos !== -1) {
+      types.splice(pos, 1);
+      instances.push('Object');
+    }
+  }
+
+  if (types.length > 0) {
+    msg += `${types.length > 1 ? 'one of type' : 'of type'} ${formatList(types, 'or')}`;
+    if (instances.length > 0 || other.length > 0) msg += ' or ';
+  }
+  if (instances.length > 0) {
+    msg += `an instance of ${formatList(instances, 'or')}`;
+    if (other.length > 0) msg += ' or ';
+  }
+  if (other.length > 0) {
+    if (other.length > 1) {
+      msg += `one of ${formatList(other, 'or')}`;
+    } else {
+      if (other[0].toLowerCase() !== other[0]) msg += 'an ';
+      msg += `${other[0]}`;
+    }
+  }
+
+  return `${msg}. Received ${determineSpecificType(actual)}`;
 }
 
 function makeErrorClass(code: string): new (...args: unknown[]) => Error {
@@ -106,8 +228,13 @@ function createErrorsBindingContext(): Record<string, unknown> {
   return {
     codes,
     NodeError,
+    // Node's AbortError keeps the DOMException-style name and message.
     AbortError: class AbortError extends Error {
       code = 'ABORT_ERR';
+      name = 'AbortError';
+      constructor(message: string = 'The operation was aborted') {
+        super(message);
+      }
     },
     hideStackFrames: <T extends (...args: never[]) => unknown>(fn: T): T => fn,
     aggregateTwoErrors: (innerError: unknown, outerError: unknown) => outerError ?? innerError,
@@ -144,38 +271,32 @@ export const internalValidatorsSpec: BuiltinSpec = {
       }
     }
 
-    function typeName(v: unknown): string {
-      if (v === null) return 'null';
-      if (Array.isArray(v)) return 'object';
-      return typeof v;
-    }
-
     return {
       validateAbortSignal: () => undefined,
       validateAbortSignalArray: () => undefined,
       validateArray: (v: unknown, name: string) =>
-        assert(Array.isArray(v), 'ERR_INVALID_ARG_TYPE', name, 'Array', typeName(v)),
+        assert(Array.isArray(v), 'ERR_INVALID_ARG_TYPE', name, 'Array', v),
       validateBoolean: (v: unknown, name: string) =>
-        assert(typeof v === 'boolean', 'ERR_INVALID_ARG_TYPE', name, 'boolean', typeName(v)),
+        assert(typeof v === 'boolean', 'ERR_INVALID_ARG_TYPE', name, 'boolean', v),
       validateBooleanArray: () => undefined,
       validateBuffer: () => undefined,
       validateDictionary: () => undefined,
       validateEncoding: () => undefined,
       validateFiniteNumber: (v: unknown, name: string) =>
-        assert(typeof v === 'number' && Number.isFinite(v), 'ERR_INVALID_ARG_TYPE', name, 'number', typeName(v)),
+        assert(typeof v === 'number' && Number.isFinite(v), 'ERR_INVALID_ARG_TYPE', name, 'number', v),
       validateFunction: (v: unknown, name: string) =>
-        assert(typeof v === 'function', 'ERR_INVALID_ARG_TYPE', name, 'Function', typeName(v)),
+        assert(typeof v === 'function', 'ERR_INVALID_ARG_TYPE', name, 'Function', v),
       validateInteger: (v: unknown, name: string) =>
-        assert(Number.isInteger(v), 'ERR_INVALID_ARG_TYPE', name, 'integer', typeName(v)),
+        assert(Number.isInteger(v), 'ERR_INVALID_ARG_TYPE', name, 'integer', v),
       validateNumber: (v: unknown, name: string) =>
-        assert(typeof v === 'number', 'ERR_INVALID_ARG_TYPE', name, 'number', typeName(v)),
+        assert(typeof v === 'number', 'ERR_INVALID_ARG_TYPE', name, 'number', v),
       validateObject: (v: unknown, name: string, opts?: { allowArray?: boolean; allowFunction?: boolean }) => {
         const ok =
           v !== null &&
           typeof v === 'object' &&
           (opts?.allowArray === true || !Array.isArray(v)) &&
           (opts?.allowFunction === true || typeof v !== 'function');
-        assert(ok, 'ERR_INVALID_ARG_TYPE', name, 'object', typeName(v));
+        assert(ok, 'ERR_INVALID_ARG_TYPE', name, 'Object', v);
       },
       validateOneOf: () => undefined,
       validatePlainFunction: () => undefined,
@@ -183,7 +304,7 @@ export const internalValidatorsSpec: BuiltinSpec = {
         assert(Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 65535, 'ERR_OUT_OF_RANGE', name, '>= 0 && <= 65535', String(v)),
       validateSignalName: () => undefined,
       validateString: (v: unknown, name: string) =>
-        assert(typeof v === 'string', 'ERR_INVALID_ARG_TYPE', name, 'string', typeName(v)),
+        assert(typeof v === 'string', 'ERR_INVALID_ARG_TYPE', name, 'string', v),
       validateStringArray: () => undefined,
       validateStringWithoutNullBytes: () => undefined,
       validateThisInternalField: () => undefined,
