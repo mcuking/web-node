@@ -270,6 +270,191 @@ describe('stream (base classes)', () => {
     readable.resume();
     await expect(finished(readable)).resolves.toBeUndefined();
   });
+
+  it('read(n) is byte-exact and splits buffered chunks', async () => {
+    const { runtime, out, run } = boot({
+      '/project/index.js': `
+        const { Readable } = require('stream');
+        const r = new Readable({ read() {} });
+        r.push('ab');
+        r.push(Buffer.from('cd'));
+        r.push(null);
+        console.log('A', r.read(3).toString());
+        console.log('B', r.read(3).toString());
+        console.log('C', r.read());
+        console.log('len', r.readableLength);
+      `,
+    });
+    run();
+    await waitFor(() => out.join('').includes('len'));
+    expect(out.join('')).toContain('A abc');
+    expect(out.join('')).toContain('B d');
+    expect(out.join('')).toContain('C null');
+    expect(out.join('')).toContain('len 0');
+  });
+
+  it('read() with no argument drains everything buffered', async () => {
+    const { runtime, out, run } = boot({
+      '/project/index.js': `
+        const { Readable } = require('stream');
+        // A _read that pushes synchronously must be observed by the same read().
+        const r = new Readable({ read() { this.push('hello'); this.push(null); } });
+        console.log('A', String(r.read()));
+        console.log('B', r.read());
+      `,
+    });
+    run();
+    await waitFor(() => out.join('').includes('B'));
+    expect(out.join('')).toContain('A hello');
+    expect(out.join('')).toContain('B null');
+  });
+
+  it('drives a paused consumer with the readable event', async () => {
+    const { runtime, out, run } = boot({
+      '/project/index.js': `
+        const { Readable } = require('stream');
+        const r = new Readable({ read() {} });
+        r.push('ab');
+        r.push(null);
+        let signals = 0;
+        r.on('readable', () => {
+          signals++;
+          let c;
+          while ((c = r.read(1)) !== null) console.log('chunk', String(c));
+        });
+        r.on('end', () => console.log('end signals=' + signals));
+      `,
+    });
+    run();
+    await waitFor(() => out.join('').includes('end signals'));
+    // Node emits `readable` once when data arrives and once more, empty, before
+    // `end` — a paused reader relies on both. Contrast with `data`, which never
+    // fires here.
+    expect(out.join('')).toContain('chunk a');
+    expect(out.join('')).toContain('chunk b');
+    expect(out.join('')).toContain('end signals=2');
+  });
+
+  it('delivers byte chunks as Buffers, not bare Uint8Arrays', async () => {
+    const { runtime, out, run } = boot({
+      '/project/index.js': `
+        const { Readable } = require('stream');
+        const r = new Readable({ read() {} });
+        r.on('data', (c) => console.log('data', Buffer.isBuffer(c), c.toString(), c.toString('hex')));
+        r.push('ab');
+        r.push(new Uint8Array([101, 102]));
+        r.push(null);
+      `,
+    });
+    run();
+    await waitFor(() => out.join('').split('data').length >= 3);
+    expect(out.join('')).toContain('data true ab 6162');
+    expect(out.join('')).toContain('data true ef 6566');
+  });
+
+  it('exposes readableObjectMode and writableObjectMode', async () => {
+    const { runtime, out, run } = boot({
+      '/project/index.js': `
+        const { Readable, Writable } = require('stream');
+        const r = new Readable({ objectMode: true, read() {} });
+        const w = new Writable({ objectMode: true, write(c, e, cb) { cb(); } });
+        console.log('r', r.readableObjectMode, 'w', w.writableObjectMode);
+        const rb = new Readable({ read() {} });
+        console.log('byte r', rb.readableObjectMode);
+      `,
+    });
+    run();
+    await waitFor(() => out.join('').includes('byte r'));
+    expect(out.join('')).toContain('r true w true');
+    expect(out.join('')).toContain('byte r false');
+  });
+
+  it('passes object-mode values through untouched, strings included', async () => {
+    const { runtime, out, run } = boot({
+      '/project/index.js': `
+        const { Writable, Readable } = require('stream');
+        const seen = [];
+        const w = new Writable({
+          objectMode: true,
+          write(c, e, cb) { seen.push(typeof c + ':' + JSON.stringify(c)); cb(); },
+        });
+        w.write({ a: 1 });
+        w.write('plain string');
+        w.end();
+        w.on('finish', () => console.log(seen.join(' | ')));
+        const r = new Readable({ objectMode: true, read() {} });
+        r.push('still a string');
+        r.push(42);
+        r.push(null);
+        r.on('data', (c) => console.log('r', typeof c, JSON.stringify(c)));
+      `,
+    });
+    run();
+    await waitFor(() => out.join('').includes('still a string'));
+    // An object-mode writable must not re-encode a string as a Buffer.
+    expect(out.join('')).toContain('object:{"a":1} | string:"plain string"');
+    expect(out.join('')).toContain('r string "still a string"');
+    expect(out.join('')).toContain('r number 42');
+  });
+
+  it('autoDestroys: end/finish is followed by close with destroyed === true', async () => {
+    const { runtime, out, run } = boot({
+      '/project/index.js': `
+        const { Readable, Writable } = require('stream');
+        const w = new Writable({ write(c, e, cb) { cb(); } });
+        w.on('finish', () => console.log('finish'));
+        w.on('close', () => console.log('w close destroyed=' + w.destroyed));
+        w.end('x');
+        const r = new Readable({ read() {} });
+        r.on('end', () => console.log('end destroyed=' + r.destroyed));
+        r.on('close', () => console.log('r close destroyed=' + r.destroyed));
+        r.resume();
+        r.push('x');
+        r.push(null);
+      `,
+    });
+    run();
+    await waitFor(() => out.join('').includes('r close'));
+    // `end`/`finish` fire while the stream is still open, then `destroyed`
+    // flips before `close` — exactly Node's ordering.
+    expect(out.join('')).toContain('end destroyed=false');
+    expect(out.join('')).toContain('r close destroyed=true');
+    expect(out.join('')).toContain('w close destroyed=true');
+  });
+
+  it('honours autoDestroy: false (no close until destroyed explicitly)', async () => {
+    const { runtime, out, run } = boot({
+      '/project/index.js': `
+        const { Writable } = require('stream');
+        const w = new Writable({ autoDestroy: false, write(c, e, cb) { cb(); } });
+        w.on('finish', () => console.log('finish destroyed=' + w.destroyed));
+        w.on('close', () => console.log('close'));
+        w.end('x');
+        setTimeout(() => console.log('later destroyed=' + w.destroyed), 20);
+      `,
+    });
+    run();
+    await waitFor(() => out.join('').includes('later'));
+    expect(out.join('')).toContain('finish destroyed=false');
+    expect(out.join('')).toContain('later destroyed=false');
+    expect(out.join('')).not.toContain('close');
+  });
+
+  it('Readable.from defaults to objectMode and stays lazy', async () => {
+    const { runtime, out, run } = boot({
+      '/project/index.js': `
+        const { Readable } = require('stream');
+        const f = Readable.from(['a', 'b']);
+        console.log('default', f.readableObjectMode, f.readableHighWaterMark);
+        const bytes = Readable.from([Buffer.from('ab')], { objectMode: false });
+        console.log('byte', bytes.readableObjectMode, bytes.readableHighWaterMark);
+      `,
+    });
+    run();
+    await waitFor(() => out.join('').includes('byte'));
+    expect(out.join('')).toContain('default true 1');
+    expect(out.join('')).toContain('byte false 1');
+  });
 });
 
 describe('stream (integration)', () => {

@@ -20,11 +20,18 @@ import type { BuiltinSpec, BuiltinInitContext } from './types';
  *     the rest, so `_write` implementations do not have to be re-entrant.
  *
  * Deliberate simplifications (documented in the design spec):
- *   - `read(n)` in byte mode hands back whole buffered chunks, it does not
- *     split to an exact byte count. `'data'`/`pipe()` (the common paths) are
- *     exact;  `read(n)` is a convenience.
- *   - No `objectMode`/`readableObjectMode` separation, no `autoDestroy` timing
- *     subtleties, no `stream.finished` cleanup handle.
+ *   - `stream.finished`'s callback form returns a no-op `cleanup()`.
+ *
+ * What is real here, not approximated:
+ *   - `read(n)` in byte mode is exact: it splits to the requested byte count
+ *     instead of handing back whole buffered chunks.
+ *   - Both halves of the `objectMode` split are real getters
+ *     (`readableObjectMode` / `writableObjectMode`), and an object-mode
+ *     writable passes strings through untouched instead of encoding them.
+ *   - `autoDestroy` (on by default) closes the stream after `end`/`finish`,
+ *     with `destroyed === true` by the time `close` fires; a duplex waits for
+ *     both halves.
+ *   - Paused-mode consumers are driven by the `readable` event.
  */
 
 const DEFAULT_HWM = 16 * 1024;
@@ -75,8 +82,46 @@ interface WritableState {
   hwm: number;
   objectMode: boolean;
   decodeStrings: boolean;
+  autoDestroy: boolean;
+  closed: boolean;
   destroyed: boolean;
   error: Error | null;
+}
+
+/**
+ * `autoDestroy` bookkeeping, shared by every stream shape.
+ *
+ * A plain `Readable` is "done" when it ends; a plain `Writable` when it
+ * finishes; a `Duplex` only when *both* halves are done (otherwise the writable
+ * side would be torn down while the readable side is still producing, which is
+ * the classic half-open bug). Registering the two flags in one place lets a
+ * single helper decide when to `destroy()`.
+ */
+interface AutoDestroyState {
+  autoDestroy: boolean;
+  readableDone: boolean;
+  writableDone: boolean;
+  /**
+   * Mark the stream destroyed and emit `close`, once.
+   *
+   * Deliberately *not* `destroy()`: the normal `end`/`finish` path has already
+   * released whatever the stream held, so re-entering `_destroy` here would tear
+   * down resources a second time (an http `ClientRequest` aborts its socket, for
+   * one). This mirrors what the hand-written `close` emission did before
+   * `autoDestroy` existed, plus the `destroyed` flag Node expects at `close`.
+   */
+  close: () => void;
+}
+
+const DESTROY_STATE = new WeakMap<object, AutoDestroyState>();
+
+function settleAutoDestroy(self: object, side: 'readable' | 'writable'): void {
+  const state = DESTROY_STATE.get(self);
+  if (!state) return;
+  if (side === 'readable') state.readableDone = true;
+  else state.writableDone = true;
+  if (!state.autoDestroy) return;
+  if (state.readableDone && state.writableDone) state.close();
 }
 
 const W_STATE = new WeakMap<object, WritableState>();
@@ -100,10 +145,34 @@ function initWritable(self: object, options: Record<string, unknown> = {}): void
     corked: 0,
     hwm: typeof options.highWaterMark === 'number' ? (options.highWaterMark as number) : objectMode ? OBJECT_HWM : DEFAULT_HWM,
     objectMode,
-    decodeStrings: options.decodeStrings !== false,
+    // Node forces `decodeStrings` off in object mode: a string is a value to
+    // pass through, not bytes to re-encode as a Buffer.
+    decodeStrings: options.decodeStrings !== false && !objectMode,
+    autoDestroy: options.autoDestroy !== false,
+    closed: false,
     destroyed: false,
     error: null,
   });
+  // A Duplex reaches here with a registry already created by Readable; a plain
+  // Writable gets one now, with its readable half marked done from the start.
+  const existing = DESTROY_STATE.get(self);
+  if (existing) {
+    existing.writableDone = false;
+    if (options.autoDestroy === false) existing.autoDestroy = false;
+  } else {
+    DESTROY_STATE.set(self, {
+      autoDestroy: options.autoDestroy !== false,
+      readableDone: true,
+      writableDone: false,
+      close: () => {
+        const s = W_STATE.get(self) as WritableState;
+        if (s.closed) return;
+        s.closed = true;
+        s.destroyed = true;
+        (self as { emit(n: string, ...a: unknown[]): unknown }).emit('close');
+      },
+    });
+  }
 }
 
 export const streamSpec: BuiltinSpec = {
@@ -114,7 +183,11 @@ export const streamSpec: BuiltinSpec = {
   init: (ctx: BuiltinInitContext) => {
     const { EventEmitter } = ctx.require('events') as { EventEmitter: new () => EmitterLike };
     const { Buffer: Buffer_ } = ctx.require('buffer') as {
-      Buffer: { from(v: unknown, e?: string): Uint8Array; allocUnsafe(n: number): Uint8Array };
+      Buffer: {
+        new (size: number): Uint8Array;
+        from(v: unknown, e?: string): Uint8Array;
+        allocUnsafe(n: number): Uint8Array;
+      };
     };
 
     interface EmitterLike {
@@ -126,6 +199,19 @@ export const streamSpec: BuiltinSpec = {
 
     const defer = (fn: () => void): void => ctx.binding.nextTick(fn as (...a: unknown[]) => void);
 
+    /** Byte-mode chunks reach consumers as Buffers, as they do in Node. */
+    const toBuffer = (chunk: AnyChunk): AnyChunk => {
+      if (chunk instanceof Buffer_) return chunk;
+      if (typeof chunk === 'string') return Buffer_.from(chunk, 'utf8');
+      if (chunk instanceof Uint8Array) return Buffer_.from(chunk);
+      if (ArrayBuffer.isView(chunk)) {
+        const v = chunk as ArrayBufferView;
+        return Buffer_.from(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+      }
+      if (chunk instanceof ArrayBuffer) return Buffer_.from(new Uint8Array(chunk));
+      return chunk;
+    };
+
     // ======================= Readable ======================================
 
     class Readable extends (EventEmitter as new () => EmitterLike) {
@@ -135,18 +221,25 @@ export const streamSpec: BuiltinSpec = {
       #length = 0;
       #hwm: number;
       #objectMode: boolean;
+      #autoDestroy: boolean;
       #ended = false;
       #endEmitted = false;
       #flowing = false;
       #paused = false;
       #reading = false;
       #destroyed = false;
+      #closed = false;
       #encoding: string | null = null;
       #piped: unknown[] = [];
+      /** A `readable` signal is already scheduled: do not queue a second one. */
+      #emittedReadable = false;
+      /** The consumer asked for data (`read()`/`readable`) but got none yet. */
+      #needReadable = false;
 
       constructor(options: Record<string, unknown> = {}) {
         super();
         this.#objectMode = !!options.objectMode;
+        this.#autoDestroy = options.autoDestroy !== false;
         this.#hwm =
           typeof options.highWaterMark === 'number'
             ? (options.highWaterMark as number)
@@ -160,6 +253,22 @@ export const streamSpec: BuiltinSpec = {
         if (typeof options.destroy === 'function') {
           (this as unknown as Record<string, unknown>)._destroy = (options.destroy as (...a: unknown[]) => void).bind(this);
         }
+        // The readable half is not done yet; the writable half is absent (a
+        // Duplex flips this in `initWritable`).
+        DESTROY_STATE.set(this, {
+          autoDestroy: this.#autoDestroy,
+          readableDone: false,
+          writableDone: true,
+          close: () => this.#softClose(),
+        });
+      }
+
+      /** Mark destroyed and emit `close` once, without re-entering `_destroy`. */
+      #softClose(): void {
+        if (this.#closed) return;
+        this.#closed = true;
+        this.#destroyed = true;
+        this.emit('close');
       }
 
       /** Subclasses override: produce more data (via `push`). */
@@ -174,6 +283,9 @@ export const streamSpec: BuiltinSpec = {
 
       get readableHighWaterMark(): number {
         return this.#hwm;
+      }
+      get readableObjectMode(): boolean {
+        return this.#objectMode;
       }
       get readableLength(): number {
         return this.#length;
@@ -195,9 +307,15 @@ export const streamSpec: BuiltinSpec = {
       }
 
       #decode(chunk: AnyChunk): AnyChunk {
-        if (this.#objectMode || this.#encoding === null) return chunk;
-        if (typeof chunk === 'string') return chunk;
-        return new TextDecoder(this.#encoding === 'utf8' ? 'utf-8' : this.#encoding).decode(toBytes(chunk));
+        if (this.#objectMode) return chunk;
+        if (this.#encoding !== null) {
+          if (typeof chunk === 'string') return chunk;
+          return new TextDecoder(this.#encoding === 'utf8' ? 'utf-8' : this.#encoding).decode(toBytes(chunk));
+        }
+        // Byte mode with no decoder: Node hands the consumer a Buffer, never a
+        // bare Uint8Array (chunk.toString() has to mean "decode", not "list the
+        // bytes").
+        return toBuffer(chunk);
       }
 
       #maybeRead(): void {
@@ -218,16 +336,53 @@ export const streamSpec: BuiltinSpec = {
           this.emit('data', this.#decode(chunk));
         }
         if (this.#shouldFlow() && !this.#ended && this.#length < this.#hwm) this.#maybeRead();
+        // A paused consumer learns about new bytes from `readable`, not `data`.
+        if (!this.#shouldFlow() && this.#buffer.length > 0) this.#emitReadable();
         if (this.#ended && this.#buffer.length === 0 && !this.#endEmitted && this.#shouldFlow()) {
-          this.#endEmitted = true;
-          // Deferred, like Node. A synchronous 'end' would fire from inside the
-          // very call that started the flow (`pipe()`, `on('data')`, `resume()`),
-          // i.e. before the caller had a chance to attach its own 'end' handler.
-          defer(() => {
-            this.emit('end');
-            this.emit('close');
-          });
+          this.#endReadable();
         }
+      }
+
+      /**
+       * Signal a paused consumer that data (or the end) is available.
+       *
+       * Deferred and coalesced the way Node does it: the flag is only cleared
+       * once the event actually fires, so a burst of `push()` calls yields a
+       * single `readable`.
+       */
+      #emitReadable(): void {
+        this.#needReadable = false;
+        if (this.#emittedReadable || this.#destroyed) return;
+        this.#emittedReadable = true;
+        defer(() => {
+          if (this.#destroyed) return;
+          if (this.#length > 0 || this.#ended) {
+            this.#emittedReadable = false;
+            this.emit('readable');
+          } else {
+            this.#needReadable = true;
+          }
+        });
+      }
+
+      /**
+       * Emit `end`, then `close` (through `autoDestroy`), exactly once.
+       *
+       * Deferred, like Node. A synchronous `end` would fire from inside the very
+       * call that started the flow (`pipe()`, `on('data')`, `resume()`), i.e.
+       * before the caller had a chance to attach its own `end` handler.
+       */
+      #endReadable(): void {
+        if (this.#endEmitted) return;
+        this.#endEmitted = true;
+        defer(() => {
+          if (this.#destroyed) return;
+          // Node re-signals `readable` with an empty buffer just before `end`,
+          // so a paused reader that is mid-loop sees one final, harmless tick.
+          if (!this.#shouldFlow()) this.emit('readable');
+          this.emit('end');
+          settleAutoDestroy(this, 'readable');
+        });
       }
 
       push(chunk: AnyChunk): boolean {
@@ -235,7 +390,14 @@ export const streamSpec: BuiltinSpec = {
         if (chunk === null) {
           this.#ended = true;
           this.#reading = false;
+          if (this.#buffer.length === 0 && !this.#shouldFlow()) this.#emitReadable();
           this.#drain();
+          if (this.#ended && this.#buffer.length === 0 && !this.#endEmitted && !this.#shouldFlow()) {
+            // Nothing will ever flow: a paused consumer still needs `readable`,
+            // then `end`, so it can observe the empty tail.
+            this.#emitReadable();
+            this.#endReadable();
+          }
           return false;
         }
         if (this.#ended) throw new Error('stream.push() after EOF');
@@ -254,11 +416,17 @@ export const streamSpec: BuiltinSpec = {
 
       // Attaching a 'data' listener switches the stream into flowing mode, and
       // `pipe()` relies on that: this is the whole "flowing vs paused" contract.
+      // A 'readable' listener is the opposite: it keeps the stream paused and
+      // asks it to start producing.
       on(name: string, fn: (...a: never[]) => void): this {
         (super.on as (n: string, f: (...a: never[]) => void) => unknown)(name, fn);
         if (name === 'data') {
           this.#flowing = true;
           this.#paused = false;
+          this.#drain();
+        } else if (name === 'readable') {
+          this.#needReadable = true;
+          if (!this.#ended) this.#maybeRead();
           this.#drain();
         }
         return this;
@@ -273,6 +441,10 @@ export const streamSpec: BuiltinSpec = {
         if (name === 'data') {
           this.#flowing = true;
           this.#paused = false;
+          this.#drain();
+        } else if (name === 'readable') {
+          this.#needReadable = true;
+          if (!this.#ended) this.#maybeRead();
           this.#drain();
         }
         return this;
@@ -299,31 +471,80 @@ export const streamSpec: BuiltinSpec = {
         return this;
       }
 
-      /** Pull API. Byte mode returns whole buffered chunks, not exact counts. */
+      /**
+       * Pull API, byte-exact in byte mode.
+       *
+       * `read(n)` yields exactly `n` bytes (splitting buffered chunks as needed)
+       * or everything available when `n` is omitted; object mode always yields
+       * one whole value. A no-op read at a full buffer or at EOF only re-arms
+       * the `readable` signal, which is what Node does.
+       */
       read(n?: number): AnyChunk {
         if (this.#destroyed) return null;
-        if (this.#buffer.length === 0) {
-          if (!this.#ended) this.#maybeRead();
-          if (this.#buffer.length === 0) return null;
+
+        const explicit = n !== undefined && !Number.isNaN(n);
+        const want = explicit ? Math.max(0, Math.floor(n as number)) : 0;
+
+        if (explicit && want === 0 && this.#needReadable && (this.#length >= this.#hwm || this.#ended)) {
+          this.#emitReadable();
+          return null;
         }
+
+        // `_read` may push synchronously (a passthrough or a `Readable.from`), so
+        // the decision to pull has to be made from the pre-read length.
+        let doRead = this.#needReadable;
+        if (this.#length === 0 || this.#length - want < this.#hwm) doRead = true;
+        if (this.#ended || this.#reading) doRead = false;
+        if (doRead) this.#maybeRead();
+
+        const howMuch = this.#howMuchToRead(explicit, want);
+        if (howMuch === 0) {
+          this.#needReadable = true;
+          // A zero-byte answer at EOF is the signal to finish the stream.
+          if (this.#ended && this.#length === 0 && !this.#endEmitted) this.#endReadable();
+          return null;
+        }
+
+        const ret = this.#fromBuffer(howMuch);
+        if (ret === null) {
+          this.#needReadable = true;
+        } else {
+          // The buffer moved, so the next arrival must announce itself again.
+          this.#emittedReadable = false;
+          this.#needReadable = false;
+        }
+        if (this.#ended && this.#length === 0 && !this.#endEmitted) this.#endReadable();
+        return ret;
+      }
+
+      /** How many bytes/values a single `read()` may hand back. */
+      #howMuchToRead(explicit: boolean, want: number): number {
+        if (this.#length === 0 && this.#ended) return 0;
+        if (this.#objectMode) return explicit && want === 0 ? 0 : 1;
+        if (!explicit) return this.#length;
+        if (want <= 0) return this.#length;
+        return Math.min(want, this.#length);
+      }
+
+      /** Take `howMuch` out of the buffer (splitting a byte chunk if needed). */
+      #fromBuffer(howMuch: number): AnyChunk {
+        if (this.#buffer.length === 0) return null;
         if (this.#objectMode) {
           const chunk = this.#buffer.shift() as AnyChunk;
           this.#length -= 1;
           return chunk;
         }
-        if (n === undefined || Number.isNaN(n)) {
+        if (howMuch >= this.#length) {
           const all = this.#buffer;
           this.#buffer = [];
           this.#length = 0;
           return this.#decode(concatChunks(all));
         }
-        const want = Math.max(0, Math.floor(n));
-        if (want === 0) return this.#decode(new Uint8Array(0));
         const out: Uint8Array[] = [];
         let got = 0;
-        while (this.#buffer.length > 0 && got < want) {
+        while (this.#buffer.length > 0 && got < howMuch) {
           const head = toBytes(this.#buffer[0]);
-          const take = Math.min(head.byteLength, want - got);
+          const take = Math.min(head.byteLength, howMuch - got);
           out.push(take === head.byteLength ? head : head.slice(0, take));
           got += take;
           if (take === head.byteLength) {
@@ -449,6 +670,10 @@ export const streamSpec: BuiltinSpec = {
 
       static from(iterable: unknown, options?: Record<string, unknown>): Readable {
         const opts = { objectMode: true, ...(options ?? {}) } as Record<string, unknown>;
+        // `Readable.from` is lazy in Node: unless the caller picks a size, it
+        // will not buffer more than a single chunk, so an unbounded source
+        // cannot fill memory.
+        if (opts.highWaterMark === undefined) opts.highWaterMark = 1;
         const stream = new Readable(opts);
         const it = getIterator(iterable);
         let stopped = false;
@@ -553,6 +778,9 @@ export const streamSpec: BuiltinSpec = {
       }
       get writableHighWaterMark(): number {
         return wstate(this).hwm;
+      }
+      get writableObjectMode(): boolean {
+        return wstate(this).objectMode;
       }
       get destroyed(): boolean {
         return wstate(this).destroyed;
@@ -691,8 +919,9 @@ export const streamSpec: BuiltinSpec = {
           // Deferred: `finish` must not fire synchronously inside `end()`, or a
           // caller attaching its listener right after `end()` would miss it.
           defer(() => {
+            if (s.destroyed) return;
             self.emit('finish');
-            self.emit('close');
+            settleAutoDestroy(self, 'writable');
           });
         };
         try {
