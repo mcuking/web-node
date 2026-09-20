@@ -351,8 +351,9 @@ checkout; every patch we do apply is listed in the manifest's `patches` field.
 
 **Current coverage** (revision `7a3437d`, v26.9.1-dev):
 
-- **58 files vendored** — the whole `stream` layer, `events`,
+- **59 files vendored** — the whole `stream` layer, `events`,
   `internal/event_target` (+ `internal/webidl`, `internal/perf/utils`),
+  `internal/abort_controller`,
   `async_hooks`
   (+ `internal/async_local_storage/*`, `internal/promise_hooks`), `path`,
   `querystring`, `punycode`, `domain`, `diagnostics_channel`, `string_decoder`,

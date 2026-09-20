@@ -25,6 +25,7 @@ const FILES = [
   'internal/webidl.js',
   'internal/perf/utils.js',
   'internal/event_target.js',
+  'internal/abort_controller.js',
   'internal/util/types.js',
   'internal/util/inspect.js',
   'internal/util/colors.js',

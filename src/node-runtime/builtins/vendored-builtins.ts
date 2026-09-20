@@ -53,6 +53,30 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     ],
   },
   {
+    id: 'internal/abort_controller',
+    vendorPath: 'internal/abort_controller.js',
+    origin: 'node-source',
+    // Node's file top-level requires `events` (for `kMaxEventTargetListeners`)
+    // and `internal/event_target` (which itself top-level requires `events`).
+    // Listing `events` first makes sure it is fully materialised before either
+    // consumer starts, instead of handing them a half-built `module.exports`.
+    // `internal/worker/io` (MessageChannel) is only reached from `[kTransferList]`
+    // during a real postMessage, which this runtime does not implement, so it is
+    // deliberately left unregistered.
+    deps: [
+      'events',
+      'internal/event_target',
+      'internal/util',
+      'internal/util/inspect',
+      'internal/errors',
+      'internal/webidl',
+      'internal/validators',
+      'internal/assert',
+      'internal/worker/js_transferable',
+      'timers',
+    ],
+  },
+  {
     id: 'internal/util/types',
     vendorPath: 'internal/util/types.js',
     origin: 'node-source',

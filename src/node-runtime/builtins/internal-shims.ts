@@ -623,42 +623,47 @@ export const internalDebuglogSpec: BuiltinSpec = {
 // sees why, instead of a silent `undefined`.
 
 // ---------------------------------------------------------------------------
-// internal/abort_controller
+// internal/worker/js_transferable
 // ---------------------------------------------------------------------------
 //
-// Node's real internal/abort_controller.js is built on its own EventTarget,
-// webidl converters and js_transferable plumbing — none of which exist here.
-// The host realm already provides spec-compliant AbortController/AbortSignal, so
-// we re-export those under Node's module id.
+// Node's real file is the plumbing for `structuredClone`/`postMessage` of host
+// objects: `@@kClone`/`@@kTransfer`/`@@kDeserialize` symbols plus a
+// `markTransferMode` that stamps a C++-owned private symbol. We ship the same
+// symbol names (as a shim, `origin: 'web-node'`) so `internal/abort_controller`
+// can define its prototypes, but the transfer machinery itself is inert: this
+// runtime has no message ports to transfer through, so `markTransferMode` is a
+// no-op rather than a lie about serialisation working.
 
-export const internalAbortControllerSpec: BuiltinSpec = {
-  id: 'internal/abort_controller',
+export const internalJsTransferableSpec: BuiltinSpec = {
+  id: 'internal/worker/js_transferable',
   origin: 'web-node',
-  deps: ['internal/errors', 'internal/validators'],
+  deps: ['internal/errors'],
   init: (ctx: BuiltinInitContext) => {
     const errors = ctx.require('internal/errors') as {
       codes: Record<string, new (...args: unknown[]) => Error>;
     };
-    const AbortSignalCtor = AbortSignal;
+    const kClone = Symbol('kClone');
+    const kDeserialize = Symbol('kDeserialize');
+    const kTransfer = Symbol('kTransfer');
+    const kTransferList = Symbol('kTransferList');
     return {
-      AbortController,
-      AbortSignal,
-      // Node's `aborted(signal, resource)` resolves once the signal aborts.
-      aborted: async (signal: AbortSignal, resource: unknown): Promise<void> => {
-        if (signal === undefined || !('aborted' in Object(signal))) {
-          throw new errors.codes.ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
+      kClone,
+      kDeserialize,
+      kTransfer,
+      kTransferList,
+      markTransferMode: (): void => undefined,
+      setup: (): void => undefined,
+      structuredClone: (...args: unknown[]): unknown => {
+        if (args.length === 0) {
+          throw new errors.codes.ERR_MISSING_ARGS('The value argument must be specified');
         }
-        if (resource === undefined) {
-          throw new errors.codes.ERR_INVALID_ARG_TYPE('resource', 'Object', resource);
+        const sc = (globalThis as { structuredClone?: (v: unknown, o?: unknown) => unknown })
+          .structuredClone;
+        if (typeof sc !== 'function') {
+          throw notImplemented('api', 'structuredClone', 'This host has no structuredClone.');
         }
-        if (signal.aborted) return;
-        await new Promise<void>((resolve) => {
-          signal.addEventListener('abort', () => resolve(), { once: true });
-        });
+        return sc(args[0], args[1]);
       },
-      transferableAbortSignal: (signal: AbortSignal) => signal,
-      transferableAbortController: () => new AbortController(),
-      _AbortSignalCtor: AbortSignalCtor,
     };
   },
 };

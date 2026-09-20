@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-20T08:33:18.893Z",
+  "generatedAt": "2026-09-20T10:05:01.112Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -68,6 +68,13 @@
       "sha256": "b3a0d24b7460670ca8cad869de8cfda9382686171292df2534941b14e7288cca",
       "upstreamSha256": "b3a0d24b7460670ca8cad869de8cfda9382686171292df2534941b14e7288cca",
       "bytes": 34034,
+      "patches": []
+    },
+    {
+      "path": "internal/abort_controller.js",
+      "sha256": "7b74ae53ab97992ebc61744f76dfc84e4a3e4a40552f0d14a2a3b887d68430eb",
+      "upstreamSha256": "7b74ae53ab97992ebc61744f76dfc84e4a3e4a40552f0d14a2a3b887d68430eb",
+      "bytes": 18443,
       "patches": []
     },
     {

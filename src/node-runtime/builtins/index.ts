@@ -1,7 +1,6 @@
 import type { BuiltinSpec } from './types';
 
 import {
-  internalAbortControllerSpec,
   internalAbortListenerSpec,
   internalBlobSpec,
   internalBufferSpec,
@@ -16,6 +15,7 @@ import {
   internalTraceSigintSpec,
   internalWebStreamsAdaptersSpec,
   internalEventsSymbolsSpec,
+  internalJsTransferableSpec,
   internalBootstrapRealmSpec,
   internalUrlSpec,
 } from './internal-shims';
@@ -47,9 +47,9 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalBootstrapRealmSpec,
   internalUrlSpec,
   internalBlobSpec,
-  internalAbortControllerSpec,
   internalFsGlobSpec,
   internalAbortListenerSpec,
+  internalJsTransferableSpec,
   internalOptionsSpec,
   internalDebuglogSpec,
   internalEncodingSpec,

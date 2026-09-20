@@ -1,8 +1,20 @@
 import type { BindingFactory } from './context';
+import { notImplemented } from '../errors';
 
 /** `symbols` binding: internal symbols shared across internal Node modules. */
 export const symbolsBinding: BindingFactory = () => {
-  const make = (name: string): symbol => Symbol(name);
+  // Memoised so repeated reads of the same symbol name stay identical
+  // (`internal/per_context/domexception.js` and `internal/worker/io.js` each
+  // read these, and the two must agree on identity).
+  const cache = new Map<string, symbol>();
+  const make = (name: string): symbol => {
+    let sym = cache.get(name);
+    if (sym === undefined) {
+      sym = Symbol(name);
+      cache.set(name, sym);
+    }
+    return sym;
+  };
   return {
     async_id_symbol: make('async_id_symbol'),
     trigger_async_id_symbol: make('trigger_async_id_symbol'),
@@ -185,9 +197,30 @@ export const icuBinding: BindingFactory = () => ({
 });
 
 /** `messaging` binding: only enough to satisfy internal code paths we ship. */
+/** `messaging` binding: the DOM-side surface (DOMException, structuredClone). */
 export const messagingBinding: BindingFactory = () => ({
   setDeserializeMainFunction: () => undefined,
+  setDeserializerCreateObjectFunction: () => undefined,
   isBuildingSnapshot: () => false,
+  // `internal/abort_controller` builds its `AbortError` from this constructor.
+  // Node hands out V8's DOMException; the host realm's is the same spec object.
+  DOMException: typeof DOMException === 'function' ? DOMException : undefined,
+  // `internal/worker/js_transferable` wraps this. Keep the host implementation
+  // so the identity-transferable types still behave.
+  structuredClone: (...args: unknown[]) => {
+    const sc = (globalThis as { structuredClone?: (...a: unknown[]) => unknown }).structuredClone;
+    if (typeof sc !== 'function') {
+      throw notImplemented('api', 'structuredClone', 'This host has no structuredClone.');
+    }
+    return sc(...args);
+  },
+  // `internal/worker/io` defines its DOMException lazily through this hook; the
+  // binding exposes the property eagerly instead, so it is a no-op here.
+  exposeLazyDOMExceptionProperty: () => undefined,
+  QuotaExceededError:
+    typeof DOMException === 'function'
+      ? class QuotaExceededError extends DOMException {}
+      : undefined,
 });
 
 /** `diagnostics_channel` binding: the native subscriber table. */
