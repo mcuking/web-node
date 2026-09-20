@@ -493,6 +493,11 @@ export const bufferSpec: BuiltinSpec = {
 
     // Override how buffers are presented by util.inspect(), mirroring
     // `lib/buffer.js`: `<Buffer 01 02>` (50 bytes max by default).
+    //
+    // The name is pinned explicitly: the inspect hook reads
+    // `constructor.name`, and a minified production bundle would otherwise
+    // rename the class (e.g. `<r 01 02>`). Subclasses keep their own name.
+    Object.defineProperty(Buffer, 'name', { value: 'Buffer', configurable: true });
     let INSPECT_MAX_BYTES = 50;
     (Buffer.prototype as unknown as Record<symbol, unknown>)[customInspectSymbol] = function inspect(
       this: Uint8Array,

@@ -119,6 +119,21 @@ describe('vendored: internal/util/inspect', () => {
     expect(util.inspect(new Proxy(target, {}))).toBe('{ a: 1 }');
   });
 
+  it('keeps the Buffer tag stable, including under minification', () => {
+    const { realm, util, Buffer } = boot();
+    // The inspect hook reads `constructor.name`; we pin it so a minified
+    // production bundle cannot rename the class (which showed up as `<r 01 02>').
+    expect((Buffer as unknown as { name: string }).name).toBe('Buffer');
+    expect(util.inspect(Buffer.from([1, 2]))).toBe('<Buffer 01 02>');
+    // A subclass still reports its own name, like Node.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const Base: any = Buffer;
+    const Sub = class MyBuf extends Base {};
+    const inst = Buffer.from([0, 0]) as unknown as object;
+    Object.setPrototypeOf(inst, Sub.prototype);
+    expect(util.inspect(inst)).toBe('<MyBuf 00 00>');
+  });
+
   it('flows through console.log end to end', () => {
     const vfs = new MemoryVfs({ cwd: '/project' });
     vfs.mkdir('/project', { recursive: true });
