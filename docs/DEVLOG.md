@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -34,11 +34,12 @@
 | M7 | **child_process + 受控 spawn 面**（fork/exec/spawn + mini-shell + `ProcessHost`） | ✅ 完成 |
 | M7 | **npm `.bin` shim + 生命周期脚本**（JS shim + 依赖/根项目脚本） | ✅ 完成 |
 | M8 | **stream 收尾**（字节精确 `read(n)` + `objectMode` 分离 + `autoDestroy` + `readable` 驱动 + chunk 交付 `Buffer`） | ✅ 完成 |
+| M9 | **Buffer 共享内存**（`slice`/`subarray` + `from(ArrayBuffer)` 返回视图） | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **145/145 通过** · `vite build` 绿（worker ~309KB / index ~10.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **150/150 通过** · `vite build` 绿（worker ~310KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -117,16 +118,39 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 按优先级：
 
 1. **扩大 vendoring**：把 TS 实现逐步换成真源码 + shim（先 `node tools/dep-scan.mjs` 估算）。
-2. **Buffer slice 语义**：目前是拷贝而非共享内存（见设计文档「已知限制」）。
-3. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
-4. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
-5. **stream 遗留（M8 尾声）**：`stream.finished` 的回调形式返回的是 no-op `cleanup()`；`read(n)` 的 `n` 大于 hwm 时未按 Node 向上取整到 hwm。
+2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
+3. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
+4. **stream 遗留（M8 尾声）**：`stream.finished` 的回调形式返回的是 no-op `cleanup()`；`read(n)` 的 `n` 大于 hwm 时未按 Node 向上取整到 hwm。
+5. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
 4. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 5. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M9 Buffer 共享内存：`slice`/`subarray` 与 `from(ArrayBuffer)` 不再拷贝
+
+**目标**：把 Buffer 的视图语义对齐真 Node（v22 实测），这是 DEVLOG「下一步」第 2 项。
+
+**改了什么**
+
+- **`slice` / `subarray` 返回共享内存的视图**：改为 `new Buffer(this.buffer, byteOffset, length)`（即在底层 ArrayBuffer 上开窗口），而不是之前的拷贝。写入视图会回写到原 Buffer，反之亦然；`slice` 与 `subarray` 行为一致（与 Node 相同，两者都是 view）。越界/负索引的夹取仍由 `Uint8Array.prototype.subarray` 负责。
+- **`Buffer.from(ArrayBuffer[, offset[, length]])` 返回视图**：不再拷贝，与 Node 一致（`Buffer.from(ab)` 改动会反映到原 ArrayBuffer）。
+- **`Buffer.from(string | Buffer | Uint8Array)` 仍为拷贝**（Node 同此，保持不变）。
+- **demo**：buffer 段落新增 `view shares : true`（通过 `subarray` 写回原 Buffer 验证）。
+
+**为什么**
+
+- 真 Node 基准（`/tmp/m9/buf.js`）逐条量出：`slice>writeThrough true` / `slice>readThrough true` / `slice>byteOffsetDelta 1` / `fromAB>shares true` / `fromAB2>shares true`，而 `fromBuf>copies true` / `fromU8>copies true`。
+- 这是解析器/协议实现的核心假设：从读缓冲里切出一帧、之后复用该缓冲。若 `slice` 是拷贝，帧数据会在缓冲被覆写后“神秘地”变对/变错；若 `from(ArrayBuffer)` 是拷贝，对视图的改动会静默丢失。
+- **副作用审查**：`http.ts` 的帧切分用的是原生 `Uint8Array`（`concat` 每次新建），不受影响；VFS 存的是 `Uint8Array` 并按 `.slice()` 拷贝，也不受影响。已在改动后全量回归确认。
+
+**涉及文件**
+
+修改：`src/node-runtime/builtins/buffer.ts`、`src/demo-project.ts`；新增：`test/buffer.test.ts`（5 条回归）。
+
+**验证**：`tsc --noEmit` 干净 · `vitest run` **150/150**（新增 buffer 5 条）· `vite build` 绿 · 浏览器端到端：`view shares : true`。
 
 ### 2026-09-20 · M8 stream 收尾：字节精确 `read(n)` + `objectMode` 分离 + `autoDestroy`
 

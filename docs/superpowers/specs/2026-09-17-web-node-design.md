@@ -182,11 +182,10 @@ web-node/
 
 ## 9. 已知限制
 
-> 本表按里程碑进展刷新（当前至 **M8**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
+> 本表按里程碑进展刷新（当前至 **M9**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
 
 | 限制 | 说明 |
 |---|---|
-| Buffer `slice`/`subarray` 复制而非共享内存 | 与 Node 语义有差异，MVP 取舍 |
 | ESM 为转换实现 | 不支持 top-level await / live bindings |
 | `stream.finished` 的回调形式 | 返回 no-op `cleanup()` |
 | `fork` 的 IPC | `send`/`message` 明确抛 `notImplemented`，不静默 no-op |
@@ -194,6 +193,7 @@ web-node/
 | `os` 返回静态假数据 | 浏览器无可信宿主信息 |
 | glob 未实现 | `path.matchesGlob` 抛错 |
 | `file:`/`git+`/`link:` 说明符 | npm 未支持 |
+| Buffer 未池化 | `allocUnsafe`/`from(string)` 不做 slab 池化（`.byteOffset` 恒为 0） |
 
 ---
 
