@@ -5,7 +5,7 @@ export const utilSpec: BuiltinSpec = {
   id: 'util',
   aliases: ['node:util'],
   origin: 'web-node',
-  init: () => {
+  init: (ctx) => {
     function format(f: unknown, ...args: unknown[]): string {
       if (typeof f !== 'string') {
         return [f, ...args].map((a) => (typeof a === 'string' ? a : inspect(a))).join(' ');
@@ -97,19 +97,9 @@ export const utilSpec: BuiltinSpec = {
       return out;
     }
 
-    const types = {
-      isAnyArrayBuffer: (v: unknown) => v instanceof ArrayBuffer,
-      isArrayBuffer: (v: unknown) => v instanceof ArrayBuffer,
-      isAsyncFunction: (v: unknown) => typeof v === 'function' && v.constructor?.name === 'AsyncFunction',
-      isDate: (v: unknown) => v instanceof Date,
-      isMap: (v: unknown) => v instanceof Map,
-      isNativeError: (v: unknown) => v instanceof Error,
-      isPromise: (v: unknown) => v instanceof Promise,
-      isRegExp: (v: unknown) => v instanceof RegExp,
-      isSet: (v: unknown) => v instanceof Set,
-      isTypedArray: (v: unknown) => ArrayBuffer.isView(v) && !(v instanceof DataView),
-      isUint8Array: (v: unknown) => v instanceof Uint8Array,
-    };
+    // `util.types` is `require('internal/util/types')` in Node; that module is
+    // now the real vendored source, so use it directly.
+    const types = ctx.require('internal/util/types') as Record<string, (v: unknown) => boolean>;
 
     function isDeepStrictEqual(a: unknown, b: unknown): boolean {
       if (a === b) return true;

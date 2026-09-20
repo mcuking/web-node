@@ -674,36 +674,6 @@ export const internalBufferSpec: BuiltinSpec = {
 // The typed-array predicates Node builds over V8 intrinsics, expressed against
 // the host's ArrayBuffer.isView + Object.prototype.toString classification.
 
-export const internalUtilTypesSpec: BuiltinSpec = {
-  id: 'internal/util/types',
-  origin: 'web-node',
-  init: () => {
-    const tag = (v: unknown): string | undefined =>
-      ArrayBuffer.isView(v) ? Object.prototype.toString.call(v).slice(8, -1) : undefined;
-    const is = (name: string) => (v: unknown): boolean => tag(v) === name;
-    return {
-      isArrayBufferView: (v: unknown): boolean => ArrayBuffer.isView(v),
-      isTypedArray: (v: unknown): boolean => tag(v) !== undefined && tag(v) !== 'DataView',
-      isDataView: is('DataView'),
-      isUint8Array: is('Uint8Array'),
-      isUint8ClampedArray: is('Uint8ClampedArray'),
-      isUint16Array: is('Uint16Array'),
-      isUint32Array: is('Uint32Array'),
-      isInt8Array: is('Int8Array'),
-      isInt16Array: is('Int16Array'),
-      isInt32Array: is('Int32Array'),
-      isFloat16Array: is('Float16Array'),
-      isFloat32Array: is('Float32Array'),
-      isFloat64Array: is('Float64Array'),
-      isBigInt64Array: is('BigInt64Array'),
-      isBigUint64Array: is('BigUint64Array'),
-      // `diagnostics_channel` reads this to decide whether a subscription's
-      // result should be awaited; Node keeps it here too.
-      isPromise: (v: unknown): boolean => v instanceof Promise,
-    };
-  },
-};
-
 // ---------------------------------------------------------------------------
 // internal/assert
 // ---------------------------------------------------------------------------
