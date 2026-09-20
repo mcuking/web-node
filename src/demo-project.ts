@@ -120,6 +120,23 @@ console.log(
     console.log('from(string): ' + chunks.length + ' chunk(s) -> ' + JSON.stringify(chunks));
   });
 })();
+// stream.isReadable/isWritable/isDisturbed/isErrored are Node's own predicates
+// (internal/streams/utils.js), reading our _readableState/_writableState.
+(function () {
+  const stream = require('stream');
+  const live = new stream.Readable({ read: function () {} });
+  const done = new stream.Readable({ read: function () {} });
+  done.push('x');
+  done.push(null);
+  done.resume();
+  done.on('end', function () {
+    console.log(
+      'predicates  : live isReadable=' + stream.isReadable(live) +
+        ' / ended isReadable=' + stream.isReadable(done) +
+        ' isDisturbed=' + stream.isDisturbed(done)
+    );
+  });
+})();
 const factsFile = path.join(dir, 'facts.txt');
 fs.writeFileSync(factsFile, require('./lib/facts.js')().map(function (r) {
   return r[0] + ' = ' + r[1];
