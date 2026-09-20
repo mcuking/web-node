@@ -18,11 +18,11 @@ import {
   osBinding,
   performanceBinding,
   processMethodsBinding,
-  stringDecoderBinding,
   symbolsBinding,
   taskQueueBinding,
   uvBinding,
 } from './misc';
+import { stringDecoderBinding } from './string_decoder';
 
 /** The whitelist of internal bindings this runtime implements. */
 const REGISTRY: Record<string, (ctx: BindingContext) => Record<string, unknown>> = {

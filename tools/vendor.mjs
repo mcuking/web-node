@@ -54,6 +54,7 @@ const FILES = [
   'punycode.js',
   'domain.js',
   'diagnostics_channel.js',
+  'string_decoder.js',
 ];
 
 /**

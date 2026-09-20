@@ -132,11 +132,6 @@ export const osBinding: BindingFactory = () => ({
   getUserInfo: () => ({ uid: 0, gid: 0, username: 'web-node', homedir: '/home/web-node', shell: null }),
 });
 
-/** `string_decoder` binding: hex/base64 helpers used by the decoder builtin. */
-export const stringDecoderBinding: BindingFactory = () => ({
-  decode: () => '',
-});
-
 /** `icru`/`icu` binding: Intl availability. */
 export const icuBinding: BindingFactory = () => ({
   getDefaultLocale: () => 'en-US',

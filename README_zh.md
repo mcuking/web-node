@@ -249,10 +249,10 @@ Node 的 `lib/` 里可原样复用的文件直接取真源码（内容哈希 + �
 
 **当前覆盖**（revision `7a3437d`，v26.9.1-dev）：
 
-- **38 个文件**已 vendor：整套 `stream` 层、`events`、`async_hooks`（+ `internal/async_local_storage/*`、`internal/promise_hooks`）、`path`、`querystring`、`punycode`、`domain`、`diagnostics_channel`，以及它们依赖的 `internal/*`（`primordials`、`fixed_queue`、`constants`、`encoding/util`、`streams/state`、`streams/destroy`、`per_context/*` 等）。
+- **39 个文件**已 vendor：整套 `stream` 层、`events`、`async_hooks`（+ `internal/async_local_storage/*`、`internal/promise_hooks`）、`path`、`querystring`、`punycode`、`domain`、`diagnostics_channel`、`string_decoder`，以及它们依赖的 `internal/*`（`primordials`、`fixed_queue`、`constants`、`encoding/util`、`streams/state`、`streams/destroy`、`per_context/*` 等）。
 - **58 个顶层 `lib/*.js` 里已有 29 个可用**——要么是 vendored 真源码，要么是因为真文件依赖浏览器里不存在的 native 层，改由我们自研实现。
 
-**能搬与不能搬**：Node `lib/` 约 420 个 `.js`。"全搬"不是复制活：绝大多数直接坐在 native binding（V8 C++ API、libuv handle、raw socket、native addon、模组 loader）上，浏览器没有对应物。所以规则是——**纯 JS 层原样 vendor，下面的 native 层用 JS 重写**（`async_hooks` 的 `async_wrap` 就是这么做的）。剩下的大缺口是根本无浏览器故事的那些（`http2`、`dgram`、`tls`/`_tls_*`、`cluster`、`worker_threads`、`inspector`、`repl`、`vm`/`wasi`、`sqlite`、`sea`），以及值得做的 native 层重写（`internal/util/inspect.js`、native `string_decoder`、`internal/fs/*`）。
+**能搬与不能搬**：Node `lib/` 约 420 个 `.js`。"全搬"不是复制活：绝大多数直接坐在 native binding（V8 C++ API、libuv handle、raw socket、native addon、模组 loader）上，浏览器没有对应物。所以规则是——**纯 JS 层原样 vendor，下面的 native 层用 JS 重写**（`async_hooks` 的 `async_wrap`、`string_decoder` 的 JS decoder binding 都是这个套路）。剩下的大缺口是根本无浏览器故事的那些（`http2`、`dgram`、`tls`/`_tls_*`、`cluster`、`worker_threads`、`inspector`、`repl`、`vm`/`wasi`、`sqlite`、`sea`），以及值得做的 native 层重写（`internal/util/inspect.js`、`internal/util/types.js`、`internal/fs/*`）。
 
 ## 改动约定
 

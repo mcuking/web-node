@@ -33,7 +33,6 @@ import { utilSpec } from './util';
 import { consoleSpec } from './console';
 import { timersSpec } from './timers';
 import { processSpec } from './process';
-import { stringDecoderSpec } from './string_decoder';
 import { osSpec } from './os';
 import { assertSpec } from './assert-impl';
 import { moduleSpec } from './module';
@@ -71,7 +70,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   consoleSpec,
   timersSpec,
   processSpec,
-  stringDecoderSpec,
   osSpec,
   assertSpec,
   moduleSpec,

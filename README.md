@@ -351,11 +351,12 @@ checkout; every patch we do apply is listed in the manifest's `patches` field.
 
 **Current coverage** (revision `7a3437d`, v26.9.1-dev):
 
-- **38 files vendored** — the whole `stream` layer, `events`, `async_hooks`
+- **39 files vendored** — the whole `stream` layer, `events`, `async_hooks`
   (+ `internal/async_local_storage/*`, `internal/promise_hooks`), `path`,
-  `querystring`, `punycode`, `domain`, `diagnostics_channel`, and the
-  `internal/*` pieces they need (`primordials`, `fixed_queue`, `constants`,
-  `encoding/util`, `streams/state`, `streams/destroy`, `per_context/*`, …).
+  `querystring`, `punycode`, `domain`, `diagnostics_channel`, `string_decoder`,
+  and the `internal/*` pieces they need (`primordials`, `fixed_queue`,
+  `constants`, `encoding/util`, `streams/state`, `streams/destroy`,
+  `per_context/*`, …).
 - **29 of the 58 top-level `lib/*.js` modules are provided** — either as
   vendored source, or by our own implementation where the real file needs a
   native layer that cannot exist in a tab.
@@ -367,9 +368,10 @@ large majority sit directly on native bindings (V8 C++ APIs, libuv handles, raw
 sockets, native addons, the module loader) that have no browser equivalent. So
 the rule is: **vendor the pure-JS layers verbatim, and reimplement only the
 native layer underneath them in JS** — exactly what `async_wrap` does for
-`async_hooks` and what the `string_decoder` binding would need for the real
-decoder. A file is vendorable when its only dependencies are shims we already
-provide; everything else is a binding away.
+`async_hooks` and what the JS `string_decoder` binding does for the real
+decoder (`src/string_decoder.cc` ported to `bindings/string_decoder.ts`). A file
+is vendorable when its only dependencies are shims we already provide;
+everything else is a binding away.
 
 The remaining large gaps are the ones with no browser story at all (`http2`,
 `dgram`, `tls`/`_tls_*`, `cluster`, `worker_threads`, `inspector`, `repl`,

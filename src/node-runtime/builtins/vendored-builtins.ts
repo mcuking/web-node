@@ -357,4 +357,11 @@ export const vendoredBuiltins: BuiltinSpec[] = [
       'async_hooks',
     ],
   },
+  {
+    id: 'string_decoder',
+    aliases: ['node:string_decoder'],
+    vendorPath: 'string_decoder.js',
+    origin: 'node-source',
+    deps: ['buffer', 'internal/util', 'internal/errors'],
+  },
 ];

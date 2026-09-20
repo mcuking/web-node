@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**；M14 再把 **`internal/streams/end-of-stream.js` 接进来**（`finished()` 就是真实现）；M15 换掉自研 `EventEmitter`，改用 **Node 真 `events.js`**（`_events` 形状 / `prependListener` / `errorMonitor` / `captureRejections`），并把 `stream.addAbortSignal` 接到真源码；M16 把**整个 `stream` 模块换成真源码**（`lib/stream.js` + `internal/streams/*`：Readable/Writable/Duplex/Transform/PassThrough/pipeline/finished/compose/duplexPair/operators + `stream/promises`），删掉手写 stream；M17 把 **`async_hooks` 也换成真源码**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*`），落在自研 `async_wrap` 绑定上，并让 tick / timer 成为真 async resource——hook 会触发、`AsyncLocalStorage` 能跨异步边界传 store；M18 把**真框架**跑了起来——@vitejs/plugin-vue 在页内编译 **Vue 3 SFC**，`vite build` 产出生产 Vue bundle、`createServer` 在预览里跑真实可交互 Vue 应用（计数器可点、HMR 生效）；M19 又拉了一批量：**真 `punycode.js` / `domain.js` / `diagnostics_channel.js`**（后两者跑在真 `async_hooks` 上，`diagnostics_channel` 配一个小 JS binding）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**；M14 再把 **`internal/streams/end-of-stream.js` 接进来**（`finished()` 就是真实现）；M15 换掉自研 `EventEmitter`，改用 **Node 真 `events.js`**（`_events` 形状 / `prependListener` / `errorMonitor` / `captureRejections`），并把 `stream.addAbortSignal` 接到真源码；M16 把**整个 `stream` 模块换成真源码**（`lib/stream.js` + `internal/streams/*`：Readable/Writable/Duplex/Transform/PassThrough/pipeline/finished/compose/duplexPair/operators + `stream/promises`），删掉手写 stream；M17 把 **`async_hooks` 也换成真源码**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*`），落在自研 `async_wrap` 绑定上，并让 tick / timer 成为真 async resource——hook 会触发、`AsyncLocalStorage` 能跨异步边界传 store；M18 把**真框架**跑了起来——@vitejs/plugin-vue 在页内编译 **Vue 3 SFC**，`vite build` 产出生产 Vue bundle、`createServer` 在预览里跑真实可交互 Vue 应用（计数器可点、HMR 生效）；M19 又拉了一批量：**真 `punycode.js` / `domain.js` / `diagnostics_channel.js`**（后两者跑在真 `async_hooks` 上，`diagnostics_channel` 配一个小 JS binding）；M20 把 **`string_decoder` 也换成真源码**——把 `src/string_decoder.cc` 那个 native 状态机用 JS 逐字节重写（`bindings/string_decoder.ts`），编解码、跨 chunk 多字节字符、base64 回吐 1–2 字节等行为全对齐真 Node。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -45,11 +45,12 @@
 | M17 | **真 `async_hooks`**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` 换成真源码，落在自研 `async_wrap` 绑定上）+ tick/timer 真实 async resource（hook 会触发、`AsyncLocalStorage` 跨异步边界传 store） | ✅ 完成 |
 | M18 | **真框架跑起来**：@vitejs/plugin-vue 在页内编译 **Vue 3 单文件组件**（SFC），`vite build` 出生产 Vue bundle、`createServer` 在预览里跑真实可交互 Vue 应用（计数器可点、HMR 生效） | ✅ 完成 |
 | M19 | **更多 vendored 真源码**：`punycode.js`、`domain.js`、`diagnostics_channel.js`（跑在真 `async_hooks` 上，配 JS `diagnostics_channel` binding） | ✅ 完成 |
+| M20 | **真 `string_decoder`**：把 `src/string_decoder.cc` 的 native 解码状态机用 JS 逐字节重写（`bindings/string_decoder.ts`），`lib/string_decoder.js` 换真源码；删掉自研实现 | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **232/232 通过** · `vite build` 绿（worker ~645KB / index ~10.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **244/244 通过** · `vite build` 绿（worker ~652KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -130,21 +131,39 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 1. ~~**给 `internal/async_hooks` 一个真实实现**~~ ✅ **已解决（2026-09-20，M17）**。
 2. ~~**跑一个真前端框架**~~ ✅ **已解决（2026-09-20，M18）**：@vitejs/plugin-vue 在页内编译 Vue 3 SFC，`vite build` 出生产 bundle、dev server 在预览里跑真实可交互应用（计数器可点 + HMR）。顺带修了两个真问题：**Vite 5.4 的依赖预打包（esbuild）在无文件系统下不可用**（改用 `optimizeDeps.disabled`，让 Vite 直接供 node_modules 的 ESM 源码）、**esbuild-wasm 必须钉在 Vite 5.4 驱动的 0.21 线**。
 2b. ~~**继续拉 vendored 真源码**~~ ✅ **已解决（2026-09-20，M19）**：`punycode.js` / `domain.js` / `diagnostics_channel.js` 已换真源码（后两者就坐在真 `async_hooks` 上）。下面“继续 vendoring”一节给出下一步批次的候选。
+2c. ~~**`string_decoder` 换真源码**~~ ✅ **已解决（2026-09-20，M20）**：把 `src/string_decoder.cc` 的 native 解码状态机用 JS 重写（`bindings/string_decoder.ts`），真 `lib/string_decoder.js` 直接跑在上面；并让 `internal/util` 的 `normalizeEncoding`/`encodingsMap` 与 Node 对齐。
 3. **继续 vendoring（按 ROI 排序）**：
-   - **`string_decoder`**：真源码已就绪，差一个 JS 版的 native decoder binding（现在是我们自研实现）——与 `async_wrap` 同套路（用 `TextDecoder` + 一个承载状态的 `Uint8Array`）。
    - **`internal/util/inspect.js`**（3067 行，真 `util.inspect`）：需 `internal/url` / `internal/util/types` / `internal/bootstrap/realm` 等一批 shim。
    - **`internal/util/types.js`**：目前自研；真文件依赖 `internal/crypto/keys`，可先补那一个。
    - **`internal/fs/*`**：我们已是自研 `fs`，其上层模块（`fs/promises`、`internal/fs/*`）可逐个尝试真源码。
+   - **`internal/validators.js` / `internal/errors.js`**：目前是 shim，真文件依赖 `internal/util` 与 `internal/assert`，成本可能可控。
 4. **promise hooks（M17 跲尾，可选）**：`async_hooks` 现在看得见 tick/timer/AsyncResource，但 V8 promise 未插桩，`promiseResolve` 不响。真做需要 `promiseHook` 级别的插桩，代价大，先放着。
 5. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 6. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。M16 把 child 的生命周期事件改为**订阅时延一个 macrotask**（让 stdout 的 `data` 先于 `exit`，对齐真 Node）；若后续发现时序副作用，可再评估。
 7. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
-8. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M19 后 worker 达 **~645KB**）；若在意体积，可改成按文件 code-split。
+8. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M20 后 worker 达 **~652KB**）；若在意体积，可改成按文件 code-split。
 9. **补 `internal/util/inspect` 等 shim 的保真度**；把 `internal/streams/duplexify` 的 `internal/blob` 从 `isBlob` stub 扩到真 `Blob` 包装（当前够用）。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M20 真 `string_decoder`（把 `src/string_decoder.cc` 搬成 JS）
+
+**目标**：上一轮的“继续 vendoring”把 `string_decoder` 标为“差一个 native decoder binding”。这轮把它做掉：真 `lib/string_decoder.js` 直接跑，删自研实现。
+
+**改了什么**
+
+1. **新 `src/node-runtime/bindings/string_decoder.ts`**：`src/string_decoder.cc` 的逐字节移植。它维护一段小 native 状态 buffer（`state[0..4)` 不完整字符缓冲 / `state[4]` missingBytes / `state[5]` bufferedBytes / `state[6]` encodingField），导出 `encodings`（顺序 = encoding 码）、字段偏移常量、`kSize`、`decode(state, view)`、`flush(state)`。字段布局照 `src/string_decoder.h`，encoding 码照 `InitializeStringDecoder`。
+2. **换真源码**：`lib/string_decoder.js` vendor（MANIFEST 38 → **39**），删掉自研 `src/node-runtime/builtins/string_decoder.ts`（及其在 `builtins/index.ts` 的注册）。
+3. **`internal/util` 对齐 Node**：`normalizeEncoding` 从“nginx 式 toLowerCase”改成 Node 真的 `slowCases` 分支；新增 `encodingsMap`（从 `internalBinding('string_decoder').encodings` 构建）。真 `string_decoder.js` 靠这两个把 encoding 名归一到 canonical 再存数字码。
+4. **新测试 `test/string-decoder.test.ts`**（12 条）：覆盖所有编码、跨 chunk 多字节 UTF-8（€ 拆 2+1、emoji 拆 2+2 与 1+3）、U+FFFD 回退、base64/base64url 回吐 1–2 字节、utf16le 奇数字节、任意 ArrayBuffer view、`ERR_UNKNOWN_ENCODING` / `ERR_INVALID_ARG_TYPE`、以及遗留的 `lastChar`/`lastNeed`/`lastTotal`/`text()`。期望值全部先跑真 Node v26.9.0 取。
+
+**为什么**：`string_decoder` 是“纯 JS 层靠 native 层”的又一范式——真 `lib/string_decoder.js` 只是薄薄一层，native 部分（一个状态机）换 JS 重写后，真源码就能原样拉过来。
+
+**验证**：`tsc --noEmit` 干净 · `vitest run` **244/244**（+12）· `vite build` 绿（worker 645KB → ~652KB）。
+
+**涉及文件**：`tools/vendor.mjs`、`vendor/node-lib/string_decoder.js` + MANIFEST、`src/node-runtime/bindings/{string_decoder.ts,index.ts,misc.ts}`、`src/node-runtime/builtins/{internal-shims.ts,vendored-builtins.ts,index.ts}`、`test/string-decoder.test.ts`、`README.md`/`README_zh.md`、`docs/superpowers/specs/2026-09-17-web-node-design.md`。
 
 ### 2026-09-20 · M19 再拉一批 vendored 真源码（`punycode` / `domain` / `diagnostics_channel`）
 
