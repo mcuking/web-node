@@ -96,9 +96,11 @@ pipeline(fs.createReadStream('/project/a.txt'), new Transform({
 高水位之上的 `write()`/`push()` 返回 `false` 并在排空后发 `'drain'`（背压真实生效）。
 
 流的核心已逐步换成 **Node 真源码**（`internal/streams/state.js`、`from.js`、`utils.js`、
-`destroy.js`）：默认高水位、`Readable.from`、`isReadable`/`isWritable`/`isDisturbed`/
-`isErrored`/`isDestroyed` 谓词，以及 `destroy()` / `_undestroy()` 生命周期。因此
-`destroy(err)` 会在下一 tick 依次发 `error`、`close`；`finished()` 遇到“writable 未完成就
+`destroy.js`、`end-of-stream.js`）：默认高水位、`Readable.from`、
+`isReadable`/`isWritable`/`isDisturbed`/`isErrored`/`isDestroyed` 谓词、
+`destroy()` / `_undestroy()` 生命周期，以及 `finished()` / `eos()`。因此
+`destroy(err)` 会在下一 tick 依次发 `error`、`close`；`finished()` 就是真的 end-of-stream：
+吃 options（`readable`/`writable` 覆盖、`AbortSignal` → `AbortError`），“writable 未完成就
 close”会报 `ERR_STREAM_PREMATURE_CLOSE`。
 
 响应到浏览器也是**真流式**：SW 直接把 `ReadableStream` 交给浏览器，`res.write()` / SSE / 大文件
@@ -229,6 +231,7 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M11 | 修 stream 核心 bug + 真源码 `Readable.from` | ✅ |
 | M12 | 对齐流状态形状（`_readableState`/`_writableState`）+ 真谓词 | ✅ |
 | M13 | vendor `internal/streams/destroy.js`（真 `destroy`/`_undestroy` + `[kState]` 位域）+ `finished()` 接真谓词 | ✅ |
+| M14 | vendor `internal/streams/end-of-stream.js` —— `finished()`/`eos()` 就是真源码（options + AbortSignal） | ✅ |
 
 ## 改动约定
 

@@ -402,3 +402,114 @@ export const internalFsGlobSpec: BuiltinSpec = {
     },
   }),
 };
+
+// ---------------------------------------------------------------------------
+// internal/async_hooks
+// ---------------------------------------------------------------------------
+//
+// The runtime has no async-context tracking, so `enabledHooksExist()` is always
+// false and `AsyncResource` degrades to running its callback synchronously. That
+// is exactly the branch vendored code takes when hooks are off, so callers that
+// guard on `enabledHooksExist()` stay correct.
+
+export const internalAsyncHooksSpec: BuiltinSpec = {
+  id: 'internal/async_hooks',
+  origin: 'web-node',
+  init: () => {
+    class AsyncResource {
+      type: string;
+      constructor(type: string) {
+        this.type = type;
+      }
+      runInAsyncScope<T>(fn: (...args: unknown[]) => T, thisArg?: unknown, ...args: unknown[]): T {
+        return fn.apply(thisArg, args);
+      }
+      emitDestroy(): this {
+        return this;
+      }
+      asyncId(): number {
+        return 0;
+      }
+      triggerAsyncId(): number {
+        return 0;
+      }
+    }
+    return {
+      AsyncResource,
+      enabledHooksExist: () => false,
+      hasAsyncHooks: () => false,
+      getHookArrays: () => [[], [], [], [], [], []],
+      asyncWrapProviders: new Map<string, number>(),
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// internal/async_context_frame
+// ---------------------------------------------------------------------------
+//
+// There is no continuation-preserved embedder data here, so `current()` is
+// always undefined and the getter/setter are inert. Vendored code guards on
+// `AsyncContextFrame.current() || enabledHooksExist()`, which is false, so this
+// only has to answer the probe honestly.
+
+export const internalAsyncContextFrameSpec: BuiltinSpec = {
+  id: 'internal/async_context_frame',
+  origin: 'web-node',
+  init: () => ({
+    current: (): undefined => undefined,
+    has: (): boolean => false,
+    get: (): undefined => undefined,
+    set: (): undefined => undefined,
+    setContinuationPreservedEmbedderData: (): undefined => undefined,
+  }),
+};
+
+// ---------------------------------------------------------------------------
+// internal/events/abort_listener
+// ---------------------------------------------------------------------------
+//
+// Same contract as Node's (lib/internal/events/abort_listener.js), written
+// against the host's native AbortSignal. `kResistStopPropagation` is a Node
+// DOM-shim detail and is not needed for a real browser AbortSignal.
+
+export const internalAbortListenerSpec: BuiltinSpec = {
+  id: 'internal/events/abort_listener',
+  origin: 'web-node',
+  deps: ['internal/errors', 'internal/validators'],
+  init: (ctx: BuiltinInitContext) => {
+    const errors = ctx.require('internal/errors') as {
+      codes: Record<string, new (...args: unknown[]) => Error>;
+    };
+    const validators = ctx.require('internal/validators') as {
+      validateAbortSignal: (s: unknown, name: string) => void;
+      validateFunction: (f: unknown, name: string) => void;
+    };
+
+    // `Symbol.dispose` is a well-known symbol the TS lib here does not declare yet.
+    const kDispose = (Symbol as unknown as { dispose: symbol }).dispose;
+
+    function addAbortListener(signal: AbortSignal, listener: () => void): { [k: symbol]: () => void } {
+      if (signal === undefined) {
+        throw new errors.codes.ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
+      }
+      validators.validateAbortSignal(signal, 'signal');
+      validators.validateFunction(listener, 'listener');
+
+      let removeEventListener: (() => void) | undefined;
+      if (signal.aborted) {
+        queueMicrotask(() => listener());
+      } else {
+        signal.addEventListener('abort', listener, { once: true });
+        removeEventListener = () => signal.removeEventListener('abort', listener);
+      }
+      return {
+        [kDispose]() {
+          removeEventListener?.();
+        },
+      };
+    }
+
+    return { addAbortListener };
+  },
+};

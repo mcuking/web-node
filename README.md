@@ -178,12 +178,14 @@ above the high-water mark and emit `'drain'` once the buffer empties, so
 backpressure propagates for real instead of buffering whole bodies in memory.
 
 Several pieces of Node's own stream core are vendored and executed as-is
-(`internal/streams/state.js`, `from.js`, `utils.js`, `destroy.js`): the default
-high-water marks, `Readable.from`, the `isReadable`/`isWritable`/`isDisturbed`/
-`isErrored`/`isDestroyed` predicates, and the `destroy()` / `_undestroy()`
-lifecycle. `destroy(err)` therefore emits `error` then `close` on the next tick,
-and `finished()` rejects a `close` that beats the writable half with
-`ERR_STREAM_PREMATURE_CLOSE`.
+(`internal/streams/state.js`, `from.js`, `utils.js`, `destroy.js`,
+`end-of-stream.js`): the default high-water marks, `Readable.from`, the
+`isReadable`/`isWritable`/`isDisturbed`/`isErrored`/`isDestroyed` predicates,
+the `destroy()` / `_undestroy()` lifecycle, and `finished()` / `eos()`.
+`destroy(err)` therefore emits `error` then `close` on the next tick, and
+`finished()` is the real end-of-stream: it takes the options object
+(`readable`/`writable` overrides, an `AbortSignal` → `AbortError`) and rejects a
+`close` that beats the writable half with `ERR_STREAM_PREMATURE_CLOSE`.
 
 ## npm
 
@@ -324,6 +326,7 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M11 | Fix stream core bugs (sync push recursion, async-iter error) + real `Readable.from` | ✅ Done |
 | M12 | Align the stream state shape (`_readableState`/`_writableState`) + real predicates | ✅ Done |
 | M13 | Vendor `internal/streams/destroy.js` (real `destroy`/`_undestroy` + `[kState]` bits) and run `finished()` on the real predicates | ✅ Done |
+| M14 | Vendor `internal/streams/end-of-stream.js` — `finished()`/`eos()` are the real source, options + AbortSignal included | ✅ Done |
 
 ## Contributing
 

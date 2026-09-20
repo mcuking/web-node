@@ -20,7 +20,8 @@ import type { BuiltinSpec, BuiltinInitContext } from './types';
  *     the rest, so `_write` implementations do not have to be re-entrant.
  *
  * Deliberate simplifications (documented in the design spec):
- *   - `stream.finished`'s callback form returns a no-op `cleanup()`.
+ *   - `stream.finished` runs Node's real end-of-stream, but its aborted-signal path
+ *     relies on the host AbortSignal only (no `kResistStopPropagation` shim).
  *
  * What is real here, not approximated:
  *   - `read(n)` in byte mode is exact: it splits to the requested byte count
@@ -1511,122 +1512,33 @@ export const streamSpec: BuiltinSpec = {
 
     // ======================= helpers =======================================
 
-    // Node's `finished()` (internal/streams/end-of-stream.js) is built on the
-    // same `internal/streams/utils` predicates we now vendor; this is that logic
-    // without the async_hooks/AsyncResource plumbing it also carries. It settles
-    // when the readable half ended / the writable half finished, reports a
-    // destroyed-with-error stream as that error, and otherwise flags a `close`
-    // that arrives before both halves are done as ERR_STREAM_PREMATURE_CLOSE.
-    const prematureClose = (): Error =>
-      new (errorCodes.ERR_STREAM_PREMATURE_CLOSE as new () => Error)();
-    const erroredOf = (s: EmitterLike): Error | null => {
-      const e = streamUtils.isErrored(s)
-        ? ((s as unknown as { errored?: Error | null }).errored ??
-            (s as unknown as { _readableState?: { errored?: Error | null } })._readableState?.errored ??
-            (s as unknown as { _writableState?: { errored?: Error | null } })._writableState?.errored ??
-            null)
-        : null;
-      return (e as Error | null) ?? null;
+    // Node's real `finished()` / `eos()` — vendored verbatim from
+    // internal/streams/end-of-stream.js. It settles when the readable half ended
+    // / the writable half finished, reports a destroyed-with-error stream as that
+    // error, and otherwise flags a `close` that arrives before both halves are
+    // done as ERR_STREAM_PREMATURE_CLOSE. The async_hooks branch it guards with
+    // `enabledHooksExist()` is inert here (we ship no async hooks).
+    const kEmptyObject = Object.freeze({});
+    const streamEos = ctx.require('internal/streams/end-of-stream') as {
+      eos: (s: unknown, options: Record<string, unknown>, cb: (err?: Error | null) => void) => () => void;
+      finished: (s: unknown, opts?: Record<string, unknown>) => Promise<void>;
     };
 
     function finished(
       stream: EmitterLike,
-      cb?: (err?: Error | null) => void,
+      options?: Record<string, unknown> | ((err?: Error | null) => void),
+      callback?: (err?: Error | null) => void,
     ): (() => void) | Promise<void> {
-      const readable = streamUtils.isReadable(stream) === true;
-      const writable = streamUtils.isWritable(stream) === true;
-      let willEmitClose = streamUtils.willEmitClose(stream) === true;
-      let readableFinished = streamUtils.isReadableFinished(stream, false) === true;
-      let writableFinished = streamUtils.isWritableFinished(stream, false) === true;
-
-      let settled = false;
-      let finish: (err?: Error | null) => void = () => {};
-      const bound: Array<[string, (...a: never[]) => void]> = [];
-      const cleanup = (): void => {
-        for (const [name, fn] of bound) {
-          (stream.removeListener as (n: string, f: (...a: unknown[]) => void) => unknown)(
-            name,
-            fn as (...a: unknown[]) => void,
-          );
-        }
-        bound.length = 0;
-        finish = () => {};
-      };
-      const settle = (err?: Error | null): void => {
-        if (settled) return;
-        settled = true;
-        // Grab the finisher first: `cleanup()` resets it to a no-op.
-        const f = finish;
-        cleanup();
-        f(err ?? null);
-      };
-      const on = (name: string, fn: (...a: never[]) => void): void => {
-        (stream.on as (n: string, f: (...a: unknown[]) => void) => unknown)(
-          name,
-          fn as (...a: unknown[]) => void,
-        );
-        bound.push([name, fn]);
-      };
-
-      const onend = (): void => {
-        readableFinished = true;
-        // A stream destroyed mid-flight cannot be trusted to emit `close`.
-        if ((stream as unknown as { destroyed?: boolean }).destroyed) willEmitClose = false;
-        if (willEmitClose) return;
-        if (!writable || writableFinished) settle(null);
-      };
-      const onfinish = (): void => {
-        writableFinished = true;
-        if ((stream as unknown as { destroyed?: boolean }).destroyed) willEmitClose = false;
-        if (willEmitClose) return;
-        if (!readable || readableFinished) settle(null);
-      };
-      const onerror = (err: Error): void => settle(err);
-      const onclose = (): void => {
-        // Node's getEosOnCloseError(): a close before both halves are done is a
-        // premature close unless the stream was destroyed with an error.
-        const errored = erroredOf(stream);
-        if (errored) {
-          settle(errored);
-          return;
-        }
-        if (readable && !readableFinished && streamUtils.isReadableFinished(stream, false) !== true) {
-          settle(prematureClose());
-          return;
-        }
-        if (writable && !writableFinished && streamUtils.isWritableFinished(stream, false) !== true) {
-          settle(prematureClose());
-          return;
-        }
-        settle(null);
-      };
-
-      if (cb) {
-        finish = cb;
-        if (settled) return () => undefined;
-      } else {
-        return new Promise<void>((resolve, reject) => {
-          finish = (err) => (err ? reject(err) : resolve());
-          start();
-        });
+      // Node's signature: finished(stream[, options], callback).
+      if (typeof options === 'function') {
+        callback = options;
+        options = undefined;
       }
-      start();
-      return cleanup;
-
-      function start(): void {
-        // Already done? Answer on the next tick, like Node's immediate result.
-        if (
-          streamUtils.isDestroyed(stream) ||
-          ((!readable || readableFinished) && (!writable || writableFinished))
-        ) {
-          defer(() => settle(erroredOf(stream)));
-          return;
-        }
-        if (readable) on('end', onend as (...a: never[]) => void);
-        if (writable) on('finish', onfinish as (...a: never[]) => void);
-        on('error', onerror as (...a: never[]) => void);
-        on('close', onclose as (...a: never[]) => void);
+      const opts = options ?? kEmptyObject;
+      if (typeof callback === 'function') {
+        return streamEos.eos(stream, opts, callback);
       }
+      return streamEos.finished(stream, opts);
     }
 
     function pipeline(...args: unknown[]): unknown {
@@ -1669,7 +1581,8 @@ export const streamSpec: BuiltinSpec = {
           pipeline(...streams, (err?: Error | null) => (err ? reject(err) : resolve()));
         });
       },
-      finished: (stream: EmitterLike): Promise<void> => finished(stream) as Promise<void>,
+      finished: (stream: EmitterLike, options?: Record<string, unknown>): Promise<void> =>
+        finished(stream, options) as Promise<void>,
     };
 
     function addAbortSignal(): never {

@@ -46,6 +46,20 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     deps: ['internal/errors', 'internal/streams/utils'],
   },
   {
+    id: 'internal/streams/end-of-stream',
+    vendorPath: 'internal/streams/end-of-stream.js',
+    origin: 'node-source',
+    deps: [
+      'internal/errors',
+      'internal/util',
+      'internal/validators',
+      'internal/streams/utils',
+      'internal/async_hooks',
+      'internal/async_context_frame',
+      'internal/events/abort_listener',
+    ],
+  },
+  {
     id: 'path',
     aliases: ['node:path'],
     vendorPath: 'path.js',

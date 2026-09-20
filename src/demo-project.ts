@@ -166,6 +166,24 @@ console.log(
   );
   w.destroy();
 })();
+// finished() IS Node's end-of-stream (internal/streams/end-of-stream.js): a real
+// AbortSignal rejects it with an AbortError, and it runs its own options object.
+(function () {
+  const stream = require('stream');
+  const r = new stream.Readable({ read: function () {} });
+  const ac = new AbortController();
+  const p = stream.finished(r, { signal: ac.signal });
+  ac.abort();
+  p.then(
+    function () { console.log('end-of-strm: resolved'); },
+    function (e) { console.log('end-of-strm: ' + e.name + ' / ' + e.code); }
+  );
+  const w = new stream.Writable({ write: function (_c, _e, cb) { cb(); } });
+  stream.finished(w, { readable: false }).then(function () {
+    console.log('end-of-strm: readable:false waited for the writable half');
+  });
+  w.end('done');
+})();
 const factsFile = path.join(dir, 'facts.txt');
 fs.writeFileSync(factsFile, require('./lib/facts.js')().map(function (r) {
   return r[0] + ' = ' + r[1];
@@ -824,8 +842,10 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
   and run as-is: Readable.from, high-water-mark resolution, the state predicates,
   and now the real destroy/close chain
 - **destroy() + finished()** — destroy, _undestroy and the error/close emit order
-  come from Node's internal/streams/destroy.js; finished() rejects a close that
-  beats the writable half with ERR_STREAM_PREMATURE_CLOSE
+  come from Node's internal/streams/destroy.js; finished() is Node's real
+  internal/streams/end-of-stream.js, so it honours the options object (readable/
+  writable overrides, an AbortSignal → AbortError) and rejects a close that beats
+  the writable half with ERR_STREAM_PREMATURE_CLOSE
 - **Chunked transfer-encoding** — a response without Content-Length streams as chunked,
   and the client side de-chunks it again
 - **npm client (milestone 4)** — "Install deps" fetches the dependencies declared in
@@ -856,7 +876,7 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - Real TLS (the https module is the http surface under a TLS-shaped name)
 - Buffer pooling (allocUnsafe / from(string) do not carve from an 8 KB slab)
 - npm/yarn/pnpm filesystem specs (file:, git+, link:)
-- A real async_hooks, so end-of-stream's AsyncResource plumbing can be vendored too
+- A real async_hooks (so the vendored end-of-stream can take its AsyncResource branch)
 - webpack (esbuild, rollup and Vite are milestones 5/5b/5c)
 `,
 };

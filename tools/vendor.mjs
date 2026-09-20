@@ -26,6 +26,7 @@ const FILES = [
   'internal/streams/from.js',
   'internal/streams/utils.js',
   'internal/streams/destroy.js',
+  'internal/streams/end-of-stream.js',
   'path.js',
   'querystring.js',
 ];

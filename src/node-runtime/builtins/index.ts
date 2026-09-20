@@ -1,6 +1,9 @@
 import type { BuiltinSpec } from './types';
 
 import {
+  internalAbortListenerSpec,
+  internalAsyncContextFrameSpec,
+  internalAsyncHooksSpec,
   internalErrorsSpec,
   internalFsGlobSpec,
   internalUtilSpec,
@@ -37,6 +40,9 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalValidatorsSpec,
   internalUtilSpec,
   internalFsGlobSpec,
+  internalAsyncHooksSpec,
+  internalAsyncContextFrameSpec,
+  internalAbortListenerSpec,
   // vendored real Node source
   ...vendoredBuiltins,
   // our implementations

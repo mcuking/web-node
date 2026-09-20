@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 更进一步——把 **`internal/streams/destroy.js` 真源码接进来**（`destroy`/`_undestroy` + `[kState]` 位域适配）并让 `finished()` 用真谓词（含 `ERR_STREAM_PREMATURE_CLOSE`）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**（`destroy`/`_undestroy` + `[kState]` 位域适配）；M14 再把 **`internal/streams/end-of-stream.js` 接进来**——`finished()` 就是 Node 的真实现（options 对象、AbortSignal、`ERR_STREAM_PREMATURE_CLOSE`）。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -39,11 +39,12 @@
 | M11 | **修 stream 核心 bug**（同步 push 递归、异步迭代错误传播）+ 真源码 `Readable.from` | ✅ 完成 |
 | M12 | **对齐流状态形状**（`_readableState`/`_writableState`）+ 真源码谓词 | ✅ 完成 |
 | M13 | **vendor `internal/streams/destroy.js`**（真 `destroy`/`_undestroy` + `[kState]` 位域）+ `finished()` 接真谓词 | ✅ 完成 |
+| M14 | **vendor `internal/streams/end-of-stream.js`**（真 `eos`/`finished`，含 options + AbortSignal）| ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **183/183 通过** · `vite build` 绿（worker ~344KB / index ~10.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **193/193 通过** · `vite build` 绿（worker ~357KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -121,15 +122,46 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **接真源码 `internal/streams/end-of-stream.js`**：把现在手写的 `finished()` 换成真实现。它依赖 `internal/async_hooks`（`enabledHooksExist`）/`internal/async_context_frame`/`internal/util`/`internal/validators`，要么先起一个能 no-op 的 `async_hooks` 层，要么跟 vendoring 一起兼容。
-2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
-3. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
-4. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
-5. **stream 剩余**：接真 `readable.js`/`writable.js`（M12/M13 已把 `_readableState`/`_writableState` 与 `[kState]` 就位，接口渐渐够用了）。
+1. **真 `internal/streams/readable.js` 接入**：`_readableState`/`_writableState` 与 `[kState]` 已就位，可以开始把 `Readable.prototype` 的真实现搬进来（先从 `pipe`/`unpipe`/`resume` 这些不依赖 `async_hooks` 的方法切）。
+2. **给 `internal/async_hooks` 一个真实（哪怕最小）实现**，让 vendored 代码能走 `AsyncResource` 分支（end-of-stream 现在只能走 `enabledHooksExist() === false` 那条路）。
+3. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
+4. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。
+5. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M14 接真源码 `internal/streams/end-of-stream.js`
+
+**目标**：把 DEVLOG「下一步」第 1 项做完——`finished()` 手写版换成 Node 的真实现。同时把 `destroy.js` 留下来的三块 shim 缺口（`async_hooks` / `async_context_frame` / `events/abort_listener`）补上。
+
+**改了什么**
+
+1. **新增真源码 `internal/streams/end-of-stream.js`**（`npm run vendor`，manifest 12 → **13** 个文件）。它导出 `eos` / `finished` / `kEosNodeSynchronousCallback`。
+2. **`finished()` 直接委派给 vendored `eos`/`finished`**（`stream.ts`）。公共签名改成 Node 的 `finished(stream[, options], callback)`：带回调返回 `cleanup()`，否则返回 Promise；`stream/promises.finished` 也接受 `options`。
+   - 于是现在真支持 **options 对象**：`readable:false` / `writable:false` / `error:false` / `signal`。
+   - `signal` → 用 **真 AbortSignal**：已 aborted 立即报错，飞行中 abort 也报错，错误都是 `AbortError` / `ABORT_ERR`。
+3. **新增三块 internal shim**（`internal-shims.ts`）：
+   - `internal/async_hooks`：`enabledHooksExist()` 永远 false，`AsyncResource` 退化为同步直调（正是真源码在 hooks 关闭时走的那条分支）。
+   - `internal/async_context_frame`：`current()` 永远 undefined。
+   - `internal/events/abort_listener`：按 Node 契约写（针对宿主原生 `AbortSignal`），返回带 `Symbol.dispose` 的对象。
+4. **接回 pipeline**：`pipeline()` 本来就调 `finished(last)`；现在这条路径也走真源码（源出错→目的端被 destroy 的语义保持）。
+5. 删掉 `stream.ts` 里手写的 `finished` 及其辅助 `prematureClose`/`erroredOf`。
+
+**为什么**
+
+- 手写版有个真 bug：`finished(stream, opts)` 会把 `opts` 丢掉（只收 `cb`），导致 `signal`/`readable:false` 完全不生效。接真源码后这个类问题一次性消失。
+- end-of-stream 是 `pipeline`/`stream/promises` 的公共地基，换成真实现后错误传播、半关闭判定、中止语义全部对齐 Node。
+
+**验证**（期望值全部先跑真 Node v22.19.0 实测）
+
+- 单测：183 → **193**（新增 `test/stream-eos.test.ts` 10 条：已结束/已 end、`readable:false`、premature-close、destroy-error、飞行中/已完成 abort、cleanup、干净结束、pipeline 源错传播）。
+- 浏览器端到端（本机 5199 + Chrome CDP）打印：`end-of-strm: AbortError / ABORT_ERR`、`end-of-strm: readable:false waited for the writable half`。
+
+**涉及文件**
+
+新增：`vendor/node-lib/internal/streams/end-of-stream.js`（+ MANIFEST）、`test/stream-eos.test.ts`。修改：`tools/vendor.mjs`、`src/node-runtime/builtins/vendored-builtins.ts`、`src/node-runtime/builtins/internal-shims.ts`、`src/node-runtime/builtins/index.ts`、`src/node-runtime/builtins/stream.ts`、`src/demo-project.ts`。
 
 ### 2026-09-20 · M13 接真源码 `internal/streams/destroy.js` + `finished()` 用真谓词
 
