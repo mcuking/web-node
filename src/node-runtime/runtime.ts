@@ -21,6 +21,44 @@ export class ProcessExit extends Error {
 // Capture the host timers *before* installGlobals() can shadow them, otherwise
 // our timer bindings would call themselves through globalThis.setTimeout.
 const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
+
+/**
+ * Seed a bootstrap `process` global when the host has none.
+ *
+ * Node's `lib/internal/util.js` reads `process.versions` / `process.platform`
+ * at *load* time, and it is reached while `process` itself is still being built
+ * (`process` → `events` → `internal/util`). A native embedder has `process`
+ * from the very first line; a browser worker does not, so the load throws
+ * `ReferenceError: process is not defined`. Seed just enough of a stand-in for
+ * that load-time read; `#installGlobals()` replaces it with the real process
+ * object once construction completes, and every later `process.x` read resolves
+ * through `globalThis` to the real one.
+ *
+ * The stand-in mirrors the real process's `platform` and an empty `versions`
+ * (this runtime has no OpenSSL/Amaro), so `internal/util.js`'s `noCrypto` /
+ * `noTypeScript` / `isWindows` are computed the same way here as in the final
+ * object. Skipped when the host already exposes `process` (Node, Vitest).
+ */
+function seedBootstrapProcess(): void {
+  const g = globalThis as unknown as Record<string, unknown>;
+  if (g.process !== undefined) return;
+  const noop = (): void => undefined;
+  g.process = {
+    versions: {},
+    platform: 'linux',
+    arch: 'wasm32',
+    env: {},
+    argv: [],
+    version: 'v26.9.1',
+    cwd: () => '/',
+    nextTick: (fn: (...a: unknown[]) => void, ...args: unknown[]): void => {
+      queueMicrotask(() => fn(...args));
+    },
+    emitWarning: noop,
+    stdout: { write: () => true, isTTY: false },
+    stderr: { write: () => true, isTTY: false },
+  };
+}
 const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
 const nativeSetInterval = globalThis.setInterval.bind(globalThis);
 const nativeClearInterval = globalThis.clearInterval.bind(globalThis);
@@ -117,6 +155,10 @@ export class NodeRuntime {
   #nextTickScheduled = false;
 
   constructor(opts: RuntimeOptions) {
+    // Must run before anything materialises a module: `internal/util.js` (a
+    // dependency of `events`, itself a dependency of `process`) reads `process`
+    // at load time. See `seedBootstrapProcess`.
+    seedBootstrapProcess();
     this.vfs = opts.vfs;
     const argv = opts.argv ?? [];
     const env = opts.env ?? {};
