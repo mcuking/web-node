@@ -182,9 +182,9 @@ web-node/
 
 ## 9. 已知限制
 
-> 本表按里程碑进展刷新（当前至 **M10**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
+> 本表按里程碑进展刷新（当前至 **M17**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
 >
-> **vendoring 进展**：`internal/streams/state.js`（highWaterMark）、`internal/streams/from.js`（`Readable.from`）、`internal/streams/utils.js`（`isReadable`/`isWritable`/`isDisturbed`/`isErrored`）、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`path.js`、`querystring.js`、`internal/per_context/*` 已用 Node 真源码。
+> **vendoring 进展**：`lib/stream.js` + `internal/streams/*`（整套流）、`lib/events.js`、`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` + `internal/promise_hooks.js`、`internal/streams/{state,from,utils}.js`、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`path.js`、`querystring.js`、`internal/per_context/*` 已用 Node 真源码（MANIFEST 35 个文件）。
 
 | 限制 | 说明 |
 |---|---|
@@ -196,15 +196,17 @@ web-node/
 | glob 未实现 | `path.matchesGlob` 抛错 |
 | `file:`/`git+`/`link:` 说明符 | npm 未支持 |
 | Buffer 未池化 | `allocUnsafe`/`from(string)` 不做 slab 池化（`.byteOffset` 恒为 0） |
+| promise hooks 不触发 | V8 promise 未插桩，`createHook({ promiseResolve })` 不会响（tick/timer/AsyncResource 会） |
 
 ---
 
 ## 10. 后续里程碑
 
-已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、vendoring：stream state + Readable.from（M10/M11）、流状态形状 + 真谓词（M12）。
+已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、整套 stream + events 换真源码（M10–M16）、真 `async_hooks` + `AsyncLocalStorage`（M17）。
 
 接下来：
 
-1. **继续 vendoring 流模块**：`internal/streams/utils.js` 已接；下一步接 `internal/streams/destroy.js`（需先对齐 `emitErrorNT`/`nextTick` 链路）与 `internal/streams/legacy.js`（`Stream` 基类），再考虑 `internal/fixed_queue.js`。
+1. **promise hooks（M17 遗留，可选）**：要让 `createHook` 的 `promiseResolve` 真响，需要 V8 promise 级插桩，代价大，暂缓。
 2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
 3. **性能**：把热点 binding（buffer/fs）替换为 wasm；引入 SharedArrayBuffer + Atomics 做同步 syscall。
+4. **前端生态验证**：在页内跑一个真实前端工具链（已能跑 Vite / rollup / esbuild），把 vendoring 收益兑换成“真能跑起来的东西”。

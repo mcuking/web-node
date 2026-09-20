@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**；M14 再把 **`internal/streams/end-of-stream.js` 接进来**（`finished()` 就是真实现）；M15 换掉自研 `EventEmitter`，改用 **Node 真 `events.js`**（`_events` 形状 / `prependListener` / `errorMonitor` / `captureRejections`），并把 `stream.addAbortSignal` 接到真源码；M16 把**整个 `stream` 模块换成真源码**（`lib/stream.js` + `internal/streams/*`：Readable/Writable/Duplex/Transform/PassThrough/pipeline/finished/compose/duplexPair/operators + `stream/promises`），删掉手写 stream。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
+**阶段**：M5 真实构建工具已落地（**esbuild** WASM），M5b 接入 **rollup 的官方 WASM 构建**；M5c 把 **Vite 本体**跑了起来（`vite build` → VFS）；M5d 又把 Vite 的 **dev server** 在页内跑通（`createServer` + `listen` + 按需转换，预览真实渲染）；M5e 把 **HMR** 接通了——ServiceWorker 代理不了 WebSocket，于是 HMR 改走 **BroadcastChannel**；M5f 补齐 **CSS 热更（`css-update`）与按端口隔离通道**；M3.5d 把预览从路径前缀升级为 **子域名真源隔离**（`<port>.localhost`，仅 dev server）；M6 把 npm 客户端收尾（**lockfile + 完整性校验 + peer 自动安装**）；M7 补上了运行时的 **进程与 shell 表面**（`child_process` 全家族 + 受控 `ProcessHost` + mini-shell），并把 npm 的 **`.bin` shim 与生命周期脚本**接到这个表面上；M8 把 **stream** 的几处近似实现换成真语义（字节精确 `read(n)`、objectMode 双向分离、`autoDestroy`、暂停模式的 `readable` 驱动、chunk 一律交付 `Buffer`）；M9 让 **Buffer 的 `slice`/`subarray` 与 `from(ArrayBuffer)`** 共享底层内存（Node 同语义）；M10 开始**扩大 vendoring**（第一块真源码 `internal/streams/state.js` 接管 highWaterMark，默认值/ per-side 键 / 校验 / `read(n)` 增长全对齐）；M11 拿真源码 `Readable.from` 时反手修了两个 stream 核心 bug；M12 把流状态形状（`_readableState`/`_writableState`）对齐 Node 并接上真谓词；M13 把 **`internal/streams/destroy.js` 真源码接进来**；M14 再把 **`internal/streams/end-of-stream.js` 接进来**（`finished()` 就是真实现）；M15 换掉自研 `EventEmitter`，改用 **Node 真 `events.js`**（`_events` 形状 / `prependListener` / `errorMonitor` / `captureRejections`），并把 `stream.addAbortSignal` 接到真源码；M16 把**整个 `stream` 模块换成真源码**（`lib/stream.js` + `internal/streams/*`：Readable/Writable/Duplex/Transform/PassThrough/pipeline/finished/compose/duplexPair/operators + `stream/promises`），删掉手写 stream；M17 把 **`async_hooks` 也换成真源码**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*`），落在自研 `async_wrap` 绑定上，并让 tick / timer 成为真 async resource——hook 会触发、`AsyncLocalStorage` 能跨异步边界传 store。已部署到 **GitHub Pages**：<https://mcuking.github.io/web-node/>。
 
 > 预览 UI：右侧 Output / Preview 双 tab，**自动发现监听端口**（1.5s 轻量轮询），iframe 加载子域名（dev）或 `/preview/<port>/`（构建）。
 
@@ -42,11 +42,12 @@
 | M14 | **vendor `internal/streams/end-of-stream.js`**（真 `eos`/`finished`，含 options + AbortSignal）| ✅ 完成 |
 | M15 | **vendor Node 真 `events.js`**（替换自研 EventEmitter）+ 真 `stream.addAbortSignal`；`internal/streams/readable.js` 已 vendor 并就绪 | ✅ 完成 |
 | M16 | **整套 stream 换真源码**（`lib/stream.js` + `internal/streams/*`：Writable/Duplex/Transform/PassThrough/pipeline/compose/duplexPair/operators + `stream/promises`），删除手写 stream | ✅ 完成 |
+| M17 | **真 `async_hooks`**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` 换成真源码，落在自研 `async_wrap` 绑定上）+ tick/timer 真实 async resource（hook 会触发、`AsyncLocalStorage` 跨异步边界传 store） | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **220/220 通过** · `vite build` 绿（worker ~550KB / index ~10.8KB / css ~4.1KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **226/226 通过** · `vite build` 绿（worker ~596KB / index ~10.8KB / css ~4.1KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -124,17 +125,40 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 按优先级：
 
-1. **给 `internal/async_hooks` 一个真实（哪怕最小）实现**，让 vendored 代码能走 `AsyncResource` 分支（end-of-stream / readable 现在都只能走 `enabledHooksExist() === false` 那条路）。
-2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
-3. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。M16 把 child 的生命周期事件改为**订阅时延一个 macrotask**（让 stdout 的 `data` 先于 `exit`，对齐真 Node）；若后续发现时序副作用，可再评估。
-4. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
-5. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M16 后 worker 达 **~550KB**）；若在意体积，可改成按文件 code-split。
-6. ~~**统一 oracle 版本**~~ ✅ **已解决（2026-09-20）**：vendored 真源码来自 `/Users/tangjianghong/Downloads/node`，是 **Node v26.9.1-dev**（`v26.9.0-1-g7a3437d`），与旧基准 fnm **v22.19.0** 不是一套。已用 fnm 装 **v26.9.0**（距 vendored 只差一个 commit）作为新基准；实测确认 v26.9.0 与 vendored 源行为一致（例：EOF 处 `end signals=1`，v22 为 2）。**后续 oracle 一律用 v26.9.0**：`export PATH="/Users/tangjianghong/Library/Application Support/fnm/node-versions/v26.9.0/installation/bin:$PATH"`。
+1. ~~**给 `internal/async_hooks` 一个真实实现**~~ ✅ **已解决（2026-09-20，M17）**：`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` 已换真源码，落在自研 `async_wrap` 绑定上；tick/timer 现在是真 async resource，hook 会触发、`AsyncLocalStorage` 能跨异步边界传 store。剩下的已知缺口只有 **promise hooks**（不插桩 V8 promise）。
+2. **promise hooks（M17 跲尾，可选）**：`async_hooks` 现在看得见 tick/timer/AsyncResource，但 V8 promise 未插桩，`promiseResolve` 不响。真做需要 `promiseHook` 级别的插桩，代价大，先放着。
+3. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
+4. **child_process 收尾（M7 遗留）**：child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见；`fork` 的 IPC（`send`/`message`）目前明确抛 `notImplemented`。M16 把 child 的生命周期事件改为**订阅时延一个 macrotask**（让 stdout 的 `data` 先于 `exit`，对齐真 Node）；若后续发现时序副作用，可再评估。
+5. **Buffer pooling 遗留（M9 尾声）**：`allocUnsafe` / `from(string)` 未做 8KB slab 池化（`.byteOffset` 恒为 0、`.buffer.byteLength === length`）；与语义无关，但可观测。
+6. **把 vendored 源改为按需加载**：`vendored.ts` 现在是 eager `import.meta.glob`，每个 vendor 文件都进 bundle（M16 后 worker 达 **~596KB**）；若在意体积，可改成按文件 code-split。
 7. **补 `internal/async_hooks` / `internal/util/inspect` 等 shim 的保真度**；把 `internal/streams/duplexify` 的 `internal/blob` 从 `isBlob` stub 扩到真 `Blob` 包装（当前够用）。
 
 ---
 
 ## 变更记录
+
+### 2026-09-20 · M17 真 `async_hooks`（+ 真实 async resource 的 tick / timer）
+
+**背景**：之前在 `internal-shims.ts` 里手写了一个 `internal/async_hooks`，只有个空壳 `AsyncResource`，且 `enabledHooksExist()` 恒为 `false`。而 `async_hooks` 正好是之前一直跳过的那块——end-of-stream 里的 `AsyncContextFrame.current() || enabledHooksExist()` 分支永远只能走 false 那条。
+
+**改了什么**
+
+1. **新增 `async_wrap` 绑定**（`bindings/async_wrap.ts`）：把我们之前在 C++ 的那一层（`Environment::AsyncHooks`）用 JS 做出来——`async_hook_fields`/`async_id_fields`/`async_ids_stack`（typed array）、`execution_async_resources`、`constants`（`kInit/kBefore/...`，索引逐个对齐 `src/env.h`）、`Providers`（70 个 provider 名→id，照 `src/async_wrap.h` 顺序）、以及 `setupHooks`/`setCallbackTrampoline`/`setPromiseHooks`/`queueDestroyAsyncId`/`registerDestroyHook`/`pushAsyncContext`/`popAsyncContext`/`clearAsyncIdStack`。初始值对齐真 `AsyncHooks()`：`executionAsyncId=1`、`trigger=0`、`counter=1`、`defaultTrigger=-1`、`kCheck=1`。
+2. **换成真源码**：`internal/async_hooks.js`、`async_hooks.js`（公开模块）、`internal/async_context_frame.js`、`internal/promise_hooks.js`、`internal/async_local_storage/{async_hooks,run_scope}.js` 全部 vendor（MANIFEST 现在 35 个文件）。删掉手写的 `internalAsyncHooksSpec` / `internalAsyncContextFrameSpec`。
+3. **CJS 模块现在能拿到 `internalBinding`**：`vm.ts` 的 `CJS_PARAMS` 加上 `internalBinding`，`realm.ts` 注入 `(name) => this.internalBinding(name)`。没有这个，真 `internal/async_hooks.js` 一加载就 `internalBinding is not defined`。
+4. **bootstrap 接 hook**：仿 Node 的 `lib/internal/bootstrap/node.js`，realm 一建好就 `internalBinding('async_wrap').setupHooks(require('internal/async_hooks').nativeHooks)`，这样排队的 `destroy` 能回到 JS 语义。
+5. **tick / timer 变成真的 async resource**：`process.nextTick` 建 `TickObject`，`timers.setTimeout/setInterval/setImmediate` 建 `Timeout`/`Immediate`，都在排程时 `emitInit`、回调外裹 `emitBefore/emitAfter`、触发后 `emitDestroy`（tick/timer 都在 Node 的 `internal/process/task_queues.js` / `internal/timers.js` 里干这个）。这是让 `createHook` 真的能看到 tick/timer、让 `AsyncLocalStorage` 真能跨 `nextTick`/`setTimeout` 传 store 的关键。
+6. **error codes**：补 `ERR_ASYNC_CALLBACK`(TypeError) / `ERR_ASYNC_TYPE`(TypeError) / `ERR_INVALID_ASYNC_ID`(RangeError)；`errors` 绑定补 `exitCodes`（`internal/async_hooks` 拿 `kGenericUserError`）。symbols 绑定补 `resource_symbol` / `trigger_async_id_symbol`。`internal/options` 的默认值补 `--async-context-frame: false`（我们走 async_hooks 版的 ALS，不开 AsyncContextFrame）。
+
+**已知限制**（写进 README 的 Not yet）：本 tab 不插桩 V8 promise，所以 promise hooks 不触发（`promiseResolve` 不会响）；`setPromiseHooks` 会给一个可用的 stop 函数，但注册后不会真的看到 promise。
+
+**为什么**：逻辑上这是 vendoring 的“最后一块拼图”——流、事件都换真源码后，剩下能拉的就是 async_hooks；而且真 async_hooks 带一个真 `AsyncLocalStorage`（在浏览器里跑 Node 代码时，跨异步边界的上下文本就是硬需求）。做法上也对得上 web-node 的约定：**能原样跑的 Node 源码就原样跑**，跑不了的 native 层（这里叫 `async_wrap`）自己用 JS 补，并在 MANIFEST 里溯源。
+
+**涉及文件**
+
+新增：`src/node-runtime/bindings/async_wrap.ts`、`vendor/node-lib/{async_hooks.js,internal/async_hooks.js,internal/promise_hooks.js,internal/async_context_frame.js,internal/async_local_storage/*}`、`test/async-hooks.test.ts`（6 条，期望值先跑真 Node v26 取得）。修改：`tools/vendor.mjs`、`src/node-runtime/bindings/{index,misc}.ts`、`src/node-runtime/vm.ts`、`src/node-runtime/realm.ts`、`src/node-runtime/runtime.ts`、`src/node-runtime/builtins/{index,internal-shims,timers,process,vendored-builtins}.ts`、`src/demo-project.ts`。
+
+**验证**：`tsc --noEmit` 干净 · `vitest run` **226/226**（+6）· 浏览器端到端 demo：`async_hooks: init:TickObject / init:Timeout / tick={"user":"tang"} / timer={"user":"tang"}`、`als outside : undefined`。
 
 ### 2026-09-20 · oracle 切到 fnm Node v26.9.0
 
