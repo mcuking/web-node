@@ -719,6 +719,42 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     ],
   },
   {
+    id: 'internal/blob',
+    vendorPath: 'internal/blob.js',
+    origin: 'node-source',
+    // The real `Blob` (src/node_blob.cc reduced to a flat list of byte parts by
+    // `bindings/blob.ts`). It sits on our `internal/encoding` shim (decoder +
+    // encoder), `internal/url`, `internal/util`, `internal/webidl` converters
+    // and `internal/worker/js_transferable`; the WHATWG streams and timers it
+    // uses are touched lazily from inside the file.
+    deps: [
+      'internal/encoding',
+      'internal/url',
+      'internal/util',
+      'internal/util/inspect',
+      'internal/util/types',
+      'internal/validators',
+      'internal/webidl',
+      'internal/errors',
+      'internal/process/task_queues',
+      'internal/worker/js_transferable',
+    ],
+  },
+  {
+    id: 'internal/file',
+    vendorPath: 'internal/file.js',
+    origin: 'node-source',
+    // `File` is a thin subclass of `Blob`; it only needs the blob module plus
+    // validation/inspection helpers. Exposed globally by `bootstrap/web`.
+    deps: [
+      'internal/blob',
+      'internal/errors',
+      'internal/util',
+      'internal/util/inspect',
+      'internal/worker/js_transferable',
+    ],
+  },
+  {
     id: 'internal/async_hooks',
     vendorPath: 'internal/async_hooks.js',
     origin: 'node-source',

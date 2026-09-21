@@ -719,17 +719,9 @@ export const internalBufferSpec: BuiltinSpec = {
 // internal/blob
 // ---------------------------------------------------------------------------
 //
-// Only `isBlob` is read by the lazily-loaded duplexify path; the host realm's
-// Blob is the real thing.
-
-export const internalBlobSpec: BuiltinSpec = {
-  id: 'internal/blob',
-  origin: 'web-node',
-  init: () => ({
-    isBlob: (value: unknown): boolean =>
-      typeof Blob !== 'undefined' && value instanceof Blob,
-  }),
-};
+// ⏬ This is now the real vendored file (`lib/internal/blob.js`, plus
+// `lib/internal/file.js` for `File`); they run on the JS `blob` binding
+// (`bindings/blob.ts`).
 
 // ---------------------------------------------------------------------------
 // internal/histogram
@@ -1064,10 +1056,24 @@ export const internalAbortListenerSpec: BuiltinSpec = {
 export const internalEncodingSpec: BuiltinSpec = {
   id: 'internal/encoding',
   origin: 'web-node',
-  init: () => ({
-    TextEncoder,
-    TextDecoder,
-  }),
+  init: () => {
+    // `internal/blob.js` and `internal/webworker.js` decode bytes through a
+    // shared decoder; the host realm has a real `TextDecoder`, so a plain memo
+    // matches Node's `getUtf8Decoder` (a lazily-created singleton).
+    let utf8Decoder: TextDecoder | undefined;
+    return {
+      TextEncoder,
+      TextDecoder,
+      getUtf8Decoder: (): TextDecoder => (utf8Decoder ??= new TextDecoder()),
+      getEncodingFromLabel: (label: string): string | undefined => {
+        try {
+          return new TextDecoder(label).encoding;
+        } catch {
+          return undefined;
+        }
+      },
+    };
+  },
 };
 
 // ---------------------------------------------------------------------------

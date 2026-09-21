@@ -491,6 +491,28 @@ const nodeStream = require('stream');
 })();
 console.log('');
 
+// --- Blob (milestone 37) ---
+// Blob and File are now the real lib/internal/blob.js + lib/internal/file.js
+// running on a JS 'blob' binding. Blob is a global (and require('buffer').Blob
+// agrees on identity); blob.stream() chunks on the original part boundaries.
+console.log('-- Blob (milestone 37) --');
+(async function () {
+  const b = new Blob(['node ', 'in ', 'the browser']);
+  console.log('size        : ' + b.size + ' type=' + JSON.stringify(b.type));
+  console.log('text        : ' + (await b.text()));
+  const chunks = [];
+  const r = b.stream().getReader();
+  for (;;) { const x = await r.read(); if (x.done) break; chunks.push(Buffer.from(x.value).toString()); }
+  console.log('stream      : ' + JSON.stringify(chunks));
+  const f = new File(['data'], 'demo.txt', { type: 'text/plain' });
+  console.log('file        : ' + f.name + ' ' + f.size + ' ' + f.type);
+  const sliced = b.slice(5, 7);
+  console.log('slice       : ' + (await sliced.text()));
+  const ob = await require('fs').openAsBlob('/project/index.js').catch(function () { return null; });
+  console.log('openAsBlob  : ' + (ob ? ob.size + ' bytes from /project/index.js' : 'n/a'));
+})();
+console.log('');
+
 // --- npm (milestone 4) ---
 // The npm client downloads and unpacks packages into the virtual node_modules.
 // require() already resolves node_modules from the VFS, so once "Install deps"

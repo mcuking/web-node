@@ -2,7 +2,6 @@ import type { BuiltinSpec } from './types';
 
 import {
   internalAbortListenerSpec,
-  internalBlobSpec,
   internalBufferSpec,
   internalEncodingSpec,
   internalErrorsSpec,
@@ -44,7 +43,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalBufferSpec,
   internalBootstrapRealmSpec,
   internalUrlSpec,
-  internalBlobSpec,
   internalFsUtilsSpec,
   internalHistogramSpec,
   internalAbortListenerSpec,

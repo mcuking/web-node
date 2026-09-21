@@ -545,11 +545,14 @@ export const bufferSpec: BuiltinSpec = {
 
     const SlowBuffer = (size: number): Buffer => Buffer.alloc(size);
 
-    return {
+    // `buffer.Blob` / `buffer.File` / `buffer.resolveObjectURL` are Node's real
+    // vendored classes. They have to be lazy: `internal/blob` pulls in
+    // `internal/util/inspect`, which requires `buffer` back, so requiring them
+    // while `buffer` itself is initializing would hand `inspect` a half-built
+    // exports object. Node does the same with `defineLazyProperties`.
+    const exports: Record<string, unknown> = {
       Buffer,
       SlowBuffer,
-      Blob: typeof Blob !== 'undefined' ? Blob : undefined,
-      File: typeof File !== 'undefined' ? File : undefined,
       atob: (s: string) => atob(s),
       btoa: (s: string) => btoa(s),
       kMaxLength: MAX_LENGTH,
@@ -570,7 +573,26 @@ export const bufferSpec: BuiltinSpec = {
         for (let i = 0; i < buf.length; i++) if (buf[i] > 0x7f) return false;
         return true;
       },
-      resolveObjectURL: () => undefined,
     };
+    let lazyBlob: { Blob?: unknown; resolveObjectURL?: unknown } | undefined;
+    const loadBlob = () =>
+      (lazyBlob ??= ctx.require('internal/blob') as {
+        Blob?: unknown;
+        resolveObjectURL?: unknown;
+      });
+    let lazyFile: { File?: unknown } | undefined;
+    const loadFile = () => (lazyFile ??= ctx.require('internal/file') as { File?: unknown });
+    for (const [key, get] of [
+      ['Blob', () => loadBlob().Blob],
+      ['File', () => loadFile().File],
+      ['resolveObjectURL', () => loadBlob().resolveObjectURL],
+    ] as const) {
+      Object.defineProperty(exports, key, {
+        enumerable: true,
+        configurable: true,
+        get,
+      });
+    }
+    return exports;
   },
 };

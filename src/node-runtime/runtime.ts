@@ -340,6 +340,19 @@ export class NodeRuntime {
       const value = (globalThis as unknown as Record<string, unknown>)[name];
       if (value !== undefined) sandboxGlobal[name] = value;
     }
+    // `Blob`/`File` are ours, not the host's: Node exposes them from
+    // `internal/blob` + `internal/file` (bootstrap/web), and the vendored
+    // `internal/streams/duplexify` gates its Blob path on the real `isBlob`. If
+    // user code created the host realm's Blob instead, that check would miss,
+    // so the global and the module must agree on identity.
+    try {
+      const blob = this.realm.require('internal/blob') as { Blob?: unknown };
+      if (blob.Blob !== undefined) sandboxGlobal.Blob = blob.Blob;
+      const file = this.realm.require('internal/file') as { File?: unknown };
+      if (file.File !== undefined) sandboxGlobal.File = file.File;
+    } catch {
+      /* keep the host's Blob/File if the vendored modules are unavailable */
+    }
     // `self` only exists in a browser/worker host; browser-targeted libraries
     // rely on it. Under Node (tests) alias it to the real global so those
     // libraries still find crypto/performance/TextEncoder through it.

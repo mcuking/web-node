@@ -86,4 +86,32 @@ export const unsupportedSpecs: BuiltinSpec[] = [
         constants: { Z_NO_COMPRESSION: 0, Z_BEST_SPEED: 1, Z_BEST_COMPRESSION: 9, Z_DEFAULT_COMPRESSION: -1 },
       }),
   },
+  {
+    id: 'vm',
+    aliases: ['node:vm'],
+    origin: 'web-node',
+    // A full `vm` (isolated contexts, `Script`, `compileFunction`) is out of
+    // scope, but `runInNewContext` is not optional: Node's own vendored
+    // `internal/util.js` reaches for a **cross-realm** RegExp through it
+    // (`getInternalGlobal` / `SideEffectFreeRegExpPrototypeSymbolReplace`),
+    // which the WHATWG streams finalizers hit. Without it, merely garbage
+    // collecting a stream writer raised an unhandled `NotImplementedError`.
+    // Everything else throws on use, as usual.
+    init: () =>
+      unsupported('vm', {
+        runInNewContext: (code: string, contextObject?: Record<string, unknown>) => {
+          // `this` in the evaluated program must be the context object, and a
+          // bare `runInNewContext('this')` has to hand back something with the
+          // standard intrinsics on it (Node returns the contextified global),
+          // so default to an object that delegates to the host global.
+          const context = contextObject ?? Object.create(globalThis);
+          const run = new Function(
+            '__ctx__',
+            '__code__',
+            'with (__ctx__) { return eval(__code__); }',
+          ) as (ctx: unknown, code: string) => unknown;
+          return run.call(context, context, code);
+        },
+      }),
+  },
 ];

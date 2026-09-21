@@ -359,7 +359,7 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
 
 **Current coverage** (revision `7a3437d`, v26.9.1-dev):
 
-- **103 files vendored** — the whole `stream` layer, `events`,
+- **105 files vendored** — the whole `stream` layer, `events`,
   `internal/event_target` (+ `internal/webidl`, `internal/perf/utils`),
   `internal/abort_controller`, `console` (+ `internal/console/*`,
   `internal/cli_table`, `internal/util/debuglog`, `internal/trace_events`,
@@ -390,6 +390,12 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
   strategies and the text codecs, plus the classic↔web adapters so
   `Readable.toWeb` / `Writable.toWeb` / `Duplex.toWeb` work;
   `CompressionStream`/`DecompressionStream` need the native zlib and throw,
+  `internal/blob` (+ `internal/file`) — the real `Blob` and `File`, on a JS
+  `blob` binding that keeps the `DataQueue` contract (a reader hands back one
+  entry per `pull`, so `blob.stream()` chunks on the original source
+  boundaries); `Blob`/`File` are globals and agree on identity with
+  `require('buffer').Blob`, and `fs.openAsBlob` plus the
+  `URL.createObjectURL` object store ride along,
   `internal/util/comparisons` (the real `isDeepStrictEqual`),
   `internal/util/colors`, `util` (+ `internal/util.js`, `internal/util/diff`,
   `internal/util/parse_args/*`), `internal/mime`, and the `internal/*` pieces
@@ -401,7 +407,8 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
   load-only stubs that keep `import` side-effect-free and throw a typed
   `NotImplementedError` on use. The newest real ones are `perf_hooks` (the whole
   `internal/perf/*` group) and `stream/web` (the whole `internal/webstreams/*`
-  group). `crypto` is the newest hand-written one: the
+  group), plus the `Blob`/`File` globals behind `internal/blob` + `internal/file`.
+  `crypto` is the newest hand-written one: the
   WebCrypto API is promise-only, but Node's `createHash` / `createHmac` /
   `pbkdf2Sync` / `scryptSync` are synchronous, so MD5, SHA-1, SHA-2
   (224/256/384/512), HMAC, PBKDF2, HKDF and scrypt are implemented in plain JS
@@ -422,9 +429,11 @@ everything else is a binding away.
 
 The remaining large gaps are the ones with no browser story at all (`http2`,
 `dgram`, `tls`/`_tls_*`, `cluster`, the thread-spawning half of
-`worker_threads`, `inspector`, `repl`, `vm`/`wasi`, `sqlite`, `sea`), plus
+`worker_threads`, `inspector`, `repl`, `wasi`, `sqlite`, `sea`), plus
 native-layer reimplementations worth doing (`internal/util/inspect.js`, the
-native `string_decoder`, `internal/fs/*`).
+native `string_decoder`, `internal/fs/*`). `vm` is a load-only stub whose only
+real member is `runInNewContext` — Node's own `internal/util.js` needs it to
+reach a cross-realm `RegExp`.
 
 ## Contributing
 

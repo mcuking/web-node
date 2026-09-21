@@ -27,6 +27,7 @@ import {
 } from './misc';
 import { messagingBinding, workerBinding } from './messaging';
 import { stringDecoderBinding } from './string_decoder';
+import { blobBinding } from './blob';
 
 /** The whitelist of internal bindings this runtime implements. */
 const REGISTRY: Record<string, BindingFactory> = {
@@ -48,6 +49,7 @@ const REGISTRY: Record<string, BindingFactory> = {
   messaging: messagingBinding,
   uv: uvBinding,
   stream_wrap: streamWrapBinding,
+  blob: blobBinding,
   diagnostics_channel: diagnosticsChannelBinding,
   task_queue: taskQueueBinding,
   trace_events: traceEventsBinding,
@@ -76,7 +78,6 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'cares_wrap',
   'http_parser',
   'encoding_binding',
-  'blob',
   'url',
   'url_pattern',
   'trace_events',

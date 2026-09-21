@@ -420,6 +420,16 @@ export const fsSpec: BuiltinSpec = {
       realpathSync: Object.assign((p: string) => binding.realpathSync(p), {
         native: (p: string) => binding.realpathSync(p),
       }),
+      // `fs.openAsBlob(path[, options])` (lib/fs.js): an fd-backed Blob that
+      // is read incrementally. Every byte source here is memory resident, so
+      // it resolves to a Blob over the file's bytes. The promise wrapper
+      // matches Node (it leaves room for an async implementation later).
+      openAsBlob: (p: string, options: { type?: string } = {}) => {
+        const { createBlobFromFilePath } = ctx.require('internal/blob') as {
+          createBlobFromFilePath: (path: string, opts: { type?: string }) => unknown;
+        };
+        return Promise.resolve(createBlobFromFilePath(vfs.resolve(p), { type: options?.type }));
+      },
       readFile: (p: string, o: unknown, c?: (e: Error | null, d?: unknown) => void) => {
         const callback = typeof o === 'function' ? (o as (e: Error | null, d?: unknown) => void) : c!;
         const options = typeof o === 'function' ? undefined : o;

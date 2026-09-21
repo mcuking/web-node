@@ -118,6 +118,8 @@ const FILES = [
   'internal/webstreams/adapters.js',
   'internal/webstreams/compression.js',
   'stream/web.js',
+  'internal/blob.js',
+  'internal/file.js',
 ];
 
 /**

@@ -8,6 +8,9 @@ import type { BindingFactory } from './context';
  * encoding primitives that are genuinely binding-level (atob/btoa bridges).
  */
 export const bufferBinding: BindingFactory = () => ({
+  // Node's own limit (`buffer.kMaxLength` on a 64-bit build); `internal/blob.js`
+  // bounds a Blob's total length with it.
+  kMaxLength: Number.MAX_SAFE_INTEGER,
   atob: (input: string): string => atob(input),
   btoa: (input: string): string => btoa(input),
   // `binding.copyArrayBuffer(dest, destOffset, src, srcOffset, count)`
