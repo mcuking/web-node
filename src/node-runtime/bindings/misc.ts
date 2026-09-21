@@ -532,6 +532,68 @@ export const diagnosticsChannelBinding: BindingFactory = () => {
   };
 };
 
+/**
+ * `fs_dir` — the native directory handle (`src/node_dir.cc`). The `Dir` class in
+ * `lib/internal/fs/dir.js` is only reached when no VFS mount owns the path; when
+ * one does, `internal/fs/promises` short-circuits `opendir`. The handle is a
+ * shape so the module loads, and calling it is an explicit error.
+ */
+export const fsDirBinding: BindingFactory = () => {
+  const unsupported = (name: string) => () => {
+    throw notImplemented(
+      'binding',
+      `fs_dir.${name}`,
+      'The native directory handle is bypassed by the mounted VFS.',
+    );
+  };
+  return {
+    kDirHandle: Symbol('kDirHandle'),
+    opendir: unsupported('opendir'),
+    dirfd: unsupported('dirfd'),
+    readSync: unsupported('readSync'),
+    close: unsupported('close'),
+  };
+};
+
+const kFSWatchStart = Symbol('kFSWatchStart');
+
+/**
+ * `fs_event_wrap` (`src/fs_event_wrap.cc`). A browser tab has no inotify, so the
+ * native watcher is a shape: `fs.watch` falls back to the VFS watcher (or, for
+ * the callback API, fails loudly).
+ */
+export const fsEventWrapBinding: BindingFactory = () => {
+  class FSEvent {
+    static get kFSWatchStart() {
+      return kFSWatchStart;
+    }
+    start(): void {
+      throw notImplemented(
+        'binding',
+        'fs_event_wrap.FSEvent.start',
+        'There is no inotify in a browser tab; use the VFS watcher.',
+      );
+    }
+    stop(): void {}
+    close(): void {}
+  }
+  return { FSEvent };
+};
+
+/**
+ * `modules` (`src/node_modules.cc`). Only its package.json reader is exposed,
+ * and only the VFS module hooks call it; we ship no package.json reader.
+ */
+export const modulesBinding: BindingFactory = () => ({
+  parsePackageJSON: () => {
+    throw notImplemented(
+      'binding',
+      'modules.parsePackageJSON',
+      'web-node does not ship the native package.json reader.',
+    );
+  },
+});
+
 /** `uv` binding: the event loop. We expose an explicit "no pending work" view. */
 export const uvBinding: BindingFactory = () => {
   // `getErrorMap()` (src/uv.cc): a Map from the negative libuv errno to

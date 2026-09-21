@@ -1474,4 +1474,117 @@ export const vendoredBuiltins: BuiltinSpec[] = [
       'internal/vfs/dir',
     ],
   },
+  // -------------------------------------------------------------------------
+  // milestone 50: the real fs/promises, dispatching into the VFS
+  // -------------------------------------------------------------------------
+  {
+    id: 'internal/fs/dir',
+    vendorPath: 'internal/fs/dir.js',
+    origin: 'node-source',
+    // The `Dir` class. Reads the `fs` and `fs_dir` bindings at load time; the
+    // VFS dispatch in `internal/fs/promises` short-circuits `opendir`, so the
+    // native directory handle is only a shape here.
+    deps: [
+      'internal/errors',
+      'internal/util',
+      'internal/fs/utils',
+      'internal/validators',
+    ],
+  },
+  {
+    id: 'internal/fs/watchers',
+    vendorPath: 'internal/fs/watchers.js',
+    origin: 'node-source',
+    deps: [
+      'events',
+      'buffer',
+      'internal/async_hooks',
+      'internal/errors',
+      'internal/util',
+      'internal/util/types',
+      'internal/fs/utils',
+      'internal/validators',
+      'internal/assert',
+    ],
+  },
+  {
+    id: 'internal/fs/recursive_watch',
+    vendorPath: 'internal/fs/recursive_watch.js',
+    origin: 'node-source',
+    // Lazily requires `fs` (the callback module) and `internal/event_target`.
+    deps: [
+      'events',
+      'internal/assert',
+      'internal/errors',
+      'internal/fs/utils',
+      'internal/fs/watchers',
+      'internal/util',
+      'internal/validators',
+    ],
+  },
+  {
+    id: 'internal/fs/cp/cp',
+    vendorPath: 'internal/fs/cp/cp.js',
+    origin: 'node-source',
+    // Called lazily by `internal/fs/promises`'s `cp`. Builds on the promise fs.
+    deps: [
+      'internal/errors',
+      'fs/promises',
+      'path',
+      'internal/process/permission',
+    ],
+  },
+  {
+    id: 'internal/fs/promises',
+    vendorPath: 'internal/fs/promises.js',
+    origin: 'node-source',
+    // The real promise fs. Every method first asks the mounted VFS
+    // (`internal/fs/utils`'s `vfsState.handlers`) and only falls back to the
+    // `fs` binding when no mount owns the path.
+    deps: [
+      'buffer',
+      'internal/errors',
+      'internal/util',
+      'internal/util/types',
+      'internal/validators',
+      'internal/fs/utils',
+      'internal/fs/dir',
+      'internal/fs/watchers',
+      'internal/fs/recursive_watch',
+      'internal/fs/glob',
+      'internal/readline/interface',
+      'internal/worker/js_transferable',
+    ],
+  },
+  {
+    id: 'internal/vfs/setup',
+    vendorPath: 'internal/vfs/setup.js',
+    origin: 'node-source',
+    // `registerVFS`: builds the handler object and calls `setVfsHandlers`, the
+    // switch that turns on the fs/promises dispatch. The module-loader hooks it
+    // also installs are pulled in lazily, so they never run here.
+    deps: [
+      'buffer',
+      'path',
+      'internal/errors',
+      'internal/util',
+      'internal/util/types',
+      'internal/util/debuglog',
+      'internal/validators',
+      'internal/url',
+      'internal/options',
+      'internal/process/permission',
+      'internal/fs/utils',
+      'internal/vfs/errors',
+      'internal/vfs/file_system',
+      'internal/vfs/router',
+      'internal/vfs/fd',
+    ],
+  },
+  {
+    id: 'fs/promises',
+    vendorPath: 'fs/promises.js',
+    origin: 'node-source',
+    deps: ['internal/fs/promises'],
+  },
 ];

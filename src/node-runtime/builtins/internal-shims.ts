@@ -414,7 +414,15 @@ function createErrorsBindingContext(): Record<string, unknown> {
         super(message);
       }
     },
-    hideStackFrames: <T extends (...args: never[]) => unknown>(fn: T): T => fn,
+    // `hideStackFrames` wraps a validator and records the raw function on
+    // `.withoutStackTrace`, the escape hatch `internal/fs/*` uses to validate
+    // without paying the stack-hiding cost. We cannot rewrite captured stacks,
+    // so the wrapper is transparent — but the property must exist.
+    hideStackFrames: <T extends (...args: never[]) => unknown>(fn: T): T => {
+      const wrapped = ((...args: never[]) => fn(...args)) as T & { withoutStackTrace?: T };
+      wrapped.withoutStackTrace = fn;
+      return wrapped as T;
+    },
     // Node probes a real stack overflow once to learn this realm's error
     // name/message, then matches future errors against those. Kept faithful
     // (and cached), since `util.inspect` uses it to decide whether to print
@@ -935,6 +943,74 @@ export const internalEventsSymbolsSpec: BuiltinSpec = {
   init: () => ({
     kFirstEventParam: Symbol('kFirstEventParam'),
   }),
+};
+
+// ---------------------------------------------------------------------------
+// internal/fs/rimraf
+// ---------------------------------------------------------------------------
+//
+// Node's own rimraf (`lib/internal/fs/rimraf.js`) drives the *callback* `fs`
+// module with `Buffer` paths on the thread pool. A browser tab has neither the
+// thread pool nor a callback-fs that takes Buffer paths, so the module is a
+// thin VFS-native implementation with the same contract
+// (`{ rimraf, rimrafPromises }`). `internal/fs/promises`'s `rm` only reaches for
+// `rimrafPromises`, which it hands a validated path + options.
+
+export const internalFsRimrafSpec: BuiltinSpec = {
+  id: 'internal/fs/rimraf',
+  origin: 'web-node',
+  deps: ['fs', 'path'],
+  init: (ctx: BuiltinInitContext) => {
+    const fs = ctx.require('fs') as {
+      lstatSync(path: string): { isDirectory(): boolean };
+      readdirSync(path: string): string[];
+      rmdirSync(path: string): void;
+      unlinkSync(path: string): void;
+    };
+    const { join } = ctx.require('path') as { join(...parts: string[]): string };
+
+    const rmTree = (path: string, recursive: boolean): void => {
+      const stats = fs.lstatSync(path);
+      if (!stats.isDirectory()) {
+        fs.unlinkSync(path);
+        return;
+      }
+      if (!recursive) {
+        // Errors with `ENOTEMPTY` when the directory still has entries.
+        fs.rmdirSync(path);
+        return;
+      }
+      for (const name of fs.readdirSync(path)) {
+        rmTree(join(path, name), true);
+      }
+      fs.rmdirSync(path);
+    };
+
+    const rimrafPromises = async (
+      path: unknown,
+      options: { recursive?: boolean; force?: boolean } = {},
+    ): Promise<void> => {
+      try {
+        rmTree(String(path), !!options.recursive);
+      } catch (err) {
+        if (options.force && (err as { code?: string }).code === 'ENOENT') return;
+        throw err;
+      }
+    };
+
+    const rimraf = (
+      path: unknown,
+      options: { recursive?: boolean; force?: boolean },
+      callback: (err: Error | null) => void,
+    ): void => {
+      rimrafPromises(path, options).then(
+        () => callback(null),
+        (err: Error) => callback(err),
+      );
+    };
+
+    return { rimraf, rimrafPromises };
+  },
 };
 
 // ---------------------------------------------------------------------------

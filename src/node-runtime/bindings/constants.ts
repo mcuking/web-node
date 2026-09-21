@@ -4,11 +4,27 @@ import { ERRNO } from '../vfs/types';
 const O_RDONLY = 0;
 const O_WRONLY = 1;
 const O_RDWR = 2;
-const O_CREAT = 64;
-const O_EXCL = 128;
-const O_TRUNC = 512;
-const O_APPEND = 1024;
-const O_DIRECTORY = 65536;
+// Open flags below match the local oracle (`node -p "require('fs').constants"`
+// on darwin, Node v26.9.0); the runtime has no libuv of its own, so it exposes
+// the same numbers the reference build does.
+const O_CREAT = 512;
+const O_EXCL = 2048;
+const O_TRUNC = 1024;
+const O_APPEND = 8;
+const O_DIRECTORY = 1048576;
+
+export const FS_OPEN_FLAGS = {
+  O_RDONLY,
+  O_WRONLY,
+  O_RDWR,
+  O_CREAT,
+  O_EXCL,
+  O_TRUNC,
+  O_APPEND,
+  O_DIRECTORY,
+} as const;
+
+export const FS_ACCESS_MODES = { F_OK: 0, X_OK: 1, W_OK: 2, R_OK: 4 } as const;
 
 const SIGNALS: Record<string, number> = {
   SIGHUP: 1,
@@ -99,9 +115,9 @@ export const constantsBinding: BindingFactory = () => {
       R_OK: 4,
       // open flags
       O_SYNC: 128,
-      O_DSYNC: 4096,
-      O_NONBLOCK: 2048,
-      O_NOCTTY: 256,
+      O_DSYNC: 4194304,
+      O_NONBLOCK: 4,
+      O_NOCTTY: 131072,
       O_SYMLINK: 2097152,
       S_IFMT: 0o170000,
       S_IFREG: 0o100000,

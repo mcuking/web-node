@@ -1,14 +1,19 @@
 import type { BindingContext, BindingFactory } from './context';
 import { VfsError, type Stat } from '../vfs/types';
+import { FS_OPEN_FLAGS } from './constants';
 
 /**
  * `fs` binding.
  *
- * Contract: synchronous primitives over the VFS plus nextTick-deferred callback
- * variants, mirroring the shape of Node's internal fs binding closely enough
- * that builtins can be written against it. An fd table lives here so file
- * descriptors behave like real ones (position, append).
+ * Contract: synchronous primitives over the VFS plus the async surface Node's
+ * real `internal/fs/promises` drives (a trailing `kUsePromises` token returns a
+ * Promise; a trailing function is callback style; neither is synchronous). An
+ * fd table lives here so file descriptors behave like real ones (position,
+ * append).
  */
+
+/** The token `src/node_file.cc` uses to ask for a Promise. */
+const USE_PROMISES: unique symbol = Symbol('kUsePromises');
 
 interface FdEntry {
   path: string;
@@ -159,6 +164,251 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     });
   }
 
+  /**
+   * Resolve Node's trailing "request wrap" argument: `kUsePromises` → a
+   * Promise, a function → callback style, anything else → synchronous return.
+   * Mirrors how `src/node_file.cc` discriminates the three modes.
+   */
+  function wrap<T>(fn: () => T, token: unknown): T | Promise<unknown> | undefined {
+    if (token === USE_PROMISES) return Promise.resolve().then(fn);
+    if (typeof token === 'function') {
+      ctx.nextTick(() => {
+        try {
+          (token as (e: Error | null, r?: unknown) => void)(null, fn());
+        } catch (err) {
+          (token as (e: Error | null, r?: unknown) => void)(err as Error);
+        }
+      });
+      return undefined;
+    }
+    return fn();
+  }
+
+  /**
+   * `internal/fs/utils`'s `getStatsFromBinding` reads the binding's stat result
+   * positionally: an 18-slot tuple `[dev, mode, nlink, uid, gid, rdev, blksize,
+   * ino, size, blocks, atime_s, atime_ns, mtime_s, mtime_ns, ctime_s, ctime_ns,
+   * birthtime_s, birthtime_ns]`. BigInt stats keep the same slots as BigInts.
+   */
+  function statSlots(st: Stat, bigint: boolean): Float64Array | BigInt64Array {
+    const toSecNsec = (ms: number): [number, number] => {
+      const sec = Math.floor(ms / 1000);
+      return [sec, Math.round((ms - sec * 1000) * 1e6)];
+    };
+    const atime = toSecNsec(st.atimeMs);
+    const mtime = toSecNsec(st.mtimeMs);
+    const ctime = toSecNsec(st.ctimeMs);
+    const birth = toSecNsec(st.birthtimeMs);
+    if (bigint) {
+      return BigInt64Array.from([
+        BigInt(st.dev), BigInt(st.mode), BigInt(st.nlink), BigInt(st.uid), BigInt(st.gid),
+        BigInt(st.rdev), BigInt(st.blksize), BigInt(st.ino), BigInt(st.size), BigInt(st.blocks),
+        BigInt(atime[0]), BigInt(atime[1]), BigInt(mtime[0]), BigInt(mtime[1]),
+        BigInt(ctime[0]), BigInt(ctime[1]), BigInt(birth[0]), BigInt(birth[1]),
+      ]);
+    }
+    return Float64Array.from([
+      st.dev, st.mode, st.nlink, st.uid, st.gid, st.rdev, st.blksize, st.ino, st.size, st.blocks,
+      atime[0], atime[1], mtime[0], mtime[1], ctime[0], ctime[1], birth[0], birth[1],
+    ]);
+  }
+
+  /** `stringToFlags` numbers → the fd-table's flag letter. */
+  function flagsToMode(flags: number): string {
+    const F = FS_OPEN_FLAGS;
+    const acc = flags & 3;
+    const create = !!(flags & F.O_CREAT);
+    const excl = !!(flags & F.O_EXCL);
+    const trunc = !!(flags & F.O_TRUNC);
+    const append = !!(flags & F.O_APPEND);
+    if (append) return excl ? (acc === 2 ? 'ax+' : 'ax') : acc === 2 ? 'a+' : 'a';
+    if (trunc || create) {
+      if (acc === 2) return excl ? 'wx+' : 'w+';
+      return excl ? 'wx' : 'w';
+    }
+    return acc === 2 ? 'r+' : 'r';
+  }
+
+  function encodeResult(value: string, encoding: unknown): string | Uint8Array {
+    return encoding === 'buffer' ? new TextEncoder().encode(value) : value;
+  }
+
+  /**
+   * `binding.readdir(path, encoding, withFileTypes, token)`: withFileTypes
+   * returns the `{0: names, 1: types}` split shaping `getDirents` expects;
+   * otherwise a plain name array.
+   */
+  function readdirShape(path: string, withFileTypes: boolean): unknown {
+    const entries = vfs.readdir(path);
+    const names = entries.map((d) => d.name);
+    if (!withFileTypes) return names;
+    const types = entries.map((d) => direntTypeCode(d.type));
+    return { 0: names, 1: types };
+  }
+
+  function mkdtempSync(prefix: string): string {
+    const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      let suffix = '';
+      for (let i = 0; i < 6; i += 1) {
+        suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
+      }
+      const candidate = prefix + suffix;
+      if (!vfs.exists(candidate)) {
+        vfs.mkdir(candidate);
+        return vfs.resolve(candidate);
+      }
+    }
+    throw new VfsError('EEXIST', 'mkdtemp', prefix);
+  }
+
+  function readBuffersSync(fd: number, buffers: Uint8Array[], position: number | null): number {
+    let total = 0;
+    let pos = position;
+    for (const buf of buffers) {
+      const n = readSync(fd, buf, 0, buf.byteLength, pos);
+      total += n;
+      if (pos !== null) pos += n;
+      if (n < buf.byteLength) break;
+    }
+    return total;
+  }
+
+  function writeBuffersSync(fd: number, buffers: Uint8Array[], position: number | null): number {
+    let total = 0;
+    let pos = position;
+    for (const buf of buffers) {
+      const n = writeSync(fd, buf, 0, buf.byteLength, pos);
+      total += n;
+      if (pos !== null) pos += n;
+    }
+    return total;
+  }
+
+  const direntTypeCode = (type: string): number => {
+    switch (type) {
+      case 'file': return 1; // UV_DIRENT_FILE
+      case 'dir': return 2; // UV_DIRENT_DIR
+      case 'symlink': return 3; // UV_DIRENT_LINK
+      default: return 0; // UV_DIRENT_UNKNOWN
+    }
+  };
+
+  const isEnoent = (err: unknown): boolean => (err as { code?: string } | null)?.code === 'ENOENT';
+
+  /** fd → path, or throw `EBADF` like the native binding does. */
+  function fdPath(fd: number): string {
+    const entry = fds.get(fd);
+    if (!entry) throw new VfsError('EBADF', 'fd', String(fd));
+    return entry.path;
+  }
+
+  function ftruncateFd(fd: number, len: number): void {
+    const data = vfs.readFile(fdPath(fd));
+    const next = new Uint8Array(len);
+    next.set(data.subarray(0, Math.min(len, data.byteLength)));
+    vfs.writeFile(fdPath(fd), next);
+  }
+
+  /** `getStatFsFromBinding`: an 8-slot tuple `[type, bsize, blocks, bfree, bavail, files, ffree]`. */
+  function statfsSlots(bigint: boolean): Float64Array | BigInt64Array {
+    const slots = [0, 4096, 0, 0, 0, 0, 0, 0];
+    return bigint ? BigInt64Array.from(slots.map((n) => BigInt(n))) : Float64Array.from(slots);
+  }
+
+  /** Encode a string with the encoding `string_bytes` would use. */
+  function encodeWith(value: string, encoding: unknown): Uint8Array {
+    const BufferCtor = (globalThis as { Buffer?: { from(s: string, e?: string): Uint8Array } }).Buffer;
+    if (BufferCtor && typeof encoding === 'string') return BufferCtor.from(value, encoding);
+    return new TextEncoder().encode(value);
+  }
+
+  /** `binding.FileHandle`: the fd wrapper `internal/fs/promises` extends. */
+  class FileHandleBinding {
+    fd: number;
+    constructor(fd: number) {
+      this.fd = fd;
+    }
+    getAsyncId(): number {
+      return this.fd;
+    }
+    closeSync(): void {
+      closeSync(this.fd);
+    }
+    close(): Promise<void> {
+      return Promise.resolve().then(() => closeSync(this.fd));
+    }
+  }
+
+  /** `binding.ReadFileJob`: open + fstat + read (+ close for small files) in one
+   * go. Files up to `length` come back whole (`fd === -1`); bigger ones come
+   * back as an open fd + size, read by `readFileHandle`. The buffer is a real
+   * `Buffer` (the native job produces one). */
+  class ReadFileJobBinding {
+    ondone: ((err: Error | null, buffer?: Uint8Array, fd?: number, size?: number, closeErr?: Error | null) => void) | null = null;
+    private readonly flags: number;
+    private readonly length: number;
+    constructor(_path: string, flags: number, length: number) {
+      this.flags = flags;
+      this.length = length;
+    }
+    run(path: string): Error | undefined {
+      try {
+        // `open` first: a missing file must fail with the `open` syscall, like
+        // the native job does.
+        const fd = openSync(path, flagsToMode(this.flags));
+        const st = vfs.stat(path);
+        if (st.size <= this.length) {
+          const data = vfs.readFile(path);
+          closeSync(fd);
+          const BufferCtor = (globalThis as {
+            Buffer?: { from(b: ArrayBuffer, o?: number, l?: number): Uint8Array };
+          }).Buffer;
+          const buffer =
+            BufferCtor && data.byteLength > 0
+              ? BufferCtor.from(data.buffer as ArrayBuffer, data.byteOffset, data.byteLength)
+              : data;
+          this.ondone?.(null, buffer, -1, buffer.byteLength, null);
+        } else {
+          this.ondone?.(null, undefined, fd, st.size, null);
+        }
+        return undefined;
+      } catch (err) {
+        this.ondone?.(err as Error);
+        return undefined;
+      }
+    }
+  }
+
+  /** `binding.WriteFileJob`: open + write + close in one go. */
+  class WriteFileJobBinding {
+    ondone: ((err: Error | null) => void) | null = null;
+    private readonly flags: number;
+    private readonly mode: number;
+    private readonly data: Uint8Array;
+    constructor(_path: string, flags: number, mode: number, data: Uint8Array) {
+      this.flags = flags;
+      this.mode = mode;
+      this.data = data;
+    }
+    run(path: string): Error | undefined {
+      let fd: number | undefined;
+      try {
+        fd = openSync(path, flagsToMode(this.flags), this.mode);
+        writeSync(fd, this.data, 0, this.data.byteLength, 0);
+        closeSync(fd);
+        this.ondone?.(null);
+        return undefined;
+      } catch (err) {
+        if (fd !== undefined) {
+          try { closeSync(fd); } catch { /* already closed */ }
+        }
+        this.ondone?.(err as Error);
+        return undefined;
+      }
+    }
+  }
+
   return {
     // ---- sync primitives ----
     openSync,
@@ -200,41 +450,114 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     realpathSync: (path: string) => vfs.resolve(path),
     rmSync: (path: string, opts?: { recursive?: boolean; force?: boolean }) => vfs.rm(path, opts ?? {}),
 
-    // ---- callback variants ----
-    open: (path: string, flags: string, mode: number, cb: (err: Error | null, fd?: number) => void) =>
-      asyncCall(() => openSync(path, flags, mode), cb),
-    close: (fd: number, cb: (err: Error | null) => void) => asyncCall(() => closeSync(fd), cb),
+    // ---- async / promise surface (`internal/fs/promises` drives these) ----
+    //
+    // `src/node_file.cc` methods take a trailing "request wrap" argument: the
+    // `kUsePromises` token (return a Promise), a callback, or neither (run
+    // synchronously). `internal/fs/promises` mixes all three.
+    kUsePromises: USE_PROMISES,
+    FileHandle: FileHandleBinding,
+    ReadFileJob: ReadFileJobBinding,
+    WriteFileJob: WriteFileJobBinding,
+
+    open: (path: string, flags: string | number, mode: number, token?: unknown) =>
+      wrap(() => openSync(path, typeof flags === 'number' ? flagsToMode(flags) : flags, mode), token),
+    close: (fd: number, token?: unknown) => wrap(() => closeSync(fd), token),
     read: (
       fd: number,
       buffer: Uint8Array,
       offset: number,
       length: number,
       position: number | null,
-      cb: (err: Error | null, bytesRead?: number, buffer?: Uint8Array) => void,
-    ) => asyncCall(() => readSync(fd, buffer, offset, length, position), cb, (n) => n),
-    write: (
+      token?: unknown,
+    ) => wrap(() => readSync(fd, buffer, offset, length, position), token),
+    readBuffers: (fd: number, buffers: Uint8Array[], position: number | null, token?: unknown) =>
+      wrap(() => readBuffersSync(fd, buffers, position), token),
+    writeBuffer: (
       fd: number,
       buffer: Uint8Array,
       offset: number,
       length: number,
       position: number | null,
-      cb: (err: Error | null, bytesWritten?: number) => void,
-    ) => asyncCall(() => writeSync(fd, buffer, offset, length, position), cb, (n) => n),
-    stat: (path: string, cb: (err: Error | null, st?: unknown) => void) => asyncCall(() => statSync(path), cb),
-    lstat: (path: string, cb: (err: Error | null, st?: unknown) => void) => asyncCall(() => statSync(path), cb),
-    fstat: (fd: number, cb: (err: Error | null, st?: Record<string, unknown>) => void) => {
-      const entry = fds.get(fd);
-      asyncCall<Record<string, unknown>>(() => {
-        if (!entry) throw new VfsError('EBADF', 'fstat', String(fd));
-        return statSync(entry.path);
-      }, cb);
+      token?: unknown,
+    ) => wrap(() => writeSync(fd, buffer, offset, length, position), token),
+    writeBuffers: (fd: number, buffers: Uint8Array[], position: number | null, token?: unknown) =>
+      wrap(() => writeBuffersSync(fd, buffers, position), token),
+    writeString: (fd: number, string: string, position: number | null, encoding: unknown, token?: unknown) => {
+      const bytes = encodeWith(string, encoding);
+      return wrap(() => writeSync(fd, bytes, 0, bytes.byteLength, position), token);
     },
-    readdir: (path: string, cb: (err: Error | null, names?: unknown) => void) =>
-      asyncCall(() => vfs.readdir(path).map((d) => d.name), cb),
-    mkdir: (path: string, opts: unknown, cb: (err: Error | null) => void) =>
-      asyncCall(() => vfs.mkdir(path, (opts ?? {}) as Record<string, never>), cb),
-    unlink: (path: string, cb: (err: Error | null) => void) => asyncCall(() => vfs.rm(path), cb),
-    rename: (from: string, to: string, cb: (err: Error | null) => void) => asyncCall(() => vfs.rename(from, to), cb),
+    stat: (path: string, bigint: boolean, token?: unknown, throwIfNoEntry?: boolean) =>
+      wrap(() => {
+        try {
+          return statSlots(vfs.stat(path), !!bigint);
+        } catch (err) {
+          if (throwIfNoEntry === false && isEnoent(err)) return undefined;
+          throw err;
+        }
+      }, token),
+    lstat: (path: string, bigint: boolean, token?: unknown, throwIfNoEntry?: boolean) =>
+      wrap(() => {
+        try {
+          return statSlots(vfs.stat(path), !!bigint);
+        } catch (err) {
+          if (throwIfNoEntry === false && isEnoent(err)) return undefined;
+          throw err;
+        }
+      }, token),
+    fstat: (fd: number, bigint: boolean, token?: unknown) =>
+      wrap(() => statSlots(vfs.stat(fdPath(fd)), !!bigint), token),
+    statfs: (_path: string, bigint: boolean, token?: unknown) =>
+      wrap(() => statfsSlots(bigint), token),
+    access: (path: string, _mode: number, token?: unknown) =>
+      wrap(() => {
+        if (!vfs.exists(path)) throw new VfsError('ENOENT', 'access', path);
+      }, token),
+    copyFile: (src: string, dest: string, _flags: number, token?: unknown) =>
+      wrap(() => vfs.copyFile(src, dest), token),
+    rename: (oldPath: string, newPath: string, token?: unknown) =>
+      wrap(() => vfs.rename(oldPath, newPath), token),
+    unlink: (path: string, token?: unknown) => wrap(() => vfs.rm(path), token),
+    rmdir: (path: string, token?: unknown) => wrap(() => vfs.rm(path), token),
+    mkdir: (path: string, mode: number | undefined, recursive: boolean, token?: unknown) =>
+      wrap(() => vfs.mkdir(path, { recursive: !!recursive, mode }), token),
+    readdir: (path: string, _encoding: unknown, withFileTypes: boolean, token?: unknown) =>
+      wrap(() => readdirShape(path, !!withFileTypes), token),
+    mkdtemp: (prefix: string, _encoding: unknown, token?: unknown) => wrap(() => mkdtempSync(prefix), token),
+    realpath: (path: string, encoding: unknown, token?: unknown) =>
+      wrap(() => encodeResult(vfs.resolve(path), encoding), token),
+    openFileHandle: (path: string, flags: number, mode: number, token?: unknown) =>
+      wrap(() => new FileHandleBinding(openSync(path, flagsToMode(flags), mode)), token),
+    ftruncate: (fd: number, len: number, token?: unknown) => wrap(() => ftruncateFd(fd, len), token),
+    truncate: (path: string, len: number, token?: unknown) =>
+      wrap(() => {
+        const data = vfs.readFile(path);
+        const next = new Uint8Array(len);
+        next.set(data.subarray(0, Math.min(len, data.byteLength)));
+        vfs.writeFile(path, next);
+      }, token),
+    fsync: (_fd: number, token?: unknown) => wrap(() => undefined, token),
+    fdatasync: (_fd: number, token?: unknown) => wrap(() => undefined, token),
+    fchmod: (fd: number, mode: number, token?: unknown) => wrap(() => vfs.chmod(fdPath(fd), mode), token),
+    chmod: (path: string, mode: number, token?: unknown) => wrap(() => vfs.chmod(path, mode), token),
+    // The VFS has no ownership model, so the chown family and timestamp setters
+    // succeed as no-ops (matching how a real permission-less FS behaves).
+    fchown: (_fd: number, _uid: number, _gid: number, token?: unknown) => wrap(() => undefined, token),
+    chown: (_path: string, _uid: number, _gid: number, token?: unknown) => wrap(() => undefined, token),
+    lchown: (_path: string, _uid: number, _gid: number, token?: unknown) => wrap(() => undefined, token),
+    utimes: (_path: string, _atime: number, _mtime: number, token?: unknown) => wrap(() => undefined, token),
+    futimes: (_fd: number, _atime: number, _mtime: number, token?: unknown) => wrap(() => undefined, token),
+    lutimes: (_path: string, _atime: number, _mtime: number, token?: unknown) => wrap(() => undefined, token),
+    // No symlinks in the VFS: fail loudly instead of pretending.
+    symlink: (_target: string, _path: string, _type: number, _token?: unknown) => {
+      throw new VfsError('ENOSYS', 'symlink', String(_path));
+    },
+    link: (_existing: string, _path: string, _token?: unknown) => {
+      throw new VfsError('ENOSYS', 'link', String(_path));
+    },
+    readlink: (path: string, _encoding: unknown, _token?: unknown) => {
+      throw new VfsError('EINVAL', 'readlink', path);
+    },
 
     // ---- helpers used by the fs builtin ----
     __fds: fds,

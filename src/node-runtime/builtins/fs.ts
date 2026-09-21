@@ -379,10 +379,10 @@ export const fsSpec: BuiltinSpec = {
         O_RDONLY: 0,
         O_WRONLY: 1,
         O_RDWR: 2,
-        O_CREAT: 64,
-        O_EXCL: 128,
-        O_TRUNC: 512,
-        O_APPEND: 1024,
+        O_CREAT: 512,
+        O_EXCL: 2048,
+        O_TRUNC: 1024,
+        O_APPEND: 8,
       },
       // sync
       readFileSync,
@@ -556,40 +556,16 @@ export const fsSpec: BuiltinSpec = {
     };
 
     // fs.promises
-    const promises: Record<string, unknown> = {};
-    type Cb<R> = (err: Error | null, r?: R) => void;
-    const promisify =
-      (fn: (...args: any[]) => void) =>
-      (...args: any[]): Promise<any> =>
-        new Promise((resolve, reject) => {
-          fn(...args, (err: Error | null, r?: unknown) => (err ? reject(err) : resolve(r)));
-        });
-
-    promises.readFile = promisify((...a: any[]) => (fs.readFile as (...x: any[]) => void)(...a));
-    promises.writeFile = promisify((...a: any[]) => (fs.writeFile as (...x: any[]) => void)(...a));
-    promises.appendFile = promisify((p: string, d: unknown, c: Cb<void>) => (fs.appendFile as (...x: any[]) => void)(p, d, undefined, c));
-    promises.mkdir = promisify((...a: any[]) => (fs.mkdir as (...x: any[]) => void)(...a));
-    promises.readdir = promisify((...a: any[]) => (fs.readdir as (...x: any[]) => void)(...a));
-    promises.rmdir = promisify((...a: any[]) => (fs.rmdir as (...x: any[]) => void)(...a));
-    promises.rm = promisify((...a: any[]) => (fs.rm as (...x: any[]) => void)(...a));
-    promises.unlink = promisify((...a: any[]) => (fs.unlink as (...x: any[]) => void)(...a));
-    promises.rename = promisify((...a: any[]) => (fs.rename as (...x: any[]) => void)(...a));
-    promises.copyFile = promisify((...a: any[]) => (fs.copyFile as (...x: any[]) => void)(...a));
-    promises.stat = promisify((...a: any[]) => (fs.stat as (...x: any[]) => void)(...a));
-    promises.lstat = promisify((...a: any[]) => (fs.lstat as (...x: any[]) => void)(...a));
-    promises.access = promisify((p: string, c: Cb<void>) => (fs.access as (...x: any[]) => void)(p, undefined, c));
-    promises.chmod = promisify((...a: any[]) => (fs.chmod as (...x: any[]) => void)(...a));
-    promises.open = promisify((...a: any[]) => (fs.open as (...x: any[]) => void)(...a));
-    promises.realpath = promisify((...a: any[]) => (fs.realpath as (...x: any[]) => void)(...a));
-    promises.constants = (fs as { constants: unknown }).constants;
-    promises.glob = async function* (pattern: string, options?: unknown): AsyncGenerator<string> {
-      const { Glob } = ctx.require('internal/fs/glob') as {
-        Glob: new (p: string, o?: unknown) => { glob: () => AsyncIterable<string> };
-      };
-      yield* new Glob(pattern, options).glob();
-    };
-
-    fs.promises = promises;
+    //
+    // Node exposes the exact same object as `require('fs/promises')`. Resolved
+    // lazily (via a getter) to avoid a load cycle: the real promise fs reaches
+    // back into `fs` for `cp`.
+    Object.defineProperty(fs, 'promises', {
+      enumerable: true,
+      get() {
+        return ctx.require('fs/promises');
+      },
+    });
     void vfs;
     void finish;
 

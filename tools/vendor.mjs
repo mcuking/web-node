@@ -153,6 +153,14 @@ const FILES = [
   'internal/vfs/watcher.js',
   'internal/vfs/file_system.js',
   'internal/vfs/providers/memory.js',
+  // milestone 50: real fs/promises on top of the VFS
+  'fs/promises.js',
+  'internal/fs/dir.js',
+  'internal/fs/watchers.js',
+  'internal/fs/recursive_watch.js',
+  'internal/fs/cp/cp.js',
+  'internal/fs/promises.js',
+  'internal/vfs/setup.js',
 ];
 
 /**

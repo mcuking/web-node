@@ -15,13 +15,13 @@ import {
   internalEventsSymbolsSpec,
   internalBootstrapRealmSpec,
   internalUrlSpec,
+  internalFsRimrafSpec,
 } from './internal-shims';
 import { vendoredBuiltins } from './vendored-builtins';
 import { vfsSpec } from './vfs';
 import { undiciSpec } from './undici';
 import { workerThreadsSpec } from './worker-threads';
 import { fsSpec } from './fs';
-import { fsPromisesSpec } from './fs-promises';
 import { cryptoSpec } from './crypto';
 import { urlSpec } from './url';
 import { dnsSpec, dnsPromisesSpec } from './dns';
@@ -41,6 +41,7 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalErrorSourceSpec,
   internalBootstrapRealmSpec,
   internalUrlSpec,
+  internalFsRimrafSpec,
   internalHistogramSpec,
   internalAbortListenerSpec,
   internalOptionsSpec,
@@ -63,7 +64,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   // milestone 4: streams (fs/http are built on these) — `stream`/`stream/promises`
   // are the vendored Node source (see vendored-builtins.ts)
   fsSpec,
-  fsPromisesSpec,
   urlSpec,
   cryptoSpec,
   dnsSpec,

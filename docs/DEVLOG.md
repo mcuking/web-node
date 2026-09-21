@@ -74,6 +74,7 @@
 | M46 | **宿主 WebSocket 计入退出判定**：runtime 包装沙箱 `WebSocket`，开着的 socket 计入 `activeCount()`（`#hostSockets` + `#hostGeneration` 按 run 隔离），子进程在 socket close/error 后才判定退出；顺带修一个被它暴露的 loader 真 bug——模块顶层 `const`/`let`/`class` 声明与注入的沙箱全局同名会 `Identifier 'X' has already been declared` 编译失败（Vite chunk 里的 `const WebSocket = websocket`），改用长度保持的 code-mask 分词器按模块剔除冲突名 | ✅ 完成 |
 | M47 | **`crypto` 对称密码**：`createCipheriv`/`createDecipheriv` 支持 AES-128/192/256 的 ECB/CBC/CTR/CFB/OFB/GCM（纯 JS，FIPS-197 + NIST SP 800-38A/D，逐字节对齐 OpenSSL）；`getCiphers`/`getCipherInfo` 就位；未实现的已知 cipher 抛类型化 `NotImplementedError`、未知 cipher 抛 `ERR_CRYPTO_UNKNOWN_CIPHER`；顺带移除 Node v26 已删的 `createCipher`/`createDecipher` | ✅ 完成 |
 | M48 | **`Buffer` 换真源码**：vendor 真 `lib/buffer.js` + `lib/internal/buffer.js` + `lib/internal/v8/startup_snapshot.js` + `lib/util/types.js`（MANIFEST 119 → 123），删自研 `builtins/buffer.ts`；`buffer` binding 扩成完整 JS 实现（逐字节对齐 `src/node_buffer.cc` + `src/string_bytes.cc` + `deps/nbytes`：各编码 slice/write、`indexOf*`、`compare`/`copy`/`fill`、`swap*`、`isAscii`/`isUtf8`、`atob`/`btoa`、unsafe 分配）；`icu` binding 补 `transcode`/`icuErrName`（返回真 `Buffer`，坏编码抛 `U_ILLEGAL_ARGUMENT_ERROR`）；新增 `mksnapshot` binding；`internal/errors` 补 buffer/snapshot 错误码 | ✅ 完成 |
+| M50 | **真 `fs/promises`**：vendor 真 `lib/fs/promises.js` + `lib/internal/fs/promises.js`（2304 行）+ `internal/fs/{dir,watchers,recursive_watch}.js` + `internal/vfs/setup.js` + `internal/fs/cp/cp.js`（MANIFEST 135 → 142）；`fs` binding 补齐整张 async/promise 面（`kUsePromises` 三态派发：Promise / 回调 / 同步；`FileHandle`/`ReadFileJob`/`WriteFileJob`；`stat` 家族返回 18 槽元组；`readdir` 返回 `{0:names,1:types}`）；`hideStackFrames` 补 `.withoutStackTrace`；`internal/fs/rimraf` 改成 VFS 原生 shim（真 rimraf 驱动回调 fs + Buffer 路径，标签页没有）；`fs.promises` 换成 `require('fs/promises')` 同一个对象 | ✅ 完成 |
 | M49 | **真 `vfs` 子系统 + fs 基座**：vendor 真 `lib/internal/fs/utils.js`（替掉 shim）与整个 `lib/internal/vfs/*`（`file_system`/`provider`/`fd`/`stats`/`dir`/`file_handle`/`streams`/`watcher`/`router`/`errors` + `providers/memory`）（MANIFEST 123 → 135）；新增 `vfs` 模块（`create`/`VirtualFileSystem`/`VirtualProvider`/`MemoryProvider`，`RealFSProvider`/`ZipProvider` 显式不支持）；`uv` binding 从空表换成**真 `UV_ERRNO_MAP`（85 条）**，`internal/errors` 补真 `UVException` 并把 `uvErrmapGet` 接上；`constants` binding 补全 `fs`/`os` 表（access modes、`O_SYNC`、`S_IF*`、`UV_DIRENT_*`、`os.devNull`、`os.errno`）；fs binding 补 `internalModuleStat`/`readdirRecursive`；顺带 `util.getSystemErrorMap()` 恢复成真表 | ✅ 完成 |
 | D | **GitHub Pages 部署**（子路径站点 + gh-pages 发布） | ✅ 完成 |
 
@@ -182,7 +183,8 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
    - ~~**`stream/web`（WHATWG streams）**~~ ✅ **已处理（2026-09-21，M36）**：见上条 2p。
    - ~~**`perf_hooks`**~~ ✅ **已处理（2026-09-21，M35）**：见上条 2o。
    - ~~**`crypto`**~~ ✅ **部分处理（2026-09-21，M34）**：同步面（摘要/HMAC/PBKDF2/HKDF/scrypt/`timingSafeEqual`）已用 JS 实现并对齐 OpenSSL 输出；仍缺：密文（AES 等，需同步密码学或原生）、签名/验签、非对称密钥与 `KeyObject`、Diffie-Hellman、素数生成——它们需要原生 OpenSSL 或 keystore，保留显式抛错。
-   - ~~**`internal/fs/utils`（fs 基座）**~~ ✅ **已处理（2026-09-21，M49）**：真 `lib/internal/fs/utils.js` 已 vendor，并连整个 `lib/internal/vfs/*` + `providers/memory` 一起搬进来，`vfs` 模块在运行时可用（`MemoryProvider` 全表面，对照 `node --experimental-vfs` 逐行为验证）；顺带把 `uv` errno 表做成真的（85 条）。**下一步（M50）**：让 `fs`/`fs/promises` 也换真源码——挂一个覆盖 `/` 的 VFS provider 后，真 `lib/fs.js` 与真 `lib/internal/fs/promises.js` 会走 `vfsState.handlers` 派发到 VFS，绕过 native binding；需再 vendor `lib/fs.js` + `lib/fs/promises.js` + `lib/internal/fs/{dir,promises,streams,watchers,recursive_watch,rimraf,sync_write_stream}`，并给 fs binding 补齐形状（`kUsePromises`、`FileHandle` …）。
+   - ~~**`internal/fs/utils`（fs 基座）**~~ ✅ **已处理（2026-09-21，M49）**：真 `lib/internal/fs/utils.js` 已 vendor，并连整个 `lib/internal/vfs/*` + `providers/memory` 一起搬进来，`vfs` 模块在运行时可用（`MemoryProvider` 全表面，对照 `node --experimental-vfs` 逐行为验证）；顺带把 `uv` errno 表做成真的（85 条）。
+   - ~~**`fs/promises` 换真源码**~~ ✅ **已处理（2026-09-21，M50）**：真 `lib/internal/fs/promises.js` + `lib/fs/promises.js` 已跑起来（VFS 挂载路径走 Node 自己的派发，其余走我们的 `fs` binding，async/promise 面已补全，`fs.promises === require('fs/promises')`）。**下一步（M51）**：把 **callback `fs`（真 `lib/fs.js`）** 也换真源——真 `lib/fs.js` 与 promise 版共用 `internal/fs/utils.js` 的派发，能一次到位；需再 vendor `lib/fs.js` + `lib/internal/fs/{streams,sync_write_stream,read/…}`，并把 fs binding 的 callback 面（`open`/`read`/`write`/`readdir` 回调 + Buffer 路径 + `encoding:'buffer'`）补到能等价真 `fs` 回调 API。
    - ~~**`internal/fs/glob`**~~ ✅ **已处理（2026-09-21，M33）**：真 `internal/fs/glob.js` + 随包 `internal/deps/minimatch/index`；`path.matchesGlob`、`fs.glob`/`globSync`、`fs.promises.glob` 上线。剩：`internal/fs/utils` 仍是只含 `DirentFromStats` 的 shim（真文件是 fs 基座）；`withFileTypes` 的 `Dirent.parentPath` 与我们自研 readdir 的形状一致（绝对值 vs Node 按传入路径）已对齐。
    - ~~**`stream/iter` + `stream/consumers`**~~ ✅ **已处理（2026-09-21，M38）**：真 `lib/stream/iter.js` + `lib/stream/consumers.js` + 整个 `internal/streams/iter/*`（12 文件）。`internal/streams/iter/transform.js` 不在内（它顶层 `internalBinding('zlib')`；M45 的 builtin `zlib` 不能代替 native 绑定，故仍未支持）。
    - **`internal/perf/*` 的直方图半边**：⚠️ 部分过时——M35 已把 `perf_hooks` 换成真源码；仅 `createHistogram`/`importHistogram`/`monitorEventLoopDelay` 仍抛错（真 `internal/histogram` 背后是 native hdr_histogram + 一整套统计检验，JS 移植代价大、优先级低）。
@@ -206,6 +208,24 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-21 · M50 `fs/promises` 换真源码（`lib/internal/fs/promises.js`）
+
+**目标**：M49 把 Node 自己的 VFS 子系统搬进来后，这一步把 `fs/promises` 也换成真源码——即 Node 的 `lib/internal/fs/promises.js` + `lib/fs/promises.js`，而不是 web-node 手写的转发层。挂载了 VFS 的路径走 Node 自己的派发（`vfsState.handlers`），其余路径落到我们的 `fs` binding。
+
+**改了什么**
+
+1. **vendor 真源码**（`tools/vendor.mjs`，MANIFEST 135 → 142）：`fs/promises.js`、`internal/fs/promises.js`、`internal/fs/{dir,watchers,recursive_watch}.js`、`internal/fs/cp/cp.js`、`internal/vfs/setup.js`。在 `vendored-builtins.ts` 注册（含 `deps`）；`internal/fs/promises` 进 `deps` 的 `internal/fs/glob`、`internal/readline/interface`、`internal/worker/js_transferable` 都已在 M30/M31/M33 就位。
+2. **`fs` binding 补齐 async/promise 面**（`bindings/fs.ts`）：真 `src/node_file.cc` 的方法都带一个尾随的 “request wrap” 参数——`kUsePromises` 令牌（返回 Promise）/ 回调函数 / 都没有（同步），`internal/fs/promises` 三种都用。新增 `kUsePromises` 令牌 + `wrap()` 三态派发，并实现：`read`/`readBuffers`/`writeBuffer`/`writeBuffers`/`writeString`、`stat`/`lstat`/`fstat`（返回 `getStatsFromBinding` 预期的 18 槽元组，bigint 同名 BigInt64Array）、`statfs`、`access`/`copyFile`/`rename`/`unlink`/`rmdir`/`mkdir`/`readdir`（`{0:names,1:types}`）/`mkdtemp`/`realpath`/`openFileHandle`/`ftruncate`/`truncate`/`fsync`/`fdatasync`/`chmod`/`chown` 家族/`utimes` 家族；`FileHandle`（fd 包装，带 `getAsyncId`/`close`/`closeSync`）、`ReadFileJob`（open+fstat+read；≤一 chunk 整体返回 fd=-1，大文件返回 fd+size）、`WriteFileJob`。复制文件类都走 VFS；VFS 没有符号链接，因此 `symlink`/`link`/`readlink` 显式报错（不静默）。
+3. **`hideStackFrames` 补 `.withoutStackTrace`**（`bindings` 的 `errors` 上下文）：真 `internal/validators` 用 `validateX.withoutStackTrace(...)` 绕过推栈隐藏，之前是个空包装，属性不存在就 `is not a function`。
+4. **`internal/fs/rimraf` 改为 VFS 原生 shim**（`internal-shims.ts`）：Node 真 rimraf 用回调 `fs` + `Buffer` 路径 + 线程池，浏览器标签页三样都没有；改成同样契约（`{ rimraf, rimrafPromises }`）的 VFS 递归删除，`internal/fs/promises` 的 `rm` 只用到 `rimrafPromises`。
+5. **`fs.promises` 指向同一个对象**：`fs.promises === require('fs/promises')`（惰性 getter，避开 `internal/fs/promises` ↔ `fs` 的加载环）。
+
+**验证**
+
+- 新增 `test/fs-promises.test.ts`（8 例）：`fs/promises === fs.promises`、写读往返（string/Buffer）、`stat`/`lstat` 类型 + bigint、递归 `mkdir`/`readdir`（含 withFileTypes）/`rm`、`rename`/`copyFile`/`unlink`、`appendFile`/`access`、`FileHandle` 读写关、libuv 形状的 `ENOENT`（`errno=-2` + `no such file or directory, open '<path>'`，与本地 Node v26.9.0 oracle 逐字一致）。
+- `test/util.test.ts`、`test/vendored-strip.test.ts` 计数随 vendor 清单更新。
+- 门禁全绿：`npm run typecheck` 干净 · `npx vitest run` **630/630（52 文件，+8 例）** · `npm run build` 绿（worker 1853.49 → **1990.35KB**）。
 
 ### 2026-09-21 · M49 Node 真 `vfs` 子系统 + fs 基座（`lib/internal/fs/utils.js` + `lib/internal/vfs/*`）
 

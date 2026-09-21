@@ -24,6 +24,9 @@ import {
   taskQueueBinding,
   traceEventsBinding,
   uvBinding,
+  fsDirBinding,
+  fsEventWrapBinding,
+  modulesBinding,
   streamWrapBinding,
 } from './misc';
 import { messagingBinding, workerBinding } from './messaging';
@@ -50,6 +53,9 @@ const REGISTRY: Record<string, BindingFactory> = {
   messaging: messagingBinding,
   mksnapshot: mksnapshotBinding,
   uv: uvBinding,
+  fs_dir: fsDirBinding,
+  fs_event_wrap: fsEventWrapBinding,
+  modules: modulesBinding,
   stream_wrap: streamWrapBinding,
   blob: blobBinding,
   diagnostics_channel: diagnosticsChannelBinding,
@@ -71,7 +77,6 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'tty_wrap',
   'contextify',
   'module_wrap',
-  'modules',
   'inspector',
   'sea',
   'ffi',

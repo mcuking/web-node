@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-21T10:25:15.206Z",
+  "generatedAt": "2026-09-21T10:37:39.347Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -950,6 +950,55 @@
       "sha256": "ffbe5934bbe9883523c288b26d6e0c3424aba83f9c08ce110fc03637a31d184c",
       "upstreamSha256": "ffbe5934bbe9883523c288b26d6e0c3424aba83f9c08ce110fc03637a31d184c",
       "bytes": 32010,
+      "patches": []
+    },
+    {
+      "path": "fs/promises.js",
+      "sha256": "f18e640c98afa9c2cac0541e7d281fd9ec65a802bd396eca6a3afb0a34480d8e",
+      "upstreamSha256": "f18e640c98afa9c2cac0541e7d281fd9ec65a802bd396eca6a3afb0a34480d8e",
+      "bytes": 73,
+      "patches": []
+    },
+    {
+      "path": "internal/fs/dir.js",
+      "sha256": "b0790f231855c30be329836456a1d85d6c1e082373a6fd6b74ea927b8e7fe0c2",
+      "upstreamSha256": "b0790f231855c30be329836456a1d85d6c1e082373a6fd6b74ea927b8e7fe0c2",
+      "bytes": 8665,
+      "patches": []
+    },
+    {
+      "path": "internal/fs/watchers.js",
+      "sha256": "1e56ebb425c662e48cbccc4338995b2076bd6892ff07e539fb3cade491cd3e6a",
+      "upstreamSha256": "1e56ebb425c662e48cbccc4338995b2076bd6892ff07e539fb3cade491cd3e6a",
+      "bytes": 14597,
+      "patches": []
+    },
+    {
+      "path": "internal/fs/recursive_watch.js",
+      "sha256": "115dd87a6635266b6fbd7dd6fe57e4848dd9657c984931ab8933e95b85cfe1ad",
+      "upstreamSha256": "115dd87a6635266b6fbd7dd6fe57e4848dd9657c984931ab8933e95b85cfe1ad",
+      "bytes": 11194,
+      "patches": []
+    },
+    {
+      "path": "internal/fs/cp/cp.js",
+      "sha256": "8c385c05f80346a580dac0b755f73a0f34034d14c9eeed2cce6149448f411a8e",
+      "upstreamSha256": "8c385c05f80346a580dac0b755f73a0f34034d14c9eeed2cce6149448f411a8e",
+      "bytes": 12715,
+      "patches": []
+    },
+    {
+      "path": "internal/fs/promises.js",
+      "sha256": "8d2e3a1f74d36150e2de430298c23e8e1211c9b8fbdbd9de60e9e1ad8f405401",
+      "upstreamSha256": "8d2e3a1f74d36150e2de430298c23e8e1211c9b8fbdbd9de60e9e1ad8f405401",
+      "bytes": 65187,
+      "patches": []
+    },
+    {
+      "path": "internal/vfs/setup.js",
+      "sha256": "76d2ce8aa70af8e3caaf991c79672727ceedd932d0b4d95101e370ffad55504f",
+      "upstreamSha256": "76d2ce8aa70af8e3caaf991c79672727ceedd932d0b4d95101e370ffad55504f",
+      "bytes": 34194,
       "patches": []
     }
   ]
