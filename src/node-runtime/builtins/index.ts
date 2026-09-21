@@ -29,7 +29,6 @@ import { dnsSpec, dnsPromisesSpec } from './dns';
 import { unsupportedSpecs } from './unsupported';
 import { timersSpec } from './timers';
 import { processSpec } from './process';
-import { osSpec } from './os';
 import { moduleSpec } from './module';
 import { netSpec } from './net';
 import { httpSpec } from './http';
@@ -61,7 +60,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   bufferSpec,
   timersSpec,
   processSpec,
-  osSpec,
   moduleSpec,
   // milestone 3: networking
   netSpec,

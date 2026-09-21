@@ -630,6 +630,13 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     ],
   },
   {
+    id: 'os',
+    aliases: ['node:os'],
+    vendorPath: 'os.js',
+    origin: 'node-source',
+    deps: ['internal/errors', 'internal/util', 'internal/validators'],
+  },
+  {
     id: 'console',
     aliases: ['node:console'],
     vendorPath: 'console.js',

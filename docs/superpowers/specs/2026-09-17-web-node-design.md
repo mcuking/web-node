@@ -102,7 +102,7 @@ primordials.js（真源码）→ domexception.js / messageport.js（真源码）
 | `errors` | TS | source-map / uncaught 挂钩（空实现） |
 | `performance` | TS | `performance.now()` |
 | `process_methods` | TS | cwd/chdir/exit/umask |
-| `os` | TS | 静态宿主事实 |
+| `os` | TS | 静态宿主事实（真 `lib/os.js` 跑在其上） |
 | `string_decoder` | TS | decode 占位 |
 | `icu` / `messaging` / `uv` | TS | 最小满足 |
 
@@ -129,7 +129,7 @@ primordials.js（真源码）→ domexception.js / messageport.js（真源码）
 `primordials.js`：引擎缺少 `Float16Array` / `Iterator` 时跳过而非崩溃（3 处，语义等价）。这是**唯一**对真源码的修改。
 
 ### 为什么其余不 vendored
-`internal/errors.js` 是环形依赖枢纽（errors ↔ util ↔ inspect ↔ validators），全量 vendoring 会牵出 231 个文件。因此 `internal/errors` / `internal/fs/glob` / `internal/errors/error_source` / `internal/encoding` / `internal/util/trace_sigint` / `internal/blob` / `internal/worker/js_transferable` / `internal/v8/startup_snapshot` 等由我们提供**最小等价 shim**（`src/node-runtime/builtins/internal-shims.ts`），只实现 vendored 文件实际用到的导出。例外：`internal/util.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util/{diff,parse_args/*,debuglog}.js`、`internal/validators.js`、`internal/mime.js`、`internal/event_target.js`、`internal/webidl.js`、`internal/perf/utils.js`、`internal/abort_controller.js`、`internal/trace_events.js`、`internal/cli_table.js`、`internal/console/*`、`internal/readline/*`、`assert.js` + `internal/assert/*`、`util.js`、`console.js` 本身依赖面可控，已换成真源码（M21–M27），只把它们脚下的 binding/shim 补齐。
+`internal/errors.js` 是环形依赖枢纽（errors ↔ util ↔ inspect ↔ validators），全量 vendoring 会牵出 231 个文件。因此 `internal/errors` / `internal/fs/glob` / `internal/errors/error_source` / `internal/encoding` / `internal/util/trace_sigint` / `internal/blob` / `internal/worker/js_transferable` / `internal/v8/startup_snapshot` 等由我们提供**最小等价 shim**（`src/node-runtime/builtins/internal-shims.ts`），只实现 vendored 文件实际用到的导出。例外：`internal/util.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util/{diff,parse_args/*,debuglog}.js`、`internal/validators.js`、`internal/mime.js`、`internal/event_target.js`、`internal/webidl.js`、`internal/perf/utils.js`、`internal/abort_controller.js`、`internal/trace_events.js`、`internal/cli_table.js`、`internal/console/*`、`internal/readline/*`、`assert.js` + `internal/assert/*`、`util.js`、`console.js`、`os.js` 本身依赖面可控，已换成真源码（M21–M28），只把它们脚下的 binding/shim 补齐。
 
 ---
 
@@ -184,7 +184,7 @@ web-node/
 
 > 本表按里程碑进展刷新（当前至 **M17**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
 >
-> **vendoring 进展**：`lib/stream.js` + `internal/streams/*`（整套流）、`lib/events.js`、`lib/internal/event_target.js` + `internal/webidl.js` + `internal/perf/utils.js`、`lib/internal/abort_controller.js`、`lib/console.js` + `internal/console/*` + `internal/cli_table.js` + `internal/trace_events.js` + `internal/util/debuglog.js`、`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` + `internal/promise_hooks.js`、`lib/path.js`、`lib/querystring.js`、`lib/punycode.js`、`lib/domain.js`、`lib/diagnostics_channel.js`、`lib/string_decoder.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util.js`、`internal/util/diff.js`、`internal/util/parse_args/*`、`internal/validators.js`、`internal/mime.js`、`assert.js`、`internal/assert/{utils,assertion_error,myers_diff}.js`、`internal/streams/{state,from,utils}.js`、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`internal/per_context/*` 以及 `util.js` 已用 Node 真源码（MANIFEST 67 个文件）。
+> **vendoring 进展**：`lib/stream.js` + `internal/streams/*`（整套流）、`lib/events.js`、`lib/internal/event_target.js` + `internal/webidl.js` + `internal/perf/utils.js`、`lib/internal/abort_controller.js`、`lib/console.js` + `internal/console/*` + `internal/cli_table.js` + `internal/trace_events.js` + `internal/util/debuglog.js`、`lib/os.js`、`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` + `internal/promise_hooks.js`、`lib/path.js`、`lib/querystring.js`、`lib/punycode.js`、`lib/domain.js`、`lib/diagnostics_channel.js`、`lib/string_decoder.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util.js`、`internal/util/diff.js`、`internal/util/parse_args/*`、`internal/validators.js`、`internal/mime.js`、`assert.js`、`internal/assert/{utils,assertion_error,myers_diff}.js`、`internal/streams/{state,from,utils}.js`、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`internal/per_context/*` 以及 `util.js` 已用 Node 真源码（MANIFEST 68 个文件）。
 
 | 限制 | 说明 |
 |---|---|
@@ -192,7 +192,8 @@ web-node/
 | `stream.finished` 的回调形式 | 返回 no-op `cleanup()` |
 | `fork` 的 IPC | `send`/`message` 明确抛 `notImplemented`，不静默 no-op |
 | child 剩余工作是 host promise 时 | 退出判定不可见（见 M7 变更记录） |
-| `os` 返回静态假数据 | 浏览器无可信宿主信息 |
+| `os` 返回静态假数据 | 浏览器无可信宿主信息（但已换真 `lib/os.js`，形状/强制转换/`constants` 与 Node 一致） |
+| `credentials` binding | 只提供 `getTempDir`（`/tmp`） |
 | glob 未实现 | `path.matchesGlob` 抛错 |
 | `file:`/`git+`/`link:` 说明符 | npm 未支持 |
 | Buffer 未池化 | `allocUnsafe`/`from(string)` 不做 slab 池化（`.byteOffset` 恒为 0） |
@@ -202,7 +203,7 @@ web-node/
 
 ## 10. 后续里程碑
 
-已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、整套 stream + events 换真源码（M10–M16）、真 `async_hooks` + `AsyncLocalStorage`（M17）、真框架跑起来（M18，Vue 3 SFC 在页内被 Vite 编译并运行）、更多 vendored 真源码（M19）、真 `string_decoder`（M20）、真 `internal/util/types`（M21）、真 `internal/util/inspect`（M22）、真断言栈（M23）、真 `util` 模块（M24：`lib/util.js` + `lib/internal/util.js`，真 `promisify`/`parseArgs`/`MIMEType`/`parseEnv` 等）。
+已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、整套 stream + events 换真源码（M10–M16）、真 `async_hooks` + `AsyncLocalStorage`（M17）、真框架跑起来（M18，Vue 3 SFC 在页内被 Vite 编译并运行）、更多 vendored 真源码（M19）、真 `string_decoder`（M20）、真 `internal/util/types`（M21）、真 `internal/util/inspect`（M22）、真断言栈（M23）、真 `util` 模块（M24：`lib/util.js` + `lib/internal/util.js`，真 `promisify`/`parseArgs`/`MIMEType`/`parseEnv` 等）、真 `EventTarget` 栈（M25）、真 `AbortController`/`AbortSignal`（M26）、真 `console`（M27）、真 `os`（M28）。
 
 接下来：
 

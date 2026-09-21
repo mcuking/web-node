@@ -188,21 +188,42 @@ export const processMethodsBinding: BindingFactory = (ctx) => ({
   constrainedMemory: () => 512 * 1024 * 1024,
 });
 
-/** `os` binding: static host facts. */
+/**
+ * `os` binding: static host facts for the browser sandbox.
+ *
+ * The surface (and each function's `(…, ctx)` shape) matches `src/node_os.cc`,
+ * which the vendored `lib/os.js` drives directly.
+ */
 export const osBinding: BindingFactory = () => ({
   getHostname: () => 'web-node',
-  getOSRelease: () => 'browser',
-  getOSType: () => 'Browser',
-  getOSVersion: () => '',
-  getMachine: () => 'wasm32',
+  // `lib/os.js` destructures a single `[type, version, release, machine]` tuple.
+  getOSInformation: () => ['Browser', 'web-node', 'browser', 'wasm32'],
   getFreeMem: () => 512 * 1024 * 1024,
   getTotalMem: () => 1024 * 1024 * 1024,
   getUptime: () => performance.now() / 1000,
   getCPUs: () => [],
-  getInterfaceAddresses: () => ({}),
+  // A flat array of 7-tuples in real Node; empty is the "no interfaces" answer.
+  getInterfaceAddresses: () => [],
   getHomeDirectory: () => '/home/web-node',
-  getTmpdir: () => '/tmp',
   getUserInfo: () => ({ uid: 0, gid: 0, username: 'web-node', homedir: '/home/web-node', shell: null }),
+  getAvailableParallelism: () => navigator.hardwareConcurrency ?? 1,
+  // `lib/os.js` hands this a preallocated Float64Array and expects it filled.
+  getLoadAvg: (out: Float64Array) => {
+    out[0] = 0;
+    out[1] = 0;
+    out[2] = 0;
+  },
+  // A value, not a function: `lib/os.js` reads it at module top level.
+  isBigEndian: false,
+  getPriority: () => 0,
+  // Non-zero signals failure; 0 is the "success" answer.
+  setPriority: () => 0,
+});
+
+/** `credentials` binding: the sandbox has one fixed temp dir. */
+export const credentialsBinding: BindingFactory = () => ({
+  getTempDir: () => '/tmp',
+  cacheDir: '/tmp',
 });
 
 /** `icru`/`icu` binding: Intl availability. */

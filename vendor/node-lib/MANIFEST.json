@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-20T10:40:00.453Z",
+  "generatedAt": "2026-09-21T02:09:52.091Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -474,6 +474,13 @@
       "sha256": "015a5d3afc40c0153599a2f25928af98024ac158fd237ecf5e1ce2b31272d9e6",
       "upstreamSha256": "015a5d3afc40c0153599a2f25928af98024ac158fd237ecf5e1ce2b31272d9e6",
       "bytes": 20233,
+      "patches": []
+    },
+    {
+      "path": "os.js",
+      "sha256": "5b14b21284e19382708f588ff7fa5a212c5335a84b1d9ae6ebdf626244f8fde9",
+      "upstreamSha256": "5b14b21284e19382708f588ff7fa5a212c5335a84b1d9ae6ebdf626244f8fde9",
+      "bytes": 8250,
       "patches": []
     }
   ]

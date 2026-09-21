@@ -11,6 +11,7 @@ import { bufferBinding } from './buffer';
 import { asyncWrapBinding } from './async_wrap';
 import {
   asyncContextFrameBinding,
+  credentialsBinding,
   diagnosticsChannelBinding,
   errorsBinding,
   icuBinding,
@@ -40,6 +41,7 @@ const REGISTRY: Record<string, (ctx: BindingContext) => Record<string, unknown>>
   performance: performanceBinding,
   process_methods: processMethodsBinding,
   os: osBinding,
+  credentials: credentialsBinding,
   string_decoder: stringDecoderBinding,
   icu: icuBinding,
   messaging: messagingBinding,
@@ -76,7 +78,6 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'blob',
   'url',
   'url_pattern',
-  'credentials',
   'trace_events',
   'heap_utils',
   'mksnapshot',

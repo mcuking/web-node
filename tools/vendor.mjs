@@ -83,6 +83,7 @@ const FILES = [
   'string_decoder.js',
   'assert.js',
   'util.js',
+  'os.js',
 ];
 /**
  * Documented, minimal patches applied to vendored source.
