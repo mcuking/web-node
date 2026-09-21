@@ -219,6 +219,14 @@ inventing numbers.
 than pretend to be a console — but the colour-depth logic (`lib/internal/tty.js`)
 is real, which is what makes `FORCE_COLOR` paint `util.styleText` output.
 
+`vm` is the real `lib/vm.js` as well. A page cannot build a second V8 realm, so
+the `contextify` binding stands in: a context *is* the sandbox object (tagged with
+Node's contextify symbol) and scripts run inside `with (context) { … }`, with
+`this` bound to it. `createContext`/`isContext`/`Script`/`compileFunction` and the
+`runIn*Context` helpers are real, sandbox reads and writes behave as in Node, and
+a fresh context exposes the standard intrinsics (plus `console`) while keeping
+`process`, `require`, `Buffer` and `setTimeout` undefined.
+
 ## npm
 
 Hit **Install deps** and the client resolves your `package.json` dependencies
@@ -444,6 +452,7 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M53 | Real `url` — `lib/url.js` vendored (legacy parse/format/resolve + the WHATWG re-exports); `internal/url` becomes a bridge to the host URL classes, with `url`/`url_pattern`/`encoding_binding` bindings | ✅ Done |
 | M54 | Real `v8` — `lib/v8.js` vendored; `serialize`/`deserialize` and the `Serializer`/`Deserializer` classes run on a new `serdes` binding that reimplements V8's structured-clone wire format (version 15) in JS, byte-for-byte with Node v26.9.0 across a 115-case differential corpus; heap snapshots, `queryObjects` and profiling throw | ✅ Done |
 | M55 | Real `tty` — `lib/tty.js` + `lib/internal/tty.js` vendored, with a new `tty_wrap` binding (`isTTY` is always false, the `TTY` handle throws): `isatty` and `getColorDepth`/`hasColors` are real, `ReadStream`/`WriteStream` throw instead of faking a terminal; the `FORCE_COLOR` path through `internal/util/colors` (previously a missing module) now works and colours `util.styleText`. 57 colour-depth + 10 `hasColors` cases match Node v26.9.0 | ✅ Done |
+| M56 | Real `vm` — `lib/vm.js` + `lib/internal/vm.js` vendored, with a new `contextify` binding: the sandbox object *is* the context (tagged with Node's contextify symbol) and scripts run in a `with`-scope over it, so `createContext`/`isContext`/`Script`/`compileFunction`/`runIn*Context` are real while `process`/`require`/`Buffer`/`setTimeout` stay `undefined` inside a fresh context. 59 behaviours match Node v26.9.0 | ✅ Done |
 
 ## Vendored Node source
 

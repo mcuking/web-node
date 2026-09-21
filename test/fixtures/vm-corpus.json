@@ -1,0 +1,121 @@
+{
+  "generatedBy": "node v26.9.0",
+  "results": {
+    "expr": 3,
+    "completionLastValue": 2,
+    "thisType": "object",
+    "thisEqualsGlobalThis": true,
+    "thisIsSandbox": false,
+    "thisFreshIdentity": false,
+    "typeofProcess": "undefined",
+    "typeofRequire": "undefined",
+    "typeofModule": "undefined",
+    "typeofBuffer": "undefined",
+    "typeofSetTimeout": "undefined",
+    "typeofGlobal": "undefined",
+    "typeofConsole": "object",
+    "typeofMath": "object",
+    "typeofJSON": "object",
+    "typeofArray": "function",
+    "typeofDate": "function",
+    "sandboxWrite": 1,
+    "sandboxVar": 1,
+    "sandboxRead": 42,
+    "globalWriteThenRead": 7,
+    "jsonStringify": "{\"a\":1}",
+    "mathMax": 2,
+    "mapJoin": "2,4,6",
+    "tryCatchInContext": "e",
+    "iife": 42,
+    "isContextCreated": true,
+    "isContextPlain": false,
+    "isContextArray": false,
+    "createContextReturnsArg": true,
+    "createContextIdempotent": true,
+    "createContextName": true,
+    "dontContextifyIsContext": true,
+    "dontContextifyRun": 2,
+    "createScriptInstance": true,
+    "scriptRunInThisContext": 12,
+    "scriptRunInNewContext": 12,
+    "scriptRunInContext": 7,
+    "scriptStringOptions": 1,
+    "runInNewContextStringOptions": 4,
+    "scriptPrototypeMethods": "function,function,function",
+    "compileFunctionBasic": 3,
+    "compileFunctionNoParams": 5,
+    "compileFunctionContext": 10,
+    "constantsKeys": "USE_MAIN_CONTEXT_DEFAULT_LOADER,DONT_CONTEXTIFY",
+    "constantsTypes": "symbol,symbol",
+    "moduleKeys": "Script,createContext,createScript,runInContext,runInNewContext,runInThisContext,isContext,compileFunction,measureMemory,constants",
+    "syntaxError": {
+      "ok": false,
+      "name": "SyntaxError",
+      "message": "Unexpected identifier 'error'"
+    },
+    "runtimeError": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "Cannot read properties of null (reading 'x')"
+    },
+    "customThrow": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "boom"
+    },
+    "scriptLineOffsetType": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "The \"options.lineOffset\" property must be of type number. Received type string ('x')",
+      "code": "ERR_INVALID_ARG_TYPE"
+    },
+    "scriptColumnOffsetRange": {
+      "ok": false,
+      "name": "RangeError",
+      "message": "The value of \"options.columnOffset\" is out of range. It must be an integer. Received 1.5",
+      "code": "ERR_OUT_OF_RANGE"
+    },
+    "runInContextNonContext": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "The \"contextifiedObject\" argument must be an vm.Context. Received an instance of Object",
+      "code": "ERR_INVALID_ARG_TYPE"
+    },
+    "compileFunctionParamsType": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "The \"params\" argument must be an instance of Array. Received type string ('notarray')",
+      "code": "ERR_INVALID_ARG_TYPE"
+    },
+    "compileFunctionNonContext": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "The \"options.parsingContext\" property must be an instance of Context. Received an instance of Object",
+      "code": "ERR_INVALID_ARG_TYPE"
+    },
+    "timeoutType": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "The \"options.timeout\" property must be of type number. Received type string ('x')",
+      "code": "ERR_INVALID_ARG_TYPE"
+    },
+    "timeoutZero": {
+      "ok": false,
+      "name": "RangeError",
+      "message": "The value of \"options.timeout\" is out of range. It must be >= 1 && <= 4294967295. Received 0",
+      "code": "ERR_OUT_OF_RANGE"
+    },
+    "isContextNonObject": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "The \"object\" argument must be of type object. Received type number (3)",
+      "code": "ERR_INVALID_ARG_TYPE"
+    },
+    "createContextBadName": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "The \"options.name\" property must be of type string. Received type number (3)",
+      "code": "ERR_INVALID_ARG_TYPE"
+    }
+  }
+}

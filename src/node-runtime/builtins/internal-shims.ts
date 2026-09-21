@@ -110,6 +110,7 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_INVALID_FD: '"fd" must be a positive integer: %s',
   ERR_INVALID_FD_TYPE: 'Unsupported fd type: %s',
   ERR_TTY_INIT_FAILED: 'TTY initialization failed',
+  ERR_CONTEXT_NOT_INITIALIZED: 'context used is not initialized',
 };
 
 /**
@@ -177,6 +178,7 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_INVALID_CURSOR_POS: TypeError,
   ERR_INVALID_FD: RangeError,
   ERR_INVALID_FD_TYPE: TypeError,
+  ERR_CONTEXT_NOT_INITIALIZED: Error,
 };
 
 class NodeError extends Error {
@@ -816,6 +818,11 @@ const OPTION_DEFAULTS: Record<string, unknown> = {
   // reads these to answer `isEnabled()`, and a tab never has them on.
   '--permission': false,
   '--permission-audit': false,
+  // `--experimental-vm-modules` gates `vm.SourceTextModule` and the
+  // `importModuleDynamically` callback in `lib/internal/vm.js`. The runtime does
+  // not ship the ESM vm bridge, so the flag is off (its absence would make
+  // `getOptionValue` throw the moment a custom callback is passed).
+  '--experimental-vm-modules': false,
 };
 
 export const internalOptionsSpec: BuiltinSpec = {

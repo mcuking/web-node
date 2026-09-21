@@ -1746,4 +1746,27 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     // prototype methods are real.
     deps: ['net', 'internal/errors', 'internal/tty'],
   },
+  {
+    id: 'internal/vm',
+    vendorPath: 'internal/vm.js',
+    origin: 'node-source',
+    // The real `lib/internal/vm.js`. `isContext` reads the context tag straight
+    // off the sandbox, and `getHostDefinedOptionId` consults
+    // `internal/options`; `internal/vm/module` and `internal/modules/esm/utils`
+    // are pulled in lazily by `registerImportModuleDynamically`, which returns
+    // early unless a custom callback is supplied.
+    deps: ['internal/validators', 'internal/options'],
+  },
+  {
+    id: 'vm',
+    aliases: ['node:vm'],
+    vendorPath: 'vm.js',
+    origin: 'node-source',
+    // The real `lib/vm.js`. The `contextify` binding supplies a JS stand-in for
+    // V8 contexts (`createContext`/`Script`/`compileFunction`): a context is the
+    // sandbox object tagged with the contextify private symbol, and scripts run
+    // it via a `with`-scope. `vm.Module`/`SourceTextModule` need
+    // `--experimental-vm-modules`, which is off.
+    deps: ['internal/vm', 'internal/errors', 'internal/validators', 'internal/util'],
+  },
 ];

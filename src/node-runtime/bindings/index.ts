@@ -36,6 +36,7 @@ import { blobBinding } from './blob';
 import { urlBinding, urlPatternBinding, encodingBinding } from './url';
 import { serdesBinding } from './serdes';
 import { heapUtilsBinding, profilerBinding, v8Binding } from './v8';
+import { contextifyBinding } from './contextify';
 
 /** The whitelist of internal bindings this runtime implements. */
 const REGISTRY: Record<string, BindingFactory> = {
@@ -77,6 +78,7 @@ const REGISTRY: Record<string, BindingFactory> = {
   v8: v8Binding,
   heap_utils: heapUtilsBinding,
   profiler: profilerBinding,
+  contextify: contextifyBinding,
 };
 
 /** Bindings Node internal code knows about but that we deliberately do not ship. */
@@ -86,7 +88,6 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'tcp_wrap',
   'udp_wrap',
   'pipe_wrap',
-  'contextify',
   'module_wrap',
   'inspector',
   'sea',

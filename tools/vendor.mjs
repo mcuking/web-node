@@ -182,6 +182,12 @@ const FILES = [
   // a tab) so they throw; `isatty` and `WriteStream.prototype.getColorDepth`
   // are real. `internal/tty.js` (above) is the pure-JS colour-depth logic.
   'tty.js',
+  // milestone 56: the real `vm`. `contextify` is a JS stand-in for V8 contexts:
+  // a context is the sandbox tagged with the contextify symbol, and a script
+  // runs inside `with (context)`. `internal/vm.js` holds `isContext` and the
+  // `importModuleDynamically` plumbing.
+  'vm.js',
+  'internal/vm.js',
 ];
 
 /**

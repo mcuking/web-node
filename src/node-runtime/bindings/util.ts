@@ -37,6 +37,13 @@ const kRejected = 2;
 const PRIVATE_SYMBOLS = {
   arrow_message_private_symbol: Symbol('arrow_message_private_symbol'),
   decorated_private_symbol: Symbol('decorated_private_symbol'),
+  // `internal/vm.js`'s `isContext` reads this off a contextified object, and the
+  // `contextify` binding's `makeContext` writes it (the name matches
+  // `src/env_properties.h`).
+  contextify_context_private_symbol: Symbol('node:contextify:context'),
+  // The embedder option id a compiled script/function carries; the `contextify`
+  // binding accepts but does not act on it.
+  host_defined_option_symbol: Symbol('node:host_defined_option_symbol'),
   // `internal/worker/js_transferable`'s `markTransferMode` writes the transfer
   // mode here; the `data` accessor of a marked object reads it back.
   transfer_mode_private_symbol: Symbol('transfer_mode_private_symbol'),

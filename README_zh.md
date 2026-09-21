@@ -122,6 +122,12 @@ close”会报 `ERR_STREAM_PREMATURE_CLOSE`。
 `ReadStream`/`WriteStream` 构造即抛——但颜色深度逻辑（`lib/internal/tty.js`）是真的，
 正因如此 `FORCE_COLOR` 才能让 `util.styleText` 真的输出 ANSI。
 
+`vm` 也是真的 `lib/vm.js`。页面造不出第二个 V8 realm，所以由 `contextify` binding 顶上：
+上下文**就是**那个沙箱对象（标上 Node 的 contextify 符号），脚本跑在 `with (context) { … }`
+里、`this` 绑到它。`createContext`/`isContext`/`Script`/`compileFunction` 与 `runIn*Context`
+都是真的，沙箱读写与 Node 一致，新上下文只有标准内建（加 `console`），`process`/`require`/
+`Buffer`/`setTimeout` 保持 `undefined`。
+
 响应到浏览器也是**真流式**：SW 直接把 `ReadableStream` 交给浏览器，`res.write()` / SSE / 大文件
 边产生边到达（HTML 例外，为注入 `<base>` 先缓冲）。连接默认 keep-alive，服务端支持 pipelining，
 客户端按端口做连接池。`https` 是 `http` 的同名壳（虚拟网络无 TLS）。
@@ -331,6 +337,7 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M53 | **真 `url`**——vendor `lib/url.js`（legacy parse/format/resolve + WHATWG 重导出）；`internal/url` 改成宿主 URL 桥，新增 `url`/`url_pattern`/`encoding_binding` binding | ✅ |
 | M54 | **真 `v8`**——vendor `lib/v8.js`；`serialize`/`deserialize` 与 `Serializer`/`Deserializer` 跑在新的 `serdes` binding 上（用 JS 重写 V8 结构化克隆线格式（版本 15），与真 Node v26.9.0 的 115 条差分语料逐字节一致）；堆快照/`queryObjects`/profiler 一律抛错 | ✅ |
 | M55 | **真 `tty`**——vendor `lib/tty.js` + `lib/internal/tty.js`，新增 `tty_wrap` binding（`isTTY` 恒 false、`TTY` 构造即抛）：`isatty` 与 `getColorDepth`/`hasColors` 是真实现，`ReadStream`/`WriteStream` 抛错而不假装终端；`internal/util/colors` 的 `FORCE_COLOR` 惰性路径（之前指向未注册模块、会炸）从此可用，`util.styleText` 会真的上色。57 条颜色深度 + 10 条 `hasColors` 语料与真 Node v26.9.0 全等 | ✅ |
+| M56 | **真 `vm`**——vendor `lib/vm.js` + `lib/internal/vm.js`，新增 `contextify` binding：沙箱对象**本身就是**上下文（标 Node 的 contextify 符号），脚本跑在它上面的 `with` scope 里，所以 `createContext`/`isContext`/`Script`/`compileFunction`/`runIn*Context` 都是真的，且新上下文里 `process`/`require`/`Buffer`/`setTimeout` 保持 `undefined`。59 条行为与真 Node v26.9.0 全等 | ✅ |
 
 ## Vendored 真源码现状
 

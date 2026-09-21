@@ -653,6 +653,34 @@ try {
 }
 console.log('');
 
+// --- vm (milestone 56) ---
+// vm is Node's real lib/vm.js. A page cannot build a second V8 realm, so the
+// 'contextify' binding emulates a context: the sandbox object *is* the context
+// (tagged with Node's contextify symbol), and a script runs inside a with-scope
+// over it. Writes land on the sandbox, this/globalThis are the scope, and the
+// completion value comes back; realm identity is the documented deviation.
+console.log('-- vm (milestone 56) --');
+var nodeVm = require('vm');
+var sandbox = { seed: 41 };
+console.log('expr        : ' + nodeVm.runInNewContext('seed + 1', sandbox));
+nodeVm.runInNewContext('assigned = "yes"', sandbox);
+console.log('sandbox     : seed=' + sandbox.seed + ' assigned=' + JSON.stringify(sandbox.assigned));
+console.log('isolation   : typeof process=' + nodeVm.runInNewContext('typeof process'));
+console.log('this===self : ' + nodeVm.runInNewContext('this===globalThis'));
+console.log('isContext   : plain=' + nodeVm.isContext({}) + ' created=' + nodeVm.isContext(nodeVm.createContext({})));
+console.log('script      : ' + new nodeVm.Script('6*7').runInThisContext());
+var compiled = nodeVm.compileFunction('return a + b', ['a', 'b']);
+console.log('compileFn   : ' + compiled(20, 22));
+var parsing = nodeVm.createContext({ base: 100 });
+console.log('parsingCtx  : ' + nodeVm.compileFunction('return base + 1', [], { parsingContext: parsing })());
+try {
+  nodeVm.runInNewContext('while(true){}', {}, { timeout: 10 });
+  console.log('timeout     : unexpectedly allowed');
+} catch (err) {
+  console.log('timeout     : throws (' + err.code + ')');
+}
+console.log('');
+
 // --- Blob (milestone 37) ---
 // Blob and File are now the real lib/internal/blob.js + lib/internal/file.js
 // running on a JS 'blob' binding. Blob is a global (and require('buffer').Blob

@@ -67,6 +67,13 @@ export const symbolsBinding: BindingFactory = () => {
     // our `messaging` binding and `internal/worker/io.js` can compare identity.
     oninit: make('oninit'),
     no_message_symbol: make('no_message_symbol'),
+    // Read by `lib/internal/vm.js` / `lib/vm.js` to distinguish the three
+    // `importModuleDynamically` defaults (`DONT_CONTEXTIFY` is the fourth).
+    vm_dynamic_import_default_internal: make('vm_dynamic_import_default_internal'),
+    vm_dynamic_import_main_context_default: make('vm_dynamic_import_main_context_default'),
+    vm_dynamic_import_no_callback: make('vm_dynamic_import_no_callback'),
+    vm_dynamic_import_missing_flag: make('vm_dynamic_import_missing_flag'),
+    vm_context_no_contextify: make('vm_context_no_contextify'),
     messaging_clone_symbol: make('messaging_clone_symbol'),
     messaging_transfer_symbol: make('messaging_transfer_symbol'),
     messaging_deserialize_symbol: make('messaging_deserialize_symbol'),
