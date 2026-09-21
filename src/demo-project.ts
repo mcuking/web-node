@@ -562,6 +562,27 @@ const webZlib = require('stream/web');
 try { zlib.gzipSync('x'); } catch (e) { console.log('gzipSync    : ' + e.code); }
 console.log('');
 
+// --- AES ciphers (milestone 47) ---
+// The symmetric half of node:crypto is here too: createCipheriv/
+// createDecipheriv over AES in ECB/CBC/CTR/CFB/OFB/GCM. Node's ciphers are
+// synchronous and streaming, so WebCrypto (promise-only) cannot stand in;
+// they are implemented in plain JS (src/node-runtime/crypto/cipher.ts) and
+// match OpenSSL byte for byte.
+console.log('-- AES ciphers (milestone 47) --');
+const cKey = Buffer.from('00112233445566778899aabbccddeeff', 'hex');
+const cIv = Buffer.from('0f0e0d0c0b0a09080706050403020100', 'hex');
+const cbc = crypto.createCipheriv('aes-128-cbc', cKey, cIv);
+const cbcCt = Buffer.concat([cbc.update('The quick brown fox jumps over the lazy dog'), cbc.final()]);
+console.log('cbc ct      : ' + cbcCt.toString('hex').slice(0, 40) + '...');
+const cbcBack = crypto.createDecipheriv('aes-128-cbc', cKey, cIv);
+console.log('cbc pt      : ' + Buffer.concat([cbcBack.update(cbcCt), cbcBack.final()]).toString());
+const gcm = crypto.createCipheriv('aes-128-gcm', cKey, Buffer.from('0f0e0d0c0b0a090807060504', 'hex'));
+gcm.setAAD(Buffer.from('header-v1'));
+const gcmCt = Buffer.concat([gcm.update('hello world'), gcm.final()]);
+console.log('gcm tag     : ' + gcm.getAuthTag().toString('hex'));
+console.log('gcm ciphers : ' + crypto.getCiphers().filter(function (n) { return n.indexOf('aes-') === 0; }).length + ' aes entries');
+console.log('');
+
 // --- Blob (milestone 37) ---
 // Blob and File are now the real lib/internal/blob.js + lib/internal/file.js
 // running on a JS 'blob' binding. Blob is a global (and require('buffer').Blob

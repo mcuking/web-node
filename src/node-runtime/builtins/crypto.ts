@@ -11,6 +11,14 @@ import {
   type HashAlgo,
   type ScryptOptions,
 } from '../crypto/hash';
+import {
+  Cipheriv as AesCipheriv,
+  getCipherInfo as lookupCipherInfo,
+  isKnownCipherName,
+  listCiphers,
+  resolveCipher,
+  type CipherSpec,
+} from '../crypto/cipher';
 
 /**
  * `crypto` — the subset tooling actually calls in a browser tab.
@@ -24,9 +32,13 @@ import {
  *    `subtle.digest` is a promise. They are implemented directly in
  *    `src/node-runtime/crypto/hash.ts` against the published specs and checked
  *    against Node's OpenSSL output.
+ *  - **Symmetric ciphers** (`createCipheriv`/`createDecipheriv`, AES in
+ *    ECB/CBC/CTR/CFB/OFB/GCM) are likewise synchronous and streaming, so they
+ *    are implemented in `src/node-runtime/crypto/cipher.ts` (FIPS-197 +
+ *    SP 800-38A/D) rather than bridged to async WebCrypto.
  *
- * Everything outside that surface (ciphers, signatures, key objects, Diffie-
- * Hellman, primes) throws a loud, typed error rather than returning garbage.
+ * Everything outside that surface (signatures, key objects, Diffie-Hellman,
+ * primes) throws a loud, typed error rather than returning garbage.
  */
 
 // --- encoding helpers --------------------------------------------------------
@@ -432,6 +444,158 @@ export const cryptoSpec: BuiltinSpec = {
       return mismatch === 0;
     };
 
+    // -- symmetric ciphers ---------------------------------------------------
+    //
+    // AES (ECB/CBC/CTR/CFB/OFB/GCM) is real, implemented in
+    // `../crypto/cipher.ts` because Node's ciphers are synchronous and OpenSSL
+    // bindings that WebCrypto's promise-based API cannot substitute for. Ciphers
+    // OpenSSL knows but this runtime does not implement (Camellia, ARIA, SM4,
+    // DES/3DES, ChaCha20-Poly1305, CCM, OCB, SIV, XTS, wrap, …) raise a typed
+    // `NotImplementedError`; a name OpenSSL does not know raises
+    // `ERR_CRYPTO_UNKNOWN_CIPHER`, just like Node.
+
+    const describe = (value: unknown): string => {
+      if (value === null) return 'null';
+      if (value === undefined) return 'undefined';
+      if (typeof value === 'object') {
+        if (Array.isArray(value)) return 'an instance of Array';
+        const name = (value as { constructor?: { name?: string } }).constructor?.name ?? 'Object';
+        return `an instance of ${name}`;
+      }
+      return `type ${typeof value} (${String(value)})`;
+    };
+
+    const isRawBytes = (value: unknown): value is ArrayBuffer | SharedArrayBuffer =>
+      value instanceof ArrayBuffer ||
+      (typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer);
+
+    const coerceKey = (key: unknown): Uint8Array => {
+      if (typeof key === 'string') return bytesFromString(key, 'utf8');
+      if (key instanceof Uint8Array) return key;
+      if (ArrayBuffer.isView(key)) return new Uint8Array(key.buffer, key.byteOffset, key.byteLength);
+      if (isRawBytes(key)) return new Uint8Array(key as ArrayBuffer);
+      throw coded(
+        'TypeError',
+        'ERR_INVALID_ARG_TYPE',
+        `The "key" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, DataView, KeyObject, or CryptoKey. Received ${describe(key)}`,
+      );
+    };
+
+    const coerceIv = (iv: unknown, spec: CipherSpec): Uint8Array | null => {
+      if (iv === undefined) {
+        throw coded(
+          'TypeError',
+          'ERR_INVALID_ARG_TYPE',
+          `The "iv" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received undefined`,
+        );
+      }
+      let bytes: Uint8Array | null = null;
+      if (iv === null) bytes = null;
+      else if (typeof iv === 'string') bytes = bytesFromString(iv, 'utf8');
+      else if (iv instanceof Uint8Array) bytes = iv;
+      else if (ArrayBuffer.isView(iv)) bytes = new Uint8Array(iv.buffer, iv.byteOffset, iv.byteLength);
+      else if (isRawBytes(iv)) bytes = new Uint8Array(iv as ArrayBuffer);
+      else {
+        throw coded(
+          'TypeError',
+          'ERR_INVALID_ARG_TYPE',
+          `The "iv" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received ${describe(iv)}`,
+        );
+      }
+      const invalid = (): never => {
+        throw coded('TypeError', 'ERR_CRYPTO_INVALID_IV', 'Invalid initialization vector');
+      };
+      if (spec.ivLength === null) {
+        // ECB takes no IV; anything non-empty is a mistake.
+        if (bytes !== null && bytes.length > 0) invalid();
+        return null;
+      }
+      if (bytes === null || bytes.length === 0) invalid();
+      // GCM accepts any positive IV length (OpenSSL derives J0); the other modes
+      // require exactly the block-sized IV.
+      if (spec.mode === 'gcm' ? (bytes as Uint8Array).length < 1 : (bytes as Uint8Array).length !== spec.ivLength) invalid();
+      return bytes;
+    };
+
+    const coerceCipherInput = (data: unknown, encoding?: string): Uint8Array => {
+      if (typeof data === 'string') return bytesFromString(data, encoding);
+      if (data instanceof Uint8Array) return data;
+      if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      if (isRawBytes(data)) return new Uint8Array(data as ArrayBuffer);
+      throw coded(
+        'TypeError',
+        'ERR_INVALID_ARG_TYPE',
+        `The "data" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received ${describe(data)}`,
+      );
+    };
+
+    const coerceBytes = (value: unknown, name: string): Uint8Array => {
+      if (value instanceof Uint8Array) return value;
+      if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+      if (isRawBytes(value)) return new Uint8Array(value as ArrayBuffer);
+      throw coded(
+        'TypeError',
+        'ERR_INVALID_ARG_TYPE',
+        `The "${name}" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received ${describe(value)}`,
+      );
+    };
+
+    const makeCipher = (
+      algorithm: unknown,
+      key: unknown,
+      iv: unknown,
+      options: unknown,
+      encrypt: boolean,
+    ): Record<string, unknown> => {
+      const spec = resolveCipher(algorithm);
+      if (!spec) {
+        const name = `${algorithm}`;
+        if (isKnownCipherName(name)) throw notImplemented('api', `crypto cipher "${name}"`);
+        throw coded('Error', 'ERR_CRYPTO_UNKNOWN_CIPHER', 'Unknown cipher');
+      }
+      const keyBytes = coerceKey(key);
+      if (keyBytes.length !== spec.keyLength) {
+        throw coded('RangeError', 'ERR_CRYPTO_INVALID_KEYLEN', 'Invalid key length');
+      }
+      const ivBytes = coerceIv(iv, spec);
+      const authTagLength =
+        (options as { authTagLength?: number } | undefined)?.authTagLength ?? 16;
+      const inner = new AesCipheriv(spec, keyBytes, ivBytes, encrypt, authTagLength);
+
+      const api: Record<string, unknown> = {
+        update(data: unknown, inputEncoding?: string, outputEncoding?: string) {
+          const out = inner.update(coerceCipherInput(data, inputEncoding));
+          return encodeOutput(asBuffer(out), outputEncoding);
+        },
+        final(outputEncoding?: string) {
+          return encodeOutput(asBuffer(inner.final()), outputEncoding);
+        },
+        setAutoPadding(autoPadding?: boolean) {
+          inner.setAutoPadding(autoPadding);
+          return api;
+        },
+        setAAD(aad: unknown) {
+          inner.setAAD(coerceBytes(aad, 'aad'));
+          return api;
+        },
+      };
+      if (encrypt) {
+        api.getAuthTag = () => asBuffer(inner.getAuthTag());
+      } else {
+        api.setAuthTag = (tag: unknown) => {
+          inner.setAuthTag(coerceBytes(tag, 'tag'));
+          return api;
+        };
+      }
+      return api;
+    };
+
+    const createCipheriv = (algorithm: unknown, key: unknown, iv?: unknown, options?: unknown) =>
+      makeCipher(algorithm, key, iv, options, true);
+    const createDecipheriv = (algorithm: unknown, key: unknown, iv?: unknown, options?: unknown) =>
+      makeCipher(algorithm, key, iv, options, false);
+    const getCipherInfo = (nameOrNid: string | number) => lookupCipherInfo(nameOrNid);
+
     // -- explicitly unsupported ----------------------------------------------
     //
     // These need real crypto primitives (ciphers, signatures, asymmetric keys,
@@ -442,10 +606,6 @@ export const cryptoSpec: BuiltinSpec = {
       throw notImplemented('api', `crypto.${name}`);
     };
     const unsupportedApis = {
-      createCipheriv: unsupportedApi('createCipheriv'),
-      createDecipheriv: unsupportedApi('createDecipheriv'),
-      createCipher: unsupportedApi('createCipher'),
-      createDecipher: unsupportedApi('createDecipher'),
       createSign: unsupportedApi('createSign'),
       createVerify: unsupportedApi('createVerify'),
       sign: unsupportedApi('sign'),
@@ -469,9 +629,7 @@ export const cryptoSpec: BuiltinSpec = {
       generatePrimeSync: unsupportedApi('generatePrimeSync'),
       checkPrime: unsupportedApi('checkPrime'),
       checkPrimeSync: unsupportedApi('checkPrimeSync'),
-      getCiphers: unsupportedApi('getCiphers'),
       getCurves: unsupportedApi('getCurves'),
-      getCipherInfo: unsupportedApi('getCipherInfo'),
       getFips: unsupportedApi('getFips'),
       setFips: unsupportedApi('setFips'),
       X509Certificate: unsupportedApi('X509Certificate'),
@@ -485,6 +643,10 @@ export const cryptoSpec: BuiltinSpec = {
       createHmac,
       hash,
       getHashes: listHashes,
+      createCipheriv,
+      createDecipheriv,
+      getCiphers: listCiphers,
+      getCipherInfo,
       randomBytes,
       randomFill,
       randomFillSync,
