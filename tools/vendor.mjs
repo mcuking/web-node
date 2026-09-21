@@ -162,6 +162,7 @@ const FILES = [
   'internal/fs/cp/cp-sync.js',
   'internal/fs/read/context.js',
   'internal/streams/fast-utf8-stream.js',
+  'internal/fs/streams.js',
   'fs.js',
   'internal/fs/promises.js',
   'internal/vfs/setup.js',

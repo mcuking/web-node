@@ -1622,6 +1622,27 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     ],
   },
   {
+    id: 'internal/fs/streams',
+    vendorPath: 'internal/fs/streams.js',
+    origin: 'node-source',
+    // `fs.ReadStream`/`fs.WriteStream`. Its top-level `require('fs')` is safe
+    // because it is only ever required lazily (from `createReadStream`/
+    // `createWriteStream`), by which point `fs` is fully evaluated.
+    deps: [
+      'buffer',
+      'stream',
+      'fs',
+      'internal/errors',
+      'internal/fs/promises',
+      'internal/fs/utils',
+      'internal/url',
+      'internal/util',
+      'internal/validators',
+      'internal/streams/destroy',
+      'internal/constants',
+    ],
+  },
+  {
     id: 'fs',
     aliases: ['node:fs'],
     vendorPath: 'fs.js',

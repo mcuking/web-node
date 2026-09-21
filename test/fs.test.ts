@@ -81,21 +81,61 @@ describe('fs (real lib/fs.js)', () => {
 
   it('createReadStream / createWriteStream move bytes over the VFS', async () => {
     const { fs } = boot();
+    // The real `internal/fs/streams.js` is now vendored: fast-utf8-stream-style
+    // ReadStream/WriteStream over the `fs` binding, not a web-node shim.
+    expect(typeof fs.ReadStream).toBe('function');
+    expect(typeof fs.WriteStream).toBe('function');
+    let ws: any;
     await new Promise<void>((res, rej) => {
-      const ws = fs.createWriteStream('/project/log.txt');
+      ws = fs.createWriteStream('/project/log.txt');
+      expect(ws).toBeInstanceOf(fs.WriteStream);
       ws.on('error', rej);
-      ws.on('close', () => res());
-      ws.end('line-1\nline-2\n');
+      ws.on('finish', () => res());
+      ws.write('line-1\n');
+      ws.end('line-2\n');
     });
+    expect(ws.bytesWritten).toBe(14);
+    expect(ws.path).toBe('/project/log.txt');
     expect(fs.readFileSync('/project/log.txt', 'utf8')).toBe('line-1\nline-2\n');
+
+    // `{ start, end }` is inclusive, and `open` reports a numeric fd.
+    const rs = fs.createReadStream('/project/log.txt', { start: 7, end: 11 });
+    expect(rs).toBeInstanceOf(fs.ReadStream);
     const chunks: string[] = [];
+    let openFd: unknown;
     await new Promise<void>((res, rej) => {
-      const rs = fs.createReadStream('/project/log.txt');
+      rs.on('open', (fd: number) => { openFd = typeof fd; });
       rs.on('data', (c: any) => chunks.push(String(c)));
       rs.on('error', rej);
       rs.on('end', () => res());
     });
-    expect(chunks.join('')).toBe('line-1\nline-2\n');
+    expect(chunks.join('')).toBe('line-');
+    expect(rs.bytesRead).toBe(5);
+    expect(openFd).toBe('number');
+  });
+
+  it('streams a large file in highWaterMark chunks and pipes a byte-equal copy', async () => {
+    const { fs } = boot();
+    const big = new Uint8Array(200_000).fill(65);
+    fs.writeFileSync('/project/big.bin', big);
+    let total = 0;
+    const sizes: number[] = [];
+    await new Promise<void>((res, rej) => {
+      const s = fs.createReadStream('/project/big.bin', { highWaterMark: 65536 });
+      s.on('data', (c: any) => { total += c.length; sizes.push(c.length); });
+      s.on('error', rej);
+      s.on('end', () => res());
+    });
+    expect(total).toBe(200_000);
+    // Backpressure is real over the VFS: never larger than one chunk.
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(65536);
+    await new Promise<void>((res, rej) => {
+      const dest = fs.createWriteStream('/project/copy.bin');
+      dest.on('error', rej);
+      dest.on('finish', () => res());
+      fs.createReadStream('/project/big.bin').pipe(dest);
+    });
+    expect(Array.from(fs.readFileSync('/project/copy.bin'))).toEqual(Array.from(big));
   });
 
   it('watch reports one rename per whole-file write and per delete', () => {
