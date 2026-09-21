@@ -52,6 +52,7 @@ const FILES = [
   'internal/util/types.js',
   'internal/util/inspect.js',
   'internal/util/colors.js',
+  'internal/tty.js',
   'internal/util/comparisons.js',
   'internal/util.js',
   'internal/util/diff.js',
@@ -177,6 +178,10 @@ const FILES = [
   'v8.js',
   'internal/v8/heap_profile.js',
   'internal/v8/cpu_profiler.js',
+  // milestone 55: the real `tty`. Its streams need a native TTY handle (none in
+  // a tab) so they throw; `isatty` and `WriteStream.prototype.getColorDepth`
+  // are real. `internal/tty.js` (above) is the pure-JS colour-depth logic.
+  'tty.js',
 ];
 
 /**

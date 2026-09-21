@@ -630,6 +630,29 @@ try {
 }
 console.log('');
 
+// --- tty (milestone 55) ---
+// tty is Node's real lib/tty.js. A tab has no file descriptor and no terminal,
+// so isatty answers false and the Read/WriteStream classes throw rather than
+// pretend to be a console; the colour-depth logic (internal/tty) is real.
+console.log('-- tty (milestone 55) --');
+var nodeTty = require('tty');
+function colorDepthOf(mod, env) {
+  return mod.WriteStream.prototype.getColorDepth(env);
+}
+console.log('isatty      : 0=' + nodeTty.isatty(0) + ' 1=' + nodeTty.isatty(1) + ' -1=' + nodeTty.isatty(-1));
+console.log('depth plain : ' + colorDepthOf(nodeTty));
+console.log('depth force3: ' + colorDepthOf(nodeTty, { FORCE_COLOR: '3' }));
+console.log('depth xterm : ' + colorDepthOf(nodeTty, { TERM: 'xterm-256color' }));
+console.log('depth dumb  : ' + colorDepthOf(nodeTty, { TERM: 'dumb' }));
+console.log('hasColors256: ' + nodeTty.WriteStream.prototype.hasColors(256, { FORCE_COLOR: '2' }));
+try {
+  new nodeTty.WriteStream(1);
+  console.log('stream      : unexpectedly built');
+} catch (err) {
+  console.log('stream      : throws (' + err.code + ')');
+}
+console.log('');
+
 // --- Blob (milestone 37) ---
 // Blob and File are now the real lib/internal/blob.js + lib/internal/file.js
 // running on a JS 'blob' binding. Blob is a global (and require('buffer').Blob

@@ -53,18 +53,6 @@ function unsupported(moduleName: string, provided: Record<string, unknown> = {})
 
 export const unsupportedSpecs: BuiltinSpec[] = [
   {
-    id: 'tty',
-    aliases: ['node:tty'],
-    origin: 'web-node',
-    init: () =>
-      unsupported('tty', {
-        // Colour detection is the one thing libraries (picocolors et al.) call.
-        isatty: () => false,
-        WriteStream: class WriteStream {},
-        ReadStream: class ReadStream {},
-      }),
-  },
-  {
     id: 'tls',
     aliases: ['node:tls'],
     origin: 'web-node',

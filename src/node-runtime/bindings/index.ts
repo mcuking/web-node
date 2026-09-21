@@ -28,6 +28,7 @@ import {
   fsEventWrapBinding,
   modulesBinding,
   streamWrapBinding,
+  ttyWrapBinding,
 } from './misc';
 import { messagingBinding, workerBinding } from './messaging';
 import { stringDecoderBinding } from './string_decoder';
@@ -60,6 +61,7 @@ const REGISTRY: Record<string, BindingFactory> = {
   fs_event_wrap: fsEventWrapBinding,
   modules: modulesBinding,
   stream_wrap: streamWrapBinding,
+  tty_wrap: ttyWrapBinding,
   blob: blobBinding,
   diagnostics_channel: diagnosticsChannelBinding,
   task_queue: taskQueueBinding,
@@ -84,7 +86,6 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'tcp_wrap',
   'udp_wrap',
   'pipe_wrap',
-  'tty_wrap',
   'contextify',
   'module_wrap',
   'inspector',

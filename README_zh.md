@@ -118,6 +118,10 @@ close”会报 `ERR_STREAM_PREMATURE_CLOSE`。
 数组、Map/Set、Date、RegExp、Error、BigInt、ArrayBuffer 与 TypedArray 产出的字节与真 Node
 一致；堆快照与 profiler 那半边在标签页里没有对应物，一律抛错而不编造数字。
 
+`tty` 也是真的 `lib/tty.js`。标签页里没有文件描述符，所以 `isatty` 返回 `false`、
+`ReadStream`/`WriteStream` 构造即抛——但颜色深度逻辑（`lib/internal/tty.js`）是真的，
+正因如此 `FORCE_COLOR` 才能让 `util.styleText` 真的输出 ANSI。
+
 响应到浏览器也是**真流式**：SW 直接把 `ReadableStream` 交给浏览器，`res.write()` / SSE / 大文件
 边产生边到达（HTML 例外，为注入 `<base>` 先缓冲）。连接默认 keep-alive，服务端支持 pipelining，
 客户端按端口做连接池。`https` 是 `http` 的同名壳（虚拟网络无 TLS）。
@@ -326,6 +330,7 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M52 | **真 `internal/fs/streams.js`**——`fs.ReadStream`/`fs.WriteStream` 换真源码（惰性加载，顶层 `require('fs')` 回环自然解除） | ✅ |
 | M53 | **真 `url`**——vendor `lib/url.js`（legacy parse/format/resolve + WHATWG 重导出）；`internal/url` 改成宿主 URL 桥，新增 `url`/`url_pattern`/`encoding_binding` binding | ✅ |
 | M54 | **真 `v8`**——vendor `lib/v8.js`；`serialize`/`deserialize` 与 `Serializer`/`Deserializer` 跑在新的 `serdes` binding 上（用 JS 重写 V8 结构化克隆线格式（版本 15），与真 Node v26.9.0 的 115 条差分语料逐字节一致）；堆快照/`queryObjects`/profiler 一律抛错 | ✅ |
+| M55 | **真 `tty`**——vendor `lib/tty.js` + `lib/internal/tty.js`，新增 `tty_wrap` binding（`isTTY` 恒 false、`TTY` 构造即抛）：`isatty` 与 `getColorDepth`/`hasColors` 是真实现，`ReadStream`/`WriteStream` 抛错而不假装终端；`internal/util/colors` 的 `FORCE_COLOR` 惰性路径（之前指向未注册模块、会炸）从此可用，`util.styleText` 会真的上色。57 条颜色深度 + 10 条 `hasColors` 语料与真 Node v26.9.0 全等 | ✅ |
 
 ## Vendored 真源码现状
 

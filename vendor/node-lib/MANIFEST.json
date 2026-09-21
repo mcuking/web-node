@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-21T11:45:49.816Z",
+  "generatedAt": "2026-09-21T11:53:28.039Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -264,6 +264,13 @@
       "sha256": "f6b6702f24abe359726f05115767142148bcd5f87b84896dab47488db08af516",
       "upstreamSha256": "f6b6702f24abe359726f05115767142148bcd5f87b84896dab47488db08af516",
       "bytes": 1321,
+      "patches": []
+    },
+    {
+      "path": "internal/tty.js",
+      "sha256": "996ae301ee60854817401545811fd908c332cd3ed071c6a498d211ccdd9a932d",
+      "upstreamSha256": "996ae301ee60854817401545811fd908c332cd3ed071c6a498d211ccdd9a932d",
+      "bytes": 7150,
       "patches": []
     },
     {
@@ -1062,6 +1069,13 @@
       "sha256": "a7f70c5b8cb2f665ff6b7124ceb28e7302969cc42694bbbd485b135f212ce047",
       "upstreamSha256": "a7f70c5b8cb2f665ff6b7124ceb28e7302969cc42694bbbd485b135f212ce047",
       "bytes": 1439,
+      "patches": []
+    },
+    {
+      "path": "tty.js",
+      "sha256": "119d25f6e820b3a082a17fde3e242207604149614c6f421be8c83dfb0631b0d2",
+      "upstreamSha256": "119d25f6e820b3a082a17fde3e242207604149614c6f421be8c83dfb0631b0d2",
+      "bytes": 5617,
       "patches": []
     }
   ]

@@ -214,6 +214,11 @@ regexps, errors, bigints, array buffers and typed arrays; the heap-snapshot and
 profiler half of the module has no equivalent in a tab and throws instead of
 inventing numbers.
 
+`tty` is the real `lib/tty.js` too. There are no file descriptors in a tab, so
+`isatty` answers `false` and the `ReadStream`/`WriteStream` classes throw rather
+than pretend to be a console — but the colour-depth logic (`lib/internal/tty.js`)
+is real, which is what makes `FORCE_COLOR` paint `util.styleText` output.
+
 ## npm
 
 Hit **Install deps** and the client resolves your `package.json` dependencies
@@ -438,6 +443,7 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M52 | Real `internal/fs/streams.js` — `fs.ReadStream`/`fs.WriteStream` are the real classes (lazy-loaded, so the top-level `require('fs')` cycle resolves) | ✅ Done |
 | M53 | Real `url` — `lib/url.js` vendored (legacy parse/format/resolve + the WHATWG re-exports); `internal/url` becomes a bridge to the host URL classes, with `url`/`url_pattern`/`encoding_binding` bindings | ✅ Done |
 | M54 | Real `v8` — `lib/v8.js` vendored; `serialize`/`deserialize` and the `Serializer`/`Deserializer` classes run on a new `serdes` binding that reimplements V8's structured-clone wire format (version 15) in JS, byte-for-byte with Node v26.9.0 across a 115-case differential corpus; heap snapshots, `queryObjects` and profiling throw | ✅ Done |
+| M55 | Real `tty` — `lib/tty.js` + `lib/internal/tty.js` vendored, with a new `tty_wrap` binding (`isTTY` is always false, the `TTY` handle throws): `isatty` and `getColorDepth`/`hasColors` are real, `ReadStream`/`WriteStream` throw instead of faking a terminal; the `FORCE_COLOR` path through `internal/util/colors` (previously a missing module) now works and colours `util.styleText`. 57 colour-depth + 10 `hasColors` cases match Node v26.9.0 | ✅ Done |
 
 ## Vendored Node source
 

@@ -283,8 +283,8 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     id: 'internal/util/colors',
     vendorPath: 'internal/util/colors.js',
     origin: 'node-source',
-    // `internal/tty` is only pulled in when FORCE_COLOR is set, which never
-    // happens in the browser, so it is deliberately left unregistered.
+    // `internal/tty` (for the `FORCE_COLOR` path in `shouldColorize`) is a lazy
+    // `require`, so it stays out of `deps`; it is registered as its own builtin.
     deps: [],
   },
   {
@@ -1725,5 +1725,25 @@ export const vendoredBuiltins: BuiltinSpec[] = [
       'internal/v8/heap_profile',
       'internal/v8/startup_snapshot',
     ],
+  },
+  {
+    id: 'internal/tty',
+    vendorPath: 'internal/tty.js',
+    origin: 'node-source',
+    // Pure JS (ported from `supports-color`): `getColorDepth`/`hasColors` read
+    // `process.env` and `process.platform`. `internal/util/colors` reaches for
+    // it lazily whenever `FORCE_COLOR` is set.
+    deps: ['internal/validators'],
+  },
+  {
+    id: 'tty',
+    aliases: ['node:tty'],
+    vendorPath: 'tty.js',
+    origin: 'node-source',
+    // The real `lib/tty.js`. It builds its read/write streams on a native `TTY`
+    // handle from `tty_wrap`, which a tab cannot provide, so constructing
+    // either stream throws; `isatty` and the `getColorDepth`/`hasColors`
+    // prototype methods are real.
+    deps: ['net', 'internal/errors', 'internal/tty'],
   },
 ];

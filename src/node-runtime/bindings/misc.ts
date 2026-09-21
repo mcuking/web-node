@@ -289,6 +289,30 @@ export const osBinding: BindingFactory = () => ({
   setPriority: () => 0,
 });
 
+/**
+ * `tty_wrap` — the native TTY handle and `uv_guess_handle`.
+ *
+ * A browser tab has no file descriptors and no controlling terminal. That makes
+ * `isTTY` honestly `false` for every fd (the same answer Node gives for a piped
+ * or redirected stream), and leaves the `TTY` handle with nothing to represent,
+ * so constructing one throws. `lib/tty.js` still loads and behaves: `isatty`
+ * answers correctly, and `ReadStream`/`WriteStream` throw the moment they try to
+ * build a handle.
+ */
+export const ttyWrapBinding: BindingFactory = () => ({
+  isTTY: (_fd: number): boolean => false,
+  TTY: class TTY {
+    constructor() {
+      throw notImplemented('binding', 'tty_wrap.TTY');
+    }
+  },
+  // `uv_tty_mode_t` (deps/uv/include/uv.h). `UV_TTY_MODE_RAW` is deliberately
+  // absent: `lib/tty.js` only ever asks for these three.
+  UV_TTY_MODE_NORMAL: 0,
+  UV_TTY_MODE_IO: 2,
+  UV_TTY_MODE_RAW_VT: 3,
+});
+
 /** `credentials` binding: the sandbox has one fixed temp dir. */
 export const credentialsBinding: BindingFactory = () => ({
   getTempDir: () => '/tmp',

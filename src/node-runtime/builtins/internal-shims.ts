@@ -106,6 +106,10 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_MISSING_OPTION: '%s is required',
   ERR_CONSOLE_WRITABLE_STREAM: 'Console expects a writable stream instance for %s',
   ERR_INCOMPATIBLE_OPTION_PAIR: 'Option "%s" cannot be used in combination with option "%s"',
+  ERR_INVALID_CURSOR_POS: 'Cannot set cursor row without setting its column',
+  ERR_INVALID_FD: '"fd" must be a positive integer: %s',
+  ERR_INVALID_FD_TYPE: 'Unsupported fd type: %s',
+  ERR_TTY_INIT_FAILED: 'TTY initialization failed',
 };
 
 /**
@@ -170,6 +174,9 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_MISSING_OPTION: TypeError,
   ERR_CONSOLE_WRITABLE_STREAM: TypeError,
   ERR_INCOMPATIBLE_OPTION_PAIR: TypeError,
+  ERR_INVALID_CURSOR_POS: TypeError,
+  ERR_INVALID_FD: RangeError,
+  ERR_INVALID_FD_TYPE: TypeError,
 };
 
 class NodeError extends Error {
@@ -439,13 +446,88 @@ function makeErrorClass(
   return NodeErr as unknown as new (...args: unknown[]) => Error;
 }
 
+const kIsNodeError = Symbol('kIsNodeError');
+
+/**
+ * `SystemError` (lib/internal/errors.js) — the class behind `E(code, msg,
+ * SystemError)` entries. Its message is assembled from the error *context*
+ * (`${prefix}: ${syscall} returned ${code} (${message})`) rather than from
+ * `%s` placeholders.
+ */
+class SystemError extends Error {
+  code: string = '';
+  constructor(key: string, context: Record<string, unknown>) {
+    super();
+    const prefix = ERROR_CODES[key] ?? key;
+    let message = `${prefix}: ${context.syscall} returned ` + `${context.code} (${context.message})`;
+    if (context.path !== undefined) message += ` ${context.path}`;
+    if (context.dest !== undefined) message += ` => ${context.dest}`;
+    this.code = key;
+    Object.defineProperties(this, {
+      [kIsNodeError]: { value: true, enumerable: false, configurable: true },
+      name: { value: 'SystemError', enumerable: false, writable: true, configurable: true },
+      message: { value: message, enumerable: false, writable: true, configurable: true },
+      info: { value: context, enumerable: true, configurable: true },
+      errno: {
+        get: () => context.errno,
+        set: (value: number | undefined) => {
+          context.errno = value;
+        },
+        enumerable: true,
+        configurable: true,
+      },
+      syscall: {
+        get: () => context.syscall,
+        set: (value: string) => {
+          context.syscall = value;
+        },
+        enumerable: true,
+        configurable: true,
+      },
+    });
+    if (context.path !== undefined) {
+      Object.defineProperty(this, 'path', {
+        get: () => (context.path != null ? String(context.path) : context.path),
+        set: (value: unknown) => {
+          context.path = value ? String(value) : undefined;
+        },
+        enumerable: true,
+        configurable: true,
+      });
+    }
+  }
+}
+
+/** Codes `lib/internal/errors.js` declares with the `SystemError` base. */
+const SYSTEM_ERROR_CODES: Record<string, true> = {
+  ERR_TTY_INIT_FAILED: true,
+};
+
+function makeSystemErrorWithCode(key: string): new (ctx: Record<string, unknown>) => Error {
+  return class NodeSystemError extends SystemError {
+    constructor(ctx: Record<string, unknown>) {
+      super(key, ctx);
+    }
+  } as unknown as new (ctx: Record<string, unknown>) => Error;
+}
+
 function createErrorsBindingContext(): Record<string, unknown> {
   const codes: Record<string, unknown> = {};
   for (const code of Object.keys(ERROR_CODES)) {
     codes[code] = makeErrorClass(code);
   }
+  // `SystemError`-based codes format their message from a *context*, not from
+  // `%s` placeholders (`lib/internal/errors.js`'s `makeSystemErrorWithCode`).
+  // Only `ERR_TTY_INIT_FAILED` uses that base here; in this runtime the TTY
+  // handle cannot be built at all, so the path is unreachable, but the class
+  // is still the honest shape.
+  for (const code of Object.keys(SYSTEM_ERROR_CODES)) {
+    codes[code] = makeSystemErrorWithCode(code);
+  }
   return {
     codes,
+    SystemError,
+    kIsNodeError,
     NodeError,
     // Node's AbortError keeps the DOMException-style name and message.
     AbortError: class AbortError extends Error {
