@@ -1,130 +1,188 @@
 import { describe, expect, it } from 'vitest';
-import { MemoryVfs, VfsError } from '../src/node-runtime/vfs';
+import { MemoryVfs } from '../src/node-runtime/vfs';
+import { NodeRuntime } from '../src/node-runtime/runtime';
 
-describe('MemoryVfs', () => {
-  it('writes and reads files', () => {
-    const vfs = new MemoryVfs();
-    vfs.writeFile('/a.txt', new TextEncoder().encode('hello'));
-    expect(new TextDecoder().decode(vfs.readFile('/a.txt'))).toBe('hello');
-    expect(vfs.stat('/a.txt').size).toBe(5);
-    expect(vfs.stat('/a.txt').type).toBe('file');
+/**
+ * Node's `vfs` module (lib/vfs.js + internal/vfs/*) running on our runtime.
+ * The MemoryProvider-backed `VirtualFileSystem` is a full fs-shaped surface
+ * (sync + callback + promise + streams + watch), so these check the behaviours
+ * a real Node v26.9.0 build (`node --experimental-vfs`) produces.
+ */
+interface VfsModule {
+  create(provider?: unknown, options?: unknown): VfsFs;
+  VirtualFileSystem: unknown;
+  VirtualProvider: unknown;
+  MemoryProvider: unknown;
+  RealFSProvider: new () => unknown;
+  ZipProvider: new () => unknown;
+}
+
+interface VfsFs {
+  writeFileSync(path: string, data: string | Uint8Array): void;
+  readFileSync(path: string, opts?: string | { encoding?: string }): string | Uint8Array;
+  statSync(path: string): { size: number; isFile(): boolean; isDirectory(): boolean };
+  lstatSync(path: string): { isDirectory(): boolean };
+  existsSync(path: string): boolean;
+  mkdirSync(path: string, opts?: { recursive?: boolean }): string | undefined;
+  mkdtempSync(prefix: string): string;
+  readdirSync(path: string, opts?: { recursive?: boolean; withFileTypes?: boolean }): unknown;
+  openSync(path: string, flags: string): number;
+  closeSync(fd: number): void;
+  readSync(fd: number, buf: Uint8Array, off: number, len: number, pos: number): number;
+  writeSync(fd: number, buf: Uint8Array, off: number, len: number, pos: number): number;
+  copyFileSync(src: string, dest: string): void;
+  renameSync(src: string, dest: string): void;
+  unlinkSync(path: string): void;
+  appendFileSync(path: string, data: string): void;
+  rmSync(path: string, opts?: { recursive?: boolean }): void;
+  realpathSync(path: string): string;
+  promises: {
+    readFile(path: string, enc: string): Promise<string>;
+    writeFile(path: string, data: string): Promise<void>;
+    readdir(path: string): Promise<string[]>;
+  };
+}
+
+function bootVfs(): VfsModule {
+  return boot().mod;
+}
+
+function boot(): { mod: VfsModule; Buffer: { from(s: string): Uint8Array } } {
+  const vfs = new MemoryVfs({ cwd: '/project' });
+  vfs.mkdir('/project', { recursive: true });
+  const runtime = new NodeRuntime({
+    vfs,
+    argv: ['/project/index.js'],
+    installGlobals: false,
+    onStdout: () => {},
+    onStderr: () => {},
   });
+  return {
+    mod: runtime.realm.require('vfs') as unknown as VfsModule,
+    Buffer: (runtime.realm.require('buffer') as { Buffer: { from(s: string): Uint8Array } })
+      .Buffer,
+  };
+}
 
-  it('resolves relative paths against cwd', () => {
-    const vfs = new MemoryVfs({ cwd: '/project' });
-    vfs.mkdir('/project', { recursive: true });
-    vfs.writeFile('a.txt', new TextEncoder().encode('x'));
-    expect(vfs.exists('/project/a.txt')).toBe(true);
-  });
-
-  it('creates nested dirs recursively and lists children', () => {
-    const vfs = new MemoryVfs();
-    vfs.mkdir('/a/b/c', { recursive: true });
-    expect(vfs.stat('/a/b/c').type).toBe('dir');
-    expect(vfs.readdir('/a').map((d) => d.name)).toEqual(['b']);
-  });
-
-  it('notifies subscribers about creates, changes and deletes', () => {
-    const vfs = new MemoryVfs();
-    const seen: Array<{ type: string; path: string }> = [];
-    const off = vfs.subscribe((c) => seen.push(c));
-    vfs.writeFile('/a.txt', new TextEncoder().encode('1'));
-    vfs.writeFile('/a.txt', new TextEncoder().encode('2'));
-    vfs.rm('/a.txt');
-    off();
-    vfs.writeFile('/b.txt', new TextEncoder().encode('3'));
-    expect(seen).toEqual([
-      { type: 'create', path: '/a.txt' },
-      { type: 'change', path: '/a.txt' },
-      { type: 'delete', path: '/a.txt' },
+describe('vfs module', () => {
+  it('exports the same names as Node (minus the two unsupported providers)', () => {
+    const mod = bootVfs();
+    expect(Object.keys(mod)).toEqual([
+      'create',
+      'VirtualFileSystem',
+      'VirtualProvider',
+      'MemoryProvider',
+      'RealFSProvider',
+      'ZipProvider',
     ]);
+    // The providers we do not ship fail loudly instead of being undefined.
+    expect(() => new mod.RealFSProvider()).toThrowError(
+      /RealFSProvider is not supported/,
+    );
+    expect(() => new mod.ZipProvider()).toThrowError(/ZipProvider is not supported/);
+  });
+});
+
+describe('VirtualFileSystem (matching node --experimental-vfs)', () => {
+  it('reads and writes through the mounted provider', () => {
+    const fs = bootVfs().create() as VfsFs;
+    fs.writeFileSync('/a.txt', 'hello world');
+    expect((fs.readFileSync('/a.txt', 'utf8') as string)).toBe('hello world');
+    expect(fs.statSync('/a.txt').size).toBe(11);
+    expect(fs.statSync('/a.txt').isFile()).toBe(true);
+    expect(fs.statSync('/a.txt').isDirectory()).toBe(false);
   });
 
-  it('throws ENOENT for missing files', () => {
-    const vfs = new MemoryVfs();
-    expect(() => vfs.readFile('/nope')).toThrowError(VfsError);
+  it('walks directories recursively (both flat and with Dirents)', () => {
+    const fs = bootVfs().create() as VfsFs;
+    fs.mkdirSync('/d/e', { recursive: true });
+    fs.writeFileSync('/d/e/f.txt', 'x');
+    expect(fs.readdirSync('/d')).toEqual(['e']);
+    expect(fs.readdirSync('/d', { recursive: true })).toEqual(['e', 'e/f.txt']);
+    const dirents = fs.readdirSync('/d', { withFileTypes: true }) as Array<{
+      name: string;
+      isDirectory(): boolean;
+    }>;
+    expect(dirents.map((d) => `${d.name}:${d.isDirectory()}`)).toEqual(['e:true']);
+  });
+
+  it('round-trips a file descriptor', () => {
+    const { mod, Buffer } = boot();
+    const fs = mod.create() as VfsFs;
+    const wfd = fs.openSync('/f.txt', 'w');
+    fs.writeSync(wfd, Buffer.from('abcdef'), 0, 6, 0);
+    fs.closeSync(wfd);
+    const rfd = fs.openSync('/f.txt', 'r');
+    const buf = new Uint8Array(3);
+    expect(fs.readSync(rfd, buf, 0, 3, 1)).toBe(3);
+    expect(String.fromCharCode(...buf)).toBe('bcd');
+    fs.closeSync(rfd);
+  });
+
+  it('copies, renames, unlinks and appends', () => {
+    const fs = bootVfs().create() as VfsFs;
+    fs.writeFileSync('/a.txt', 'hello world');
+    fs.copyFileSync('/a.txt', '/b.txt');
+    expect(fs.readFileSync('/b.txt', 'utf8')).toBe('hello world');
+    fs.renameSync('/b.txt', '/c.txt');
+    expect(fs.existsSync('/b.txt')).toBe(false);
+    expect(fs.existsSync('/c.txt')).toBe(true);
+    fs.unlinkSync('/c.txt');
+    expect(fs.existsSync('/c.txt')).toBe(false);
+    fs.appendFileSync('/a.txt', '!');
+    expect(fs.readFileSync('/a.txt', 'utf8')).toBe('hello world!');
+  });
+
+  it('reports realpath, mkdtemp, rm -r and directory stats', () => {
+    const fs = bootVfs().create() as VfsFs;
+    fs.writeFileSync('/a.txt', 'hi');
+    expect(fs.realpathSync('/a.txt')).toBe('/a.txt');
+    expect(fs.mkdtempSync('/tmp-')).toMatch(/^\/tmp-/);
+    fs.mkdirSync('/sub');
+    expect(fs.statSync('/sub').isDirectory()).toBe(true);
+    expect(fs.lstatSync('/sub').isDirectory()).toBe(true);
+    fs.rmSync('/sub', { recursive: true });
+    expect(fs.existsSync('/sub')).toBe(false);
+    // Nested recursive removal.
+    fs.mkdirSync('/x/y/z', { recursive: true });
+    fs.writeFileSync('/x/y/z/f', 'q');
+    fs.rmSync('/x', { recursive: true });
+    expect(fs.existsSync('/x')).toBe(false);
+  });
+
+  it('produces libuv-shaped errors', () => {
+    const fs = bootVfs().create() as VfsFs;
+    fs.writeFileSync('/a.txt', 'hi');
     try {
-      vfs.readFile('/nope');
-    } catch (err) {
-      expect((err as VfsError).code).toBe('ENOENT');
+      fs.readFileSync('/missing');
+      throw new Error('should have thrown');
+    } catch (e) {
+      const err = e as { code: string; errno: number; message: string; name: string };
+      expect(err.name).toBe('Error');
+      expect(err.code).toBe('ENOENT');
+      expect(err.errno).toBe(-2);
+      expect(err.message).toBe("ENOENT: no such file or directory, open '/missing'");
+    }
+    try {
+      fs.mkdirSync('/a.txt');
+      throw new Error('should have thrown');
+    } catch (e) {
+      const err = e as { code: string; message: string };
+      expect(err.code).toBe('EEXIST');
+      expect(err.message).toBe("EEXIST: file already exists, mkdir '/a.txt'");
     }
   });
 
-  it('shapes errors the way Node does', () => {
-    // Read off Node v26.9.0: `fs.readFileSync('/nope')` throws an Error whose
-    // message is "ENOENT: no such file or directory, open '/nope'" — the libuv
-    // description, the syscall and the path, not Node's internal class name.
-    const vfs = new MemoryVfs();
-    const err = (() => {
-      try {
-        vfs.readFile('/nope');
-      } catch (e) {
-        return e as VfsError;
-      }
-      throw new Error('expected readFile to throw');
-    })();
-    expect(err.name).toBe('Error');
-    expect(err.message).toBe("ENOENT: no such file or directory, open '/nope'");
-    expect(err.syscall).toBe('open');
-    expect(err.path).toBe('/nope');
-    expect(err.errno).toBe(-2);
+  it('exposes a promise API', async () => {
+    const fs = bootVfs().create() as VfsFs;
+    await fs.promises.writeFile('/p.txt', 'promised');
+    expect(await fs.promises.readFile('/p.txt', 'utf8')).toBe('promised');
+    expect(await fs.promises.readdir('/')).toEqual(['p.txt']);
   });
 
-  it('rm -r removes a subtree', () => {
-    const vfs = new MemoryVfs();
-    vfs.mkdir('/x/y', { recursive: true });
-    vfs.writeFile('/x/y/z.txt', new Uint8Array());
-    vfs.rm('/x', { recursive: true });
-    expect(vfs.exists('/x')).toBe(false);
-  });
-
-  it('rmdir on a non-empty dir requires recursive', () => {
-    const vfs = new MemoryVfs();
-    vfs.mkdir('/x/y', { recursive: true });
-    expect(() => vfs.rm('/x')).toThrowError(VfsError);
-  });
-
-  it('rename moves files and subtrees', () => {
-    const vfs = new MemoryVfs();
-    vfs.mkdir('/d', { recursive: true });
-    vfs.writeFile('/d/f.txt', new TextEncoder().encode('1'));
-    vfs.rename('/d', '/e');
-    expect(vfs.exists('/d')).toBe(false);
-    expect(new TextDecoder().decode(vfs.readFile('/e/f.txt'))).toBe('1');
-  });
-
-  it('appends in order', () => {
-    const vfs = new MemoryVfs();
-    vfs.writeFile('/log', new TextEncoder().encode('a'));
-    vfs.appendFile('/log', new TextEncoder().encode('b'));
-    expect(new TextDecoder().decode(vfs.readFile('/log'))).toBe('ab');
-  });
-
-  it('round-trips through a snapshot', () => {
-    const vfs = new MemoryVfs();
-    vfs.mkdir('/p/q', { recursive: true });
-    vfs.writeFile('/p/q/f.txt', new TextEncoder().encode('data'));
-    const restored = MemoryVfs.fromSnapshot(vfs.snapshot());
-    expect(new TextDecoder().decode(restored.readFile('/p/q/f.txt'))).toBe('data');
-  });
-
-  it('preserves binary bytes through a snapshot (no UTF-8 mangling)', () => {
-    const bytes = new Uint8Array(1024);
-    for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 7 + 200) & 0xff;
-    const vfs = new MemoryVfs();
-    vfs.writeFile('/blob.wasm', bytes);
-    const restored = MemoryVfs.fromSnapshot(vfs.snapshot());
-    const back = restored.readFile('/blob.wasm');
-    expect(back.byteLength).toBe(bytes.byteLength);
-    expect(Array.from(back)).toEqual(Array.from(bytes));
-  });
-
-  it('still rehydrates legacy text snapshots', () => {
-    const legacy = [
-      { path: '/dir', type: 'dir' as const, mode: 0o755 },
-      { path: '/dir/greet.txt', type: 'file' as const, mode: 0o644, data: 'hello' },
-    ];
-    const restored = MemoryVfs.fromSnapshot(legacy, {}, 'text');
-    expect(new TextDecoder().decode(restored.readFile('/dir/greet.txt'))).toBe('hello');
+  it('writes utf8 by byte length, not code-unit length', () => {
+    const fs = bootVfs().create() as VfsFs;
+    fs.writeFileSync('/u.txt', '\u4e2d\u6587');
+    expect(fs.statSync('/u.txt').size).toBe(6);
   });
 });

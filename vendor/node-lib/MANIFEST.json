@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-21T10:12:42.282Z",
+  "generatedAt": "2026-09-21T10:25:15.206Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -866,6 +866,90 @@
       "sha256": "a51b2eb61a6f325063e603fd1ab12ece9e4436d8557910005d7d172d02388c3d",
       "upstreamSha256": "a51b2eb61a6f325063e603fd1ab12ece9e4436d8557910005d7d172d02388c3d",
       "bytes": 26872,
+      "patches": []
+    },
+    {
+      "path": "internal/fs/utils.js",
+      "sha256": "8f4f44388934c9fd281a122122f667b1a92d41f9e558bfd45a83c9aff49f061b",
+      "upstreamSha256": "8f4f44388934c9fd281a122122f667b1a92d41f9e558bfd45a83c9aff49f061b",
+      "bytes": 35357,
+      "patches": []
+    },
+    {
+      "path": "internal/vfs/errors.js",
+      "sha256": "14a7244f0bef4f0680f0dbbe82c9f9972b52329a6c4fc63e82c6dac76939b551",
+      "upstreamSha256": "14a7244f0bef4f0680f0dbbe82c9f9972b52329a6c4fc63e82c6dac76939b551",
+      "bytes": 4151,
+      "patches": []
+    },
+    {
+      "path": "internal/vfs/router.js",
+      "sha256": "9fb56c49dda2a259c987ae9b9abef9435b007e68fa025789026b4a681f464b03",
+      "upstreamSha256": "9fb56c49dda2a259c987ae9b9abef9435b007e68fa025789026b4a681f464b03",
+      "bytes": 2269,
+      "patches": []
+    },
+    {
+      "path": "internal/vfs/fd.js",
+      "sha256": "56ee8cb6e6a3996d272142d887455c1ae012ad19a2f8c361832eb9f20a5a3f79",
+      "upstreamSha256": "56ee8cb6e6a3996d272142d887455c1ae012ad19a2f8c361832eb9f20a5a3f79",
+      "bytes": 1799,
+      "patches": []
+    },
+    {
+      "path": "internal/vfs/stats.js",
+      "sha256": "0c2e939f508def539874767a9b70899a745ac2f78a2dcfd5567fe8d7288638c5",
+      "upstreamSha256": "0c2e939f508def539874767a9b70899a745ac2f78a2dcfd5567fe8d7288638c5",
+      "bytes": 10494,
+      "patches": []
+    },
+    {
+      "path": "internal/vfs/provider.js",
+      "sha256": "fa39f618f5f670c57ace6edc7096a55c449cfa0561b590340e254cca04481aa6",
+      "upstreamSha256": "fa39f618f5f670c57ace6edc7096a55c449cfa0561b590340e254cca04481aa6",
+      "bytes": 17076,
+      "patches": []
+    },
+    {
+      "path": "internal/vfs/dir.js",
+      "sha256": "23eaff64945d0a4836c7ffccae5e7e145448745a643b414bad0ca83d7894a001",
+      "upstreamSha256": "23eaff64945d0a4836c7ffccae5e7e145448745a643b414bad0ca83d7894a001",
+      "bytes": 1932,
+      "patches": []
+    },
+    {
+      "path": "internal/vfs/file_handle.js",
+      "sha256": "a9bd035d9f77211c6c8f0c550a1c9ac8aa80ce6786d8f1f4fa59a86db6cb5457",
+      "upstreamSha256": "a9bd035d9f77211c6c8f0c550a1c9ac8aa80ce6786d8f1f4fa59a86db6cb5457",
+      "bytes": 20144,
+      "patches": []
+    },
+    {
+      "path": "internal/vfs/streams.js",
+      "sha256": "594b1d08413d818b675ea94c3d98f54c2dee5d0e9d0f433145596b5bc1b751ad",
+      "upstreamSha256": "594b1d08413d818b675ea94c3d98f54c2dee5d0e9d0f433145596b5bc1b751ad",
+      "bytes": 7746,
+      "patches": []
+    },
+    {
+      "path": "internal/vfs/watcher.js",
+      "sha256": "015f7f0803b3331fa85e46b5e74e8f12a4385f4dfc40da78e3d965edfc8e713b",
+      "upstreamSha256": "015f7f0803b3331fa85e46b5e74e8f12a4385f4dfc40da78e3d965edfc8e713b",
+      "bytes": 17853,
+      "patches": []
+    },
+    {
+      "path": "internal/vfs/file_system.js",
+      "sha256": "c0c64773907aa7459f1772e790696eb6ffea45865b03c691abbf02ff2ae28a15",
+      "upstreamSha256": "c0c64773907aa7459f1772e790696eb6ffea45865b03c691abbf02ff2ae28a15",
+      "bytes": 39188,
+      "patches": []
+    },
+    {
+      "path": "internal/vfs/providers/memory.js",
+      "sha256": "ffbe5934bbe9883523c288b26d6e0c3424aba83f9c08ce110fc03637a31d184c",
+      "upstreamSha256": "ffbe5934bbe9883523c288b26d6e0c3424aba83f9c08ce110fc03637a31d184c",
+      "bytes": 32010,
       "patches": []
     }
   ]

@@ -95,11 +95,17 @@ describe('vendored: util', () => {
     ]);
   });
 
-  it('records the errno-table divergence honestly', () => {
+  it('exposes the real libuv errno table', () => {
     const { util } = boot();
-    // No libuv here, so there is no errno->message table: the map is empty and
-    // lookups fall back to Node's "Unknown system error <n>" shape.
-    expect(util.getSystemErrorMap().size).toBe(0);
-    expect(util.getSystemErrorName(-2)).toBe('Unknown system error -2');
+    // The `uv` binding now carries libuv's own `UV_ERRNO_MAP` (deps/uv/include/uv.h),
+    // so the system error map is populated exactly as in Node.
+    expect(util.getSystemErrorMap().size).toBe(85);
+    expect(util.getSystemErrorMap().get(-2)).toEqual([
+      'ENOENT',
+      'no such file or directory',
+    ]);
+    expect(util.getSystemErrorName(-2)).toBe('ENOENT');
+    // Codes outside the table still fall back to Node's shape.
+    expect(util.getSystemErrorName(-4045)).toBe('Unknown system error -4045');
   });
 });

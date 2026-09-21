@@ -239,5 +239,72 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     // ---- helpers used by the fs builtin ----
     __fds: fds,
     __statSync: statSync,
+
+    // ---- internal/fs/utils + fs/promises support ----
+    //
+    // `src/node_file.cc`'s `InternalModuleStat`: the module "type" code for a
+    // path — 1 for a CommonJS-loadable file, 2 for an ES module, 0 otherwise.
+    // `internal/fs/utils`'s recursive readdir uses it to flag directories that
+    // contain modules rather than ordinary files.
+    internalModuleStat: (path: string): number => {
+      let st: Stat;
+      try {
+        st = vfs.stat(path);
+      } catch {
+        return 0;
+      }
+      if (st.type !== 'file') return 0;
+      // The VFS has no package.json `type` rules, so the extension is the whole
+      // story: `.mjs` is always ESM, everything else loads as CommonJS.
+      return path.endsWith('.mjs') ? 2 : 1;
+    },
+
+    // `binding.readdirRecursive(path, encoding, withFileTypes, kUsePromises)`.
+    // `internal/fs/utils`'s `getRecursiveDirents` consumes the result as
+    // `{ 0: names, 1: types, 2: counts, 3: dirs }`: entries grouped by directory,
+    // with `counts[d]` entries under the relative directory `dirs[d]` (the root
+    // being `''`).
+    readdirRecursive: (
+      path: string,
+      _encoding?: unknown,
+      _withFileTypes?: boolean,
+      _usePromises?: unknown,
+    ): { 0: string[]; 1: Uint8Array; 2: Uint32Array; 3: string[] } => {
+      const DIRENT_FILE = 1;
+      const DIRENT_DIR = 2;
+      const DIRENT_LINK = 3;
+      const names: string[] = [];
+      const types: number[] = [];
+      const counts: number[] = [];
+      const dirs: string[] = [];
+
+      const typeCode = (t: string): number =>
+        t === 'dir' ? DIRENT_DIR : t === 'symlink' ? DIRENT_LINK : DIRENT_FILE;
+
+      const visit = (abs: string, rel: string): void => {
+        const entries = vfs.readdir(abs, { withFileTypes: true }) as Array<{
+          name: string;
+          type: string;
+        }>;
+        // The root directory (rel === '') is `dirs[0]`, matching the binding.
+        dirs.push(rel);
+        counts.push(entries.length);
+        const subdirs: Array<{ abs: string; rel: string }> = [];
+        for (const entry of entries) {
+          names.push(entry.name);
+          types.push(typeCode(entry.type));
+          if (entry.type === 'dir') {
+            subdirs.push({
+              abs: `${abs === '/' ? '' : abs}/${entry.name}`,
+              rel: rel === '' ? entry.name : `${rel}/${entry.name}`,
+            });
+          }
+        }
+        for (const sub of subdirs) visit(sub.abs, sub.rel);
+      };
+
+      visit(vfs.resolve(path), '');
+      return { 0: names, 1: Uint8Array.from(types), 2: Uint32Array.from(counts), 3: dirs };
+    },
   };
 };

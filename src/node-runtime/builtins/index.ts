@@ -5,7 +5,6 @@ import {
   internalEncodingSpec,
   internalErrorsSpec,
   internalErrorSourceSpec,
-  internalFsUtilsSpec,
   internalHistogramSpec,
   internalOptionsSpec,
   internalProcessPermissionSpec,
@@ -18,6 +17,7 @@ import {
   internalUrlSpec,
 } from './internal-shims';
 import { vendoredBuiltins } from './vendored-builtins';
+import { vfsSpec } from './vfs';
 import { undiciSpec } from './undici';
 import { workerThreadsSpec } from './worker-threads';
 import { fsSpec } from './fs';
@@ -41,7 +41,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalErrorSourceSpec,
   internalBootstrapRealmSpec,
   internalUrlSpec,
-  internalFsUtilsSpec,
   internalHistogramSpec,
   internalAbortListenerSpec,
   internalOptionsSpec,
@@ -54,6 +53,8 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalStreamIterTypesSpec,
   // vendored real Node source
   ...vendoredBuiltins,
+  // milestone 49: Node's virtual file system module (MemoryProvider-backed)
+  vfsSpec,
   // our implementations
   processSpec,
   moduleSpec,

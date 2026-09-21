@@ -1342,4 +1342,136 @@ export const vendoredBuiltins: BuiltinSpec[] = [
       'internal/v8/startup_snapshot',
     ],
   },
+  // -------------------------------------------------------------------------
+  // milestone 49: the fs base + the VFS subsystem
+  // -------------------------------------------------------------------------
+  {
+    id: 'internal/fs/utils',
+    vendorPath: 'internal/fs/utils.js',
+    origin: 'node-source',
+    // The real fs base: `Stats`/`BigIntStats`/`Dirent`/`StatFs` plus the path,
+    // option and flag validators every fs surface shares. Its only binding use is
+    // `internalModuleStat` (for recursive readdir module detection) and the
+    // `constants` fs/os tables.
+    deps: [
+      'buffer',
+      'internal/errors',
+      'internal/util',
+      'internal/util/types',
+      'internal/util/inspect',
+      'internal/url',
+      'internal/validators',
+      'internal/constants',
+      'internal/assert',
+    ],
+  },
+  {
+    id: 'internal/vfs/errors',
+    vendorPath: 'internal/vfs/errors.js',
+    origin: 'node-source',
+    // Reads `internalBinding('uv')` for the errno string table.
+    deps: ['internal/errors'],
+  },
+  {
+    id: 'internal/vfs/router',
+    vendorPath: 'internal/vfs/router.js',
+    origin: 'node-source',
+    // Maps an absolute path to the mount that owns it; `os.devNull` seeds the
+    // default mount root.
+    deps: ['internal/constants'],
+  },
+  {
+    id: 'internal/vfs/fd',
+    vendorPath: 'internal/vfs/fd.js',
+    origin: 'node-source',
+    deps: [],
+  },
+  {
+    id: 'internal/vfs/stats',
+    vendorPath: 'internal/vfs/stats.js',
+    origin: 'node-source',
+    deps: ['internal/fs/utils', 'internal/util'],
+  },
+  {
+    id: 'internal/vfs/provider',
+    vendorPath: 'internal/vfs/provider.js',
+    origin: 'node-source',
+    deps: ['internal/errors', 'internal/vfs/errors'],
+  },
+  {
+    id: 'internal/vfs/dir',
+    vendorPath: 'internal/vfs/dir.js',
+    origin: 'node-source',
+    deps: ['internal/errors'],
+  },
+  {
+    id: 'internal/vfs/file_handle',
+    vendorPath: 'internal/vfs/file_handle.js',
+    origin: 'node-source',
+    deps: ['buffer', 'internal/errors', 'internal/vfs/errors'],
+  },
+  {
+    id: 'internal/vfs/streams',
+    vendorPath: 'internal/vfs/streams.js',
+    origin: 'node-source',
+    deps: [
+      'buffer',
+      'stream',
+      'internal/errors',
+      'internal/vfs/errors',
+      'internal/vfs/fd',
+      'internal/util',
+      'internal/validators',
+    ],
+  },
+  {
+    id: 'internal/vfs/watcher',
+    vendorPath: 'internal/vfs/watcher.js',
+    origin: 'node-source',
+    deps: [
+      'buffer',
+      'events',
+      'timers',
+      'internal/errors',
+      'internal/util',
+      'internal/vfs/stats',
+    ],
+  },
+  {
+    id: 'internal/vfs/providers/memory',
+    vendorPath: 'internal/vfs/providers/memory.js',
+    origin: 'node-source',
+    // The in-memory provider: a full VirtualProvider with per-mount byte
+    // storage, watchers and stats. This is the provider web-node mounts at `/`.
+    deps: [
+      'buffer',
+      'util/types',
+      'internal/vfs/provider',
+      'internal/vfs/file_handle',
+      'internal/vfs/watcher',
+      'internal/vfs/stats',
+      'internal/vfs/errors',
+      'internal/fs/utils',
+      'internal/util',
+    ],
+  },
+  {
+    id: 'internal/vfs/file_system',
+    vendorPath: 'internal/vfs/file_system.js',
+    origin: 'node-source',
+    // `VirtualFileSystem`: mounts providers, routes paths, exposes the fs-shaped
+    // surface. Lazily requires `internal/vfs/setup`, `internal/url` and `buffer`.
+    deps: [
+      'internal/errors',
+      'internal/validators',
+      'internal/util',
+      'internal/util/debuglog',
+      'internal/vfs/providers/memory',
+      'internal/vfs/router',
+      'internal/vfs/fd',
+      'internal/vfs/errors',
+      'internal/vfs/streams',
+      'internal/vfs/dir',
+    ],
+  },
 ];

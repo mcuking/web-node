@@ -140,6 +140,19 @@ const FILES = [
   'internal/streams/iter/broadcast.js',
   'internal/streams/iter/share.js',
   'internal/streams/iter/classic.js',
+  // milestone 49: the real VFS subsystem (MemoryProvider-backed) + the fs base
+  'internal/fs/utils.js',
+  'internal/vfs/errors.js',
+  'internal/vfs/router.js',
+  'internal/vfs/fd.js',
+  'internal/vfs/stats.js',
+  'internal/vfs/provider.js',
+  'internal/vfs/dir.js',
+  'internal/vfs/file_handle.js',
+  'internal/vfs/streams.js',
+  'internal/vfs/watcher.js',
+  'internal/vfs/file_system.js',
+  'internal/vfs/providers/memory.js',
 ];
 
 /**

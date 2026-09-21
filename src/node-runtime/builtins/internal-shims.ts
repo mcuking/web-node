@@ -1,6 +1,17 @@
 import type { BuiltinSpec, BuiltinInitContext } from './types';
 import { notImplemented } from '../errors';
 import { getCompiledSource } from '../source-registry';
+import { ERRNO, ERRNO_DESC } from '../vfs/types';
+
+/**
+ * libuv's errno table, keyed by the negative errno — the same pairs the `uv`
+ * binding exposes via `getErrorMap()` (see `bindings/misc.ts`). `internal/util`'s
+ * `uvErrmapGet` and the libuv-shaped error classes in this file read it.
+ */
+const UV_ERRMAP = new Map<number, [string, string]>();
+for (const [name, errno] of Object.entries(ERRNO)) {
+  UV_ERRMAP.set(errno, [name, ERRNO_DESC[name] ?? 'unknown error']);
+}
 
 /**
  * Shims for the `internal/*` modules that our vendored Node source depends on.
@@ -441,10 +452,52 @@ function createErrorsBindingContext(): Record<string, unknown> {
     genericNodeError: (message: string, errorProperties?: Record<string, unknown>): Error =>
       Object.assign(new Error(message), errorProperties),
     kEnhanceStackBeforeInspector: Symbol('kEnhanceStackBeforeInspector'),
-    // There is no libuv here, so no errno table: `uvErrmapGet` always misses and
-    // callers fall back to Node's own `['UNKNOWN', 'unknown error']`. The error
-    // classes below still carry the `errno`/`code`/`syscall` shape Node exposes.
-    uvErrmapGet: () => undefined,
+    // libuv's errno table (`src/uv.cc`'s `getErrorMap`): the same name/description
+    // pairs the `uv` binding exposes, so `new UVException({...})` and
+    // `util._errnoException` produce exact libuv-shaped messages.
+    uvErrmapGet: (errno: number): [string, string] | undefined =>
+      UV_ERRMAP.get(errno),
+    /** The libuv-shaped error (lib/internal/errors.js). */
+    UVException: class UVException extends Error {
+      code: string;
+      errno: number;
+      syscall: string;
+      path?: string;
+      dest?: string;
+
+      constructor(ctx: {
+        errno: number;
+        syscall: string;
+        path?: string | Uint8Array;
+        dest?: string | Uint8Array;
+        message?: string;
+        [key: string]: unknown;
+      }) {
+        const [code, uvmsg] = UV_ERRMAP.get(ctx.errno) ?? ['UNKNOWN', 'unknown error'];
+        let message = `${code}: ${ctx.message || uvmsg}, ${ctx.syscall}`;
+        let path: string | undefined;
+        let dest: string | undefined;
+        if (ctx.path) {
+          path = ctx.path.toString();
+          message += ` '${path}'`;
+        }
+        if (ctx.dest) {
+          dest = ctx.dest.toString();
+          message += ` -> '${dest}'`;
+        }
+        super(message);
+        for (const prop of Object.keys(ctx)) {
+          if (prop === 'message' || prop === 'path' || prop === 'dest') continue;
+          (this as Record<string, unknown>)[prop] = ctx[prop];
+        }
+        this.name = 'Error';
+        this.code = code;
+        this.errno = ctx.errno;
+        this.syscall = ctx.syscall;
+        if (path) this.path = path;
+        if (dest) this.dest = dest;
+      }
+    },
     /** `util._errnoException`'s backing class (lib/internal/errors.js). */
     ErrnoException: class ErrnoException extends NodeError {
       constructor(err: number, syscall: string, original?: string) {
@@ -882,115 +935,6 @@ export const internalEventsSymbolsSpec: BuiltinSpec = {
   init: () => ({
     kFirstEventParam: Symbol('kFirstEventParam'),
   }),
-};
-
-// ---------------------------------------------------------------------------
-// internal/fs/utils  (only `DirentFromStats` is referenced, by internal/fs/glob)
-// ---------------------------------------------------------------------------
-//
-// Our `fs` is a homegrown VFS layer, so the real `internal/fs/utils.js` (the
-// 1200-line helper module that real `fs.js` sits on) does not apply here. The
-// vendored glob walker only needs one export from it: `DirentFromStats`, a
-// `Dirent` whose type predicates delegate to a `lstat`/`stat` result. Our stats
-// objects already carry the full `isDirectory()`/`isFile()`/... surface, so the
-// delegation is all that is required.
-
-export const internalFsUtilsSpec: BuiltinSpec = {
-  id: 'internal/fs/utils',
-  origin: 'web-node',
-  init: () => {
-    type StatsLike = {
-      isDirectory?: () => boolean;
-      isFile?: () => boolean;
-      isBlockDevice?: () => boolean;
-      isCharacterDevice?: () => boolean;
-      isSymbolicLink?: () => boolean;
-      isFIFO?: () => boolean;
-      isSocket?: () => boolean;
-    };
-
-    class Dirent {
-      name: string;
-      parentPath: string;
-
-      constructor(name: string, path = '') {
-        this.name = name;
-        this.parentPath = path;
-      }
-
-      isDirectory(): boolean {
-        return false;
-      }
-
-      isFile(): boolean {
-        return false;
-      }
-
-      isBlockDevice(): boolean {
-        return false;
-      }
-
-      isCharacterDevice(): boolean {
-        return false;
-      }
-
-      isSymbolicLink(): boolean {
-        return false;
-      }
-
-      isFIFO(): boolean {
-        return false;
-      }
-
-      isSocket(): boolean {
-        return false;
-      }
-    }
-
-    class DirentFromStats extends Dirent {
-      #stats: StatsLike;
-
-      constructor(name: string, stats: StatsLike, path = '') {
-        super(name, path);
-        this.#stats = stats;
-      }
-
-      #ask(method: keyof StatsLike): boolean {
-        const fn = this.#stats[method];
-        return typeof fn === 'function' ? fn.call(this.#stats) : false;
-      }
-
-      override isDirectory(): boolean {
-        return this.#ask('isDirectory');
-      }
-
-      override isFile(): boolean {
-        return this.#ask('isFile');
-      }
-
-      override isBlockDevice(): boolean {
-        return this.#ask('isBlockDevice');
-      }
-
-      override isCharacterDevice(): boolean {
-        return this.#ask('isCharacterDevice');
-      }
-
-      override isSymbolicLink(): boolean {
-        return this.#ask('isSymbolicLink');
-      }
-
-      override isFIFO(): boolean {
-        return this.#ask('isFIFO');
-      }
-
-      override isSocket(): boolean {
-        return this.#ask('isSocket');
-      }
-    }
-
-    return { DirentFromStats };
-  },
 };
 
 // ---------------------------------------------------------------------------

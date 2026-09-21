@@ -1,6 +1,7 @@
 import type { BindingFactory } from './context';
 import { notImplemented } from '../errors';
 import { triggerUncaughtException } from './uncaught';
+import { ERRNO, ERRNO_DESC } from '../vfs/types';
 
 /** `trace_events` binding: this runtime does not emit V8 trace events. */
 export const traceEventsBinding: BindingFactory = () => ({
@@ -532,21 +533,41 @@ export const diagnosticsChannelBinding: BindingFactory = () => {
 };
 
 /** `uv` binding: the event loop. We expose an explicit "no pending work" view. */
-export const uvBinding: BindingFactory = () => ({
+export const uvBinding: BindingFactory = () => {
+  // `getErrorMap()` (src/uv.cc): a Map from the negative libuv errno to
+  // `[name, description]`. `internal/util`'s `uvErrmapGet` and libuv-shaped
+  // error construction read it, so build it from the VFS's own errno tables in
+  // `deps/uv/include/uv.h` order.
+  const errorMap = new Map<number, [string, string]>();
+  for (const [name, errno] of Object.entries(ERRNO)) {
+    errorMap.set(errno, [name, ERRNO_DESC[name] ?? 'unknown error']);
+  }
+  return {
   // `uv.h`: `UV_EOF = -4095`. `internal/webstreams/adapters` compares a raw
   // read result against it when it turns a `stream_base` socket into a web
-  // stream.
+  // stream. The `UV_E*` names are the negative libuv error codes
+  // `internal/vfs/errors` builds its ENOENT/ENOTDIR/... errors from.
   UV_EOF: -4095,
+  UV_ENOENT: -2,
+  UV_ENOTDIR: -20,
+  UV_ENOTEMPTY: -66,
+  UV_EISDIR: -21,
+  UV_EBADF: -9,
+  UV_EEXIST: -17,
+  UV_EROFS: -30,
+  UV_EINVAL: -22,
+  UV_ELOOP: -62,
+  UV_EACCES: -13,
+  UV_EXDEV: -18,
   hrtime: () => [0, 0],
   getLibuvNow: () => Date.now(),
   updateTime: () => undefined,
   guessHandleType: () => 'FILE',
-  // There is no libuv error table here, so the errno map is empty and every
-  // name/message lookup falls back to Node's `Unknown system error <n>` shape.
-  getErrorMap: () => new Map(),
-  getErrorMessage: (errno: number) => `Unknown system error ${errno}`,
-  errname: () => undefined,
-});
+  getErrorMap: () => errorMap,
+  getErrorMessage: (errno: number) => errorMap.get(errno)?.[1] ?? `Unknown system error ${errno}`,
+  errname: (errno: number) => errorMap.get(errno)?.[0],
+  };
+};
 
 /**
  * `stream_wrap` binding: the C++ `StreamBase` handle base plus the shared
