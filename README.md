@@ -351,7 +351,7 @@ checkout; every patch we do apply is listed in the manifest's `patches` field.
 
 **Current coverage** (revision `7a3437d`, v26.9.1-dev):
 
-- **75 files vendored** — the whole `stream` layer, `events`,
+- **81 files vendored** — the whole `stream` layer, `events`,
   `internal/event_target` (+ `internal/webidl`, `internal/perf/utils`),
   `internal/abort_controller`, `console` (+ `internal/console/*`,
   `internal/cli_table`, `internal/util/debuglog`, `internal/trace_events`,
@@ -361,6 +361,9 @@ checkout; every patch we do apply is listed in the manifest's `patches` field.
   `internal/worker/io` (+ `internal/per_context/messageport`,
   `internal/worker/js_transferable`) — a real `MessageChannel` / `MessagePort` /
   `BroadcastChannel`, on a JS reimplementation of the `messaging` binding,
+  `readline` (+ `readline/promises`, `internal/readline/*`, `internal/repl/history`)
+  — a real line editor, keypress decoder, ANSI cursor writers and history ring,
+  on plain streams rather than a TTY,
   `async_hooks`
   (+ `internal/async_local_storage/*`, `internal/promise_hooks`), `path`,
   `querystring`, `punycode`, `domain`, `diagnostics_channel`, `string_decoder`,

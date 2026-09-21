@@ -71,12 +71,6 @@ export const unsupportedSpecs: BuiltinSpec[] = [
     init: () => unsupported('v8', { serialize: undefined, deserialize: undefined }),
   },
   {
-    id: 'readline',
-    aliases: ['node:readline'],
-    origin: 'web-node',
-    init: () => unsupported('readline'),
-  },
-  {
     id: 'tls',
     aliases: ['node:tls'],
     origin: 'web-node',

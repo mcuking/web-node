@@ -582,6 +582,10 @@ const OPTION_DEFAULTS: Record<string, unknown> = {
   '--trace-deprecation': false,
   '--throw-deprecation': false,
   '--pending-deprecation': false,
+  // The permission model is a host-process concept; `internal/process/permission`
+  // reads these to answer `isEnabled()`, and a tab never has them on.
+  '--permission': false,
+  '--permission-audit': false,
 };
 
 export const internalOptionsSpec: BuiltinSpec = {
@@ -593,6 +597,38 @@ export const internalOptionsSpec: BuiltinSpec = {
       throw notImplemented('api', `getOptionValue('${name}')`, 'The runtime is not configurable by CLI flags.');
     },
     getOptions: () => OPTION_DEFAULTS,
+  }),
+};
+
+// ---------------------------------------------------------------------------
+// internal/process/permission
+// ---------------------------------------------------------------------------
+//
+// The permission model gates host-process operations (fs/net/child_process). A
+// tab has no such model, so it is permanently *disabled* — which is exactly what
+// `src/node_permission.cc` reports when `--permission` is off: `isEnabled()` is
+// false and every scope check succeeds. `readline`'s history file writes go
+// through `has('fs.write', path)`, which therefore always allows.
+
+export const internalProcessPermissionSpec: BuiltinSpec = {
+  id: 'internal/process/permission',
+  origin: 'web-node',
+  init: () => ({
+    isEnabled: (): boolean => false,
+    isAuditMode: (): boolean => false,
+    has: (_scope: string, _reference?: unknown): boolean => true,
+    drop: (_scope: string, _reference?: unknown): void => undefined,
+    availableFlags: (): string[] => [
+      '--allow-fs-read',
+      '--allow-fs-write',
+      '--allow-addons',
+      '--allow-child-process',
+      '--allow-net',
+      '--allow-inspector',
+      '--allow-wasi',
+      '--allow-worker',
+      '--allow-openssl-store',
+    ],
   }),
 };
 

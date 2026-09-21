@@ -39,7 +39,7 @@ const fs = require('fs');
 const os = require('os');
 const http = require('http');
 const { EventEmitter } = require('events');
-const { Transform, pipeline, Readable } = require('stream');
+const { Transform, pipeline, Readable, Writable } = require('stream');
 
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
 
@@ -352,6 +352,36 @@ channel.port2.onmessage = function (e) {
   e.ports[0].postMessage('round trip through the transferred port');
 };
 channel.port1.postMessage({ payload: { hello: 'world' }, port: handoff.port1 }, [handoff.port1]);
+console.log('');
+
+// --- readline (milestone 31) ---
+// A "terminal" here is just an { input, output } stream pair - a tab has no TTY,
+// but the line editor, the keypress decoder, the ANSI cursor writers and the
+// history ring are all plain Node code running on streams.
+console.log('-- readline --');
+const readline = require('readline');
+
+let ansi = '';
+const term = new Writable({ write: function (c, e, cb) { ansi += c.toString(); cb(); } });
+readline.cursorTo(term, 3, 2);
+readline.clearLine(term, 0);
+console.log('cursor      : ' + JSON.stringify(ansi));
+
+const keys = [];
+const keyboard = new Readable({ read: function () {} });
+readline.emitKeypressEvents(keyboard);
+keyboard.on('keypress', function (s, k) {
+  keys.push(k.name + (k.ctrl ? '+ctrl' : '') + (k.shift ? '+shift' : ''));
+});
+['a', '\u001b[A', '\u0003'].forEach(function (seq) { keyboard.push(Buffer.from(seq)); });
+// Key decoding happens when the stream's 'data' event fires, so it lands a tick
+// later - exactly as on the desktop (a synchronous read here still sees []).
+setImmediate(function () { console.log('keypress    : ' + keys.join(', ')); });
+
+const editor = readline.createInterface({ input: Readable.from(['first\\nsecond\\n']), terminal: false });
+const seen = [];
+editor.on('line', function (line) { seen.push(line); });
+editor.on('close', function () { console.log('edit lines  : ' + JSON.stringify(seen)); });
 console.log('');
 
 // --- npm (milestone 4) ---

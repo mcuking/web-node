@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-21T02:44:09.932Z",
+  "generatedAt": "2026-09-21T03:00:51.884Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -110,6 +110,48 @@
       "sha256": "af9b691f147976bca019361b7be1095c7ef8c059353cd948e518327f2b3d6f8f",
       "upstreamSha256": "af9b691f147976bca019361b7be1095c7ef8c059353cd948e518327f2b3d6f8f",
       "bytes": 2754,
+      "patches": []
+    },
+    {
+      "path": "internal/readline/emitKeypressEvents.js",
+      "sha256": "fbb4e1c5ea19d108e741250dfca5c880d00c6a9ca7ed38100af6bb62518736a6",
+      "upstreamSha256": "fbb4e1c5ea19d108e741250dfca5c880d00c6a9ca7ed38100af6bb62518736a6",
+      "bytes": 2680,
+      "patches": []
+    },
+    {
+      "path": "internal/readline/interface.js",
+      "sha256": "d410c453245371a56f9accce353ccb45d08467c5cf07b9eee8a0bf5d62e89696",
+      "upstreamSha256": "d410c453245371a56f9accce353ccb45d08467c5cf07b9eee8a0bf5d62e89696",
+      "bytes": 47856,
+      "patches": []
+    },
+    {
+      "path": "internal/readline/promises.js",
+      "sha256": "8ebe49629da7f7aca5f61754729ecb8f1dcf6b5860c67e83a93807afcccdfd79",
+      "upstreamSha256": "8ebe49629da7f7aca5f61754729ecb8f1dcf6b5860c67e83a93807afcccdfd79",
+      "bytes": 3513,
+      "patches": []
+    },
+    {
+      "path": "internal/repl/history.js",
+      "sha256": "e32e2308ee985e06afa5c264a14a63bd377c6a6afae509cfde9d0c35477f7fb0",
+      "upstreamSha256": "e32e2308ee985e06afa5c264a14a63bd377c6a6afae509cfde9d0c35477f7fb0",
+      "bytes": 13699,
+      "patches": []
+    },
+    {
+      "path": "readline.js",
+      "sha256": "07a2ed16e48bebbd0b999823e68d7995ca36246bcc5f2b6c128f9549ae35391f",
+      "upstreamSha256": "07a2ed16e48bebbd0b999823e68d7995ca36246bcc5f2b6c128f9549ae35391f",
+      "bytes": 12955,
+      "patches": []
+    },
+    {
+      "path": "readline/promises.js",
+      "sha256": "76e9099cebd75a18992a0fef6f2a7f359a347aa2bfdb525739fdfe06f5db1eff",
+      "upstreamSha256": "76e9099cebd75a18992a0fef6f2a7f359a347aa2bfdb525739fdfe06f5db1eff",
+      "bytes": 1560,
       "patches": []
     },
     {
