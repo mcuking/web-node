@@ -155,7 +155,35 @@ const PERF_CONSTANTS = {
   NODE_PERFORMANCE_MILESTONE_LOOP_EXIT: MILESTONES.LOOP_EXIT,
   NODE_PERFORMANCE_MILESTONE_BOOTSTRAP_COMPLETE: MILESTONES.BOOTSTRAP_COMPLETE,
   NODE_PERFORMANCE_MILESTONE_INVALID: 8,
+
+  // `enum PerformanceEntryType` in source order (GC, HTTP, HTTP2, NET, DNS,
+  // QUIC); `internal/perf/observe.js` indexes `observerCounts` with these.
+  NODE_PERFORMANCE_ENTRY_TYPE_GC: 0,
+  NODE_PERFORMANCE_ENTRY_TYPE_HTTP: 1,
+  NODE_PERFORMANCE_ENTRY_TYPE_HTTP2: 2,
+  NODE_PERFORMANCE_ENTRY_TYPE_NET: 3,
+  NODE_PERFORMANCE_ENTRY_TYPE_DNS: 4,
+  NODE_PERFORMANCE_ENTRY_TYPE_QUIC: 5,
+  NODE_PERFORMANCE_ENTRY_TYPE_INVALID: 6,
+
+  // `enum PerformanceGCKind` / `PerformanceGCFlags` (values are the V8 GCType
+  // and GC flags bit values — see `src/node_perf.h`).
+  NODE_PERFORMANCE_GC_MAJOR: 4,
+  NODE_PERFORMANCE_GC_MINOR: 1,
+  NODE_PERFORMANCE_GC_MINOR_MARK_SWEEP: 2,
+  NODE_PERFORMANCE_GC_INCREMENTAL: 8,
+  NODE_PERFORMANCE_GC_WEAKCB: 16,
+  NODE_PERFORMANCE_GC_FLAGS_NO: 0,
+  NODE_PERFORMANCE_GC_FLAGS_CONSTRUCT_RETAINED: 2,
+  NODE_PERFORMANCE_GC_FLAGS_FORCED: 4,
+  NODE_PERFORMANCE_GC_FLAGS_SYNCHRONOUS_PHANTOM_PROCESSING: 8,
+  NODE_PERFORMANCE_GC_FLAGS_ALL_AVAILABLE_GARBAGE: 16,
+  NODE_PERFORMANCE_GC_FLAGS_ALL_EXTERNAL_MEMORY: 32,
+  NODE_PERFORMANCE_GC_FLAGS_SCHEDULE_IDLE: 64,
 };
+
+/** Number of entry types the `observerCounts` vector is indexed by. */
+const ENTRY_TYPE_COUNT = PERF_CONSTANTS.NODE_PERFORMANCE_ENTRY_TYPE_INVALID;
 
 export const performanceBinding: BindingFactory = (ctx) => {
   const host = (globalThis as { performance?: { timeOrigin?: number } }).performance;
@@ -163,20 +191,44 @@ export const performanceBinding: BindingFactory = (ctx) => {
   const milestones = new Array<number>(8).fill(-1);
   milestones[MILESTONES.TIME_ORIGIN_TIMESTAMP] = timeOriginMs * 1e3; // microseconds
   milestones[MILESTONES.TIME_ORIGIN] = timeOriginMs * 1e6; // nanoseconds
+  // Node marks these during bootstrap; here the runtime *is* the origin, so
+  // they land at 0 relative to it. LOOP_START/LOOP_EXIT stay -1 until the loop
+  // actually runs, exactly like Node before the first tick (real Node reports
+  // `loopStart === -1` at top level too, and `eventLoopUtilization()` then
+  // returns all zeros).
+  for (const index of [
+    MILESTONES.ENVIRONMENT,
+    MILESTONES.NODE_START,
+    MILESTONES.V8_START,
+    MILESTONES.BOOTSTRAP_COMPLETE,
+  ]) {
+    milestones[index] = milestones[MILESTONES.TIME_ORIGIN];
+  }
+
+  // `setupObservers()` hands the binding a JS callback to invoke on GC/native
+  // events. We never see those events, so remember it and never call it.
+  const observerCounts = new Array<number>(ENTRY_TYPE_COUNT).fill(0);
 
   return {
     now: () => ctx.now(),
     timeOrigin: timeOriginMs,
     constants: PERF_CONSTANTS,
     milestones,
-    mark: () => undefined,
-    clearMark: () => undefined,
-    measure: () => undefined,
-    clearMeasures: () => undefined,
-    getEntries: () => [],
-    getEntriesByName: () => [],
-    getEntriesByType: () => [],
+    // GC observation / event-loop metrics have no libuv (or V8 GC hook) to sit
+    // on, so these report the same inert values Node uses when the data is
+    // unavailable rather than fabricating numbers.
+    observerCounts,
+    setupObservers: (_callback: unknown) => undefined,
+    installGarbageCollectionTracking: () => undefined,
+    removeGarbageCollectionTracking: () => undefined,
+    loopIdleTime: () => 0,
+    uvMetricsInfo: () => [0, 0, 0],
     setupGarbageCollectionTracking: () => undefined,
+    // `monitorEventLoopDelay` builds its histogram from this handle; the
+    // histogram itself is not implemented (see `internal/histogram`).
+    createELDHistogram: () => {
+      throw notImplemented('api', 'perf_hooks.monitorEventLoopDelay');
+    },
   };
 };
 

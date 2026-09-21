@@ -359,7 +359,7 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
 
 **Current coverage** (revision `7a3437d`, v26.9.1-dev):
 
-- **83 files vendored** — the whole `stream` layer, `events`,
+- **93 files vendored** — the whole `stream` layer, `events`,
   `internal/event_target` (+ `internal/webidl`, `internal/perf/utils`),
   `internal/abort_controller`, `console` (+ `internal/console/*`,
   `internal/cli_table`, `internal/util/debuglog`, `internal/trace_events`,
@@ -380,6 +380,11 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
   glob walker and pattern matcher, so `path.matchesGlob`, `fs.glob`, `fs.globSync`
   and `fs.promises.glob` work,
   `internal/util/types`, `internal/util/inspect` (the real `util.inspect`),
+  `perf_hooks` (+ the whole `internal/perf/*` group) — a real `Performance`,
+  `PerformanceMark`/`PerformanceMeasure`, `PerformanceObserver`,
+  `PerformanceNodeTiming` and `timerify`, on a JS `performance` binding;
+  histograms (`createHistogram`, `monitorEventLoopDelay`) need the native
+  hdr_histogram and throw,
   `internal/util/comparisons` (the real `isDeepStrictEqual`),
   `internal/util/colors`, `util` (+ `internal/util.js`, `internal/util/diff`,
   `internal/util/parse_args/*`), `internal/mime`, and the `internal/*` pieces

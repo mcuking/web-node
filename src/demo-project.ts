@@ -427,6 +427,26 @@ console.log('randomInt   : ' + (crypto.randomInt(1, 7) >= 1 ? 'in range (1..6)' 
 console.log('randomUUID  : ' + crypto.randomUUID().length + ' chars, ' + crypto.getHashes().length + ' hashes available');
 console.log('');
 
+// --- perf_hooks (milestone 35) ---
+// Node's real perf_hooks: the marks/measures/observers half runs on a JS
+// performance binding (the browser clock stands in for uv_hrtime). The
+// histogram-backed createHistogram/monitorEventLoopDelay need the native
+// hdr_histogram and throw.
+console.log('-- perf_hooks (milestone 35) --');
+const perfHooks = require('perf_hooks');
+const perf = perfHooks.performance;
+perf.mark('start');
+let spin = 0;
+for (let i = 0; i < 200000; i++) spin += i;
+perf.mark('end');
+const span = perf.measure('spin', 'start', 'end');
+console.log('measure     : ' + span.entryType + ' ' + span.name + ' in ' + span.duration.toFixed(3) + 'ms');
+console.log('marks       : ' + perf.getEntriesByType('mark').length + ' marks, ' + perf.getEntriesByType('measure').length + ' measure');
+console.log('isMark      : ' + (perf.getEntriesByName('start')[0] instanceof perfHooks.PerformanceMark));
+console.log('nodeTiming  : nodeStart=' + perf.nodeTiming.nodeStart + ' loopStart=' + perf.nodeTiming.loopStart);
+console.log('createHistogram() -> ' + (function () { try { perfHooks.createHistogram(); return 'ok'; } catch (err) { return err.code || err.name; } })());
+console.log('');
+
 // --- npm (milestone 4) ---
 // The npm client downloads and unpacks packages into the virtual node_modules.
 // require() already resolves node_modules from the VFS, so once "Install deps"

@@ -8,6 +8,7 @@ import {
   internalErrorsSpec,
   internalErrorSourceSpec,
   internalFsUtilsSpec,
+  internalHistogramSpec,
   internalOptionsSpec,
   internalProcessPermissionSpec,
   internalStreamIterSpec,
@@ -24,7 +25,6 @@ import { workerThreadsSpec } from './worker-threads';
 import { bufferSpec } from './buffer';
 import { fsSpec } from './fs';
 import { fsPromisesSpec } from './fs-promises';
-import { perfHooksSpec } from './perf-hooks';
 import { cryptoSpec } from './crypto';
 import { urlSpec } from './url';
 import { dnsSpec, dnsPromisesSpec } from './dns';
@@ -46,6 +46,7 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalUrlSpec,
   internalBlobSpec,
   internalFsUtilsSpec,
+  internalHistogramSpec,
   internalAbortListenerSpec,
   internalOptionsSpec,
   internalProcessPermissionSpec,
@@ -67,7 +68,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   // are the vendored Node source (see vendored-builtins.ts)
   fsSpec,
   fsPromisesSpec,
-  perfHooksSpec,
   urlSpec,
   cryptoSpec,
   dnsSpec,

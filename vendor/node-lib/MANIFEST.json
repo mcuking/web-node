@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-21T03:29:15.000Z",
+  "generatedAt": "2026-09-21T06:53:07.085Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -61,6 +61,76 @@
       "sha256": "12aaefacd6f7b67360fb9758cdc94c8e0f2d43c36a1f71f313c3e4f776e80be0",
       "upstreamSha256": "12aaefacd6f7b67360fb9758cdc94c8e0f2d43c36a1f71f313c3e4f776e80be0",
       "bytes": 810,
+      "patches": []
+    },
+    {
+      "path": "internal/perf/performance_entry.js",
+      "sha256": "8f13ef192d56d23ab344f3ccf760cf3cbfc625277378006bdfc0415d4b7791ee",
+      "upstreamSha256": "8f13ef192d56d23ab344f3ccf760cf3cbfc625277378006bdfc0415d4b7791ee",
+      "bytes": 3304,
+      "patches": []
+    },
+    {
+      "path": "internal/perf/observe.js",
+      "sha256": "e77a9a587a94a4f26fa3ff32e76ff9009602824e4a30a7428ac6dd2c83bc7ee8",
+      "upstreamSha256": "e77a9a587a94a4f26fa3ff32e76ff9009602824e4a30a7428ac6dd2c83bc7ee8",
+      "bytes": 15774,
+      "patches": []
+    },
+    {
+      "path": "internal/perf/usertiming.js",
+      "sha256": "51f709377b76dd94dc50ed3fee62037b5629ef3337155588b51860bdf83f04b3",
+      "upstreamSha256": "51f709377b76dd94dc50ed3fee62037b5629ef3337155588b51860bdf83f04b3",
+      "bytes": 6472,
+      "patches": []
+    },
+    {
+      "path": "internal/perf/nodetiming.js",
+      "sha256": "3ecac721d8650e10b175086a1d4d5ed0a2dbba58174ab157057eb83d6b219d3f",
+      "upstreamSha256": "3ecac721d8650e10b175086a1d4d5ed0a2dbba58174ab157057eb83d6b219d3f",
+      "bytes": 3858,
+      "patches": []
+    },
+    {
+      "path": "internal/perf/resource_timing.js",
+      "sha256": "1866a80999446a7af63801fdfa061b0edc0d6164d86427f801d66465e4de7b79",
+      "upstreamSha256": "1866a80999446a7af63801fdfa061b0edc0d6164d86427f801d66465e4de7b79",
+      "bytes": 9841,
+      "patches": []
+    },
+    {
+      "path": "internal/perf/timerify.js",
+      "sha256": "ed4377905e5b188aa4e5fff66d37b3a1c657d8cdebbdded3fd690ed5f2b2f9cf",
+      "upstreamSha256": "ed4377905e5b188aa4e5fff66d37b3a1c657d8cdebbdded3fd690ed5f2b2f9cf",
+      "bytes": 2280,
+      "patches": []
+    },
+    {
+      "path": "internal/perf/event_loop_utilization.js",
+      "sha256": "41103605f43fd31b497c0bcf188350d078069084a6a403d950d9f7e44d57213b",
+      "upstreamSha256": "41103605f43fd31b497c0bcf188350d078069084a6a403d950d9f7e44d57213b",
+      "bytes": 1527,
+      "patches": []
+    },
+    {
+      "path": "internal/perf/event_loop_delay.js",
+      "sha256": "d5e91040e37b2ff78da0ab8f679141e650d01fcdc2d359223189f03a270e0994",
+      "upstreamSha256": "d5e91040e37b2ff78da0ab8f679141e650d01fcdc2d359223189f03a270e0994",
+      "bytes": 2032,
+      "patches": []
+    },
+    {
+      "path": "internal/perf/performance.js",
+      "sha256": "e726129389491f2a9d37c64c71aa002b679cdeb22a23ebedafd0fb924561f29b",
+      "upstreamSha256": "e726129389491f2a9d37c64c71aa002b679cdeb22a23ebedafd0fb924561f29b",
+      "bytes": 6480,
+      "patches": []
+    },
+    {
+      "path": "perf_hooks.js",
+      "sha256": "d60d36bffc87d6980124071d9713bb589dcd0cc5fbd211154bdec5311d310921",
+      "upstreamSha256": "d60d36bffc87d6980124071d9713bb589dcd0cc5fbd211154bdec5311d310921",
+      "bytes": 1273,
       "patches": []
     },
     {
