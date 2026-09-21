@@ -349,6 +349,14 @@ hash + upstream revision recorded in `vendor/node-lib/MANIFEST.json`) instead of
 reimplementing it. `npm run vendor` re-generates that tree from a local Node
 checkout; every patch we do apply is listed in the manifest's `patches` field.
 
+The tree on disk is pristine; what the *bundle* ships is comment-stripped by a
+build-time plugin (`plugins/vendored-source.ts`). Node's `lib/` is heavily
+documented (~23% comments) and the sources reach the bundle as raw strings that
+the minifier cannot touch. The stripper removes comments while keeping **line
+numbers and code columns intact** (so stack traces still point at real lines)
+and keeps each file's MIT header; the worker bundle drops from 1259 KB to
+1028 KB (**315 → 237 KB gzipped**).
+
 **Current coverage** (revision `7a3437d`, v26.9.1-dev):
 
 - **81 files vendored** — the whole `stream` layer, `events`,

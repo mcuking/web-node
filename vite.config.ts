@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { devSubdomains } from './plugins/dev-subdomains';
+import { vendoredSourcePlugin } from './plugins/vendored-source';
 
 // GitHub Pages serves the site from a sub-path (`/web-node/`), while the dev
 // server serves it from the origin root. `BASE_PATH` lets the deploy script set
@@ -9,7 +10,7 @@ const base = process.env.BASE_PATH || '/';
 
 export default defineConfig({
   base,
-  plugins: [devSubdomains()],
+  plugins: [vendoredSourcePlugin(), devSubdomains()],
   server: {
     // COOP/COEP so SharedArrayBuffer is available (needed later for wasm/Atomics).
     headers: {
@@ -22,6 +23,10 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
+    // The vendored sources are only imported from the worker entry, and Vite
+    // builds the worker with its own plugin pipeline — so the stripper has to be
+    // registered here as well as above.
+    plugins: () => [vendoredSourcePlugin()],
   },
   test: {
     environment: 'node',

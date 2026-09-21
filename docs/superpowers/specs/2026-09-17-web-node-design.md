@@ -129,6 +129,9 @@ primordials.js（真源码）→ domexception.js / messageport.js（真源码）
 ### 补丁（全部记录在 MANIFEST）
 `primordials.js`：引擎缺少 `Float16Array` / `Iterator` 时跳过而非崩溃（3 处，语义等价）。这是**唯一**对真源码的修改。
 
+### bundle 里的注释（构建期剥离）
+磁盘上的 `vendor/node-lib/` 保持与上游逐字节一致；进 bundle 的那份由 `plugins/vendored-source.ts` 去注释。原因：vendored 源经 `?raw` 以**字符串**形式进 bundle，minifier 碰不到它（注释占真源码 ~23%）。剥离规则：**行号严格不变**（注释里的换行全保留）、**代码列号不变**（只删行尾注释）、**保留每文件 MIT 声明**、无换行注释换成单个空格（`a/**/b` 不变成 `ab`）。找注释用 loader 的 `codeMask` 分词器（`src/node-runtime/loader/code-mask.ts`），不用正则。⚠️ 插件必须在 `plugins` **和** `worker.plugins` 各注册一次：worker 是 Vite 的子构建，顶层 `plugins` 的钩子在它里不会被调用。
+
 ### 为什么其余不 vendored
 `internal/errors.js` 是环形依赖枢纽（errors ↔ util ↔ inspect ↔ validators），全量 vendoring 会牵出 231 个文件。因此 `internal/errors` / `internal/fs/glob` / `internal/errors/error_source` / `internal/encoding` / `internal/util/trace_sigint` / `internal/blob` / `internal/worker/js_transferable` / `internal/v8/startup_snapshot` 等由我们提供**最小等价 shim**（`src/node-runtime/builtins/internal-shims.ts`），只实现 vendored 文件实际用到的导出。例外：`internal/util.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util/{diff,parse_args/*,debuglog}.js`、`internal/validators.js`、`internal/mime.js`、`internal/event_target.js`、`internal/webidl.js`、`internal/perf/utils.js`、`internal/abort_controller.js`、`internal/trace_events.js`、`internal/cli_table.js`、`internal/console/*`、`internal/readline/*`、`internal/{linkedlist,priority_queue}.js`、`internal/timers.js`、`internal/worker/io.js` + `internal/per_context/messageport.js` + `internal/worker/js_transferable.js`、`readline.js` + `readline/promises.js` + `internal/readline/{interface,emitKeypressEvents,promises}.js` + `internal/repl/history.js`、`assert.js` + `internal/assert/*`、`util.js`、`console.js`、`os.js`、`timers.js` + `timers/promises.js` 本身依赖面可控，已换成真源码（M21–M31），只把它们脚下的 binding/shim 补齐。
 
@@ -198,6 +201,7 @@ web-node/
 | glob 未实现 | `path.matchesGlob` 抛错 |
 | `file:`/`git+`/`link:` 说明符 | npm 未支持 |
 | Buffer 未池化 | `allocUnsafe`/`from(string)` 不做 slab 池化（`.byteOffset` 恒为 0） |
+| vendored 注释不进 bundle | 构建期剥离注释（行号/列号/ MIT 声明均保留）；`Function.prototype.toString()` 看不到注释，缩进未动 |
 | promise hooks 不触发 | V8 promise 未插桩，`createHook({ promiseResolve })` 不会响（tick/timer/AsyncResource 会） |
 
 ---
