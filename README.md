@@ -359,7 +359,7 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
 
 **Current coverage** (revision `7a3437d`, v26.9.1-dev):
 
-- **81 files vendored** — the whole `stream` layer, `events`,
+- **83 files vendored** — the whole `stream` layer, `events`,
   `internal/event_target` (+ `internal/webidl`, `internal/perf/utils`),
   `internal/abort_controller`, `console` (+ `internal/console/*`,
   `internal/cli_table`, `internal/util/debuglog`, `internal/trace_events`,
@@ -376,6 +376,9 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
   (+ `internal/async_local_storage/*`, `internal/promise_hooks`), `path`,
   `querystring`, `punycode`, `domain`, `diagnostics_channel`, `string_decoder`,
   `assert` (+ `internal/assert/*`), `internal/validators`,
+  `internal/fs/glob` (+ the bundled `internal/deps/minimatch/index`) — the real
+  glob walker and pattern matcher, so `path.matchesGlob`, `fs.glob`, `fs.globSync`
+  and `fs.promises.glob` work,
   `internal/util/types`, `internal/util/inspect` (the real `util.inspect`),
   `internal/util/comparisons` (the real `isDeepStrictEqual`),
   `internal/util/colors`, `util` (+ `internal/util.js`, `internal/util/diff`,

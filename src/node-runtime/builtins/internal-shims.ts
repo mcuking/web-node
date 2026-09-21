@@ -790,7 +790,21 @@ export const internalBootstrapRealmSpec: BuiltinSpec = {
 export const internalUrlSpec: BuiltinSpec = {
   id: 'internal/url',
   origin: 'web-node',
-  init: (ctx: BuiltinInitContext) => ctx.require('url') as Record<string, unknown>,
+  init: (ctx: BuiltinInitContext) => {
+    const url = ctx.require('url') as Record<string, unknown> & {
+      isURL?: (value: unknown) => boolean;
+      fileURLToPath?: (value: unknown) => string;
+    };
+    return {
+      ...url,
+      // `internal/url`'s file-URL helper: pass a path through untouched, resolve
+      // a `file:` URL to a path. Vendored `internal/fs/glob` reads it.
+      toPathIfFileURL: (fileURLOrPath: unknown): unknown =>
+        typeof url.isURL === 'function' && url.isURL(fileURLOrPath)
+          ? url.fileURLToPath?.(fileURLOrPath)
+          : fileURLOrPath,
+    };
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -806,20 +820,112 @@ export const internalEventsSymbolsSpec: BuiltinSpec = {
 };
 
 // ---------------------------------------------------------------------------
-// internal/fs/glob  (only `matchGlobPattern` is referenced, lazily)
+// internal/fs/utils  (only `DirentFromStats` is referenced, by internal/fs/glob)
 // ---------------------------------------------------------------------------
+//
+// Our `fs` is a homegrown VFS layer, so the real `internal/fs/utils.js` (the
+// 1200-line helper module that real `fs.js` sits on) does not apply here. The
+// vendored glob walker only needs one export from it: `DirentFromStats`, a
+// `Dirent` whose type predicates delegate to a `lstat`/`stat` result. Our stats
+// objects already carry the full `isDirectory()`/`isFile()`/... surface, so the
+// delegation is all that is required.
 
-export const internalFsGlobSpec: BuiltinSpec = {
-  id: 'internal/fs/glob',
+export const internalFsUtilsSpec: BuiltinSpec = {
+  id: 'internal/fs/utils',
   origin: 'web-node',
-  init: () => ({
-    matchGlobPattern: (): never => {
-      throw notImplemented('api', 'path.matchesGlob', 'Glob matching is outside the MVP whitelist.');
-    },
-    globSync: (): never => {
-      throw notImplemented('api', 'fs.globSync', 'Glob matching is outside the MVP whitelist.');
-    },
-  }),
+  init: () => {
+    type StatsLike = {
+      isDirectory?: () => boolean;
+      isFile?: () => boolean;
+      isBlockDevice?: () => boolean;
+      isCharacterDevice?: () => boolean;
+      isSymbolicLink?: () => boolean;
+      isFIFO?: () => boolean;
+      isSocket?: () => boolean;
+    };
+
+    class Dirent {
+      name: string;
+      parentPath: string;
+
+      constructor(name: string, path = '') {
+        this.name = name;
+        this.parentPath = path;
+      }
+
+      isDirectory(): boolean {
+        return false;
+      }
+
+      isFile(): boolean {
+        return false;
+      }
+
+      isBlockDevice(): boolean {
+        return false;
+      }
+
+      isCharacterDevice(): boolean {
+        return false;
+      }
+
+      isSymbolicLink(): boolean {
+        return false;
+      }
+
+      isFIFO(): boolean {
+        return false;
+      }
+
+      isSocket(): boolean {
+        return false;
+      }
+    }
+
+    class DirentFromStats extends Dirent {
+      #stats: StatsLike;
+
+      constructor(name: string, stats: StatsLike, path = '') {
+        super(name, path);
+        this.#stats = stats;
+      }
+
+      #ask(method: keyof StatsLike): boolean {
+        const fn = this.#stats[method];
+        return typeof fn === 'function' ? fn.call(this.#stats) : false;
+      }
+
+      override isDirectory(): boolean {
+        return this.#ask('isDirectory');
+      }
+
+      override isFile(): boolean {
+        return this.#ask('isFile');
+      }
+
+      override isBlockDevice(): boolean {
+        return this.#ask('isBlockDevice');
+      }
+
+      override isCharacterDevice(): boolean {
+        return this.#ask('isCharacterDevice');
+      }
+
+      override isSymbolicLink(): boolean {
+        return this.#ask('isSymbolicLink');
+      }
+
+      override isFIFO(): boolean {
+        return this.#ask('isFIFO');
+      }
+
+      override isSocket(): boolean {
+        return this.#ask('isSocket');
+      }
+    }
+
+    return { DirentFromStats };
+  },
 };
 
 // ---------------------------------------------------------------------------

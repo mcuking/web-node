@@ -518,11 +518,46 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     ],
   },
   {
+    id: 'internal/deps/minimatch/index',
+    vendorPath: 'internal/deps/minimatch/index.js',
+    origin: 'node-source',
+    // Node bundles `deps/minimatch` with esbuild into a single self-contained
+    // CJS file (no external requires), so the whole matcher rides along.
+    deps: [],
+  },
+  {
+    id: 'internal/fs/glob',
+    vendorPath: 'internal/fs/glob.js',
+    origin: 'node-source',
+    // The real glob walker + pattern matcher. It sits on our own `fs` /
+    // `fs/promises` (lstat/stat/readdir/realpath) and `path`; `internal/fs/utils`
+    // is a shim that only has to supply `DirentFromStats`.
+    deps: [
+      'fs',
+      'fs/promises',
+      'path',
+      'internal/util',
+      'internal/validators',
+      'internal/fs/utils',
+      'internal/errors',
+      'internal/assert',
+      'internal/url',
+      'internal/deps/minimatch/index',
+    ],
+  },
+  {
     id: 'path',
     aliases: ['node:path'],
     vendorPath: 'path.js',
     origin: 'node-source',
-    deps: ['internal/constants', 'internal/validators', 'internal/util', 'internal/fs/glob'],
+    // NOTE: `path.js` only touches `internal/fs/glob` lazily (inside
+    // `matchesGlob`, via `getLazy`), so it is deliberately *not* a declared dep.
+    // Declaring it would make `path` pull `glob` in while `path` itself is still
+    // `loading`; glob destructures `isAbsolute` from `require('path')` at load
+    // time, so it would capture a half-built `path` and `matchesGlob` would
+    // silently lose `isAbsolute`. `glob` declares `path` as a dep instead, which
+    // orders them correctly however the load starts.
+    deps: ['internal/constants', 'internal/validators', 'internal/util'],
   },
   {
     id: 'querystring',

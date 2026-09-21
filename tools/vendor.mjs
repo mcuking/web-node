@@ -10,7 +10,6 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 const NODE_SRC = process.env.NODE_SRC || '/Users/tangjianghong/Downloads/node';
-const LIB = path.join(NODE_SRC, 'lib');
 const OUT = path.resolve('vendor/node-lib');
 
 // Curated allow-list. Every entry must be dependency-free, or depend only on
@@ -97,7 +96,20 @@ const FILES = [
   'os.js',
   'internal/worker/js_transferable.js',
   'internal/worker/io.js',
+  'internal/fs/glob.js',
+  'internal/deps/minimatch/index.js',
 ];
+
+/**
+ * A few builtins are generated at build time from a tree outside `lib/`. Node
+ * bundles `deps/minimatch` with esbuild into `deps/minimatch/index.js` and maps
+ * that file to the builtin id `internal/deps/minimatch/index`; the source
+ * checkout has no `lib/internal/deps/minimatch/`. Map those ids to their real
+ * on-disk location here.
+ */
+const SOURCE_OVERRIDES = {
+  'internal/deps/minimatch/index.js': 'deps/minimatch/index.js',
+};
 /**
  * Documented, minimal patches applied to vendored source.
  * Every patch is recorded in the manifest so provenance stays auditable.
@@ -165,7 +177,7 @@ const manifest = {
 };
 
 for (const rel of FILES) {
-  const src = path.join(LIB, rel);
+  const src = path.join(NODE_SRC, SOURCE_OVERRIDES[rel] ?? path.join('lib', rel));
   if (!fs.existsSync(src)) {
     console.error(`skip (missing): ${rel}`);
     continue;

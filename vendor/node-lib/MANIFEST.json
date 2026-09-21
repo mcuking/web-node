@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-21T03:00:51.884Z",
+  "generatedAt": "2026-09-21T03:29:15.000Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -572,6 +572,20 @@
       "sha256": "e2c4830bba8e572e7db235308625be3e69ebd0dd15efd5f715a8c848e19d873f",
       "upstreamSha256": "e2c4830bba8e572e7db235308625be3e69ebd0dd15efd5f715a8c848e19d873f",
       "bytes": 14128,
+      "patches": []
+    },
+    {
+      "path": "internal/fs/glob.js",
+      "sha256": "3a116686e3bcff2680fd822b21cc89bb3ff2ec6cda07d856b2230e688aaafddf",
+      "upstreamSha256": "3a116686e3bcff2680fd822b21cc89bb3ff2ec6cda07d856b2230e688aaafddf",
+      "bytes": 41896,
+      "patches": []
+    },
+    {
+      "path": "internal/deps/minimatch/index.js",
+      "sha256": "f96315be454e1579bb685f035b015aca6c33d7275f03707f74d6c82089250c30",
+      "upstreamSha256": "f96315be454e1579bb685f035b015aca6c33d7275f03707f74d6c82089250c30",
+      "bytes": 67160,
       "patches": []
     }
   ]

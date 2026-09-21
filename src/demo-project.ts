@@ -384,6 +384,30 @@ editor.on('line', function (line) { seen.push(line); });
 editor.on('close', function () { console.log('edit lines  : ' + JSON.stringify(seen)); });
 console.log('');
 
+// --- glob (milestone 33) ---
+// path.matchesGlob and fs.glob* are Node's real glob walker (internal/fs/glob.js)
+// over the bundled minimatch matcher, walking the virtual filesystem. cwd is
+// given explicitly so the walk does not depend on how the host process resolves
+// relative paths.
+console.log('-- glob (milestone 33) --');
+const fsm = require('fs');
+const pathm = require('path');
+const globRoot = process.cwd() + '/globdemo';
+fsm.mkdirSync(globRoot + '/src/deep', { recursive: true });
+fsm.writeFileSync(globRoot + '/index.js', '');
+fsm.writeFileSync(globRoot + '/src/a.js', '');
+fsm.writeFileSync(globRoot + '/src/notes.txt', '');
+fsm.writeFileSync(globRoot + '/src/deep/c.js', '');
+console.log('matchesGlob : ' + pathm.matchesGlob('/a/b/c.txt', '**/*.txt') + ' ' + pathm.matchesGlob('a/b.js', '*.js'));
+console.log('globSync    : ' + JSON.stringify(fsm.globSync('**/*.js', { cwd: globRoot })));
+console.log('exclude     : ' + JSON.stringify(fsm.globSync('**/*.js', { cwd: globRoot, exclude: function (p) { return p.indexOf('deep') !== -1; } })));
+(async function () {
+  const out = [];
+  for await (const match of fsm.promises.glob('src/*.js', { cwd: globRoot })) out.push(match);
+  console.log('async glob  : ' + JSON.stringify(out));
+})();
+console.log('');
+
 // --- npm (milestone 4) ---
 // The npm client downloads and unpacks packages into the virtual node_modules.
 // require() already resolves node_modules from the VFS, so once "Install deps"

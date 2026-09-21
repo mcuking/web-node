@@ -476,6 +476,38 @@ export const fsSpec: BuiltinSpec = {
       write: (fd: number, b: Uint8Array, o: number, l: number, pos: number | null, c: (e: Error | null, n?: number) => void) =>
         cb(() => binding.writeSync(fd, b, o, l, pos), c),
       realpath: (p: string, c: (e: Error | null, r?: string) => void) => cb(() => binding.realpathSync(p), c),
+      // Glob matching is the vendored real `internal/fs/glob.js` (the walker plus
+      // the bundled minimatch matcher). Loaded lazily: at init time `fs` is still
+      // being built and the module requires `fs` / `fs/promises` back.
+      glob: (pattern: string, options?: unknown, callback?: (err: Error | null, matches?: string[]) => void) => {
+        let cb = callback;
+        let opts = options;
+        if (typeof options === 'function') {
+          cb = options as (err: Error | null, matches?: string[]) => void;
+          opts = undefined;
+        }
+        if (typeof cb !== 'function') {
+          throw new TypeError('The "callback" argument must be of type function');
+        }
+        const done = cb;
+        const { Glob } = ctx.require('internal/fs/glob') as {
+          Glob: new (p: string, o?: unknown) => { glob: () => AsyncIterable<string> };
+        };
+        void (async () => {
+          const out: string[] = [];
+          for await (const entry of new Glob(pattern, opts).glob()) out.push(entry);
+          return out;
+        })().then(
+          (res) => done(null, res),
+          (err: Error) => done(err),
+        );
+      },
+      globSync: (pattern: string, options?: unknown): string[] => {
+        const { Glob } = ctx.require('internal/fs/glob') as {
+          Glob: new (p: string, o?: unknown) => { globSync: () => string[] };
+        };
+        return new Glob(pattern, options).globSync();
+      },
       watch: (p: string, options?: unknown, listener?: unknown) => {
         const opts = typeof options === 'function' ? undefined : (options as { recursive?: boolean } | undefined);
         const callback = (typeof options === 'function' ? options : listener) as
@@ -540,6 +572,12 @@ export const fsSpec: BuiltinSpec = {
     promises.open = promisify((...a: any[]) => (fs.open as (...x: any[]) => void)(...a));
     promises.realpath = promisify((...a: any[]) => (fs.realpath as (...x: any[]) => void)(...a));
     promises.constants = (fs as { constants: unknown }).constants;
+    promises.glob = async function* (pattern: string, options?: unknown): AsyncGenerator<string> {
+      const { Glob } = ctx.require('internal/fs/glob') as {
+        Glob: new (p: string, o?: unknown) => { glob: () => AsyncIterable<string> };
+      };
+      yield* new Glob(pattern, options).glob();
+    };
 
     fs.promises = promises;
     void vfs;
