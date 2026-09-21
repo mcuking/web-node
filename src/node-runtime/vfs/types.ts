@@ -71,15 +71,74 @@ export class VfsError extends Error {
   syscall: string;
   path?: string;
 
+  /**
+   * A filesystem error shaped like the one Node's `UVException` builds
+   * (`lib/internal/errors.js`): `` `${code}: ${description}, ${syscall} '${path}'` ``,
+   * with `name` left as `Error`. The description is libuv's own string
+   * (`UV_ERRNO_MAP` in `deps/uv/include/uv.h`), which is what `uv_strerror`
+   * returns for the matching errno.
+   */
   constructor(code: string, syscall: string, path?: string, message?: string) {
-    super(message ?? `${code}: ${syscall}${path ? `, '${path}'` : ''}`);
-    this.name = 'VfsError';
+    // An explicit message is used verbatim (that call site owns its wording);
+    // otherwise build Node's `code: description, syscall 'path'` form.
+    if (message !== undefined) {
+      super(message);
+    } else {
+      const described = `${code}: ${ERRNO_DESC[code] ?? 'unknown error'}, ${syscall}`;
+      super(path !== undefined ? `${described} '${path}'` : described);
+    }
+    this.name = 'Error';
     this.code = code;
     this.errno = ERRNO[code] ?? -1;
     this.syscall = syscall;
     this.path = path;
   }
 }
+
+/** libuv's error descriptions (`UV_ERRNO_MAP`), keyed by code name. */
+const ERRNO_DESC: Record<string, string> = {
+  EPERM: 'operation not permitted',
+  ENOENT: 'no such file or directory',
+  ESRCH: 'no such process',
+  EINTR: 'interrupted system call',
+  EIO: 'i/o error',
+  ENXIO: 'no such device or address',
+  E2BIG: 'argument list too long',
+  ENOEXEC: 'exec format error',
+  EBADF: 'bad file descriptor',
+  ECHILD: 'No child processes',
+  EAGAIN: 'resource temporarily unavailable',
+  ENOMEM: 'not enough memory',
+  EACCES: 'permission denied',
+  EFAULT: 'bad address in system call argument',
+  EBUSY: 'resource busy or locked',
+  EEXIST: 'file already exists',
+  EXDEV: 'cross-device link not permitted',
+  ENODEV: 'no such device',
+  ENOTDIR: 'not a directory',
+  EISDIR: 'illegal operation on a directory',
+  EINVAL: 'invalid argument',
+  ENFILE: 'file table overflow',
+  EMFILE: 'too many open files',
+  ENOTTY: 'inappropriate ioctl for device',
+  ETXTBSY: 'text file is busy',
+  EFBIG: 'file too large',
+  ENOSPC: 'no space left on device',
+  ESPIPE: 'invalid seek',
+  EROFS: 'read-only file system',
+  EMLINK: 'too many links',
+  EPIPE: 'broken pipe',
+  EDOM: 'Numerical argument out of domain',
+  ERANGE: 'result too large',
+  ENAMETOOLONG: 'name too long',
+  ENOSYS: 'function not implemented',
+  ENOTEMPTY: 'directory not empty',
+  ELOOP: 'too many symbolic links encountered',
+  EOVERFLOW: 'value too large for defined data type',
+  ENOTSUP: 'operation not supported on socket',
+  EISNAM: 'Is a named type file',
+  EKEYREJECTED: 'Key was rejected by service',
+};
 
 export const ERRNO: Record<string, number> = {
   EPERM: -1,

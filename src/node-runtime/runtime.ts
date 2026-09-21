@@ -2,6 +2,7 @@ import type { BindingContext } from './bindings/context';
 import type { Vfs } from './vfs';
 import type { ProcessHost } from './proc/host';
 import { createProcessHost } from './proc/host';
+import { triggerUncaughtException } from './bindings/uncaught';
 import { VirtualNetwork } from './net/network';
 import { Realm } from './realm';
 import { ModuleLoader } from './loader';
@@ -245,6 +246,24 @@ export class NodeRuntime {
         const ns = Math.round(performance.now() * 1e6);
         return [Math.floor(ns / 1e9), ns % 1e9];
       },
+      // `exceptionHandlerState` of lib/internal/process/execution.js: shared so
+      // the process setters and the errors/util dispatchers agree on one state.
+      uncaughtCapture: {
+        captureFn: null,
+        auxiliaryCallbacks: [],
+        reportFlag: false,
+        shouldAbortOnUncaught: new Uint8Array(1),
+      },
+      // The libuv handle names `process.getActiveResourcesInfo()` reports. Node
+      // enumerates its live handles in C++; here the live timer queue plus the
+      // listening sockets of the virtual network are the resources that hold
+      // the loop open.
+      activeResources: () => {
+        const timersBinding = this.realm?.internalBinding('timers') as
+          | { __activeResources?: () => string[] }
+          | undefined;
+        return [...(timersBinding?.__activeResources?.() ?? []), ...bindingCtx.network.activeResources()];
+      },
     };
     this.bindingCtx = bindingCtx;
     this.network = bindingCtx.network;
@@ -389,7 +408,15 @@ export class NodeRuntime {
     while (this.#nextTickQueue.length > 0) {
       const batch = this.#nextTickQueue;
       this.#nextTickQueue = [];
-      for (let i = 0; i < batch.length; i++) batch[i]();
+      for (let i = 0; i < batch.length; i++) {
+        // A throw in a tick callback is an uncaught exception in Node, not a
+        // reason to abandon the rest of the queue: report it, then keep going.
+        try {
+          batch[i]();
+        } catch (err) {
+          triggerUncaughtException(this.bindingCtx, err);
+        }
+      }
     }
   }
 

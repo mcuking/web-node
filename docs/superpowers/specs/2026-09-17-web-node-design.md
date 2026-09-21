@@ -192,7 +192,7 @@ web-node/
 
 ## 9. 已知限制
 
-> 本表按里程碑进展刷新（当前至 **M17**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
+> 本表按里程碑进展刷新（当前至 **M43**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
 >
 > **vendoring 进展**：`lib/stream.js` + `internal/streams/*`（整套流）、`lib/events.js`、`lib/internal/event_target.js` + `internal/webidl.js` + `internal/perf/utils.js`、`lib/internal/abort_controller.js`、`lib/console.js` + `internal/console/*` + `internal/cli_table.js` + `internal/trace_events.js` + `internal/util/debuglog.js`、`lib/os.js`、`lib/timers.js` + `internal/timers.js` + `timers/promises.js` + `internal/{linkedlist,priority_queue}.js`、`lib/internal/worker/io.js` + `internal/per_context/messageport.js` + `internal/worker/js_transferable.js`、`lib/readline.js` + `lib/readline/promises.js` + `internal/readline/{interface,emitKeypressEvents,promises}.js` + `internal/repl/history.js`、`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` + `internal/promise_hooks.js`、`lib/path.js`、`lib/querystring.js`、`lib/punycode.js`、`lib/domain.js`、`lib/diagnostics_channel.js`、`lib/string_decoder.js`、`internal/fs/glob.js` + `internal/deps/minimatch/index.js`、`internal/blob.js` + `internal/file.js`、`stream/iter.js` + `internal/streams/iter/{types,utils,webidl,ringbuffer,from,consumers,pull,push,duplex,broadcast,share,classic}.js`、`stream/consumers.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util.js`、`internal/util/diff.js`、`internal/util/parse_args/*`、`internal/validators.js`、`internal/mime.js`、`assert.js`、`internal/assert/{utils,assertion_error,myers_diff}.js`、`internal/streams/{state,from,utils}.js`、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`internal/per_context/*` 以及 `util.js` 已用 Node 真源码（MANIFEST 119 个文件）。
 
@@ -208,6 +208,8 @@ web-node/
 | `file:`/`link:` 说明符 | **已支持**（M39）：`file:` 目录/`.tgz` 直接从 VFS 装；`link:` 因 VFS 无符号链接而物化为拷贝。`git+`/`git:` 仍未支持 |
 | Buffer 池化 | **已支持**（M41）：小于 `poolSize>>>1` 的分配（`allocUnsafe`/`from(string)`/`from(Buffer)`/`concat`）从 64 KiB slab 切 8 字节对齐槽位；`allocUnsafeSlow`/`alloc` 绕池。`poolBase` 取 0（页面看不见底层地址），所以 `.buffer.byteLength` 保真而 `.byteOffset` 确定 |
 | inspect 的几处近似 | **部分支持**（M42）：`async function*` 标签与 ICU 列宽已对齐；但 `getPromiseDetails` 恒 pending、`getProxyDetails` 恒 undefined（V8 不同步暴露）、Map/Set **迭代器**的内部 next-index JS 读不到故预览为空（集合本体正常） |
+| `process` 的内部/原生面 | **已补齐公共面**（M43）：`getBuiltinModule`/`getActiveResourcesInfo`/`loadEnvFile`/未捕获异常捕获回调三件套/`reallyExit`/`openStdin`/`ref`/`unref`/`debugPort`/`domain`/`report` 已提供，并删掉真 Node 已删的三个 deprecation 开关。仍不存在（不面向用户代码）：`_debugEnd`/`_eval`/`_fatalException`/`_getActiveHandles`/`_tickCallback` 等 `_*` 内部面、`dlopen`/`execve`/`setegid`/`seteuid`/`setgroups` 等 Unix 原生、`moduleLoadList`（需 `--expose-internals`） |
+| 回调里抛出的异常 | **已修正**（M43）：timer / nextTick 回调里的抛出之前绕过 `process._fatalException`（捕获回调与 `uncaughtException` 监听器都不响）；现在统一经共享 dispatcher 路由 |
 | vendored 注释不进 bundle | 构建期剥离注释（行号/列号/ MIT 声明均保留）；`Function.prototype.toString()` 看不到注释，缩进未动 |
 | promise hooks 不触发 | V8 promise 未插桩，`createHook({ promiseResolve })` 不会响（tick/timer/AsyncResource 会） |
 
@@ -215,13 +217,15 @@ web-node/
 
 ## 10. 后续里程碑
 
-已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、整套 stream + events 换真源码（M10–M16）、真 `async_hooks` + `AsyncLocalStorage`（M17）、真框架跑起来（M18，Vue 3 SFC 在页内被 Vite 编译并运行）、更多 vendored 真源码（M19）、真 `string_decoder`（M20）、真 `internal/util/types`（M21）、真 `internal/util/inspect`（M22）、真断言栈（M23）、真 `util` 模块（M24：`lib/util.js` + `lib/internal/util.js`，真 `promisify`/`parseArgs`/`MIMEType`/`parseEnv` 等）、真 `EventTarget` 栈（M25）、真 `AbortController`/`AbortSignal`（M26）、真 `console`（M27）、真 `os`（M28）、真 `timers`（M29：`lib/timers.js` + `internal/timers.js` + `timers/promises.js`，`timers` binding 内置一个代替 libuv 的驱动）、真 `worker_threads` 消息传递（M30：`internal/worker/io.js` + `internal/per_context/messageport.js` + `internal/worker/js_transferable.js`，`messaging` binding 用 JS 重实现 `src/node_messaging.cc` 的可见契约）、真 `readline`（M31：`lib/readline.js` + `readline/promises.js` + `internal/readline/*` + `internal/repl/history.js`，`internal/process/permission` 恒 disabled）、Buffer slab 池化（M41）、`util.inspect` / ICU 列宽保真度（M42）。
+已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、整套 stream + events 换真源码（M10–M16）、真 `async_hooks` + `AsyncLocalStorage`（M17）、真框架跑起来（M18，Vue 3 SFC 在页内被 Vite 编译并运行）、更多 vendored 真源码（M19）、真 `string_decoder`（M20）、真 `internal/util/types`（M21）、真 `internal/util/inspect`（M22）、真断言栈（M23）、真 `util` 模块（M24：`lib/util.js` + `lib/internal/util.js`，真 `promisify`/`parseArgs`/`MIMEType`/`parseEnv` 等）、真 `EventTarget` 栈（M25）、真 `AbortController`/`AbortSignal`（M26）、真 `console`（M27）、真 `os`（M28）、真 `timers`（M29：`lib/timers.js` + `internal/timers.js` + `timers/promises.js`，`timers` binding 内置一个代替 libuv 的驱动）、真 `worker_threads` 消息传递（M30：`internal/worker/io.js` + `internal/per_context/messageport.js` + `internal/worker/js_transferable.js`，`messaging` binding 用 JS 重实现 `src/node_messaging.cc` 的可见契约）、真 `readline`（M31：`lib/readline.js` + `readline/promises.js` + `internal/readline/*` + `internal/repl/history.js`，`internal/process/permission` 恒 disabled）、Buffer slab 池化（M41）、`util.inspect` / ICU 列宽保真度（M42）、`process` 表面补齐 + 未捕获异常路由（M43）。
 
 - **npm 解析（M39）**：根 `overrides`/`resolutions`（扁平/嵌套/`.`/`$ref`，最长路径优先）、`file:`/`link:` 本地说明符（VFS 目录拷贝 / 本地 `.tgz`），下载改为有界并发（默认 8）且先全下载再写树。
 
 - **进程与 IPC（M40）**：`fork()` 真给父子一条通道（`ipc.ts` 的两端 `IpcEndpoint`，默认 JSON 序列化 / `'advanced'` 结构化克隆）；开着的通道把子进程留在事件循环里；父方事件序 `disconnect → exit → close`；`resolveNodeArgs` 不再把缺失脚本当 spawn 失败。
 
 - **`util.inspect` / ICU 保真度（M42）**：`types` binding 的 `isGeneratorFunction`/`isAsyncFunction` 修正——`async function*` 在 V8 里两者皆为真，故 `util.inspect` 输出 `[AsyncGeneratorFunction: x]`；`icu.getStringWidth` 用真列宽重写（东亚宽/emoji 2 列，控制/组合/emoji 修饰符 0 列），`console.table` 与 CJK 折行对齐；`ambiguousAsFullWidth` 无法还原（需 East_Asian_Width Ambiguous 集）故显式抛错。
+
+- **`process` 表面（M43）**：逐键对照真 Node v26.9.0 补齐公共面（`getBuiltinModule`/`getActiveResourcesInfo`/`loadEnvFile`/捕获回调三件套/`report` 等），移除已删的 deprecation 开关；修了「timer/nextTick 回调抛出绕过 `process._fatalException`」的真 bug；`VfsError` message 改成 Node `UVException` 形状（`ENOENT: no such file or directory, open '/x'`，`name` 为 `Error`）。
 
 接下来：
 

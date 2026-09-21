@@ -48,6 +48,8 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_STREAM_UNABLE_TO_PIPE: 'Cannot pipe to a closed or destroyed stream',
   ERR_STREAM_WRITE_AFTER_END: 'write after end',
   ERR_INTERNAL_ASSERTION: '%s',
+  ERR_UNCAUGHT_EXCEPTION_CAPTURE_ALREADY_SET:
+    '`process.setupUncaughtExceptionCapture()` was called while a capture callback was already active',
   ERR_WEB_NODE_NOT_IMPLEMENTED: '[web-node] %s is not implemented.',
   ERR_AMBIGUOUS_ARGUMENT: 'The "%s" argument is ambiguous. %s',
   ERR_ASSERTION: '%s',

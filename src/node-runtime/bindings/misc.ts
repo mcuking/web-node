@@ -1,5 +1,6 @@
 import type { BindingFactory } from './context';
 import { notImplemented } from '../errors';
+import { triggerUncaughtException } from './uncaught';
 
 /** `trace_events` binding: this runtime does not emit V8 trace events. */
 export const traceEventsBinding: BindingFactory = () => ({
@@ -95,7 +96,7 @@ export const asyncContextFrameBinding: BindingFactory = () => {
 };
 
 /** `errors` binding: source-map + uncaught-exception plumbing. */
-export const errorsBinding: BindingFactory = () => ({
+export const errorsBinding: BindingFactory = (ctx) => ({
   // `Environment::ExitCode` (read off a real Node). `internal/async_hooks` uses
   // kGenericUserError when a hook callback throws.
   exitCodes: {
@@ -115,7 +116,11 @@ export const errorsBinding: BindingFactory = () => ({
   },
   setSourceMapsEnabled: () => undefined,
   setPrepareStackTraceCallback: () => undefined,
-  triggerUncaughtException: () => undefined,
+  // `promise_hooks` and `diagnostics_channel` dispatch into here when a
+  // rejection goes unhandled or a channel subscriber throws. It must reach the
+  // user's handlers — a silent no-op would swallow unhandled rejections.
+  triggerUncaughtException: (err: unknown, fromPromise?: boolean) =>
+    triggerUncaughtException(ctx, err, fromPromise),
   updateExceptionDetails: () => undefined,
   fatalException: () => undefined,
   getErrorSource: () => undefined,

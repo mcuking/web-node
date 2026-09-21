@@ -162,6 +162,17 @@ export class VirtualNetwork {
   }
 
   /**
+   * Handle names for `process.getActiveResourcesInfo()`. A bound port is a
+   * listening TCP handle (`TCPServerWrap`), the one resource here that keeps a
+   * Node program from exiting. Connected sockets are intentionally not listed:
+   * they are created lazily inside `dial()` and drive delivery through
+   * microtasks, so they never hold the loop open the way a libuv handle does.
+   */
+  activeResources(): string[] {
+    return Array.from({ length: this.#servers.size }, () => 'TCPServerWrap');
+  }
+
+  /**
    * Dial a bound port from the outside world (or from another part of the same
    * program). Returns the *client* half; the server's handler receives the other.
    */

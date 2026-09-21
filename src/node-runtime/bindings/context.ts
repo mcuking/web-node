@@ -44,11 +44,43 @@ export interface BindingContext {
   now(): number;
   hrtime(): [number, number];
   /**
+   * Uncaught-exception handling state, shared by the `process` builtin (which
+   * owns the public setters) and the `errors`/`util` bindings (which dispatch
+   * a thrown/`unhandledRejection` error into it). It mirrors the
+   * `exceptionHandlerState` in `lib/internal/process/execution.js`: one primary
+   * capture callback plus a list of auxiliary callbacks that coexist with it.
+   */
+  uncaughtCapture: UncaughtCaptureState;
+  /**
+   * The active-resource list `process.getActiveResourcesInfo()` returns: the
+   * libuv handle/request names libuv would report. Node builds it in C++ from
+   * its live handles; we build it from the timer queue and the virtual network.
+   */
+  activeResources(): string[];
+  /**
    * Resolve a builtin/internal module by id. Used only by bindings that must
    * lazily reach another module (e.g. `defineLazyProperties`), mirroring the
    * `Require` hook the real C++ embedder hands to V8 lazy properties.
    */
   requireBuiltin?(id: string): unknown;
+}
+
+export type UncaughtCaptureFn = (err: unknown) => void;
+export type UncaughtAuxiliaryFn = (err: unknown) => boolean | void;
+
+/**
+ * Mirrors Node's `exceptionHandlerState`
+ * (`lib/internal/process/execution.js`). `captureFn` is the primary callback
+ * (domains use it exclusively); `auxiliaryCallbacks` run only when there is no
+ * primary and must return `true` to claim the error. `reportFlag` records
+ * whether `process.report.reportOnUncaughtException` was on before a handler
+ * was installed, so clearing the handler can restore it.
+ */
+export interface UncaughtCaptureState {
+  captureFn: UncaughtCaptureFn | null;
+  auxiliaryCallbacks: UncaughtAuxiliaryFn[];
+  reportFlag: boolean;
+  shouldAbortOnUncaught: Uint8Array;
 }
 
 export type BindingFactory = (ctx: BindingContext, table: BindingTable) => Record<string, unknown>;

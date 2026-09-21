@@ -1,4 +1,5 @@
 import type { BindingContext, BindingFactory } from './context';
+import { triggerUncaughtException } from './uncaught';
 
 /**
  * `timers` binding.
@@ -46,7 +47,15 @@ export const timersBinding: BindingFactory = (ctx: BindingContext) => {
     if (timerHandle !== null) hostClearTimeout(timerHandle);
     timerHandle = hostSetTimeout(() => {
       timerHandle = null;
-      runTimers();
+      // A throw out of the queue runner is an uncaught exception, exactly as a
+      // throw out of libuv's timer callback is in Node: route it through
+      // `process._fatalException` (uncaughtException listeners, capture
+      // callbacks) instead of letting it escape the host macrotask.
+      try {
+        runTimers();
+      } catch (err) {
+        triggerUncaughtException(ctx, err);
+      }
     }, durationMs > 0 ? durationMs : 1);
   }
 
@@ -85,7 +94,11 @@ export const timersBinding: BindingFactory = (ctx: BindingContext) => {
     if (checkHandle !== null) return;
     checkHandle = hostSetTimeout(() => {
       checkHandle = null;
-      runCheck();
+      try {
+        runCheck();
+      } catch (err) {
+        triggerUncaughtException(ctx, err);
+      }
     }, 0);
   }
 
@@ -128,6 +141,18 @@ export const timersBinding: BindingFactory = (ctx: BindingContext) => {
       (timerHandle !== null && timerRefed ? 1 : 0) +
       (timeoutInfo[0] > 0 ? 1 : 0) +
       (immediateInfo[0] > 0 ? 1 : 0),
+    /**
+     * The handle names `process.getActiveResourcesInfo()` reports for the timer
+     * queue: one `Timeout` per refed timeout/interval and one `Immediate` per
+     * refed immediate (Node only lists refed handles). `internal/timers.js`
+     * keeps the refed counts in `timeoutInfo[0]` and `immediateInfo[1]`.
+     */
+    __activeResources: (): string[] => {
+      const out: string[] = [];
+      for (let i = 0; i < timeoutInfo[0]; i++) out.push('Timeout');
+      for (let i = 0; i < immediateInfo[1]; i++) out.push('Immediate');
+      return out;
+    },
     /**
      * Stop the driver between runs. Each `runMain` models a fresh process, so a
      * timeout left pending by the previous program must not fire in the next

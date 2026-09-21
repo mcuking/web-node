@@ -1,4 +1,5 @@
 import type { BuiltinSpec, BuiltinInitContext } from './types';
+import { notImplemented } from '../errors';
 
 /**
  * `process` builtin. Builds the singleton the bootstrap installs as
@@ -84,6 +85,11 @@ export const processSpec: BuiltinSpec = {
     }
 
     const startTime = Date.now();
+    // The public core-module ids (`fs`, `path`, …). `getBuiltinModule` reports
+    // `undefined` for anything else, including `internal/*`, like Node.
+    const builtinModuleIds = new Set(ctx.builtinModuleIds);
+    const errorsCodes = (): Record<string, new (...args: unknown[]) => Error> =>
+      (ctx.require('internal/errors') as { codes: Record<string, new (...args: unknown[]) => Error> }).codes;
 
     class Process extends (EventEmitter as new () => object) {
       argv = ['/bin/node', ...binding.argv];
@@ -105,9 +111,6 @@ export const processSpec: BuiltinSpec = {
       ppid = 0;
       title = 'node';
       exitCode: number | undefined = undefined;
-      noDeprecation = false;
-      throwDeprecation = false;
-      traceDeprecation = false;
       features = {
         inspector: false,
         debug: false,
@@ -241,6 +244,123 @@ export const processSpec: BuiltinSpec = {
       };
       _linkedBinding = (name: string): never => {
         throw new Error(`process._linkedBinding('${name}') is not available in web-node`);
+      };
+
+      // --- diagnostics / lifecycle surface ----------------------------------
+      /** Set while the process is unwinding after an unhandled exception. */
+      _exiting = false;
+      /** `process.domain` is a legacy no-op; Node keeps it `null`. */
+      domain = null;
+      debugPort = 9229;
+      ref = (): undefined => undefined;
+      unref = (): undefined => undefined;
+      reallyExit = (code?: number): never => {
+        binding.exit(code ?? 0);
+        throw new Error('unreachable');
+      };
+      openStdin = (): unknown => this.stdin;
+      /**
+       * `process.report` — the diagnostic-report surface. The data properties
+       * are real (and `reportOnUncaughtException` is read/written by the
+       * capture-callback setters below, as in Node). The two generators would
+       * have to be assembled in C++ from native stacks, handle lists and build
+       * metadata, so they throw rather than return a fabricated report.
+       */
+      report = {
+        compact: false,
+        directory: '',
+        excludeEnv: false,
+        excludeNetwork: false,
+        filename: '',
+        reportOnFatalError: false,
+        reportOnSignal: false,
+        reportOnUncaughtException: false,
+        signal: 'SIGUSR2',
+        getReport: (): never => {
+          throw notImplemented('api', 'process.report.getReport');
+        },
+        writeReport: (): never => {
+          throw notImplemented('api', 'process.report.writeReport');
+        },
+      };
+
+      /**
+       * Return a core module by id without a `require` from the caller (Node
+       * 22+). Only public modules resolve; `node:` is stripped, and anything
+       * else (including `internal/*`) yields `undefined`, exactly as in Node.
+       */
+      getBuiltinModule = (id: string): unknown => {
+        if (typeof id !== 'string') {
+          const codes = errorsCodes();
+          throw new codes.ERR_INVALID_ARG_TYPE('id', 'string', id);
+        }
+        const name = id.startsWith('node:') ? id.slice('node:'.length) : id;
+        if (!builtinModuleIds.has(name)) return undefined;
+        return ctx.require(name);
+      };
+
+      /**
+       * The libuv handle names holding the loop open (timers, listening
+       * sockets). Node enumerates live handles in C++; the list is built from
+       * the same timer queue and virtual network the rest of the runtime uses.
+       */
+      getActiveResourcesInfo = (): string[] => binding.activeResources();
+
+      hasUncaughtExceptionCaptureCallback = (): boolean => binding.uncaughtCapture.captureFn !== null;
+
+      setUncaughtExceptionCaptureCallback = (fn: unknown): void => {
+        const state = binding.uncaughtCapture;
+        if (fn === null) {
+          state.captureFn = null;
+          // Restore the report flag only when no auxiliaries remain, matching
+          // `setUncaughtExceptionCaptureCallback(null)` in Node.
+          if (state.auxiliaryCallbacks.length === 0) {
+            state.shouldAbortOnUncaught[0] = 1;
+            this.report.reportOnUncaughtException = state.reportFlag;
+          }
+          return;
+        }
+        if (typeof fn !== 'function') {
+          const codes = errorsCodes();
+          throw new codes.ERR_INVALID_ARG_TYPE('fn', ['Function', 'null'], fn);
+        }
+        if (state.captureFn !== null) {
+          const codes = errorsCodes();
+          throw new codes.ERR_UNCAUGHT_EXCEPTION_CAPTURE_ALREADY_SET();
+        }
+        state.captureFn = fn as (err: unknown) => void;
+        state.shouldAbortOnUncaught[0] = 0;
+        state.reportFlag = this.report.reportOnUncaughtException === true;
+        this.report.reportOnUncaughtException = false;
+      };
+
+      addUncaughtExceptionCaptureCallback = (fn: unknown): void => {
+        if (typeof fn !== 'function') {
+          const codes = errorsCodes();
+          throw new codes.ERR_INVALID_ARG_TYPE('fn', 'Function', fn);
+        }
+        const state = binding.uncaughtCapture;
+        if (state.auxiliaryCallbacks.length === 0 && state.captureFn === null) {
+          state.reportFlag = this.report.reportOnUncaughtException === true;
+          this.report.reportOnUncaughtException = false;
+          state.shouldAbortOnUncaught[0] = 0;
+        }
+        state.auxiliaryCallbacks.push(fn as (err: unknown) => boolean | void);
+      };
+
+      /**
+       * Load a `.env` file (default `./.env`) into `process.env`. Variables
+       * already set are kept, like Node — the file never overrides the
+       * environment. Parsing is `util.parseEnv`, the same code path Node uses.
+       */
+      loadEnvFile = (path?: string): void => {
+        const { parseEnv } = ctx.require('util') as { parseEnv: (content: string) => Record<string, string> };
+        const fs = ctx.require('fs') as { readFileSync: (p: string, enc: string) => string };
+        const env = this.env as Record<string, string | undefined>;
+        const parsed = parseEnv(fs.readFileSync(path ?? './.env', 'utf8'));
+        for (const key of Object.keys(parsed)) {
+          if (env[key] === undefined) env[key] = parsed[key];
+        }
       };
     }
 

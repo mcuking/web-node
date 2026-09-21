@@ -1,5 +1,6 @@
 import type { BindingContext, BindingFactory } from './context';
 import { getStringWidth } from './misc';
+import { triggerUncaughtException } from './uncaught';
 
 /**
  * `util` binding: the low-level helpers Node's internal util code expects.
@@ -233,7 +234,7 @@ export const utilBinding: BindingFactory = (ctx: BindingContext) => ({
     return slowPath ? [entries, isKeyValue] : entries;
   },
   isInsideNodeModules: () => false,
-  shouldAbortOnUncaughtToggle: new Uint8Array(1),
+  shouldAbortOnUncaughtToggle: ctx.uncaughtCapture.shouldAbortOnUncaught,
   getCallSites: () => [],
   getHeapSnapshot: () => {
     throw new Error('heap snapshot is not supported in web-node');
@@ -306,8 +307,6 @@ export const utilBinding: BindingFactory = (ctx: BindingContext) => ({
   getSystemErrorName: (err: number) => String(err),
   getDevToolsConfig: () => ({}),
   setTraceCategoryStateUpdateHandler: () => undefined,
-  triggerUncaughtException: (err: Error) => {
-    ctx.writeStderr((err && err.stack) || String(err));
-    ctx.exit(1);
-  },
+  triggerUncaughtException: (err: unknown, fromPromise?: boolean) =>
+    triggerUncaughtException(ctx, err, fromPromise),
 });

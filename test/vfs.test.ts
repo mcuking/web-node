@@ -50,6 +50,26 @@ describe('MemoryVfs', () => {
     }
   });
 
+  it('shapes errors the way Node does', () => {
+    // Read off Node v26.9.0: `fs.readFileSync('/nope')` throws an Error whose
+    // message is "ENOENT: no such file or directory, open '/nope'" — the libuv
+    // description, the syscall and the path, not Node's internal class name.
+    const vfs = new MemoryVfs();
+    const err = (() => {
+      try {
+        vfs.readFile('/nope');
+      } catch (e) {
+        return e as VfsError;
+      }
+      throw new Error('expected readFile to throw');
+    })();
+    expect(err.name).toBe('Error');
+    expect(err.message).toBe("ENOENT: no such file or directory, open '/nope'");
+    expect(err.syscall).toBe('open');
+    expect(err.path).toBe('/nope');
+    expect(err.errno).toBe(-2);
+  });
+
   it('rm -r removes a subtree', () => {
     const vfs = new MemoryVfs();
     vfs.mkdir('/x/y', { recursive: true });
