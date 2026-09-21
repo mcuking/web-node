@@ -3,7 +3,7 @@ import { MemoryVfs } from '../src/node-runtime/vfs';
 import { NodeRuntime } from '../src/node-runtime/runtime';
 
 /**
- * Buffer semantics, checked against a real Node v22.
+ * Buffer semantics, checked against a real Node v26.9.0.
  *
  * The load-bearing distinction is aliasing vs copying: `slice`/`subarray` and
  * `from(ArrayBuffer)` hand back views over the same memory, while
@@ -12,12 +12,17 @@ import { NodeRuntime } from '../src/node-runtime/runtime';
  */
 interface BufferCtor {
   new (size: number): Uint8Array;
+  poolSize: number;
   from(value: unknown, encodingOrOffset?: unknown, length?: unknown): Uint8Array & {
     slice(a?: number, b?: number): Uint8Array;
     subarray(a?: number, b?: number): Uint8Array;
     toString(enc?: string): string;
     byteOffset: number;
   };
+  alloc(size: number, fill?: unknown, encoding?: string): Uint8Array;
+  allocUnsafe(size: number): Uint8Array;
+  allocUnsafeSlow(size: number): Uint8Array;
+  concat(list: readonly Uint8Array[], totalLength?: number): Uint8Array;
   isBuffer(v: unknown): boolean;
 }
 
@@ -102,5 +107,96 @@ describe('buffer (aliasing, matching Node)', () => {
     expect(view.toString('hex')).toBe('030405');
     view[0] = 42;
     expect(raw[2]).toBe(42); // shares
+  });
+});
+
+describe('buffer pool (matching Node)', () => {
+  it('poolSize is Node’s 64 KiB, and small allocUnsafe draws from one slab', () => {
+    const { Buffer } = boot();
+    expect(Buffer.poolSize).toBe(65536);
+
+    const a = Buffer.allocUnsafe(10);
+    const b = Buffer.allocUnsafe(10);
+    expect(a.buffer).toBe(b.buffer); // one backing store
+    expect(a.buffer.byteLength).toBe(Buffer.poolSize + 64); // over-allocated for alignment
+    expect(a.byteOffset % 8).toBe(0);
+    expect(b.byteOffset % 8).toBe(0);
+    expect(b.byteOffset).toBeGreaterThanOrEqual(a.byteOffset + a.length); // no overlap
+  });
+
+  it('alloc and allocUnsafeSlow own an exactly-sized backing store', () => {
+    const { Buffer } = boot();
+    const pooled = Buffer.allocUnsafe(10);
+    const owned = Buffer.alloc(10);
+    const slow = Buffer.allocUnsafeSlow(10);
+    for (const buf of [owned, slow]) {
+      expect(buf.buffer).not.toBe(pooled.buffer);
+      expect(buf.byteOffset).toBe(0);
+      expect(buf.buffer.byteLength).toBe(10);
+    }
+    expect([...owned]).toEqual(new Array(10).fill(0)); // alloc zero-fills
+  });
+
+  it('from(string) and from(Buffer) copy into the pool', () => {
+    const { Buffer } = boot();
+    const pool = Buffer.allocUnsafe(1).buffer;
+
+    const fromStr = Buffer.from('hi');
+    expect(fromStr.buffer).toBe(pool);
+    expect(fromStr.toString()).toBe('hi');
+
+    const source = Buffer.from([1, 2, 3]);
+    const copied = Buffer.from(source);
+    expect(copied.buffer).toBe(pool);
+    copied[0] = 42;
+    expect(source[0]).toBe(1); // still a copy of the contents
+  });
+
+  it('from(TypedArray) copies into the pool too', () => {
+    const { Buffer } = boot();
+    const pool = Buffer.allocUnsafe(1).buffer;
+    const u8 = new Uint8Array([1, 2, 3]);
+    const buf = Buffer.from(u8);
+    expect(buf.buffer).toBe(pool);
+    buf[0] = 42;
+    expect(u8[0]).toBe(1);
+  });
+
+  it('concat draws from the pool and zero-fills an over-long totalLength', () => {
+    const { Buffer } = boot();
+    const pool = Buffer.allocUnsafe(1).buffer;
+
+    const joined = Buffer.concat([Buffer.from('ab'), Buffer.from('cd')]);
+    expect(joined.buffer).toBe(pool);
+    expect(joined.toString()).toBe('abcd');
+
+    const padded = Buffer.concat([Buffer.from('ab')], 4);
+    expect(padded.length).toBe(4);
+    expect([...padded]).toEqual([97, 98, 0, 0]);
+  });
+
+  it('a request at half the pool size bypasses the pool', () => {
+    const { Buffer } = boot();
+    const big = Buffer.allocUnsafe(Buffer.poolSize >>> 1);
+    expect(big.buffer.byteLength).toBe(Buffer.poolSize >>> 1);
+    expect(big.byteOffset).toBe(0);
+  });
+
+  it('zero-length buffers never allocate a backing store', () => {
+    const { Buffer } = boot();
+    for (const b of [Buffer.alloc(0), Buffer.allocUnsafe(0), Buffer.from('')]) {
+      expect(b.length).toBe(0);
+      expect(b.buffer.byteLength).toBe(0);
+    }
+  });
+
+  it('a slice of a pooled buffer still aliases the pool', () => {
+    const { Buffer } = boot();
+    const pooled = Buffer.allocUnsafe(12);
+    const view = pooled.subarray(2, 6);
+    expect(view.buffer).toBe(pooled.buffer);
+    expect(view.byteOffset).toBe(pooled.byteOffset + 2);
+    view[0] = 99;
+    expect(pooled[2]).toBe(99);
   });
 });

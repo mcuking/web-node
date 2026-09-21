@@ -6,7 +6,9 @@ import type { BuiltinSpec, BuiltinInitContext } from './types';
  * This is our own implementation (roadmap: vendor lib/internal/buffer.js once
  * the internal/errors + internal/validators + util/types shim layer grows).
  * `slice`/`subarray` and `from(arrayBuffer)` alias the backing store, as in
- * Node; `from(string|Buffer|TypedArray)` copies.
+ * Node; `from(string|Buffer|TypedArray)` copies. Allocations under half of
+ * `Buffer.poolSize` (64 KiB) are carved out of one slab, so `.byteOffset` and
+ * `.buffer.byteLength` match Node's own allocator.
  */
 const MAX_LENGTH = 0x7fffffff;
 
@@ -148,13 +150,7 @@ export const bufferSpec: BuiltinSpec = {
     };
 
     class Buffer extends Uint8Array {
-      static poolSize = 8192;
-
-      static #copyFrom(bytes: Uint8Array): Buffer {
-        const out = new Buffer(bytes.byteLength);
-        out.set(bytes);
-        return out;
-      }
+      static poolSize = 64 * 1024;
 
       // A Buffer that aliases `bytes`' memory. Node's slice/subarray and
       // from(ArrayBuffer) all return views, so writes on either side are seen
@@ -165,7 +161,7 @@ export const bufferSpec: BuiltinSpec = {
 
       static from(value: unknown, encodingOrOffset?: unknown, length?: unknown): Buffer {
         if (typeof value === 'string') {
-          return Buffer.#copyFrom(fromString(value, typeof encodingOrOffset === 'string' ? encodingOrOffset : 'utf8'));
+          return bufferFromString(value, typeof encodingOrOffset === 'string' ? encodingOrOffset : 'utf8');
         }
         if (isAnyArrayBuffer(value)) {
           const offset = typeof encodingOrOffset === 'number' ? encodingOrOffset : 0;
@@ -174,10 +170,10 @@ export const bufferSpec: BuiltinSpec = {
           return new Buffer(value as ArrayBuffer, offset, len);
         }
         if (ArrayBuffer.isView(value) || Array.isArray(value)) {
-          return Buffer.#copyFrom(Uint8Array.from(value as ArrayLike<number>));
+          return bufferFromArrayLike(Uint8Array.from(value as ArrayLike<number>));
         }
         if (value !== null && typeof value === 'object' && typeof (value as { length?: number }).length === 'number') {
-          return Buffer.#copyFrom(Uint8Array.from(Array.from(value as ArrayLike<number>)));
+          return bufferFromArrayLike(Uint8Array.from(Array.from(value as ArrayLike<number>)));
         }
         throw new TypeError(
           'The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array',
@@ -185,16 +181,19 @@ export const bufferSpec: BuiltinSpec = {
       }
 
       static alloc(size: number, fill?: unknown, encoding?: string): Buffer {
+        // Node's `alloc` never draws from the pool, so the whole size is always
+        // owned by the result.
         const buf = new Buffer(size);
-        if (fill !== undefined) buf.fill(fill as never, 0, size, encoding);
+        if (fill !== undefined && fill !== 0 && size > 0) buf.fill(fill as never, 0, size, encoding);
         return buf;
       }
 
       static allocUnsafe(size: number): Buffer {
-        return new Buffer(size);
+        return allocate(size);
       }
 
       static allocUnsafeSlow(size: number): Buffer {
+        // `allocUnsafeSlow` bypasses the pool by design.
         return new Buffer(size);
       }
 
@@ -220,17 +219,21 @@ export const bufferSpec: BuiltinSpec = {
 
       static concat(list: readonly Uint8Array[], totalLength?: number): Buffer {
         if (!Array.isArray(list)) throw new TypeError('The "list" argument must be an instance of Array');
+        if (list.length === 0) return new Buffer();
         const total = totalLength ?? list.reduce((n, b) => n + b.length, 0);
-        const out = new Buffer(total);
+        const out = allocate(total);
         let offset = 0;
         for (const b of list) {
           if (offset + b.length > total) {
             out.set(b.subarray(0, total - offset), offset);
+            offset = total;
             break;
           }
           out.set(b, offset);
           offset += b.length;
         }
+        // A caller-supplied `totalLength` can leave an uninitialised tail.
+        if (offset < total) out.fill(0, offset, total);
         return out;
       }
 
@@ -542,6 +545,85 @@ export const bufferSpec: BuiltinSpec = {
     (Buffer.prototype as unknown as Record<string, unknown>).inspect = (
       Buffer.prototype as unknown as Record<symbol, unknown>
     )[customInspectSymbol];
+
+    // --- Buffer pool -------------------------------------------------------
+    // Node carves small allocations out of one over-allocated ArrayBuffer so a
+    // program that makes many short Buffers does not pay for a backing store
+    // each time. We mirror `lib/buffer.js`'s `allocate`/`fromStringFast`
+    // exactly: pooled slices are 8-byte aligned, the pool is over-allocated to
+    // allow a cache-line-aligned base, and `allocUnsafeSlow`/`alloc`/large
+    // requests bypass the pool. A page cannot observe its backing store's real
+    // address, so the base is taken as 0 (i.e. the pool "happened" to be
+    // aligned) — that keeps `.buffer.byteLength` faithful while leaving
+    // `.byteOffset` deterministic.
+    const kPoolAlignment = 64;
+    let poolSize = 0;
+    let poolOffset = 0;
+    let poolBase = 0;
+    let allocPool = new ArrayBuffer(0);
+
+    function createPool(): void {
+      poolSize = Buffer.poolSize;
+      allocPool = new ArrayBuffer(poolSize + kPoolAlignment);
+      poolBase = 0;
+      poolOffset = 0;
+    }
+
+    function alignPool(): void {
+      // Keep handed-out slices on an 8-byte boundary, like Node.
+      if (poolOffset & 0x7) {
+        poolOffset |= 0x7;
+        poolOffset++;
+      }
+    }
+
+    function allocate(size: number): Buffer {
+      if (size <= 0) return new Buffer();
+      if (size < (Buffer.poolSize >>> 1)) {
+        if (size > poolSize - poolOffset) createPool();
+        const b = new Buffer(allocPool, poolBase + poolOffset, size);
+        poolOffset += size;
+        alignPool();
+        return b;
+      }
+      return new Buffer(size);
+    }
+
+    function bufferFromString(str: string, encoding: string): Buffer {
+      // Node's `fromString` leaves the empty string unpooled, then routes the
+      // rest through `fromStringFast`, whose pool decision is made from the
+      // *character* count before the encoded byte length is known. Mirroring
+      // that matters: a very long base64 string decodes to few bytes yet still
+      // bypasses the pool.
+      if (str.length === 0) return new Buffer();
+      const maxLength = Buffer.poolSize >>> 1;
+      const bytes = fromString(str, encoding);
+      if (str.length >= maxLength || (str.length * 4 >= maxLength && bytes.length >= maxLength)) {
+        return new Buffer(bytes.length);
+      }
+      if (bytes.length > poolSize - poolOffset) createPool();
+      const b = new Buffer(allocPool, poolBase + poolOffset, bytes.length);
+      b.set(bytes);
+      poolOffset += bytes.length;
+      alignPool();
+      return b;
+    }
+
+    function bufferFromArrayLike(obj: ArrayLike<number>): Buffer {
+      const length = obj.length;
+      if (length <= 0) return new Buffer();
+      if (length < (Buffer.poolSize >>> 1)) {
+        if (length > poolSize - poolOffset) createPool();
+        const b = new Buffer(allocPool, poolBase + poolOffset, length);
+        b.set(obj as never);
+        poolOffset += length;
+        alignPool();
+        return b;
+      }
+      return new Buffer(obj as never);
+    }
+
+    createPool();
 
     const SlowBuffer = (size: number): Buffer => Buffer.alloc(size);
 

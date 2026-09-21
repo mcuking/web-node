@@ -85,6 +85,10 @@ const backing = Buffer.from([1, 2, 3, 4]);
 const view = backing.subarray(1, 3);
 view[0] = 99;
 console.log('view shares :', backing[1] === 99);
+// Small allocations are carved from one 64 KiB slab, as in Node, so the
+// backing store is shared and byteOffset is meaningful (and 8-byte aligned).
+const pooled = Buffer.allocUnsafe(8);
+console.log('pool slab   :', pooled.buffer.byteLength === Buffer.poolSize + 64, 'byteOffset', pooled.byteOffset);
 console.log('');
 
 // --- fs over the virtual file system ---
@@ -1269,7 +1273,6 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 
 - Subdomain preview routing on a static host (only the dev server has the wildcard DNS)
 - Real TLS (the https module is the http surface under a TLS-shaped name)
-- Buffer pooling (allocUnsafe / from(string) do not carve from an 8 KB slab)
 - Promise hooks (async_hooks sees timers/ticks, but V8 promises are not
   instrumented, so promiseResolve never fires)
 - git specs in package.json (git+, git:)

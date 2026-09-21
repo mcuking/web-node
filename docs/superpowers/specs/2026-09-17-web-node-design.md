@@ -206,7 +206,7 @@ web-node/
 | `credentials` binding | 只提供 `getTempDir`（`/tmp`） |
 | `internal/fs/utils.js` 为 shim | 只导出 `DirentFromStats`（`fs` 是自研 VFS，真 util 是 fs 基座） |
 | `file:`/`link:` 说明符 | **已支持**（M39）：`file:` 目录/`.tgz` 直接从 VFS 装；`link:` 因 VFS 无符号链接而物化为拷贝。`git+`/`git:` 仍未支持 |
-| Buffer 未池化 | `allocUnsafe`/`from(string)` 不做 slab 池化（`.byteOffset` 恒为 0） |
+| Buffer 池化 | **已支持**（M41）：小于 `poolSize>>>1` 的分配（`allocUnsafe`/`from(string)`/`from(Buffer)`/`concat`）从 64 KiB slab 切 8 字节对齐槽位；`allocUnsafeSlow`/`alloc` 绕池。`poolBase` 取 0（页面看不见底层地址），所以 `.buffer.byteLength` 保真而 `.byteOffset` 确定 |
 | vendored 注释不进 bundle | 构建期剥离注释（行号/列号/ MIT 声明均保留）；`Function.prototype.toString()` 看不到注释，缩进未动 |
 | promise hooks 不触发 | V8 promise 未插桩，`createHook({ promiseResolve })` 不会响（tick/timer/AsyncResource 会） |
 

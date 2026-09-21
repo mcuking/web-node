@@ -280,6 +280,28 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M17 | **真 `async_hooks`**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` 落在自研 JS `async_wrap` 绑定上）；tick/timer 是真 async resource，hook 会触发、`AsyncLocalStorage` 能跨异步边界传 store | ✅ |
 | M18 | **真框架**——@vitejs/plugin-vue 在页内编译 **Vue 3 SFC**；`vite build` 出生产 Vue bundle，dev server 在预览里跑真实可交互应用（含 HMR） | ✅ |
 | M19 | **更多 vendored 真源码**——`punycode.js`、`domain.js`、`diagnostics_channel.js`（跑在真 `async_hooks` 上，配一个小 JS binding） | ✅ |
+| M20 | **真 `string_decoder`**——把 native 解码状态机（`src/string_decoder.cc`）用 JS 逐字节重写；`lib/string_decoder.js` 换真源码 | ✅ |
+| M21 | **真 `internal/util/types`** + 对齐 `src/node_types.cc` 的 `types` binding；`util.types` 指向真模块 | ✅ |
+| M22 | **真 `internal/util/inspect.js`**——`util.inspect`/`format`/`formatWithOptions` 就是真源码；`console` 走真 `formatWithOptions` | ✅ |
+| M23 | **真断言栈**——`lib/assert.js` + `internal/assert/*` + `internal/util/comparisons` + 真 `internal/validators.js`；堆栈帧通过 `sourceURL` 显示真文件名 | ✅ |
+| M24 | **整套 `util` 换真源码**（`lib/util.js` + `lib/internal/util.js`）：`promisify`/`callbackify`/`styleText`/`parseArgs`/`diff`/`MIMEType`/`parseEnv` | ✅ |
+| M25 | **真 Web EventTarget 栈**——`internal/event_target.js` + `internal/webidl.js`：真 `EventTarget`/`Event`/`CustomEvent`/`defineEventHandler` | ✅ |
+| M26 | **真 `AbortController`/`AbortSignal`**——`internal/abort_controller.js` 建在真 EventTarget 上（`timeout`/`any`/`throwIfAborted`） | ✅ |
+| M27 | **真 `console`**——`lib/console.js` + `internal/console/*` + `internal/cli_table`：真 `Console` 与 `table`/`count`/`group`/`time` | ✅ |
+| M28 | **真 `os`**——`lib/os.js` 站在对齐 `src/node_os.cc` 的静态 `os` binding 上 | ✅ |
+| M29 | **真 `timers`**——`lib/timers.js` + `internal/timers.js` + `timers/promises.js`，`timers` binding 内置一个代替 libuv 的驱动 | ✅ |
+| M30 | **真 `worker_threads` 消息传递**——`internal/worker/io.js`：真 `MessageChannel`/`MessagePort`/`BroadcastChannel`，`messaging` binding 用 JS 重实现 `src/node_messaging.cc` | ✅ |
+| M31 | **真 `readline`**——`lib/readline.js` + `internal/readline/*`：真行编辑器、按键解码、ANSI 光标函数与历史环 | ✅ |
+| M32 | **worker 减重**——构建期剥离 vendored 注释（保留行号/列号与 MIT 声明）：worker 1259KB → 1028KB（gzip 315 → 237KB） | ✅ |
+| M33 | **真 glob**——`internal/fs/glob.js` + 随包的 `internal/deps/minimatch`：`path.matchesGlob`、`fs.glob`/`globSync`/`promises.glob` | ✅ |
+| M34 | **`crypto` 同步面**——纯 JS 的 MD5/SHA-1/SHA-2/HMAC/PBKDF2/HKDF/scrypt，逐一对照 Node 的 OpenSSL 输出 | ✅ |
+| M35 | **真 `perf_hooks`** + 整个 `internal/perf/*` 组，跑在 JS `performance` binding 上（需 native hdr_histogram 的直方图抛错） | ✅ |
+| M36 | **真 WHATWG streams**——`stream/web.js` + `internal/webstreams/*`，`Readable.toWeb`/`Writable.toWeb`/`Duplex.toWeb` 双向打通 | ✅ |
+| M37 | **真 `Blob`/`File`**——`internal/blob.js` + `internal/file.js` 跑在 JS `blob` binding 上；全局可用，并带 `fs.openAsBlob` 与 `URL.createObjectURL` 存储 | ✅ |
+| M38 | **真 `stream/iter`**（新的 iterable-streams API）与 **`stream/consumers`**（`text`/`json`/`buffer`/`bytes`/`arrayBuffer`/`blob`） | ✅ |
+| M39 | **npm 深化**——根级 `overrides`/`resolutions`、`file:`/`link:` 说明符、有界并发下载 | ✅ |
+| M40 | **`fork()` IPC**——双向真通道（`child.send`/`process.send`）、默认 JSON 序列化、开着通道保活、`node nope.js` 像真 Node 一样 exit 1 | ✅ |
+| M41 | **Buffer slab 池化**——小于 `Buffer.poolSize` 一半（64 KiB）的分配共享一块对齐 slab，`.byteOffset`/`.buffer.byteLength` 与 Node 对齐 | ✅ |
 
 ## Vendored 真源码现状
 

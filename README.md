@@ -387,6 +387,28 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M17 | Real `async_hooks` — `lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` on a JS `async_wrap` binding; tick/timer are real async resources, so hooks fire and `AsyncLocalStorage` carries a store across async edges | ✅ Done |
 | M18 | Real framework — `@vitejs/plugin-vue` compiles a **Vue 3 SFC** in the tab; `vite build` emits a production Vue bundle and the dev server serves a live, interactive app (HMR included) | ✅ Done |
 | M19 | More vendored source — real `punycode.js`, `domain.js` and `diagnostics_channel.js` (over the real `async_hooks`, on a small JS binding) | ✅ Done |
+| M20 | Real `string_decoder` — the native decode state machine (`src/string_decoder.cc`) ported to JS; `lib/string_decoder.js` vendored | ✅ Done |
+| M21 | Real `internal/util/types` plus a `types` binding matching `src/node_types.cc`; `util.types` is the real module | ✅ Done |
+| M22 | Real `internal/util/inspect.js` — `util.inspect`/`format`/`formatWithOptions` are the real source; `console` goes through real `formatWithOptions` | ✅ Done |
+| M23 | The real assertion stack — `lib/assert.js`, `internal/assert/*`, `internal/util/comparisons`, real `internal/validators.js`; stack frames carry real filenames via `sourceURL` | ✅ Done |
+| M24 | The whole `util` module is real source (`lib/util.js` + `lib/internal/util.js`): `promisify`/`callbackify`/`styleText`/`parseArgs`/`diff`/`MIMEType`/`parseEnv` | ✅ Done |
+| M25 | Real Web EventTarget stack — `internal/event_target.js` + `internal/webidl.js`: real `EventTarget`/`Event`/`CustomEvent`/`defineEventHandler` | ✅ Done |
+| M26 | Real `AbortController`/`AbortSignal` — `internal/abort_controller.js` on the real EventTarget (`timeout`/`any`/`throwIfAborted`) | ✅ Done |
+| M27 | Real `console` — `lib/console.js` + `internal/console/*` + `internal/cli_table`: real `Console` with `table`/`count`/`group`/`time` | ✅ Done |
+| M28 | Real `os` — `lib/os.js` on a static `os` binding matching `src/node_os.cc` | ✅ Done |
+| M29 | Real `timers` — `lib/timers.js` + `internal/timers.js` + `timers/promises.js`, with a libuv-replacing driver inside the `timers` binding | ✅ Done |
+| M30 | Real `worker_threads` messaging — `internal/worker/io.js`; real `MessageChannel`/`MessagePort`/`BroadcastChannel`, the `messaging` binding reimplementing `src/node_messaging.cc` in JS | ✅ Done |
+| M31 | Real `readline` — `lib/readline.js` + `internal/readline/*`: real line editor, key decoder, ANSI cursor helpers and history ring | ✅ Done |
+| M32 | Lighter worker — a build-time plugin strips vendored comments while keeping line/column numbers and MIT headers: worker 1259KB → 1028KB (gzip 315 → 237KB) | ✅ Done |
+| M33 | Real glob — `internal/fs/glob.js` + the bundled `internal/deps/minimatch`: `path.matchesGlob`, `fs.glob`/`globSync`/`promises.glob` | ✅ Done |
+| M34 | `crypto` synchronous surface — plain-JS MD5/SHA-1/SHA-2/HMAC/PBKDF2/HKDF/scrypt checked against Node's OpenSSL output | ✅ Done |
+| M35 | Real `perf_hooks` + the whole `internal/perf/*` group on a JS `performance` binding (histograms needing native hdr_histogram throw) | ✅ Done |
+| M36 | Real WHATWG streams — `stream/web.js` + `internal/webstreams/*`, so `Readable.toWeb`/`Writable.toWeb`/`Duplex.toWeb` work both ways | ✅ Done |
+| M37 | Real `Blob`/`File` — `internal/blob.js` + `internal/file.js` on a JS `blob` binding; globals plus `fs.openAsBlob` and the `URL.createObjectURL` store | ✅ Done |
+| M38 | Real `stream/iter` (the iterable-streams API) and `stream/consumers` (`text`/`json`/`buffer`/`bytes`/`arrayBuffer`/`blob`) | ✅ Done |
+| M39 | npm deep-cut — root `overrides`/`resolutions`, `file:`/`link:` specifiers, and bounded-concurrency tarball downloads | ✅ Done |
+| M40 | `fork()` IPC — a real channel both ways (`child.send`/`process.send`), default JSON serialization, an open channel keeps the child alive, `node nope.js` exits 1 like Node | ✅ Done |
+| M41 | Buffer slab pooling — allocations under half of `Buffer.poolSize` (64 KiB) share one aligned slab, so `.byteOffset`/`.buffer.byteLength` match Node | ✅ Done |
 
 ## Vendored Node source
 
