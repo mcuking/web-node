@@ -2,7 +2,6 @@ import type { BuiltinSpec } from './types';
 
 import {
   internalAbortListenerSpec,
-  internalBufferSpec,
   internalEncodingSpec,
   internalErrorsSpec,
   internalErrorSourceSpec,
@@ -21,7 +20,6 @@ import {
 import { vendoredBuiltins } from './vendored-builtins';
 import { undiciSpec } from './undici';
 import { workerThreadsSpec } from './worker-threads';
-import { bufferSpec } from './buffer';
 import { fsSpec } from './fs';
 import { fsPromisesSpec } from './fs-promises';
 import { cryptoSpec } from './crypto';
@@ -41,7 +39,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   // internal shims
   internalErrorsSpec,
   internalErrorSourceSpec,
-  internalBufferSpec,
   internalBootstrapRealmSpec,
   internalUrlSpec,
   internalFsUtilsSpec,
@@ -58,7 +55,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   // vendored real Node source
   ...vendoredBuiltins,
   // our implementations
-  bufferSpec,
   processSpec,
   moduleSpec,
   // milestone 3: networking

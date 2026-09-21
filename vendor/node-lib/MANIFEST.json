@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-21T08:13:10.133Z",
+  "generatedAt": "2026-09-21T10:12:42.282Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -642,6 +642,34 @@
       "sha256": "e2c4830bba8e572e7db235308625be3e69ebd0dd15efd5f715a8c848e19d873f",
       "upstreamSha256": "e2c4830bba8e572e7db235308625be3e69ebd0dd15efd5f715a8c848e19d873f",
       "bytes": 14128,
+      "patches": []
+    },
+    {
+      "path": "util/types.js",
+      "sha256": "ccdb74daed669baa9512818d6aef80a2f352277d767f0d3f2be60d6554a67966",
+      "upstreamSha256": "ccdb74daed669baa9512818d6aef80a2f352277d767f0d3f2be60d6554a67966",
+      "bytes": 64,
+      "patches": []
+    },
+    {
+      "path": "internal/buffer.js",
+      "sha256": "066f6cec5e6ea81e376005cf8102bf944828903e8441eece0be2149ca809f14f",
+      "upstreamSha256": "066f6cec5e6ea81e376005cf8102bf944828903e8441eece0be2149ca809f14f",
+      "bytes": 34628,
+      "patches": []
+    },
+    {
+      "path": "buffer.js",
+      "sha256": "0e34571efeaa3534484d772a54f031516ef7daa180a1e7a66936c2bcc51d4505",
+      "upstreamSha256": "0e34571efeaa3534484d772a54f031516ef7daa180a1e7a66936c2bcc51d4505",
+      "bytes": 45391,
+      "patches": []
+    },
+    {
+      "path": "internal/v8/startup_snapshot.js",
+      "sha256": "ca0c3355a13bc0eb75185d0bf2bfdaa110504a3f74e085d91ff8a5e1868b9c93",
+      "upstreamSha256": "ca0c3355a13bc0eb75185d0bf2bfdaa110504a3f74e085d91ff8a5e1868b9c93",
+      "bytes": 3897,
       "patches": []
     },
     {

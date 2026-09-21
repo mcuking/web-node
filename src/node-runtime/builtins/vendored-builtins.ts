@@ -1303,4 +1303,43 @@ export const vendoredBuiltins: BuiltinSpec[] = [
       'internal/worker/js_transferable',
     ],
   },
+  {
+    id: 'internal/v8/startup_snapshot',
+    vendorPath: 'internal/v8/startup_snapshot.js',
+    origin: 'node-source',
+    // Reads the inert `mksnapshot` binding at load time; the real work is behind
+    // `isBuildingSnapshot()`, which is always false here.
+    deps: ['internal/validators', 'internal/errors'],
+  },
+  {
+    id: 'util/types',
+    vendorPath: 'util/types.js',
+    origin: 'node-source',
+    deps: ['internal/util/types'],
+  },
+  {
+    id: 'internal/buffer',
+    vendorPath: 'internal/buffer.js',
+    origin: 'node-source',
+    // Destructures `internal/errors`/`internal/validators`/`util/types` at load
+    // time, then the whole `buffer` binding.
+    deps: ['internal/errors', 'internal/validators', 'util/types'],
+  },
+  {
+    id: 'buffer',
+    vendorPath: 'buffer.js',
+    origin: 'node-source',
+    // `Buffer` is `FastBuffer` from `internal/buffer`; `constants` comes from the
+    // `buffer` binding; `Blob`/`File` are lazy (`internal/blob`/`internal/file`).
+    deps: [
+      'internal/util',
+      'internal/util/types',
+      'internal/util/inspect',
+      'internal/assert',
+      'internal/errors',
+      'internal/validators',
+      'internal/buffer',
+      'internal/v8/startup_snapshot',
+    ],
+  },
 ];

@@ -32,6 +32,12 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_STREAM_UNSHIFT_AFTER_END_EVENT: 'stream.unshift() after end event',
   ERR_UNHANDLED_ERROR: 'Unhandled error. (%s)',
   ERR_UNKNOWN_ENCODING: 'Unknown encoding: %s',
+  ERR_BUFFER_OUT_OF_BOUNDS: 'Attempt to access memory outside buffer bounds',
+  ERR_BUFFER_TOO_LARGE: 'Cannot create a Buffer larger than %s bytes',
+  ERR_INVALID_BUFFER_SIZE: 'Buffer size must be a multiple of %s',
+  ERR_DUPLICATE_STARTUP_SNAPSHOT_MAIN_FUNCTION: 'Deserialize main function is already configured.',
+  ERR_NOT_BUILDING_SNAPSHOT: 'Operation cannot be invoked when not building startup snapshot',
+  ERR_NOT_SUPPORTED_IN_SNAPSHOT: '%s is not supported in startup snapshot',
   ERR_INVALID_ARG_VALUE: 'The argument \'%s\' is invalid. Received %s',
   ERR_INVALID_URI: 'URI malformed',
   ERR_OUT_OF_RANGE: 'The value of "%s" is out of range. It must be %s. Received %s',
@@ -97,6 +103,12 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_STREAM_UNSHIFT_AFTER_END_EVENT: Error,
   ERR_UNHANDLED_ERROR: Error,
   ERR_UNKNOWN_ENCODING: TypeError,
+  ERR_BUFFER_OUT_OF_BOUNDS: RangeError,
+  ERR_BUFFER_TOO_LARGE: RangeError,
+  ERR_INVALID_BUFFER_SIZE: RangeError,
+  ERR_DUPLICATE_STARTUP_SNAPSHOT_MAIN_FUNCTION: Error,
+  ERR_NOT_BUILDING_SNAPSHOT: Error,
+  ERR_NOT_SUPPORTED_IN_SNAPSHOT: Error,
   ERR_UNKNOWN_FILE_EXTENSION: TypeError,
   ERR_UNSUPPORTED_ESM_URL_SCHEME: TypeError,
   ERR_ILLEGAL_CONSTRUCTOR: TypeError,
@@ -157,6 +169,12 @@ function inspectArg(value: unknown): string {
 }
 
 const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
+  // Node: `ERR_BUFFER_OUT_OF_BOUNDS('offset')` reads '"offset" is outside of
+  // buffer bounds'; with no name it is the plain memory-bounds sentence.
+  ERR_BUFFER_OUT_OF_BOUNDS: (args) => {
+    const name = args[0] as string | undefined;
+    return name ? `"${name}" is outside of buffer bounds` : 'Attempt to access memory outside buffer bounds';
+  },
   // Node: "The property 'options.highWaterMark' is invalid. Received -1" —
   // 'property' whenever the name looks like a dotted path, else 'argument'.
   ERR_INVALID_ARG_VALUE: (args) => {
@@ -686,40 +704,14 @@ export const internalProcessPermissionSpec: BuiltinSpec = {
 // `(arrayBuffer, byteOffset, length)`. That is the only shape vendored source
 // (`lib/stream.js` `_uint8ArrayToBuffer`) asks for.
 
-export const internalBufferSpec: BuiltinSpec = {
-  id: 'internal/buffer',
-  origin: 'web-node',
-  deps: ['buffer'],
-  init: (ctx: BuiltinInitContext) => {
-    // Node's `Buffer` extends `FastBuffer`, so a chunk funneled through
-    // `_uint8ArrayToBuffer` still answers `Buffer.isBuffer() === true`. Reuse
-    // the runtime's own Buffer class to keep that invariant (and its methods).
-    const { Buffer } = ctx.require('buffer') as { Buffer: new (...args: never[]) => Uint8Array };
-    // `markAsUntransferable` stamps a private symbol on the object and, for an
-    // ArrayBuffer, also sets its "detach key" (the C++ `ArrayBuffer` detail the
-    // serializer consults). We have no V8 detach key, so the private symbol is
-    // the whole mechanism here; `structuredClone` is the host's and does not
-    // read either, which is why the flag is advisory in this runtime.
-    const untransferableObjectPrivateSymbol = Symbol('untransferable_object_private_symbol');
-    return {
-      FastBuffer: Buffer,
-      markAsUntransferable: (object: unknown): void => {
-        if ((typeof object !== 'object' && typeof object !== 'function') || object === null) {
-          return; // A primitive is already untransferable.
-        }
-        try {
-          (object as Record<symbol, unknown>)[untransferableObjectPrivateSymbol] = true;
-        } catch {
-          // Frozen objects are simply not marked, as in Node.
-        }
-      },
-      isMarkedAsUntransferable: (object: unknown): boolean =>
-        object !== null &&
-        typeof object === 'object' &&
-        (object as Record<symbol, unknown>)[untransferableObjectPrivateSymbol] !== undefined,
-    };
-  },
-};
+// ---------------------------------------------------------------------------
+// internal/buffer
+// ---------------------------------------------------------------------------
+//
+// ⏬ This is now the real vendored file (`lib/internal/buffer.js`), running on
+// the JS `buffer` binding (`bindings/buffer.ts`). `worker_threads` and the
+// worker messaging surface read `markAsUntransferable`/`isMarkedAsUntransferable`
+// from it. See the `internal/buffer` spec in `vendored-builtins.ts`.
 
 // ---------------------------------------------------------------------------
 // internal/blob

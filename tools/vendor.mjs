@@ -106,6 +106,11 @@ const FILES = [
   'os.js',
   'internal/worker/js_transferable.js',
   'internal/worker/io.js',
+  // milestone 48: the real Buffer implementation + its unsafe-allocation helpers
+  'util/types.js',
+  'internal/buffer.js',
+  'buffer.js',
+  'internal/v8/startup_snapshot.js',
   'internal/fs/glob.js',
   'internal/deps/minimatch/index.js',
   'internal/webstreams/util.js',

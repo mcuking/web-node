@@ -40,6 +40,9 @@ const PRIVATE_SYMBOLS = {
   // `internal/worker/js_transferable`'s `markTransferMode` writes the transfer
   // mode here; the `data` accessor of a marked object reads it back.
   transfer_mode_private_symbol: Symbol('transfer_mode_private_symbol'),
+  // `internal/buffer.js`'s `markAsUntransferable` writes this to flag an object
+  // whose backing store must not be moved out of the current agent.
+  untransferable_object_private_symbol: Symbol('untransferable_object_private_symbol'),
 };
 
 const isArrayIndex = (key: string): boolean => {

@@ -295,13 +295,125 @@ export const credentialsBinding: BindingFactory = () => ({
 });
 
 /** `icru`/`icu` binding: Intl availability. */
-export const icuBinding: BindingFactory = () => ({
+export const mksnapshotBinding: BindingFactory = () => ({
+  // `internal/v8/startup_snapshot.js` reads `[0]` of this array to answer
+  // `isBuildingSnapshot()`; we are never building one.
+  isBuildingSnapshotBuffer: [false],
+  setSerializeCallback: (): void => {},
+  setDeserializeCallback: (): void => {},
+  setDeserializeMainFunction: (): void => {},
+});
+
+export const icuBinding: BindingFactory = (ctx) => ({
   getDefaultLocale: () => 'en-US',
   getAvailableLocales: () => ['en-US'],
   getBestAvailableLocale: () => 'en-US',
   getStringWidth,
   hasSmallICU: () => false,
+  // `buffer.transcode` (lib/buffer.js) decodes with a source converter and
+  // re-encodes with a target one. ICU returns a numeric status for a bad
+  // request; `icuErrName` turns it into the `code` the thrown error carries.
+  transcode: (source: Uint8Array, fromEnc: unknown, toEnc: unknown) => {
+    const result = transcode(source, fromEnc, toEnc);
+    // The native `_transcode` hands back a `Buffer` (`node::Buffer::New`), not a
+    // bare `Uint8Array`; `lib/buffer.js` returns it verbatim, so wrap it here.
+    return typeof result === 'number' ? result : toBuffer(ctx, result);
+  },
+  icuErrName: (code: number): string => ICU_ERR_NAMES[code] ?? 'U_UNKNOWN_ERROR',
 });
+
+/** Wrap fresh bytes as a non-pooled `Buffer`, like `node::Buffer::New`. */
+function toBuffer(
+  ctx: Parameters<BindingFactory>[0],
+  bytes: Uint8Array,
+): Uint8Array {
+  const Buffer = (ctx.requireBuiltin?.('buffer') as
+    | { Buffer?: { from(b: ArrayBufferLike, o: number, l: number): Uint8Array } }
+    | undefined)?.Buffer;
+  if (Buffer && bytes.length > 0) return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length);
+  return bytes;
+}
+
+const ICU_ERR_NAMES: Record<number, string> = {
+  0: 'U_ZERO_ERROR',
+  1: 'U_ILLEGAL_ARGUMENT_ERROR',
+  2: 'U_MISSING_RESOURCE_ERROR',
+  4: 'U_FILE_ACCESS_ERROR',
+  5: 'U_INTERNAL_PROGRAM_ERROR',
+  7: 'U_INVALID_FORMAT_ERROR',
+  9: 'U_BUFFER_OVERFLOW_ERROR',
+  10: 'U_UNSUPPORTED_ERROR',
+  12: 'U_INVALID_CHAR_FOUND',
+  15: 'U_MEMORY_ALLOCATION_ERROR',
+};
+
+/** Canonical name for the encodings ICU accepts in `transcode`. */
+function canonicalTranscodeEncoding(encoding: unknown): 'utf8' | 'ucs2' | 'latin1' | 'ascii' | null {
+  if (typeof encoding !== 'string') return null;
+  switch (encoding) {
+    case 'utf8':
+    case 'utf-8':
+      return 'utf8';
+    case 'ucs2':
+    case 'ucs-2':
+    case 'utf16le':
+    case 'utf-16le':
+      return 'ucs2';
+    case 'latin1':
+    case 'binary':
+      return 'latin1';
+    case 'ascii':
+      return 'ascii';
+    default:
+      return null;
+  }
+}
+
+/**
+ * `Buffer.transcode(source, fromEnc, toEnc)` (src/node_i18n.cc). Returns the
+ * transcoded bytes, or the numeric ICU status (1, U_ILLEGAL_ARGUMENT_ERROR)
+ * when either encoding is not one ICU can convert.
+ */
+function transcode(source: Uint8Array, fromEnc: unknown, toEnc: unknown): Uint8Array | number {
+  const from = canonicalTranscodeEncoding(fromEnc);
+  const to = canonicalTranscodeEncoding(toEnc);
+  if (from === null || to === null) return 1;
+
+  // Decode the source into UTF-16 code units.
+  let units: number[];
+  if (from === 'utf8') {
+    const decoded = new TextDecoder('utf-8', { ignoreBOM: true }).decode(source);
+    units = [];
+    for (let i = 0; i < decoded.length; i++) units.push(decoded.charCodeAt(i));
+  } else if (from === 'ucs2') {
+    units = [];
+    for (let i = 0; i + 1 < source.length; i += 2) units.push(source[i] | (source[i + 1] << 8));
+  } else if (from === 'latin1') {
+    units = Array.from(source);
+  } else {
+    units = [];
+    for (let i = 0; i < source.length; i++) units.push(source[i] < 0x80 ? source[i] : 0xfffd);
+  }
+
+  // Encode them into the target encoding, substituting unrepresentable chars.
+  if (to === 'utf8') {
+    let text = '';
+    for (const u of units) text += String.fromCharCode(u);
+    return new TextEncoder().encode(text);
+  }
+  if (to === 'ucs2') {
+    const out = new Uint8Array(units.length * 2);
+    for (let i = 0; i < units.length; i++) {
+      out[2 * i] = units[i] & 0xff;
+      out[2 * i + 1] = (units[i] >> 8) & 0xff;
+    }
+    return out;
+  }
+  const limit = to === 'latin1' ? 0x100 : 0x80;
+  const out = new Uint8Array(units.length);
+  for (let i = 0; i < units.length; i++) out[i] = units[i] < limit ? units[i] : 0x3f;
+  return out;
+}
 
 // --- Unicode column width -------------------------------------------------
 // `getStringWidth` is the measure `util.inspect`, `console.table` and readline

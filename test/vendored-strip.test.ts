@@ -103,6 +103,6 @@ describe('the vendored bundle', () => {
   });
 
   it('covers every file on disk', () => {
-    expect(VENDORED_FILES.length).toBe(119);
+    expect(VENDORED_FILES.length).toBe(123);
   });
 });
