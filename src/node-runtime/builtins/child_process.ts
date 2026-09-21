@@ -10,10 +10,13 @@
  *   - `shell: true`, `exec()` and `execFile({ shell: true })` go through the
  *     mini-shell in `shell/sh.ts`. It is a real parser, and it refuses what it
  *     cannot faithfully run instead of approximating it.
- *   - `fork()` starts the module like `node <module>`, but there is no IPC
- *     channel: `send()`, `disconnect()` and `'message'` events throw rather
- *     than pretend. A silent no-op here would be the worst possible outcome,
- *     because the parent would simply wait forever for a reply.
+ *   - `fork()` starts the module like `node <module>` **and gives it an IPC
+ *     channel**, so `send()`/`on('message')`/`disconnect()` work in both
+ *     directions. The channel is a host macrotask hop, not an OS pipe; a send
+ *     handle (a socket) is refused rather than dropped.
+ *   - A `spawn()`ed child has no channel, so `send()`/`disconnect()` throw —
+ *     Node leaves them `undefined` there, and a silent no-op would be the worst
+ *     possible outcome, because the parent would wait forever for a reply.
  *   - The `*Sync` variants only work for programs that complete without the
  *     event loop, and say so precisely when they cannot be used.
  */
@@ -22,6 +25,8 @@ import type { BuiltinSpec, BuiltinInitContext } from './types';
 import { notImplemented } from '../errors';
 import { runShell, runShellSync, ShellSyntaxError, ShellUnsupportedError } from '../shell/sh';
 import { SpawnError } from '../proc/host';
+import type { IpcEndpoint, Serialization } from '../proc/ipc';
+import * as p from '../vfs/posix';
 
 export const childProcessSpec: BuiltinSpec = {
   id: 'child_process',
@@ -77,6 +82,26 @@ export const childProcessSpec: BuiltinSpec = {
       encoding?: string | null;
       maxBuffer?: number;
       stdio?: unknown;
+      /** `fork`: 'json' (default) or 'advanced' message serialization. */
+      serialization?: Serialization;
+      /** `fork`: accepted for shape compatibility; the child inherits stdin. */
+      silent?: boolean;
+      /** `fork`: the child's `process.execArgv`. */
+      execArgv?: string[];
+      killSignal?: string;
+      detached?: boolean;
+      windowsHide?: boolean;
+    }
+
+    /**
+     * Emit an `error` on a ChildProcess, but only when someone is listening.
+     * Node crashes on an unhandled `'error'`; that crash would take the whole
+     * worker (and every other child) down here, so a dropped channel with no
+     * listener is reported through the send callback instead.
+     */
+    function emitErrorIfListened(child: ChildProcess, err: Error): void {
+      const emitter = child as unknown as { listenerCount(name: string): number };
+      if (emitter.listenerCount('error') > 0) child.emit('error', err);
     }
 
     function toBytes(value: string | Uint8Array): Uint8Array {
@@ -103,11 +128,13 @@ export const childProcessSpec: BuiltinSpec = {
       killed = false;
       spawnargs: string[];
       spawnfile: string;
-      connected = false;
       [key: string]: unknown;
 
       #handle: ChildHandleLike | null = null;
       #closed = false;
+      #connected = false;
+      /** The parent's handle on the IPC channel; `undefined` unless forked. */
+      #channel: { ref: () => void; unref: () => void } | null = null;
 
       constructor(command: string, args: string[]) {
         super();
@@ -143,9 +170,41 @@ export const childProcessSpec: BuiltinSpec = {
         return this.exitCode;
       }
 
+      /**
+       * `true` only while a forked child's channel is open. A spawned child has
+       * no channel, so this stays `false` — the same value Node reports.
+       */
+      get connected(): boolean {
+        return this.#connected;
+      }
+
+      /**
+       * The channel object (`ref`/`unref`), Node's `subprocess.channel`. It is
+       * `undefined` when there is no channel at all and `null` once one has been
+       * disconnected — both measured against Node v26.9.0.
+       */
+      get channel(): unknown {
+        const ipc = this.#handle?.ipc;
+        if (!ipc) return undefined;
+        return ipc.connected ? this.#channel : null;
+      }
+
       bind(handle: ChildHandleLike): void {
         this.#handle = handle;
         this.pid = handle.pid;
+        const ipc = handle.ipc;
+        if (ipc) {
+          this.#connected = true;
+          this.#channel = {
+            ref: () => ipc.ref(),
+            unref: () => ipc.unref(),
+          };
+          // Messages and the disconnect travel on their own macrotask, so a
+          // listener attached right after `fork()` returns is never too late.
+          ipc.onMessage((message) => defer(() => this.emit('message', message)));
+          ipc.onDisconnect(() => defer(() => this.#emitDisconnect()));
+          ipc.onError((err) => defer(() => emitErrorIfListened(this, err)));
+        }
         // Subscribe on a later turn, not synchronously. The virtual child has
         // already run to completion inside `spawn()`, so its output is replayed
         // on subscribe; replaying synchronously would land before the caller's
@@ -167,6 +226,9 @@ export const childProcessSpec: BuiltinSpec = {
         this.#closed = true;
         this.exitCode = result.code;
         this.signalCode = result.signal;
+        // A dead child takes its channel with it, and Node's order is
+        // disconnect → exit → close.
+        this.#emitDisconnect();
         this.stdout.push(null);
         this.stderr.push(null);
         this.emit('exit', result.code, result.signal);
@@ -180,19 +242,47 @@ export const childProcessSpec: BuiltinSpec = {
       }
 
       disconnect(): void {
-        throw notImplemented(
-          'api',
-          'child_process.ChildProcess.disconnect',
-          'a spawned program has no IPC channel in web-node',
-        );
+        const ipc = this.#handle?.ipc;
+        if (!ipc) {
+          throw notImplemented(
+            'api',
+            'child_process.ChildProcess.disconnect',
+            'this child has no IPC channel; only fork() creates one',
+          );
+        }
+        ipc.disconnect();
       }
 
-      send(): boolean {
-        throw notImplemented(
-          'api',
-          'child_process.ChildProcess.send',
-          'a spawned program has no IPC channel in web-node; use a file or a socket on the virtual network',
-        );
+      send(message: unknown, sendHandle?: unknown, options?: unknown, callback?: unknown): boolean {
+        const ipc = this.#handle?.ipc;
+        if (!ipc) {
+          throw notImplemented(
+            'api',
+            'child_process.ChildProcess.send',
+            'this child has no IPC channel (only fork() creates one); for a spawned program, use a file or a socket on the virtual network',
+          );
+        }
+        let cb: ((err: Error | null) => void) | undefined;
+        if (typeof sendHandle === 'function') {
+          cb = sendHandle as (err: Error | null) => void;
+        } else if (sendHandle !== undefined && sendHandle !== null) {
+          // A handle is a real OS object (a socket, a server, a shared fd) and
+          // there is none here, so refuse rather than quietly drop it.
+          throw new Error(
+            'a send handle cannot cross a web-node IPC channel: there is no OS socket to hand over',
+          );
+        } else if (typeof options === 'function') {
+          cb = options as (err: Error | null) => void;
+        } else if (typeof callback === 'function') {
+          cb = callback as (err: Error | null) => void;
+        }
+        return ipc.send(message, cb);
+      }
+
+      #emitDisconnect(): void {
+        if (!this.#connected) return;
+        this.#connected = false;
+        this.emit('disconnect');
       }
 
       ref(): this {
@@ -206,12 +296,24 @@ export const childProcessSpec: BuiltinSpec = {
 
     interface ChildHandleLike {
       readonly pid: number;
+      /** Present only for `fork()`ed children. */
+      readonly ipc?: IpcEndpoint;
       write(data: Uint8Array): void;
       endStdin(): void;
       kill(signal?: string): boolean;
       onStdout(cb: (chunk: Uint8Array) => void): () => void;
       onStderr(cb: (chunk: Uint8Array) => void): () => void;
       onExit(cb: (result: { code: number | null; signal: string | null }) => void): () => void;
+    }
+
+    function checkSerialization(value: unknown): Serialization {
+      if (value === undefined) return 'json';
+      if (value === 'json' || value === 'advanced') return value;
+      const error = new TypeError(
+        `The argument 'options.serialization' must be one of: 'json', 'advanced'. Received '${String(value)}'`,
+      ) as TypeError & { code?: string };
+      error.code = 'ERR_INVALID_ARG_VALUE';
+      throw error;
     }
 
     function startProcess(
@@ -388,10 +490,60 @@ export const childProcessSpec: BuiltinSpec = {
       return child;
     }
 
-    /** `fork` starts a module the way `node <module>` would. */
+    /**
+     * `fork` starts a module the way `node <module>` would, and wires up an IPC
+     * channel so the two sides can talk:
+     *
+     *   parent: `child.send(x)` / `child.on('message')` / `child.disconnect()`
+     *   child:  `process.send(x)` / `process.on('message')` / `process.disconnect()`
+     *
+     * A forked child stays alive while its channel is open and ref'd (Node's rule
+     * too), so a module that only registers a `'message'` handler waits instead
+     * of exiting. `serialization` defaults to `'json'`, matching Node: Buffers
+     * arrive as `{ type: 'Buffer', data: [...] }`, `undefined` properties vanish,
+     * and a circular structure throws from `send()`.
+     */
     function fork(modulePath: string, args?: unknown, options?: unknown): ChildProcess {
       const parsed = normalizeArgs(args, options);
-      const { child } = startProcess('node', [modulePath, ...parsed.args], parsed.options);
+      const opts = parsed.options;
+      const serialization = checkSerialization(opts.serialization);
+      const script = p.isAbsolute(modulePath) ? modulePath : p.resolve(binding.vfs.cwd, modulePath);
+
+      const child = new ChildProcess(binding.execPath, [script, ...parsed.args]);
+      const cwd = opts.cwd ?? binding.vfs.cwd;
+      const env = opts.env ? { ...binding.env, ...opts.env } : { ...binding.env };
+      const timeoutMs = typeof opts.timeout === 'number' && opts.timeout > 0 ? opts.timeout : undefined;
+
+      try {
+        const handle = binding.spawn.spawn({
+          command: binding.execPath,
+          args: [script, ...parsed.args],
+          cwd,
+          env,
+          stdin: null,
+          timeoutMs,
+          ipc: { serialization },
+          execArgv: opts.execArgv ?? [],
+          label: `fork ${script}`,
+        });
+        defer(() => child.emit('spawn'));
+        // `fork` inherits its child's stdio by default (Node's `silent: false`),
+        // so a forked module's console output belongs on the runtime's own
+        // stdout. `silent: true` keeps it on the pipe only.
+        if (!opts.silent) {
+          handle.onStdout((chunk) => binding.writeStdout(decoder.decode(chunk)));
+          handle.onStderr((chunk) => binding.writeStderr(decoder.decode(chunk)));
+        }
+        child.bind(handle);
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        defer(() => {
+          child.emit('error', error);
+          child.stdout.push(null);
+          child.stderr.push(null);
+          child.emit('close', null, null);
+        });
+      }
       return child;
     }
 

@@ -42,6 +42,13 @@ import type { Realm } from '../realm';
 import type { ModuleLoader } from '../loader';
 import * as p from '../vfs/posix';
 import { resolveCommand, displayCommand, type ResolveContext, type Resolution } from './command';
+import {
+  createIpcChannelPair,
+  IpcHandleUnsupportedError,
+  type IpcChannelPair,
+  type IpcEndpoint,
+  type Serialization,
+} from './ipc';
 
 /** Raised when a command cannot be started at all (Node's `spawn` `'error'`). */
 export class SpawnError extends Error {
@@ -73,6 +80,14 @@ export interface SpawnRequest {
   stdin?: Uint8Array | null;
   /** Kill the child after this long. */
   timeoutMs?: number;
+  /**
+   * Give the child an IPC channel (`fork`). A child with an open, ref'd channel
+   * stays alive past its synchronous phase — that is what keeps a forked module
+   * waiting for messages instead of exiting immediately.
+   */
+  ipc?: { serialization?: Serialization };
+  /** The child's `process.execArgv`. */
+  execArgv?: string[];
   /** Label used in diagnostics (defaults to the command line). */
   label?: string;
 }
@@ -86,6 +101,8 @@ export interface ChildHandle {
   readonly pid: number;
   readonly command: string;
   readonly exited: boolean;
+  /** The parent's end of the child's IPC channel; absent unless forked. */
+  readonly ipc?: IpcEndpoint;
   /** Write to the child's stdin. No-op once it has exited. */
   write(data: Uint8Array): void;
   endStdin(): void;
@@ -150,6 +167,19 @@ function toBytes(value: Uint8Array | string): Uint8Array {
   return typeof value === 'string' ? encoder.encode(value) : value;
 }
 
+/**
+ * Emit an `error` on a child's `process`/`ChildProcess`, but only when someone
+ * is listening. Node crashes the process on an unhandled `'error'`; here the
+ * crash would take the whole worker down, so a dropped channel with no listener
+ * is reported through the send callback instead.
+ */
+function emitIfListened(emitter: Record<string, unknown>, err: Error): void {
+  const count = emitter.listenerCount;
+  if (typeof count === 'function' && (count as (name: string) => number).call(emitter, 'error') > 0) {
+    (emitter.emit as (name: string, ...a: unknown[]) => boolean).call(emitter, 'error', err);
+  }
+}
+
 export function createProcessHost(deps: ProcessHostDeps): ProcessHost {
   // Captured before any runtime shadows the globals, so the settle poll runs on
   // the *host* timer queue and never shows up in `activeCount()`.
@@ -209,6 +239,9 @@ export function createProcessHost(deps: ProcessHostDeps): ProcessHost {
     #stdinDataListeners: Array<(chunk: Uint8Array) => void> = [];
     #stdinEndListeners: Array<() => void> = [];
     #stdinPumpScheduled = false;
+    /** The IPC pair, created on first need so a plain spawn pays nothing. */
+    #ipcPair: IpcChannelPair | null = null;
+    #settleScheduled = false;
 
     constructor(request: SpawnRequest) {
       this.pid = nextPid++;
@@ -221,6 +254,30 @@ export function createProcessHost(deps: ProcessHostDeps): ProcessHost {
 
     get exited(): boolean {
       return this.#exit !== null;
+    }
+
+    /** The parent's end of this child's IPC channel, if it has one. */
+    get ipc(): IpcEndpoint | undefined {
+      return this.#ipcPair?.parent;
+    }
+
+    /** Create the channel once, on demand (only `fork` asks for one). */
+    #ipc(): IpcChannelPair | null {
+      if (!this.#request.ipc) return null;
+      if (!this.#ipcPair) {
+        this.#ipcPair = createIpcChannelPair({ serialization: this.#request.ipc.serialization, defer });
+      }
+      return this.#ipcPair;
+    }
+
+    /**
+     * An open, ref'd IPC channel is live work, exactly like a socket: a forked
+     * module that has returned from its synchronous phase still waits for
+     * messages. `process.channel.unref()` (or a disconnect) lifts that.
+     */
+    #ipcKeepsAlive(): boolean {
+      const pair = this.#ipcPair;
+      return pair !== null && pair.child.connected && pair.child.refd;
     }
 
     get label(): string {
@@ -364,6 +421,9 @@ export function createProcessHost(deps: ProcessHostDeps): ProcessHost {
       if (this.#exit) return;
       this.#exit = { code, signal };
       this.#clearTimeout();
+      // A child that dies takes its channel with it, and the parent hears about
+      // that *before* `exit` — Node's order is disconnect → exit → close.
+      this.#ipcPair?.parent.disconnect();
       children.delete(this);
       deps.onChildEvent?.({ type: 'exit', pid: this.pid, command: this.command, code });
       const cbs = this.#exitCbs;
@@ -544,6 +604,7 @@ export function createProcessHost(deps: ProcessHostDeps): ProcessHost {
       proc.env = this.env;
       proc.pid = this.pid;
       proc.ppid = 1;
+      proc.execArgv = this.#request.execArgv ?? [];
       proc.title = this.#label;
       proc.exitCode = undefined;
       proc.cwd = (): string => this.cwd;
@@ -557,7 +618,51 @@ export function createProcessHost(deps: ProcessHostDeps): ProcessHost {
       proc.stdout = this.#pipeStream((text) => this.writeStdout(text), false, 1);
       proc.stderr = this.#pipeStream((text) => this.writeStderr(text), false, 2);
       proc.stdin = this.#stdinStream();
+      this.#attachIpc(proc);
       return proc;
+    }
+
+    /**
+     * Give a forked child the four things Node puts on its `process`: `send`,
+     * `disconnect`, `channel`, and a live `connected`. A plain spawned child
+     * never gets these — `process.send` is `undefined` in Node there too.
+     */
+    #attachIpc(proc: Record<string, unknown>): void {
+      const pair = this.#ipc();
+      if (!pair) return;
+      const channel = pair.child;
+
+      proc.send = (message: unknown, sendHandleOrCb?: unknown, maybeCb?: unknown): boolean => {
+        let callback: ((err: Error | null) => void) | undefined;
+        if (typeof sendHandleOrCb === 'function') {
+          callback = sendHandleOrCb as (err: Error | null) => void;
+        } else if (sendHandleOrCb !== undefined && sendHandleOrCb !== null) {
+          throw new IpcHandleUnsupportedError('A send handle');
+        } else if (typeof maybeCb === 'function') {
+          callback = maybeCb as (err: Error | null) => void;
+        }
+        return channel.send(message, callback);
+      };
+      proc.disconnect = (): void => channel.disconnect();
+      proc.channel = {
+        ref: (): void => channel.ref(),
+        unref: (): void => channel.unref(),
+      };
+      Object.defineProperty(proc, 'connected', {
+        get: () => channel.connected,
+        enumerable: true,
+        configurable: true,
+      });
+
+      channel.onMessage((message) => {
+        (proc.emit as (name: string, ...a: unknown[]) => boolean).call(proc, 'message', message);
+        this.#scheduleSettle();
+      });
+      channel.onDisconnect(() => {
+        (proc.emit as (name: string, ...a: unknown[]) => boolean).call(proc, 'disconnect');
+        this.#scheduleSettle();
+      });
+      channel.onError((err) => emitIfListened(proc, err));
     }
 
     /** A `process.stdout`-shaped sink over this child's pipe. */
@@ -684,20 +789,30 @@ export function createProcessHost(deps: ProcessHostDeps): ProcessHost {
      * it asks "did the child leave anything behind?", not "is the queue empty?"
      */
     #scheduleSettle(): void {
+      if (this.#exit || this.#settleScheduled) return;
+      this.#settleScheduled = true;
       defer(() => {
-        if (this.#exit) return;
-        // The stdin pump is itself a macrotask, so a child still waiting for its
-        // input has not finished merely because its timers drained.
-        if (!this.#stdinDelivered) {
-          this.#scheduleSettle();
-          return;
-        }
-        if (deps.activeCount() <= this.#timersBefore) {
-          this.finish(this.#exitCode ?? 0, null);
-          return;
-        }
-        this.#scheduleSettle();
+        this.#settleScheduled = false;
+        this.#checkSettle();
       });
+    }
+
+    #checkSettle(): void {
+      if (this.#exit) return;
+      // The stdin pump is itself a macrotask, so a child still waiting for its
+      // input has not finished merely because its timers drained.
+      if (!this.#stdinDelivered) {
+        this.#scheduleSettle();
+        return;
+      }
+      if (deps.activeCount() > this.#timersBefore) {
+        this.#scheduleSettle();
+        return;
+      }
+      // An open channel parks the child instead of polling for it: the next
+      // message, or the disconnect, schedules the check again.
+      if (this.#ipcKeepsAlive()) return;
+      this.finish(this.#exitCode ?? 0, null);
     }
   }
 

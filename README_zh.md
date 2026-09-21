@@ -140,6 +140,35 @@ M39 又把解析推进一步：
 未支持：`git+`/`git:` 说明符；`link:` 是拷贝而非符号链接，所以对源包的修改不会反映到消费方。
 （生命周期脚本与 `.bin` shim 已可用：它们跑在运行时自带的 `child_process` 表面之上，见里程碑 7。）
 
+## 进程与 IPC（M7 / M40）
+
+`spawn`/`exec`/`execFile` 在受控子进程（虚拟文件系统 + 虚拟网络 + mini-shell）里把程序跑完。
+`fork()` 再进一步：它像 `node <module>` 一样启动模块，**并在父子之间接一条通道**，所以普通的父子协议直接可用：
+
+```js
+const { fork } = require('child_process');
+const child = fork('/project/worker.js');
+child.on('message', (m) => console.log('child said', m));
+child.send({ job: 21 });
+```
+
+```js
+// /project/worker.js
+process.on('message', (m) => process.send({ doubled: m.job * 2 }));
+```
+
+有意做对的几处细节：
+
+- **默认 JSON 序列化**（与 Node 一致）：Buffer 到对端变成 `{ type: 'Buffer', data: [...] }`、`Date` 变 ISO 串、
+  `undefined` 属性消失、循环结构从 `send()` 同步抛；`serialization: 'advanced'` 换成结构化克隆。
+- **开着的通道会把子进程留在事件循环里**：模块最后一行执行完也不退，等消息；`process.channel.unref()`
+  或 `disconnect()` 才放行。监听器还没挂上就到的那批消息会**缓存**，不会丢。
+- 子进程死掉时父侧事件序是 `disconnect` → `exit` → `close`，`child.connected`/`child.channel` 跟着通道状态走。
+
+未支持：**send handle**（`net.Socket`/server）显式拒绝而不是静默丢弃（这里没有 OS 句柄可传）；
+`'advanced'` 能保 `Map`/`Set`/`Date`，但不保 `Buffer` 子类（V8 serializer 会保，`structuredClone` 不会）；
+`cwd` 不隔离：父子共享同一个虚拟文件系统。
+
 ## 构建工具（M5）
 
 点顶栏 **▦ Build**：在标签页里跑 **esbuild 的官方 WASM 构建**（就是 Vite 内部用的那个转换器）。

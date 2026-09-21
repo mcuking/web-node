@@ -218,6 +218,45 @@ versions, and `file:` (a directory or a `.tgz`) installs straight from the
 virtual file system. Lifecycle scripts and `.bin` shims run against the runtime's
 own `child_process` surface (milestone 7).
 
+## Processes and IPC (M7 / M40)
+
+`spawn`/`exec`/`execFile` run a program to completion inside a controlled child
+(the virtual file system, the virtual network, and the mini-shell). `fork()`
+goes one step further: it starts the module the way `node <module>` would **and
+wires a channel between the two sides**, so the ordinary parent↔child protocol
+just works:
+
+```js
+const { fork } = require('child_process');
+const child = fork('/project/worker.js');
+child.on('message', (m) => console.log('child said', m));
+child.send({ job: 21 });
+```
+
+```js
+// /project/worker.js
+process.on('message', (m) => process.send({ doubled: m.job * 2 }));
+```
+
+Details that are faithful on purpose:
+
+- **JSON is the default serialization**, like Node: a Buffer arrives as
+  `{ type: 'Buffer', data: [...] }`, a `Date` as an ISO string, an `undefined`
+  property disappears, and a circular structure throws from `send()`.
+  `serialization: 'advanced'` switches to structured clone.
+- **An open channel keeps the child alive.** A forked module that returns from
+  its last statement still waits for messages; `process.channel.unref()` or a
+  `disconnect()` releases it. Messages that arrive before a listener is attached
+  are buffered, not dropped.
+- The parent sees `disconnect` → `exit` → `close` when the child dies, and
+  `child.connected` / `child.channel` track the channel's life.
+
+Not yet: a **send handle** (a `net.Socket`, a server) is refused rather than
+silently dropped — there is no OS handle here to hand over. `'advanced'` keeps
+`Map`/`Set`/`Date` but not the `Buffer` subclass (V8's serializer does;
+`structuredClone` does not). `cwd` is not isolated: parent and child share one
+virtual file system.
+
 ## Build tools (M5)
 
 Hit **Build** and the real esbuild — its official WASM build, the same

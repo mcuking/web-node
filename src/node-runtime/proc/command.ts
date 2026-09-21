@@ -241,7 +241,11 @@ function resolveNodeArgs(ctx: ResolveContext, args: string[]): Resolution {
   const script = rest.shift();
   if (script === undefined) return { kind: 'node', script: null, args: passthrough };
   const abs = p.resolve(ctx.cwd, script);
-  if (!isFile(ctx.vfs, abs)) return { kind: 'missing' };
+  // A missing script is *not* a failure to start: `node nope.js` starts, fails to
+  // load the module, and exits 1. Treating it as a spawn failure would report
+  // `'error'` for what Node reports as an ordinary exit — and `fork()` depends
+  // on getting the exit.
+  if (!isFile(ctx.vfs, abs)) return { kind: 'node', script: abs, args: rest };
   const resolution = resolveFile(ctx, abs, rest);
   // A `.bin` shim pointed at by an explicit `node <shim>` still forwards.
   return resolution;

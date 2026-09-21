@@ -200,7 +200,7 @@ web-node/
 |---|---|
 | ESM 为转换实现 | 不支持 top-level await / live bindings |
 | `stream.finished` 的回调形式 | 返回 no-op `cleanup()` |
-| `fork` 的 IPC | `send`/`message` 明确抛 `notImplemented`，不静默 no-op |
+| `fork` 的 IPC | **已支持**（M40）：双向 `send`/`'message'`/`disconnect`，默认 JSON 序列化、`'advanced'` 走 structuredClone，开着通道保活、事件序 disconnect→exit→close。仍不支持：send handle（无 OS 句柄）、`'advanced'` 下不保 Buffer 子类、`cwd` 不隔离 |
 | child 剩余工作是 host promise 时 | 退出判定不可见（见 M7 变更记录） |
 | `os` 返回静态假数据 | 浏览器无可信宿主信息（但已换真 `lib/os.js`，形状/强制转换/`constants` 与 Node 一致） |
 | `credentials` binding | 只提供 `getTempDir`（`/tmp`） |
@@ -217,6 +217,8 @@ web-node/
 已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、整套 stream + events 换真源码（M10–M16）、真 `async_hooks` + `AsyncLocalStorage`（M17）、真框架跑起来（M18，Vue 3 SFC 在页内被 Vite 编译并运行）、更多 vendored 真源码（M19）、真 `string_decoder`（M20）、真 `internal/util/types`（M21）、真 `internal/util/inspect`（M22）、真断言栈（M23）、真 `util` 模块（M24：`lib/util.js` + `lib/internal/util.js`，真 `promisify`/`parseArgs`/`MIMEType`/`parseEnv` 等）、真 `EventTarget` 栈（M25）、真 `AbortController`/`AbortSignal`（M26）、真 `console`（M27）、真 `os`（M28）、真 `timers`（M29：`lib/timers.js` + `internal/timers.js` + `timers/promises.js`，`timers` binding 内置一个代替 libuv 的驱动）、真 `worker_threads` 消息传递（M30：`internal/worker/io.js` + `internal/per_context/messageport.js` + `internal/worker/js_transferable.js`，`messaging` binding 用 JS 重实现 `src/node_messaging.cc` 的可见契约）、真 `readline`（M31：`lib/readline.js` + `readline/promises.js` + `internal/readline/*` + `internal/repl/history.js`，`internal/process/permission` 恒 disabled）。
 
 - **npm 解析（M39）**：根 `overrides`/`resolutions`（扁平/嵌套/`.`/`$ref`，最长路径优先）、`file:`/`link:` 本地说明符（VFS 目录拷贝 / 本地 `.tgz`），下载改为有界并发（默认 8）且先全下载再写树。
+
+- **进程与 IPC（M40）**：`fork()` 真给父子一条通道（`ipc.ts` 的两端 `IpcEndpoint`，默认 JSON 序列化 / `'advanced'` 结构化克隆）；开着的通道把子进程留在事件循环里；父方事件序 `disconnect → exit → close`；`resolveNodeArgs` 不再把缺失脚本当 spawn 失败。
 
 接下来：
 

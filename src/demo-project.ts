@@ -344,6 +344,28 @@ exec('node -e "process.stdout.write(String(6 * 7))" | node ' + path.join(__dirna
 });
 console.log('');
 
+// --- fork IPC (milestone 40) ---
+// fork() runs a module the way 'node <module>' would and gives both sides a
+// channel: the parent gets child.send / child.on('message') / child.disconnect,
+// the child gets process.send / process.on('message') / process.disconnect.
+// Messages are JSON by default (Node's default), and an open channel keeps the
+// child alive instead of letting it exit the moment its module returns.
+console.log('-- fork IPC (milestone 40) --');
+const { fork } = require('child_process');
+const kid = fork(path.join(__dirname, 'lib', 'ipc-child.js'));
+kid.on('message', function (m) {
+  console.log('child says  : ' + JSON.stringify(m));
+  if (m.step === 2) kid.disconnect();
+});
+kid.on('disconnect', function () {
+  console.log('disconnect  : connected=' + kid.connected);
+});
+kid.on('exit', function (code) {
+  console.log('child exits : ' + code);
+});
+kid.send({ n: 21 });
+console.log('');
+
 // --- worker_threads (milestone 30) ---
 // A MessageChannel is a real entangled port pair: messages are structured
 // clones, a port can be transferred to the other side (and shows up in the
@@ -711,6 +733,14 @@ console.log('spawned pid ' + process.pid + ' in ' + process.cwd() + '; its own c
   '/project/lib/upper.js': `let buf = '';
 process.stdin.on('data', (chunk) => (buf += chunk.toString()));
 process.stdin.on('end', () => process.stdout.write(buf.toUpperCase().trim() + ' (via pipe)'));
+`,
+
+  // The child half of the fork() IPC demo in index.js: it answers every message
+  // it gets, and the parent hangs up after the second one.
+  '/project/lib/ipc-child.js': `process.on('message', (m) => {
+  process.send({ step: 1, doubled: m.n * 2 });
+  process.send({ step: 2 });
+});
 `,
 
   // A shell script - the shape npm uses for its own .bin entries. A browser tab
@@ -1209,6 +1239,12 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
   editing the package that asked for it; "file:"/"link:" specifiers install a
   package straight out of the virtual file system (see the demo's @demo/greeting);
   and tarballs download with bounded concurrency instead of one at a time
+- **fork() IPC (milestone 40)** — fork() starts a module the way node <module>
+  would and wires a channel between the two sides: child.send / child.on('message')
+  / child.disconnect on the parent, process.send / process.on('message') /
+  process.disconnect in the child, with Node's default JSON serialization (and
+  'advanced' for structured clone). An open channel keeps the child alive past
+  its module returning, and the parent hears disconnect then exit then close
 - **Build tools (milestone 5)** — "Build" runs esbuild (the WASM build, the same
   transformer Vite uses) inside the tab: it compiles src/app.ts, bundles a real
   node_modules dependency, and writes /project/dist/app.js. The browser field in
@@ -1237,6 +1273,9 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - Promise hooks (async_hooks sees timers/ticks, but V8 promises are not
   instrumented, so promiseResolve never fires)
 - git specs in package.json (git+, git:)
+- IPC send handles (a socket or server cannot cross a fork() channel: there is no
+  OS handle here), and 'advanced' serialization keeps Map/Set/Date but not the
+  Buffer subclass (V8's serializer does; structuredClone does not)
 - webpack (esbuild, rollup and Vite are milestones 5/5b/5c)
 `,
 };

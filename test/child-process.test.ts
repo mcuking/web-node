@@ -316,13 +316,248 @@ describe('child_process', () => {
     expect(() => cp.execSync('node /project/spin.js | node /project/spin.js')).toThrow();
   });
 
-  it('refuses fork IPC instead of pretending', () => {
+  it('leaves send/disconnect unavailable on a spawned child, like Node', () => {
+    // Node leaves `subprocess.send`/`disconnect` *undefined* for a child with no
+    // IPC channel; we throw a named error instead of a bare "not a function",
+    // which says the same thing more usefully.
     const vfs = makeVfs({ '/project/child.js': 'console.log("hi")' });
     const { runtime } = bootRuntime(vfs);
     const cp = childProcessOf(runtime);
-    const child = cp.fork('/project/child.js');
-    expect(() => child.send('x')).toThrow(/IPC channel/);
-    expect(() => child.disconnect()).toThrow(/IPC channel/);
+    const child = cp.spawn('node', ['/project/child.js']);
+    expect(() => child.send('x')).toThrow(/no IPC channel/);
+    expect(() => child.disconnect()).toThrow(/no IPC channel/);
+    expect(child.connected).toBe(false);
+    expect(child.channel).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fork: the IPC channel
+// ---------------------------------------------------------------------------
+
+/** Resolve the first `name` event with its arguments. */
+function once(child: Record<string, any>, name: string): Promise<any[]> {
+  return new Promise((resolve) => {
+    child.once(name, (...args: any[]) => resolve(args));
+  });
+}
+
+/** Record the lifecycle events a child emits, in order. */
+function record(child: Record<string, any>): string[] {
+  const log: string[] = [];
+  for (const name of ['spawn', 'disconnect', 'exit', 'close', 'error']) {
+    child.on(name, (...args: any[]) => log.push(`${name}:${args.map((a) => String(a)).join(',')}`));
+  }
+  child.on('message', (m: unknown) => log.push(`message:${JSON.stringify(m)}`));
+  return log;
+}
+
+describe('fork: IPC channel', () => {
+  const twoWay = `/project/child.js`;
+
+  function forkWith(vfs: MemoryVfs, modulePath = twoWay, args?: unknown, options?: unknown) {
+    const { runtime, out } = bootRuntime(vfs);
+    const cp = childProcessOf(runtime);
+    const child = cp.fork(modulePath, args, options) as Record<string, any>;
+    const Buffer_ = (runtime.realm.require('buffer') as { Buffer: { from(v: string): Uint8Array } }).Buffer;
+    return { child, out, Buffer_ };
+  }
+
+  it('carries messages in both directions and reports the exit', async () => {
+    const vfs = makeVfs({
+      [twoWay]: `
+        process.on('message', (m) => {
+          if (m.stop) return process.exit(typeof m.stop === 'number' ? m.stop : 0);
+          if (m.reply) process.send({ reply: 'pong', echo: m.reply });
+        });
+        process.send({ hello: 'from child' });
+      `,    });
+    const { child } = forkWith(vfs);
+    const events = record(child);
+    expect(child.connected).toBe(true);
+    expect(typeof child.channel).toBe('object');
+    expect(child.channel).not.toBeNull();
+
+    const exited = once(child, 'exit');
+    await tick(30);
+    expect(events).toContain('spawn:');
+    expect(events).toContain('message:{"hello":"from child"}');
+
+    expect(child.send({ reply: 'ping' })).toBe(true);
+    await tick(30);
+    expect(events).toContain('message:{"reply":"pong","echo":"ping"}');
+
+    child.send({ stop: true });
+    const [code] = await exited;
+    expect(code).toBe(0);
+    expect(child.connected).toBe(false);
+    expect(child.channel).toBeNull();
+    // Node's order when the child dies with the channel open.
+    expect(events.indexOf('disconnect:')).toBeGreaterThan(-1);
+    expect(events.indexOf('disconnect:')).toBeLessThan(events.indexOf('exit:0,null'));
+    expect(events.indexOf('exit:0,null')).toBeLessThan(events.indexOf('close:0,null'));
+  });
+
+  it('inherits the child output by default and pipes it when silent', async () => {
+    const vfs = makeVfs({ [twoWay]: `console.log('from the child'); process.exit(0);` });
+    const loud = forkWith(vfs);
+    await once(loud.child, 'close');
+    expect(loud.out.join('')).toContain('from the child');
+
+    const quiet = forkWith(vfs, twoWay, [], { silent: true });
+    const piped: string[] = [];
+    quiet.child.stdout.on('data', (c: unknown) => piped.push(decoder.decode(c as Uint8Array)));
+    await once(quiet.child, 'close');
+    expect(quiet.out.join('')).not.toContain('from the child');
+    expect(piped.join('')).toContain('from the child');
+  });
+
+  it('serializes with JSON by default: Buffers flatten, undefined vanishes', async () => {
+    const vfs = makeVfs({
+      [twoWay]: `
+        process.on('message', (m) => {
+          process.send({ isBuffer: Buffer.isBuffer(m.b), b: m.b, hasU: 'u' in m, n: m.n, d: m.d });
+        });
+      `,
+    });
+    const { child, Buffer_ } = forkWith(vfs);
+    const got = once(child, 'message');
+    await tick(20);
+    child.send({ b: Buffer_.from('hi'), u: undefined, n: null, d: new Date(0) });
+    const [message] = await got;
+    expect(message).toEqual({
+      isBuffer: false,
+      b: { type: 'Buffer', data: [104, 105] },
+      hasU: false,
+      n: null,
+      d: '1970-01-01T00:00:00.000Z',
+    });
+    child.disconnect();
+  });
+
+  it('keeps structure with advanced serialization, and is honest about Buffer', async () => {
+    const vfs = makeVfs({
+      [twoWay]: `
+        process.on('message', (m) => {
+          process.send({
+            isBuffer: Buffer.isBuffer(m.b),
+            isUint8Array: m.b instanceof Uint8Array,
+            isMap: m.m instanceof Map,
+            isDate: m.d instanceof Date,
+            keys: [...m.m.keys()],
+            date: m.d.toISOString(),
+          });
+        });
+      `,
+    });
+    const { child, Buffer_ } = forkWith(vfs, twoWay, [], { serialization: 'advanced' });
+    const got = once(child, 'message');
+    await tick(20);
+    child.send({ b: Buffer_.from('hi'), m: new Map([['a', 1]]), d: new Date(0) });
+    const [message] = await got;
+    // structuredClone keeps Map/Date/typed arrays but, unlike V8's serializer,
+    // drops the Buffer subclass. Documented in the limitations, asserted here.
+    expect(message).toEqual({
+      isBuffer: false,
+      isUint8Array: true,
+      isMap: true,
+      isDate: true,
+      keys: ['a'],
+      date: '1970-01-01T00:00:00.000Z',
+    });
+    child.disconnect();
+  });
+
+  it('keeps a forked child alive while its channel is open', async () => {
+    const vfs = makeVfs({
+      [twoWay]: `
+        process.on('message', (m) => { if (m.stop) process.exit(0); });
+      `,
+    });
+    const { child } = forkWith(vfs);
+    const events = record(child);
+    // The module returned immediately; only the open channel keeps it running.
+    await tick(40);
+    expect(events.some((e) => e.startsWith('exit'))).toBe(false);
+    expect(child.connected).toBe(true);
+
+    const exited = once(child, 'exit');
+    child.send({ stop: true });
+    expect((await exited)[0]).toBe(0);
+  });
+
+  it('closes the channel on disconnect, in both directions', async () => {
+    const vfs = makeVfs({
+      [twoWay]: `
+        process.on('disconnect', () => {
+          console.log('child disconnected: ' + process.connected);
+          console.log('child resend returned: ' + process.send({ late: true }));
+        });
+      `,
+    });
+    const { child, out } = forkWith(vfs);
+    await tick(20);
+    const disconnected = once(child, 'disconnect');
+    child.disconnect();
+    await disconnected;
+    expect(child.connected).toBe(false);
+    await tick(30);
+    expect(out.join('')).toContain('child disconnected: false');
+    // The child's late reply is refused rather than dropped.
+    expect(out.join('')).toContain('child resend returned: false');
+  });
+
+  it('returns false and reports an error when sending on a closed channel', async () => {
+    const vfs = makeVfs({ [twoWay]: `process.on('message', () => {});` });
+    const { child } = forkWith(vfs);
+    await tick(20);
+    child.disconnect();
+    await tick(20);
+    const errored = once(child, 'error');
+    expect(child.send({ x: 1 })).toBe(false);
+    const [err] = await errored;
+    expect((err as { code?: string }).code).toBe('ERR_IPC_CHANNEL_CLOSED');
+    expect((err as Error).message).toBe('Channel closed');
+  });
+
+  it('refuses an unserializable message and a missing one, like Node', async () => {
+    const vfs = makeVfs({ [twoWay]: `process.on('message', () => {});` });
+    const { child } = forkWith(vfs);
+    await tick(20);
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(() => child.send(circular)).toThrow(/circular/i);
+    expect(() => child.send(undefined)).toThrow(/must be specified/);
+    child.disconnect();
+  });
+
+  it('passes argv, execArgv and a run-time send callback', async () => {
+    const vfs = makeVfs({
+      [twoWay]: `
+        process.send({ argv: process.argv, execArgv: process.execArgv, sendType: typeof process.send });
+      `,
+    });
+    const { child } = forkWith(vfs, twoWay, ['one', 'two'], { execArgv: ['--expose-gc'] });
+    const [message] = (await once(child, 'message')) as [Record<string, any>];
+    expect(message.argv.slice(1)).toEqual([twoWay, 'one', 'two']);
+    expect(message.execArgv).toEqual(['--expose-gc']);
+    expect(message.sendType).toBe('function');
+
+    const sent = await new Promise<Error | null>((resolve) => {
+      child.send({ a: 1 }, (err: Error | null) => resolve(err));
+    });
+    expect(sent).toBeNull();
+    child.disconnect();
+  });
+
+  it('reports a module that cannot be loaded as an exit, not a spawn error', async () => {
+    const vfs = makeVfs({});
+    const { child } = forkWith(vfs, '/project/missing.js');
+    const events = record(child);
+    const [code] = await once(child, 'exit');
+    expect(code).toBe(1);
+    expect(events.some((e) => e.startsWith('error'))).toBe(false);
+    expect(events.some((e) => e.startsWith('close:1'))).toBe(true);
   });
 });
 
