@@ -302,6 +302,7 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M39 | **npm 深化**——根级 `overrides`/`resolutions`、`file:`/`link:` 说明符、有界并发下载 | ✅ |
 | M40 | **`fork()` IPC**——双向真通道（`child.send`/`process.send`）、默认 JSON 序列化、开着通道保活、`node nope.js` 像真 Node 一样 exit 1 | ✅ |
 | M41 | **Buffer slab 池化**——小于 `Buffer.poolSize` 一半（64 KiB）的分配共享一块对齐 slab，`.byteOffset`/`.buffer.byteLength` 与 Node 对齐 | ✅ |
+| M42 | **`util.inspect` / ICU 保真度**——`async function*` 既是 generator 又是 async（输出 `[AsyncGeneratorFunction: x]`）；`icu.getStringWidth` 按真实 Unicode 列宽度量，`console.table`/CJK 折行与 Node 一致 | ✅ |
 
 ## Vendored 真源码现状
 

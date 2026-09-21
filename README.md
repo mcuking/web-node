@@ -409,6 +409,7 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M39 | npm deep-cut — root `overrides`/`resolutions`, `file:`/`link:` specifiers, and bounded-concurrency tarball downloads | ✅ Done |
 | M40 | `fork()` IPC — a real channel both ways (`child.send`/`process.send`), default JSON serialization, an open channel keeps the child alive, `node nope.js` exits 1 like Node | ✅ Done |
 | M41 | Buffer slab pooling — allocations under half of `Buffer.poolSize` (64 KiB) share one aligned slab, so `.byteOffset`/`.buffer.byteLength` match Node | ✅ Done |
+| M42 | `util.inspect` / ICU fidelity — `async function*` is both a generator and async (`[AsyncGeneratorFunction: x]`), and `icu.getStringWidth` measures real Unicode columns so `console.table`/CJK wrapping match Node | ✅ Done |
 
 ## Vendored Node source
 

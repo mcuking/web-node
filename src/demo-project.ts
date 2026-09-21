@@ -604,6 +604,19 @@ try {
 console.log('overrides   : ' + JSON.stringify(pkg.overrides || null));
 console.log('');
 
+// --- util.inspect / ICU column width (milestone 42) ---
+// util.inspect is Node's real source; what sits under it is now faithful too.
+// An async function* is both a generator and async in V8, so it is labelled
+// AsyncGeneratorFunction; and the ICU width function measures columns, not
+// code units, so double-width CJK lines up in console.table.
+console.log('-- inspect (milestone 42) --');
+const { inspect } = require('util');
+console.log('async gen fn:', inspect(async function* named() {}));
+// console.table widths come from the same ICU measure: '中文' is four columns,
+// so the box borders line up even for double-width text.
+console.table([{ name: '中文', n: 1 }, { name: 'ab', n: 2 }]);
+console.log('');
+
 // --- http server (milestone 3: virtual TCP) ---
 // listen(3000) binds a port inside this runtime. The ServiceWorker bridge at
 // /preview/3000/ dials it, so this URL is reachable from the browser tab.
@@ -1249,6 +1262,15 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
   process.disconnect in the child, with Node's default JSON serialization (and
   'advanced' for structured clone). An open channel keeps the child alive past
   its module returning, and the parent hears disconnect then exit then close
+- **Buffer slab pooling (milestone 41)** — allocations under half of Buffer.poolSize
+  (64 KiB) are carved from one shared, 8-byte-aligned slab, so buf.byteOffset is
+  meaningful and buf.buffer.byteLength matches what Node reports; allocUnsafeSlow,
+  alloc and large requests still bypass the pool
+- **util.inspect / ICU width (milestone 42)** — util.inspect is Node's real source,
+  and the layer under it is now faithful: an async function* is both a generator
+  and async in V8, so it is labelled [AsyncGeneratorFunction: name], and the ICU
+  width function counts display columns (CJK and emoji are two), so console.table
+  borders and CJK line wrapping line up
 - **Build tools (milestone 5)** — "Build" runs esbuild (the WASM build, the same
   transformer Vite uses) inside the tab: it compiles src/app.ts, bundles a real
   node_modules dependency, and writes /project/dist/app.js. The browser field in

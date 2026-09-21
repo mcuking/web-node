@@ -21,15 +21,30 @@ export const typesBinding: BindingFactory = () => ({
     v instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && v instanceof SharedArrayBuffer),
   isArgumentsObject: (v: unknown): boolean => tagOf(v) === '[object Arguments]',
   isArrayBuffer: (v: unknown): boolean => v instanceof ArrayBuffer,
-  isAsyncFunction: (v: unknown): boolean => tagOf(v) === '[object AsyncFunction]',
+  isAsyncFunction: (v: unknown): boolean => {
+    // V8's `IsAsyncFunction` covers both `async function` and
+    // `async function*` (an async generator satisfies both this and
+    // `isGeneratorFunction`). `Object.prototype.toString` tells them apart.
+    const tag = tagOf(v);
+    return tag === '[object AsyncFunction]' || tag === '[object AsyncGeneratorFunction]';
+  },
   isBigIntObject,
   isBooleanObject: (v: unknown): boolean => v instanceof Boolean,
   isBoxedPrimitive: (v: unknown): boolean =>
     v instanceof Number || v instanceof String || v instanceof Boolean || v instanceof Symbol || isBigIntObject(v),
   isDate: (v: unknown): boolean => v instanceof Date,
   isExternal: (): boolean => false,
-  isGeneratorFunction: (v: unknown): boolean => tagOf(v) === '[object GeneratorFunction]',
-  isGeneratorObject: (v: unknown): boolean => tagOf(v) === '[object Generator]',
+  // V8's `SharedFunctionInfo::is_generator()` is true for both sync and async
+  // generators, so `async function*` is a generator function too — that is why
+  // `util.inspect` labels it `[AsyncGeneratorFunction: name]`.
+  isGeneratorFunction: (v: unknown): boolean => {
+    const tag = tagOf(v);
+    return tag === '[object GeneratorFunction]' || tag === '[object AsyncGeneratorFunction]';
+  },
+  isGeneratorObject: (v: unknown): boolean => {
+    const tag = tagOf(v);
+    return tag === '[object Generator]' || tag === '[object AsyncGenerator]';
+  },
   isMap: (v: unknown): boolean => v instanceof Map,
   isMapIterator: (v: unknown): boolean => tagOf(v) === '[object Map Iterator]',
   isModuleNamespaceObject: (v: unknown): boolean => tagOf(v) === '[object Module]',

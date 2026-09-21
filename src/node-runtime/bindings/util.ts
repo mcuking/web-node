@@ -1,4 +1,5 @@
 import type { BindingContext, BindingFactory } from './context';
+import { getStringWidth } from './misc';
 
 /**
  * `util` binding: the low-level helpers Node's internal util code expects.
@@ -7,13 +8,16 @@ import type { BindingContext, BindingFactory } from './context';
  * binding: V8 promise states, the exit-info field indices, and V8 property
  * filters (values read off `deps/v8/include/v8-promise.h` and `v8-object.h`).
  *
- * Two introspection helpers cannot be reproduced faithfully from JS and are
+ * Three introspection helpers cannot be reproduced faithfully from JS and are
  * documented as approximations:
  *   - `getProxyDetails` always returns `undefined` (a Proxy is undetectable
  *     from JS), so inspected proxies print as ordinary objects.
- *   - `getPromiseDetails` always reports `kPending` (V8 will not expose a
- *     promise's state synchronously), so settled promises inspect as
- *     `Promise { <pending> }`.
+ *   - `getPromiseDetails` reports `kPending` for every promise (V8 will not
+ *     expose a promise's state synchronously), so settled promises inspect as
+ *     `Promise { <pending> }`. Non-promises return `undefined`, like V8.
+ *   - `previewEntries` yields nothing for a Map/Set *iterator* (V8 reads the
+ *     iterator's internal next-index; JS cannot), so `[Map Entries] { … }`
+ *     prints as an empty `[Map Iterator] { }`.
  */
 const ALL_PROPERTIES = 0;
 const ONLY_WRITABLE = 1;
@@ -205,14 +209,15 @@ export const utilBinding: BindingFactory = (ctx: BindingContext) => ({
     return ctor.name;
   },
   getExternalValue: () => 0n,
-  getPromiseDetails: (v: unknown): unknown[] => (v instanceof Promise ? [kPending, undefined] : [kPending]),
+  getPromiseDetails: (v: unknown): unknown => (v instanceof Promise ? [kPending, undefined] : undefined),
   getProxyDetails: () => undefined,
   /**
    * A partial preview of a collection's entries, used by `util.inspect` for
    * Map/Set/WeakMap/WeakSet and iterators. Map yields `[k, v]` pairs, Set and
    * Array yield their values, and weak collections yield nothing (they are
    * not enumerable). With `slowPath` the caller also learns whether the
-   * entries are key/value pairs.
+   * entries are key/value pairs. A Map/Set *iterator* has no readable
+   * position from JS, so it previews as empty (see the file header).
    */
   previewEntries: (value: unknown, slowPath?: boolean): unknown => {
     const entries: unknown[] = [];
@@ -248,7 +253,9 @@ export const utilBinding: BindingFactory = (ctx: BindingContext) => ({
   }),
   getHeapSpaceStatistics: () => [],
   setPromiseHooks: () => undefined,
-  getStringWidth: (str: string): number => str.length,
+  // Real Node keeps `getStringWidth` on the `icu` binding, not `util`; this is
+  // the same function so the two can never disagree.
+  getStringWidth,
   // Node blocks the thread here (`uv_sleep`); `Atomics.wait` is the closest
   // thing JS offers and is available inside our worker / the test harness.
   sleep: (msec: number): void => {

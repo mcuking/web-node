@@ -122,6 +122,25 @@ describe('vendored: internal/util/types', () => {
     expect(t.isGeneratorObject((function* () {})())).toBe(true);
   });
 
+  it('treats an async generator as both a generator and an async function', () => {
+    // Read off Node v26.9.0: V8's `is_generator()` covers async generators, and
+    // `IsAsyncFunction` does too — which is why `util.inspect` labels an
+    // `async function*` `[AsyncGeneratorFunction: name]`.
+    const realm = boot();
+    const t = realm.require('internal/util/types');
+    const asyncGen = async function* () {};
+    expect(t.isGeneratorFunction(asyncGen)).toBe(true);
+    expect(t.isAsyncFunction(asyncGen)).toBe(true);
+    expect(t.isGeneratorObject(asyncGen())).toBe(true);
+
+    const gen = function* () {};
+    expect(t.isGeneratorFunction(gen)).toBe(true);
+    expect(t.isAsyncFunction(gen)).toBe(false);
+    const asyncFn = async function () {};
+    expect(t.isGeneratorFunction(asyncFn)).toBe(false);
+    expect(t.isAsyncFunction(asyncFn)).toBe(true);
+  });
+
   it('isKeyObject / isCryptoKey return false without OpenSSL', () => {
     const realm = boot();
     const t = realm.require('internal/util/types');

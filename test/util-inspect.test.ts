@@ -7,10 +7,11 @@ import { NodeRuntime } from '../src/node-runtime/runtime';
  * Every expected string below was read off a real Node v26.9.0 first, so these
  * assertions pin our output to the upstream one byte for byte.
  *
- * Two predicates the vendored code sits on cannot be answered from JS, and both
- * are asserted here as the documented approximations they are:
+ * Three predicates the vendored code sits on cannot be answered from JS, and
+ * all are asserted here as the documented approximations they are:
  *   - a settled promise still reports `Promise { <pending> }`;
- *   - a Proxy inspects as the plain object it wraps.
+ *   - a Proxy inspects as the plain object it wraps;
+ *   - a Map/Set iterator previews as empty (`[Map Iterator] {  }`).
  */
 function boot() {
   const vfs = new MemoryVfs({ cwd: '/project' });
@@ -109,14 +110,41 @@ describe('vendored: internal/util/inspect', () => {
     expect(util.inspect(err)).toBe('[Error: x]');
   });
 
-  it('documents the promise / proxy approximations from the util binding', () => {
+  it('documents the promise / proxy / iterator approximations from the binding', () => {
     const { util } = boot();
-    // V8 exposes neither a promise's state nor a Proxy synchronously, so these
-    // are the deliberate limits of a JS-only native layer. Real Node v26.9.0
-    // prints `Promise { 1 }` and `Proxy({ a: 1 })` respectively.
+    // V8 exposes neither a promise's state nor a Proxy synchronously, and it
+    // reads a Map/Set iterator's private next-index to preview it; none of the
+    // three is reachable from JS. These are the deliberate limits of a JS-only
+    // native layer. Real Node v26.9.0 prints `Promise { 1 }`, `Proxy({ a: 1 })`
+    // and `[Map Entries] { [ 'a', 1 ] }` respectively.
     expect(util.inspect(Promise.resolve(1))).toBe('Promise { <pending> }');
     const target = { a: 1 };
     expect(util.inspect(new Proxy(target, {}))).toBe('{ a: 1 }');
+    const map = new Map([['a', 1]]);
+    expect(util.inspect(map.entries())).toBe('[Map Iterator] {  }');
+    // The collection itself previews fine; only the iterator position is opaque.
+    expect(util.inspect(map)).toBe("Map(1) { 'a' => 1 }");
+  });
+
+  it('labels every function kind the way Node does', () => {
+    const { util } = boot();
+    // `async function*` is both a generator and async in V8, so its label is
+    // `AsyncGeneratorFunction`, not `Function` + a suffix.
+    expect(util.inspect(async function* named() {})).toBe('[AsyncGeneratorFunction: named]');
+    expect(util.inspect(function* gen() {})).toBe('[GeneratorFunction: gen]');
+    expect(util.inspect(async function af() {})).toBe('[AsyncFunction: af]');
+    expect(util.inspect(Object.assign(function foo() {}, { a: 1 }))).toBe('[Function: foo] { a: 1 }');
+    expect(util.inspect(function () {})).toBe('[Function (anonymous)]');
+  });
+
+  it('counts double-width characters as two columns when wrapping', () => {
+    const { util } = boot();
+    // Read off Node v26.9.0: with breakLength 60 a 50-char CJK string fits on
+    // one line (100 columns of content still goes un-wrapped because the value
+    // is a single string), while the same count of ASCII also fits. The point
+    // is that the width function agrees with ICU, not that it fits.
+    const cjk = util.inspect({ k: '中'.repeat(50) }, { breakLength: 60 });
+    expect(cjk).toBe(`{\n  k: '${'中'.repeat(50)}'\n}`);
   });
 
   it('keeps the Buffer tag stable, including under minification', () => {

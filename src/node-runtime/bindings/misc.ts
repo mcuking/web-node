@@ -294,9 +294,101 @@ export const icuBinding: BindingFactory = () => ({
   getDefaultLocale: () => 'en-US',
   getAvailableLocales: () => ['en-US'],
   getBestAvailableLocale: () => 'en-US',
-  getStringWidth: (s: string) => s.length,
+  getStringWidth,
   hasSmallICU: () => false,
 });
+
+// --- Unicode column width -------------------------------------------------
+// `getStringWidth` is the measure `util.inspect`, `console.table` and readline
+// use to lay text out, so `'中文'` must be four columns wide, not two. Node
+// computes this in ICU (`src/node_i18n.cc`): a wide/fullwidth code point is 2,
+// an emoji-presentation code point is 2, control/format/combining marks and
+// emoji modifiers are 0, and everything else is 1.
+
+/**
+ * The wide/fullwidth (East_Asian_Width = W or F) set. V8 exposes no
+ * East_Asian_Width property, so these are the same ranges Node's own no-ICU
+ * fallback uses (`lib/internal/util/inspect.js`), derived from
+ * EastAsianWidth.txt. Emoji live in the 0x1f300-0x1f64f span below.
+ */
+function isFullWidthCodePoint(code: number): boolean {
+  return (
+    code >= 0x1100 &&
+    (code <= 0x115f || // Hangul Jamo
+      code === 0x2329 ||
+      code === 0x232a ||
+      (code >= 0x2e80 && code <= 0x3247 && code !== 0x303f) ||
+      (code >= 0x3250 && code <= 0x4dbf) ||
+      (code >= 0x4e00 && code <= 0xa4c6) ||
+      (code >= 0xa960 && code <= 0xa97c) ||
+      (code >= 0xac00 && code <= 0xd7a3) ||
+      (code >= 0xf900 && code <= 0xfaff) ||
+      (code >= 0xfe10 && code <= 0xfe19) ||
+      (code >= 0xfe30 && code <= 0xfe6b) ||
+      (code >= 0xff01 && code <= 0xff60) ||
+      (code >= 0xffe0 && code <= 0xffe6) ||
+      (code >= 0x1b000 && code <= 0x1b001) ||
+      (code >= 0x1f200 && code <= 0x1f251) ||
+      (code >= 0x1f300 && code <= 0x1f64f) ||
+      (code >= 0x20000 && code <= 0x3fffd))
+  );
+}
+
+const emojiPresentation = /\p{Emoji_Presentation}/u;
+const emojiModifier = /\p{Emoji_Modifier}/u;
+const zeroWidthCategory = /[\p{Cc}\p{Cf}\p{Me}\p{Mn}]/u;
+
+function columnWidth(codePoint: number): number {
+  const char = String.fromCodePoint(codePoint);
+  if (isFullWidthCodePoint(codePoint)) return 2;
+  if (emojiPresentation.test(char)) return 2;
+  // U+00AD SOFT HYPHEN is a format character but displays as a column.
+  if (codePoint !== 0x00ad && (zeroWidthCategory.test(char) || emojiModifier.test(char))) {
+    return 0;
+  }
+  return 1;
+}
+
+/**
+ * Columns needed to display `str` (no control-character stripping or NFC
+ * normalisation here — that belongs to the caller, e.g.
+ * `internal/util/inspect.js`). `expandEmojiSequence` mirrors ICU's option:
+ * when false, a code point that follows a ZWJ inside an emoji sequence is not
+ * counted separately.
+ *
+ * `ambiguousAsFullWidth` cannot be honoured without the East_Asian_Width
+ * Ambiguous set, which JS cannot see; rather than silently ignoring it we throw
+ * (no caller in the runtime passes it).
+ */
+export function getStringWidth(
+  str: string,
+  ambiguousAsFullWidth = false,
+  expandEmojiSequence = true,
+): number {
+  if (ambiguousAsFullWidth) {
+    throw notImplemented(
+      'api',
+      'icu.getStringWidth(…, ambiguousAsFullWidth = true)',
+      'The East_Asian_Width Ambiguous set is not available to JS.',
+    );
+  }
+  let width = 0;
+  let previous = 0;
+  for (const char of str) {
+    const codePoint = char.codePointAt(0)!;
+    if (
+      !expandEmojiSequence &&
+      previous === 0x200d &&
+      (emojiPresentation.test(char) || emojiModifier.test(char))
+    ) {
+      previous = codePoint;
+      continue;
+    }
+    width += columnWidth(codePoint);
+    previous = codePoint;
+  }
+  return width;
+}
 
 /** `messaging` binding: see `bindings/messaging.ts`. */
 

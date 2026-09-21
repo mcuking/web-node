@@ -66,6 +66,21 @@ describe('vendored: console', () => {
     );
   });
 
+  it('measures column width in Unicode columns, not code units', () => {
+    // '中文' is two code points but four terminal columns. Read off Node
+    // v26.9.0; the ICU column width has to reach `console.table` for the box
+    // borders to line up.
+    const { stdout } = run(`console.table([{name:'中文',n:1},{name:'ab',n:2}]);`);
+    expect(stdout).toBe(
+      '┌─────────┬────────┬───┐\n' +
+        '│ (index) │ name   │ n │\n' +
+        '├─────────┼────────┼───┤\n' +
+        "│ 0       │ '中文' │ 1 │\n" +
+        "│ 1       │ 'ab'   │ 2 │\n" +
+        '└─────────┴────────┴───┘\n',
+    );
+  });
+
   it('only prints a failed assertion, on stderr', () => {
     const { stdout, stderr } = run(`console.assert(true, 'no'); console.assert(false, 'boom %s', 'x');`);
     expect(stdout).toBe('');
