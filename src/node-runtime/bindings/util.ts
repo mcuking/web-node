@@ -32,6 +32,9 @@ const kRejected = 2;
 const PRIVATE_SYMBOLS = {
   arrow_message_private_symbol: Symbol('arrow_message_private_symbol'),
   decorated_private_symbol: Symbol('decorated_private_symbol'),
+  // `internal/worker/js_transferable`'s `markTransferMode` writes the transfer
+  // mode here; the `data` accessor of a marked object reads it back.
+  transfer_mode_private_symbol: Symbol('transfer_mode_private_symbol'),
 };
 
 const isArrayIndex = (key: string): boolean => {
@@ -161,6 +164,11 @@ export const utilBinding: BindingFactory = (ctx: BindingContext) => ({
     ONLY_CONFIGURABLE,
     SKIP_STRINGS,
     SKIP_SYMBOLS,
+    // `BaseObject::TransferMode` (src/base_object.h). `markTransferMode` ORs
+    // these into the private transfer-mode slot.
+    kDisallowCloneAndTransfer: 0,
+    kTransferable: 1 << 0,
+    kCloneable: 1 << 1,
   },
   /**
    * Own, non-index property keys, honouring the V8 property-filter bits the

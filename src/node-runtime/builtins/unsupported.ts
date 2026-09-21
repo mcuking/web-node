@@ -71,18 +71,6 @@ export const unsupportedSpecs: BuiltinSpec[] = [
     init: () => unsupported('v8', { serialize: undefined, deserialize: undefined }),
   },
   {
-    id: 'worker_threads',
-    aliases: ['node:worker_threads'],
-    origin: 'web-node',
-    init: () =>
-      unsupported('worker_threads', {
-        isMainThread: true,
-        parentPort: null,
-        workerData: null,
-        threadId: 0,
-      }),
-  },
-  {
     id: 'readline',
     aliases: ['node:readline'],
     origin: 'web-node',

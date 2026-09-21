@@ -51,4 +51,13 @@ export interface BindingContext {
   requireBuiltin?(id: string): unknown;
 }
 
-export type BindingFactory = (ctx: BindingContext) => Record<string, unknown>;
+export type BindingFactory = (ctx: BindingContext, table: BindingTable) => Record<string, unknown>;
+
+/**
+ * The binding table under construction. A factory receives it so one binding can
+ * read another's exports — Node's internal bindings are independent C++ objects,
+ * but a few of ours must agree on identity (e.g. `messaging` needs the `symbols`
+ * binding's `oninit`/`no_message_symbol` to drive a port the way
+ * `src/node_messaging.cc` does).
+ */
+export type BindingTable = Map<string, Record<string, unknown>>;

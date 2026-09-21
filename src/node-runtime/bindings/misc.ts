@@ -58,6 +58,17 @@ export const symbolsBinding: BindingFactory = () => {
     kJavaStreamBaseField: make('kJavaStreamBaseField'),
     kTestingOnlyJsStream: make('kTestingOnlyJsStream'),
     kPendingHandle: make('kPendingHandle'),
+    // Read by `internal/worker/io.js` when it installs the port's init/close
+    // hooks and re-exports the transfer/clone hooks `internal/worker/js_transferable.js`
+    // hands to objects that opt into `postMessage`. `no_message_symbol` is the
+    // sentinel `MessagePort::ReceiveMessage` returns for "the queue is empty" so
+    // our `messaging` binding and `internal/worker/io.js` can compare identity.
+    oninit: make('oninit'),
+    no_message_symbol: make('no_message_symbol'),
+    messaging_clone_symbol: make('messaging_clone_symbol'),
+    messaging_transfer_symbol: make('messaging_transfer_symbol'),
+    messaging_deserialize_symbol: make('messaging_deserialize_symbol'),
+    messaging_transfer_list_symbol: make('messaging_transfer_list_symbol'),
   };
 };
 
@@ -235,31 +246,7 @@ export const icuBinding: BindingFactory = () => ({
   hasSmallICU: () => false,
 });
 
-/** `messaging` binding: the DOM-side surface (DOMException, structuredClone). */
-export const messagingBinding: BindingFactory = () => ({
-  setDeserializeMainFunction: () => undefined,
-  setDeserializerCreateObjectFunction: () => undefined,
-  isBuildingSnapshot: () => false,
-  // `internal/abort_controller` builds its `AbortError` from this constructor.
-  // Node hands out V8's DOMException; the host realm's is the same spec object.
-  DOMException: typeof DOMException === 'function' ? DOMException : undefined,
-  // `internal/worker/js_transferable` wraps this. Keep the host implementation
-  // so the identity-transferable types still behave.
-  structuredClone: (...args: unknown[]) => {
-    const sc = (globalThis as { structuredClone?: (...a: unknown[]) => unknown }).structuredClone;
-    if (typeof sc !== 'function') {
-      throw notImplemented('api', 'structuredClone', 'This host has no structuredClone.');
-    }
-    return sc(...args);
-  },
-  // `internal/worker/io` defines its DOMException lazily through this hook; the
-  // binding exposes the property eagerly instead, so it is a no-op here.
-  exposeLazyDOMExceptionProperty: () => undefined,
-  QuotaExceededError:
-    typeof DOMException === 'function'
-      ? class QuotaExceededError extends DOMException {}
-      : undefined,
-});
+/** `messaging` binding: see `bindings/messaging.ts`. */
 
 /** `diagnostics_channel` binding: the native subscriber table. */
 export const diagnosticsChannelBinding: BindingFactory = () => {

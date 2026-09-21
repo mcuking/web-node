@@ -608,47 +608,11 @@ export const internalOptionsSpec: BuiltinSpec = {
 // internal/worker/js_transferable
 // ---------------------------------------------------------------------------
 //
-// Node's real file is the plumbing for `structuredClone`/`postMessage` of host
-// objects: `@@kClone`/`@@kTransfer`/`@@kDeserialize` symbols plus a
-// `markTransferMode` that stamps a C++-owned private symbol. We ship the same
-// symbol names (as a shim, `origin: 'web-node'`) so `internal/abort_controller`
-// can define its prototypes, but the transfer machinery itself is inert: this
-// runtime has no message ports to transfer through, so `markTransferMode` is a
-// no-op rather than a lie about serialisation working.
-
-export const internalJsTransferableSpec: BuiltinSpec = {
-  id: 'internal/worker/js_transferable',
-  origin: 'web-node',
-  deps: ['internal/errors'],
-  init: (ctx: BuiltinInitContext) => {
-    const errors = ctx.require('internal/errors') as {
-      codes: Record<string, new (...args: unknown[]) => Error>;
-    };
-    const kClone = Symbol('kClone');
-    const kDeserialize = Symbol('kDeserialize');
-    const kTransfer = Symbol('kTransfer');
-    const kTransferList = Symbol('kTransferList');
-    return {
-      kClone,
-      kDeserialize,
-      kTransfer,
-      kTransferList,
-      markTransferMode: (): void => undefined,
-      setup: (): void => undefined,
-      structuredClone: (...args: unknown[]): unknown => {
-        if (args.length === 0) {
-          throw new errors.codes.ERR_MISSING_ARGS('The value argument must be specified');
-        }
-        const sc = (globalThis as { structuredClone?: (v: unknown, o?: unknown) => unknown })
-          .structuredClone;
-        if (typeof sc !== 'function') {
-          throw notImplemented('api', 'structuredClone', 'This host has no structuredClone.');
-        }
-        return sc(args[0], args[1]);
-      },
-    };
-  },
-};
+// ⏬ This is now the real vendored file (`lib/internal/worker/js_transferable.js`);
+// see `vendored-builtins.ts`. The previous shim minted private symbols that nothing
+// else could see; the real module stamps the transfer mode through the `util`
+// binding's `transfer_mode_private_symbol` and wires `kClone`/`kTransfer` to the
+// `symbols` binding, which is what the `messaging` binding keys off.
 
 // ---------------------------------------------------------------------------
 // internal/buffer
@@ -667,7 +631,29 @@ export const internalBufferSpec: BuiltinSpec = {
     // `_uint8ArrayToBuffer` still answers `Buffer.isBuffer() === true`. Reuse
     // the runtime's own Buffer class to keep that invariant (and its methods).
     const { Buffer } = ctx.require('buffer') as { Buffer: new (...args: never[]) => Uint8Array };
-    return { FastBuffer: Buffer };
+    // `markAsUntransferable` stamps a private symbol on the object and, for an
+    // ArrayBuffer, also sets its "detach key" (the C++ `ArrayBuffer` detail the
+    // serializer consults). We have no V8 detach key, so the private symbol is
+    // the whole mechanism here; `structuredClone` is the host's and does not
+    // read either, which is why the flag is advisory in this runtime.
+    const untransferableObjectPrivateSymbol = Symbol('untransferable_object_private_symbol');
+    return {
+      FastBuffer: Buffer,
+      markAsUntransferable: (object: unknown): void => {
+        if ((typeof object !== 'object' && typeof object !== 'function') || object === null) {
+          return; // A primitive is already untransferable.
+        }
+        try {
+          (object as Record<symbol, unknown>)[untransferableObjectPrivateSymbol] = true;
+        } catch {
+          // Frozen objects are simply not marked, as in Node.
+        }
+      },
+      isMarkedAsUntransferable: (object: unknown): boolean =>
+        object !== null &&
+        typeof object === 'object' &&
+        (object as Record<symbol, unknown>)[untransferableObjectPrivateSymbol] !== undefined,
+    };
   },
 };
 

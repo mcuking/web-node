@@ -1,4 +1,4 @@
-import type { BindingContext } from './context';
+import type { BindingContext, BindingFactory, BindingTable } from './context';
 import { notImplemented } from '../errors';
 
 import { configBinding } from './config';
@@ -16,7 +16,6 @@ import {
   errorsBinding,
   icuBinding,
   inspectorBinding,
-  messagingBinding,
   osBinding,
   performanceBinding,
   processMethodsBinding,
@@ -25,10 +24,11 @@ import {
   traceEventsBinding,
   uvBinding,
 } from './misc';
+import { messagingBinding, workerBinding } from './messaging';
 import { stringDecoderBinding } from './string_decoder';
 
 /** The whitelist of internal bindings this runtime implements. */
-const REGISTRY: Record<string, (ctx: BindingContext) => Record<string, unknown>> = {
+const REGISTRY: Record<string, BindingFactory> = {
   config: configBinding,
   constants: constantsBinding,
   types: typesBinding,
@@ -52,6 +52,7 @@ const REGISTRY: Record<string, (ctx: BindingContext) => Record<string, unknown>>
   inspector: inspectorBinding,
   async_wrap: asyncWrapBinding,
   async_context_frame: asyncContextFrameBinding,
+  worker: workerBinding,
 };
 
 /** Bindings Node internal code knows about but that we deliberately do not ship. */
@@ -63,7 +64,6 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'pipe_wrap',
   'stream_wrap',
   'tty_wrap',
-  'worker',
   'contextify',
   'module_wrap',
   'modules',
@@ -92,10 +92,14 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'block_list',
 ]);
 
-export function createBindingTable(ctx: BindingContext): Map<string, Record<string, unknown>> {
-  const table = new Map<string, Record<string, unknown>>();
+export function createBindingTable(ctx: BindingContext): BindingTable {
+  const table: BindingTable = new Map();
   for (const [name, factory] of Object.entries(REGISTRY)) {
-    table.set(name, factory(ctx));
+    // The table is passed in so a factory can read a sibling binding it must
+    // agree with (see `BindingTable`). Names are registered in an order that
+    // puts `symbols` first, but readers always resolve lazily, so order only
+    // matters for what is present, not when it is read.
+    table.set(name, factory(ctx, table));
   }
   return table;
 }

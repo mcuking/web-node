@@ -328,6 +328,32 @@ exec('node -e "process.stdout.write(String(6 * 7))" | node ' + path.join(__dirna
 });
 console.log('');
 
+// --- worker_threads (milestone 30) ---
+// A MessageChannel is a real entangled port pair: messages are structured
+// clones, a port can be transferred to the other side (and shows up in the
+// event's ports array), and receiveMessageOnPort reads synchronously without
+// starting the port. Only the thread-spawning half of worker_threads (Worker,
+// postMessageToThread) is out of reach in a browser tab, and it says so.
+console.log('-- worker_threads --');
+const { MessageChannel, receiveMessageOnPort } = require('worker_threads');
+
+const syncChannel = new MessageChannel();
+syncChannel.port1.postMessage({ answer: 42 });
+console.log('sync receive : ' + JSON.stringify(receiveMessageOnPort(syncChannel.port2).message));
+
+const channel = new MessageChannel();
+const handoff = new MessageChannel();
+handoff.port2.onmessage = function (e) {
+  console.log('transferred  : ' + e.data);
+};
+channel.port2.onmessage = function (e) {
+  console.log('channel msg  : ' + JSON.stringify(e.data.payload) + ' ports=' + e.ports.length);
+  // The received port is entangled with handoff.port2, so this is the round trip.
+  e.ports[0].postMessage('round trip through the transferred port');
+};
+channel.port1.postMessage({ payload: { hello: 'world' }, port: handoff.port1 }, [handoff.port1]);
+console.log('');
+
 // --- npm (milestone 4) ---
 // The npm client downloads and unpacks packages into the virtual node_modules.
 // require() already resolves node_modules from the VFS, so once "Install deps"

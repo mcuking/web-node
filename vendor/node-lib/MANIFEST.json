@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-21T02:26:57.086Z",
+  "generatedAt": "2026-09-21T02:44:09.932Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -516,6 +516,20 @@
       "sha256": "5b14b21284e19382708f588ff7fa5a212c5335a84b1d9ae6ebdf626244f8fde9",
       "upstreamSha256": "5b14b21284e19382708f588ff7fa5a212c5335a84b1d9ae6ebdf626244f8fde9",
       "bytes": 8250,
+      "patches": []
+    },
+    {
+      "path": "internal/worker/js_transferable.js",
+      "sha256": "1700e2c98bff6acdd37e834bae6eb678f0aaa09a8e45706fb026894a0fba3288",
+      "upstreamSha256": "1700e2c98bff6acdd37e834bae6eb678f0aaa09a8e45706fb026894a0fba3288",
+      "bytes": 3784,
+      "patches": []
+    },
+    {
+      "path": "internal/worker/io.js",
+      "sha256": "e2c4830bba8e572e7db235308625be3e69ebd0dd15efd5f715a8c848e19d873f",
+      "upstreamSha256": "e2c4830bba8e572e7db235308625be3e69ebd0dd15efd5f715a8c848e19d873f",
+      "bytes": 14128,
       "patches": []
     }
   ]

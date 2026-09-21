@@ -60,9 +60,8 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     // and `internal/event_target` (which itself top-level requires `events`).
     // Listing `events` first makes sure it is fully materialised before either
     // consumer starts, instead of handing them a half-built `module.exports`.
-    // `internal/worker/io` (MessageChannel) is only reached from `[kTransferList]`
-    // during a real postMessage, which this runtime does not implement, so it is
-    // deliberately left unregistered.
+    // `internal/worker/io` is reached only through the lazy `[kTransferList]`
+    // path and is registered as a vendored module in its own right.
     deps: [
       'events',
       'internal/event_target',
@@ -689,5 +688,34 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     vendorPath: 'console.js',
     origin: 'node-source',
     deps: ['internal/console/global'],
+  },
+  {
+    id: 'internal/per_context/messageport',
+    vendorPath: 'internal/per_context/messageport.js',
+    origin: 'node-source',
+  },
+  {
+    id: 'internal/worker/js_transferable',
+    vendorPath: 'internal/worker/js_transferable.js',
+    origin: 'node-source',
+    // `setup()` is only invoked from the worker bootstrap; the messaging binding
+    // supplies `setDeserializerCreateObjectFunction`/`structuredClone` regardless.
+    deps: ['internal/errors', 'internal/webidl'],
+  },
+  {
+    id: 'internal/worker/io',
+    vendorPath: 'internal/worker/io.js',
+    origin: 'node-source',
+    // Top-level requires `stream`, `internal/event_target` (which pulls `events`),
+    // `internal/util`, `internal/util/inspect` and `internal/errors`. The undici
+    // `createFastMessageEvent` and `internal/worker/messaging` are lazy.
+    deps: [
+      'stream',
+      'internal/event_target',
+      'internal/util',
+      'internal/util/inspect',
+      'internal/errors',
+      'internal/worker/js_transferable',
+    ],
   },
 ];

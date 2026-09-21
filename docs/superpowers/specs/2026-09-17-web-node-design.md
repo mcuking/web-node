@@ -104,7 +104,8 @@ primordials.js（真源码）→ domexception.js / messageport.js（真源码）
 | `process_methods` | TS | cwd/chdir/exit/umask |
 | `os` | TS | 静态宿主事实（真 `lib/os.js` 跑在其上） |
 | `string_decoder` | TS | decode 占位 |
-| `icu` / `messaging` / `uv` | TS | 最小满足 |
+| `icu` / `uv` | TS | 最小满足 |
+| `messaging` | TS（真 `internal/worker/io.js` 跑在其上） | `MessagePort`/`MessageChannel`/`BroadcastChannel` + 纠缠组、缓冲、关闭握手、端口转移、DataCloneError |
 
 **明确不支持**（抛错）：`crypto`、`zlib`、`tcp_wrap`、`udp_wrap`、`stream_wrap`、`worker`、`inspector`、`sea`、`ffi`、`quic`、`cares_wrap`、`http_parser` 等。
 
@@ -129,7 +130,7 @@ primordials.js（真源码）→ domexception.js / messageport.js（真源码）
 `primordials.js`：引擎缺少 `Float16Array` / `Iterator` 时跳过而非崩溃（3 处，语义等价）。这是**唯一**对真源码的修改。
 
 ### 为什么其余不 vendored
-`internal/errors.js` 是环形依赖枢纽（errors ↔ util ↔ inspect ↔ validators），全量 vendoring 会牵出 231 个文件。因此 `internal/errors` / `internal/fs/glob` / `internal/errors/error_source` / `internal/encoding` / `internal/util/trace_sigint` / `internal/blob` / `internal/worker/js_transferable` / `internal/v8/startup_snapshot` 等由我们提供**最小等价 shim**（`src/node-runtime/builtins/internal-shims.ts`），只实现 vendored 文件实际用到的导出。例外：`internal/util.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util/{diff,parse_args/*,debuglog}.js`、`internal/validators.js`、`internal/mime.js`、`internal/event_target.js`、`internal/webidl.js`、`internal/perf/utils.js`、`internal/abort_controller.js`、`internal/trace_events.js`、`internal/cli_table.js`、`internal/console/*`、`internal/readline/*`、`internal/{linkedlist,priority_queue}.js`、`internal/timers.js`、`assert.js` + `internal/assert/*`、`util.js`、`console.js`、`os.js`、`timers.js` + `timers/promises.js` 本身依赖面可控，已换成真源码（M21–M29），只把它们脚下的 binding/shim 补齐。
+`internal/errors.js` 是环形依赖枢纽（errors ↔ util ↔ inspect ↔ validators），全量 vendoring 会牵出 231 个文件。因此 `internal/errors` / `internal/fs/glob` / `internal/errors/error_source` / `internal/encoding` / `internal/util/trace_sigint` / `internal/blob` / `internal/worker/js_transferable` / `internal/v8/startup_snapshot` 等由我们提供**最小等价 shim**（`src/node-runtime/builtins/internal-shims.ts`），只实现 vendored 文件实际用到的导出。例外：`internal/util.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util/{diff,parse_args/*,debuglog}.js`、`internal/validators.js`、`internal/mime.js`、`internal/event_target.js`、`internal/webidl.js`、`internal/perf/utils.js`、`internal/abort_controller.js`、`internal/trace_events.js`、`internal/cli_table.js`、`internal/console/*`、`internal/readline/*`、`internal/{linkedlist,priority_queue}.js`、`internal/timers.js`、`internal/worker/io.js` + `internal/per_context/messageport.js` + `internal/worker/js_transferable.js`、`assert.js` + `internal/assert/*`、`util.js`、`console.js`、`os.js`、`timers.js` + `timers/promises.js` 本身依赖面可控，已换成真源码（M21–M30），只把它们脚下的 binding/shim 补齐。
 
 ---
 
@@ -184,7 +185,7 @@ web-node/
 
 > 本表按里程碑进展刷新（当前至 **M17**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
 >
-> **vendoring 进展**：`lib/stream.js` + `internal/streams/*`（整套流）、`lib/events.js`、`lib/internal/event_target.js` + `internal/webidl.js` + `internal/perf/utils.js`、`lib/internal/abort_controller.js`、`lib/console.js` + `internal/console/*` + `internal/cli_table.js` + `internal/trace_events.js` + `internal/util/debuglog.js`、`lib/os.js`、`lib/timers.js` + `internal/timers.js` + `timers/promises.js` + `internal/{linkedlist,priority_queue}.js`、`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` + `internal/promise_hooks.js`、`lib/path.js`、`lib/querystring.js`、`lib/punycode.js`、`lib/domain.js`、`lib/diagnostics_channel.js`、`lib/string_decoder.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util.js`、`internal/util/diff.js`、`internal/util/parse_args/*`、`internal/validators.js`、`internal/mime.js`、`assert.js`、`internal/assert/{utils,assertion_error,myers_diff}.js`、`internal/streams/{state,from,utils}.js`、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`internal/per_context/*` 以及 `util.js` 已用 Node 真源码（MANIFEST 73 个文件）。
+> **vendoring 进展**：`lib/stream.js` + `internal/streams/*`（整套流）、`lib/events.js`、`lib/internal/event_target.js` + `internal/webidl.js` + `internal/perf/utils.js`、`lib/internal/abort_controller.js`、`lib/console.js` + `internal/console/*` + `internal/cli_table.js` + `internal/trace_events.js` + `internal/util/debuglog.js`、`lib/os.js`、`lib/timers.js` + `internal/timers.js` + `timers/promises.js` + `internal/{linkedlist,priority_queue}.js`、`lib/internal/worker/io.js` + `internal/per_context/messageport.js` + `internal/worker/js_transferable.js`、`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` + `internal/promise_hooks.js`、`lib/path.js`、`lib/querystring.js`、`lib/punycode.js`、`lib/domain.js`、`lib/diagnostics_channel.js`、`lib/string_decoder.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util.js`、`internal/util/diff.js`、`internal/util/parse_args/*`、`internal/validators.js`、`internal/mime.js`、`assert.js`、`internal/assert/{utils,assertion_error,myers_diff}.js`、`internal/streams/{state,from,utils}.js`、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`internal/per_context/*` 以及 `util.js` 已用 Node 真源码（MANIFEST 75 个文件）。
 
 | 限制 | 说明 |
 |---|---|

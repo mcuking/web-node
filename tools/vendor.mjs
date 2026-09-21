@@ -89,6 +89,8 @@ const FILES = [
   'assert.js',
   'util.js',
   'os.js',
+  'internal/worker/js_transferable.js',
+  'internal/worker/io.js',
 ];
 /**
  * Documented, minimal patches applied to vendored source.

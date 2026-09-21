@@ -14,11 +14,12 @@ import {
   internalTraceSigintSpec,
   internalWebStreamsAdaptersSpec,
   internalEventsSymbolsSpec,
-  internalJsTransferableSpec,
   internalBootstrapRealmSpec,
   internalUrlSpec,
 } from './internal-shims';
 import { vendoredBuiltins } from './vendored-builtins';
+import { undiciSpec } from './undici';
+import { workerThreadsSpec } from './worker-threads';
 import { bufferSpec } from './buffer';
 import { fsSpec } from './fs';
 import { fsPromisesSpec } from './fs-promises';
@@ -45,7 +46,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalBlobSpec,
   internalFsGlobSpec,
   internalAbortListenerSpec,
-  internalJsTransferableSpec,
   internalOptionsSpec,
   internalEncodingSpec,
   internalTraceSigintSpec,
@@ -70,7 +70,11 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   cryptoSpec,
   dnsSpec,
   dnsPromisesSpec,
+  // `internal/deps/undici/undici` is a two-line shim: only
+  // `createFastMessageEvent` is reachable from the vendored graph.
+  undiciSpec,
   ...unsupportedSpecs,
+  workerThreadsSpec,
   httpSpec,
   httpsSpec,
   // milestone 7: the controlled spawn surface

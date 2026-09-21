@@ -351,13 +351,16 @@ checkout; every patch we do apply is listed in the manifest's `patches` field.
 
 **Current coverage** (revision `7a3437d`, v26.9.1-dev):
 
-- **73 files vendored** — the whole `stream` layer, `events`,
+- **75 files vendored** — the whole `stream` layer, `events`,
   `internal/event_target` (+ `internal/webidl`, `internal/perf/utils`),
   `internal/abort_controller`, `console` (+ `internal/console/*`,
   `internal/cli_table`, `internal/util/debuglog`, `internal/trace_events`,
   `internal/readline/*`), `os`,
   `timers` (+ `internal/timers`, `timers/promises`, `internal/linkedlist`,
   `internal/priority_queue`),
+  `internal/worker/io` (+ `internal/per_context/messageport`,
+  `internal/worker/js_transferable`) — a real `MessageChannel` / `MessagePort` /
+  `BroadcastChannel`, on a JS reimplementation of the `messaging` binding,
   `async_hooks`
   (+ `internal/async_local_storage/*`, `internal/promise_hooks`), `path`,
   `querystring`, `punycode`, `domain`, `diagnostics_channel`, `string_decoder`,
@@ -385,9 +388,10 @@ is vendorable when its only dependencies are shims we already provide;
 everything else is a binding away.
 
 The remaining large gaps are the ones with no browser story at all (`http2`,
-`dgram`, `tls`/`_tls_*`, `cluster`, `worker_threads`, `inspector`, `repl`,
-`vm`/`wasi`, `sqlite`, `sea`), plus native-layer reimplementations worth doing
-(`internal/util/inspect.js`, the native `string_decoder`, `internal/fs/*`).
+`dgram`, `tls`/`_tls_*`, `cluster`, the thread-spawning half of
+`worker_threads`, `inspector`, `repl`, `vm`/`wasi`, `sqlite`, `sea`), plus
+native-layer reimplementations worth doing (`internal/util/inspect.js`, the
+native `string_decoder`, `internal/fs/*`).
 
 ## Contributing
 
