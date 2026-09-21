@@ -387,7 +387,12 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
   `streams/state`, `streams/destroy`, `per_context/*`, …).
 - **29 of the 58 top-level `lib/*.js` modules are provided** — either as
   vendored source, or by our own implementation where the real file needs a
-  native layer that cannot exist in a tab.
+  native layer that cannot exist in a tab. `crypto` is the newest of these: the
+  WebCrypto API is promise-only, but Node's `createHash` / `createHmac` /
+  `pbkdf2Sync` / `scryptSync` are synchronous, so MD5, SHA-1, SHA-2
+  (224/256/384/512), HMAC, PBKDF2, HKDF and scrypt are implemented in plain JS
+  in `src/node-runtime/crypto/hash.ts` and checked against Node's OpenSSL
+  output. Ciphers, signatures and key objects stay explicitly unsupported.
 
 ### What can and cannot be moved over
 

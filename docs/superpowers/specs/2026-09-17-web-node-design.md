@@ -107,7 +107,9 @@ primordials.js（真源码）→ domexception.js / messageport.js（真源码）
 | `icu` / `uv` | TS | 最小满足 |
 | `messaging` | TS（真 `internal/worker/io.js` 跑在其上） | `MessagePort`/`MessageChannel`/`BroadcastChannel` + 纠缠组、缓冲、关闭握手、端口转移、DataCloneError |
 
-**明确不支持**（抛错）：`crypto`、`zlib`、`tcp_wrap`、`udp_wrap`、`stream_wrap`、`worker`、`inspector`、`sea`、`ffi`、`quic`、`cares_wrap`、`http_parser` 等。
+**明确不支持**（抛错）：原生 `crypto`/OpenSSL 绑定、`zlib`、`tcp_wrap`、`udp_wrap`、`stream_wrap`、`worker`、`inspector`、`sea`、`ffi`、`quic`、`cares_wrap`、`http_parser` 等。
+
+> 注：上表说的是 **native 绑定**。`crypto` 这个 **builtin 模块本身是支持的**（`origin: web-node`）：随机数走平台 WebCrypto，同步的摘要/HMAC/PBKDF2/HKDF/scrypt 在 JS 里实现（`src/node-runtime/crypto/hash.ts`）并对齐 Node 的 OpenSSL 输出；密文/签名/非对称密钥仍显式抛错。
 
 ---
 

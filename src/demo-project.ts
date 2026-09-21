@@ -408,6 +408,25 @@ console.log('exclude     : ' + JSON.stringify(fsm.globSync('**/*.js', { cwd: glo
 })();
 console.log('');
 
+// --- crypto (milestone 34) ---
+// The digest/MAC/KDF half of node:crypto has to be synchronous, and WebCrypto
+// is promise-only, so SHA-2, HMAC, PBKDF2, HKDF and scrypt are implemented in
+// plain JS (src/node-runtime/crypto/hash.ts). Randomness still rides on the
+// platform's WebCrypto, exactly like Node rides on OpenSSL's RAND_bytes.
+console.log('-- crypto (milestone 34) --');
+const crypto = require('crypto');
+console.log('sha256(abc) : ' + crypto.createHash('sha256').update('abc').digest('hex'));
+console.log('sha512(abc) : ' + crypto.createHash('sha512').update('abc').digest('hex').slice(0, 40) + '...');
+console.log('md5(abc)    : ' + crypto.createHash('md5').update('abc').digest('hex'));
+console.log('hmac-sha256 : ' + crypto.createHmac('sha256', 'secret-key').update('hello world').digest('hex'));
+console.log('pbkdf2      : ' + crypto.pbkdf2Sync('password', 'salt', 1000, 16, 'sha256').toString('hex'));
+console.log('hkdf        : ' + Buffer.from(crypto.hkdfSync('sha256', 'key', 'salt', 'info', 16)).toString('hex'));
+console.log('scrypt      : ' + crypto.scryptSync('password', 'salt', 16, { N: 1024, r: 8, p: 1 }).toString('hex'));
+console.log('timingSafe  : ' + crypto.timingSafeEqual(Buffer.from('abcd'), Buffer.from('abcd')));
+console.log('randomInt   : ' + (crypto.randomInt(1, 7) >= 1 ? 'in range (1..6)' : 'OUT OF RANGE'));
+console.log('randomUUID  : ' + crypto.randomUUID().length + ' chars, ' + crypto.getHashes().length + ' hashes available');
+console.log('');
+
 // --- npm (milestone 4) ---
 // The npm client downloads and unpacks packages into the virtual node_modules.
 // require() already resolves node_modules from the VFS, so once "Install deps"
