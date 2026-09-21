@@ -112,7 +112,7 @@ close”会报 `ERR_STREAM_PREMATURE_CLOSE`。
 边产生边到达（HTML 例外，为注入 `<base>` 先缓冲）。连接默认 keep-alive，服务端支持 pipelining，
 客户端按端口做连接池。`https` 是 `http` 的同名壳（虚拟网络无 TLS）。
 
-## npm（M4 / M6）
+## npm（M4 / M6 / M39）
 
 点顶栏 **⬇ Install deps**：客户端会读项目 `package.json`，向 npm registry 解析依赖版本，
 下载 tarball 后 gunzip + untar 写入虚拟 `node_modules`（顶层 hoisting，仅在版本冲突时嵌套），
@@ -129,7 +129,16 @@ M6 把 npm 客户端补到实用：
 - **peer 依赖**：缺失的 peer 自动装到根 `node_modules`（npm 7+ 行为）。
 - **平台过滤**：仅不匹配当前平台（`linux`/`wasm32`）的 `optionalDependencies` 静默跳过。
 
-未支持：`file:`/`git+`/`link:` 说明符。（生命周期脚本与 `.bin` shim 已可用：它们跑在运行时自带的 `child_process` 表面之上，见里程碑 7。）
+M39 又把解析推进一步：
+- **`overrides`/`resolutions`**：根 `package.json` 的 `overrides`（或 Yarn 的 `resolutions`）能钉住一个
+  传递依赖的版本（支持扁平、嵌套、`.`、`$ref`；最长路径优先），不用改那个声明依赖的包。
+- **`file:`/`link:`**：直接从虚拟文件系统装包——`file:` 指向目录（读其 `package.json`，递归拷贝，
+  跳过 `node_modules`）或本地 `.tgz`（解包）；`link:` 因其物化为拷贝（VFS 无符号链接）。
+- **有界并发下载**：tarball 下载最多 `concurrency`（默认 8）个同时在飞，且**先全部下载校验再写树**，
+  失败不留半成品。
+
+未支持：`git+`/`git:` 说明符；`link:` 是拷贝而非符号链接，所以对源包的修改不会反映到消费方。
+（生命周期脚本与 `.bin` shim 已可用：它们跑在运行时自带的 `child_process` 表面之上，见里程碑 7。）
 
 ## 构建工具（M5）
 

@@ -53,7 +53,10 @@ top of it sit three virtual subsystems:
   `package-lock.json` (lockfileVersion 3) that a repeat install reuses without
   re-resolving, verify every tarball against the registry's sha512/sha1 before
   writing it, install missing peer dependencies at the root, and skip
-  optional dependencies built for another platform.
+  optional dependencies built for another platform. A root `overrides` (or yarn
+  `resolutions`) table pins a transitive dependency's version, `file:`/`link:`
+  specifiers install a package straight out of the virtual file system, and
+  tarballs download with bounded concurrency.
 - **Build tools** — esbuild (the official WASM build, the same transformer Vite
   uses) runs inside the tab: it compiles TypeScript, bundles a real `node_modules`
   dependency and writes `/project/dist/app.js`. The `browser` field in
@@ -208,8 +211,12 @@ const ms = require('ms');
 ms(60000); // '1m'
 ```
 
-Not yet: `file:` / `git+` / `link:` specifiers. Lifecycle scripts and `.bin`
-shims run against the runtime's own `child_process` surface (milestone 7).
+Not yet: `git+` / `git:` specifiers. A `link:` is materialised as a copy — the
+VFS has no symbolic links — so an edit to the linked package is not seen by the
+consumer. A root `overrides` (or yarn `resolutions`) table pins transitive
+versions, and `file:` (a directory or a `.tgz`) installs straight from the
+virtual file system. Lifecycle scripts and `.bin` shims run against the runtime's
+own `child_process` surface (milestone 7).
 
 ## Build tools (M5)
 

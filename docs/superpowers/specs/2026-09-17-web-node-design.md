@@ -205,7 +205,7 @@ web-node/
 | `os` 返回静态假数据 | 浏览器无可信宿主信息（但已换真 `lib/os.js`，形状/强制转换/`constants` 与 Node 一致） |
 | `credentials` binding | 只提供 `getTempDir`（`/tmp`） |
 | `internal/fs/utils.js` 为 shim | 只导出 `DirentFromStats`（`fs` 是自研 VFS，真 util 是 fs 基座） |
-| `file:`/`git+`/`link:` 说明符 | npm 未支持 |
+| `file:`/`link:` 说明符 | **已支持**（M39）：`file:` 目录/`.tgz` 直接从 VFS 装；`link:` 因 VFS 无符号链接而物化为拷贝。`git+`/`git:` 仍未支持 |
 | Buffer 未池化 | `allocUnsafe`/`from(string)` 不做 slab 池化（`.byteOffset` 恒为 0） |
 | vendored 注释不进 bundle | 构建期剥离注释（行号/列号/ MIT 声明均保留）；`Function.prototype.toString()` 看不到注释，缩进未动 |
 | promise hooks 不触发 | V8 promise 未插桩，`createHook({ promiseResolve })` 不会响（tick/timer/AsyncResource 会） |
@@ -216,9 +216,11 @@ web-node/
 
 已完成：虚拟网络（M3）、npm client（M4）、构建工具（M5）、进程表面（M7）、stream 收尾（M8）、Buffer 共享内存（M9）、整套 stream + events 换真源码（M10–M16）、真 `async_hooks` + `AsyncLocalStorage`（M17）、真框架跑起来（M18，Vue 3 SFC 在页内被 Vite 编译并运行）、更多 vendored 真源码（M19）、真 `string_decoder`（M20）、真 `internal/util/types`（M21）、真 `internal/util/inspect`（M22）、真断言栈（M23）、真 `util` 模块（M24：`lib/util.js` + `lib/internal/util.js`，真 `promisify`/`parseArgs`/`MIMEType`/`parseEnv` 等）、真 `EventTarget` 栈（M25）、真 `AbortController`/`AbortSignal`（M26）、真 `console`（M27）、真 `os`（M28）、真 `timers`（M29：`lib/timers.js` + `internal/timers.js` + `timers/promises.js`，`timers` binding 内置一个代替 libuv 的驱动）、真 `worker_threads` 消息传递（M30：`internal/worker/io.js` + `internal/per_context/messageport.js` + `internal/worker/js_transferable.js`，`messaging` binding 用 JS 重实现 `src/node_messaging.cc` 的可见契约）、真 `readline`（M31：`lib/readline.js` + `readline/promises.js` + `internal/readline/*` + `internal/repl/history.js`，`internal/process/permission` 恒 disabled）。
 
+- **npm 解析（M39）**：根 `overrides`/`resolutions`（扁平/嵌套/`.`/`$ref`，最长路径优先）、`file:`/`link:` 本地说明符（VFS 目录拷贝 / 本地 `.tgz`），下载改为有界并发（默认 8）且先全下载再写树。
+
 接下来：
 
 1. **promise hooks（M17 遗留，可选）**：要让 `createHook` 的 `promiseResolve` 真响，需要 V8 promise 级插桩，代价大，暂缓。
-2. **npm 再进一步**：`file:`/`git+`/`link:` 说明符、`overrides`/`resolutions`、并发下载限流。
+2. ~~**npm 再进一步**~~ ✅ **已统一处理（M39）**：`overrides`/`resolutions`、`file:`/`link:`、有界并发下载（见上）。剩：`git+`/`git:` 不支持（标签页无 git）。
 3. **性能**：把热点 binding（buffer/fs）替换为 wasm；引入 SharedArrayBuffer + Atomics 做同步 syscall。
 4. **更多框架 / 工具链**：React（SWC / Babel）、Svelte、TypeScript 项目、Tailwind / PostCSS 管线。

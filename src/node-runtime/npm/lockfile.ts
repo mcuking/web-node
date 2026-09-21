@@ -21,6 +21,8 @@ export interface LockedPackage {
   version: string;
   resolved?: string;
   integrity?: string;
+  /** Set for `link:` installs (npm's flag for a materialised local package). */
+  link?: boolean;
   dependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
@@ -116,11 +118,16 @@ export function writeLockfile(vfs: Vfs, cwd: string, contents: string): void {
 }
 
 /** The lockfile entry for an installed package (the fields we can reinstall from). */
-export function lockEntryFor(manifest: PackageManifest, opts: { resolved?: string; integrity?: string; dev?: boolean }): LockedPackage {
+export function lockEntryFor(
+  manifest: PackageManifest,
+  opts: { resolved?: string; integrity?: string; dev?: boolean; local?: string; link?: boolean },
+): LockedPackage {
   const entry: LockedPackage = { version: manifest.version };
-  if (opts.resolved) entry.resolved = opts.resolved;
+  const resolved = opts.resolved ?? opts.local;
+  if (resolved) entry.resolved = resolved;
   if (opts.integrity) entry.integrity = opts.integrity;
   if (opts.dev) entry.dev = true;
+  if (opts.link) entry.link = true;
   if (manifest.dependencies && Object.keys(manifest.dependencies).length) entry.dependencies = manifest.dependencies;
   if (manifest.optionalDependencies && Object.keys(manifest.optionalDependencies).length) entry.optionalDependencies = manifest.optionalDependencies;
   if (manifest.peerDependencies && Object.keys(manifest.peerDependencies).length) {

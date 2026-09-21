@@ -6,6 +6,8 @@ export { createRegistry } from './registry';
 export type { RegistryClient, PackageManifest, Packument, FetchLike, FetchResponseLike, Dist } from './registry';
 export { installProject } from './install';
 export type { InstallOptions, InstallResult, InstalledPackage } from './install';
+export { buildOverrideTable, parseOverrideKey } from './overrides';
+export type { OverrideTable, OverrideRule } from './overrides';
 export { binEntriesFor, writeBinShims, renderShim } from './bin';
 export type { BinEntry } from './bin';
 export {

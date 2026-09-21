@@ -10,14 +10,20 @@
  * that still satisfies the declared range is reused, so resolution (and its
  * network round trips) is skipped entirely.
  *
+ * A project can also steer the tree from the root: `overrides` / `resolutions`
+ * re-point a transitive dependency at a chosen range (see `overrides.ts`), and
+ * `file:`/`link:` specifiers install a package straight out of the virtual file
+ * system instead of the registry.
+ *
  * After the tree is written the installer does the two things npm does next:
  * it writes `node_modules/.bin` shims (as JavaScript, see `bin.ts`) and it runs
  * each package's `preinstall`/`install`/`postinstall` followed by the root
  * project's lifecycle (see `scripts.ts`). Script execution needs a spawn
  * surface and is therefore skipped when no `host` is supplied.
  *
- * Still out of scope (recorded as limitations): npm/yarn/pnpm filesystem specs
- * (`file:`, `git+`, `link:`) and `npm run` itself.
+ * Still out of scope (recorded as limitations): git specs (`git+`, `git:`) and
+ * `npm run` itself. `link:` is materialised as a copy — the VFS has no symbolic
+ * links — so an edit to the linked package is not observed by the consumer.
  */
 
 import type { Vfs } from '../vfs';
@@ -28,6 +34,7 @@ import { extractTarball } from './tarball';
 import { binEntriesFor, writeBinShims, type BinEntry } from './bin';
 import { runDependencyScripts, runRootScripts, DEFAULT_SCRIPT_TIMEOUT_MS, type ScriptOutcome } from './scripts';
 import { maxSatisfying, satisfies } from './semver';
+import { buildOverrideTable } from './overrides';
 import { verifyIntegrity } from './integrity';
 import { buildLockfile, lockedByName, lockEntryFor, readLockfile, writeLockfile, type LockedPackage } from './lockfile';
 
@@ -81,6 +88,12 @@ export interface InstallOptions {
   scriptTimeoutMs?: number;
   /** Streamed script output. */
   onOutput?: (chunk: Uint8Array, stream: 'stdout' | 'stderr') => void;
+  /**
+   * How many tarballs may be in flight at once. The resolution walk stays
+   * sequential (it is cheap and order-sensitive), but downloads are the slow
+   * part of an install, so they overlap up to this many at a time.
+   */
+  concurrency?: number;
 }
 
 /** A dependency resolved to a concrete version, however we got there. */
@@ -98,6 +111,14 @@ interface Resolved {
   tarball?: string;
   integrity?: string;
   fromLock: boolean;
+  /** `file:`/`link:` installs carry their bytes instead of a tarball URL. */
+  kind?: 'registry' | 'file' | 'link';
+  /** A `file:`/`link:` directory to copy into `node_modules`. */
+  localDir?: string;
+  /** A `file:` tarball, already extracted. */
+  localEntries?: Array<{ path: string; type: 'file' | 'dir'; data: Uint8Array }>;
+  /** The specifier the range came from, for the lockfile (`file:../foo`). */
+  spec?: string;
 }
 
 interface Placement {
@@ -134,6 +155,54 @@ function relativePosix(from: string, to: string): string {
   return [...Array(a.length - i).fill('..'), ...b.slice(i)].join('/');
 }
 
+/** Recursively copy a directory tree, skipping `node_modules` and `.git`. */
+function copyTree(vfs: Vfs, from: string, to: string): void {
+  ensureDir(vfs, to);
+  for (const entry of vfs.readdir(from, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === '.git') continue;
+    const src = p.join(from, entry.name);
+    const dst = p.join(to, entry.name);
+    if (entry.type === 'dir') copyTree(vfs, src, dst);
+    else {
+      ensureDir(vfs, p.dirname(dst));
+      vfs.writeFile(dst, vfs.readFile(src));
+    }
+  }
+}
+
+/** `file:`/`link:` specifier, split into its kind and (raw) target path. */
+function localSpec(spec: string): { kind: 'file' | 'link'; target: string } | null {
+  const match = /^(file|link):(.*)$/i.exec(spec);
+  if (!match) return null;
+  const target = match[2].trim();
+  return { kind: match[1].toLowerCase() as 'file' | 'link', target: target === '' ? '.' : target };
+}
+
+/**
+ * Run `worker` over `items` with at most `limit` in flight, then rethrow the
+ * first failure. Every item is attempted even if an earlier one rejects, so no
+ * download is left dangling half-scheduled.
+ */
+async function runPool<T>(items: readonly T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
+  if (items.length === 0) return;
+  const errors: unknown[] = [];
+  let next = 0;
+  const runner = async (): Promise<void> => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      try {
+        await worker(items[index]);
+      } catch (err) {
+        errors.push(err);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runner));
+  if (errors.length > 0) throw errors[0];
+}
+
 export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<InstallResult> {
   const log = opts.log ?? (() => undefined);
   const client: RegistryClient =
@@ -150,11 +219,17 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
     scripts?: Record<string, string>;
+    overrides?: unknown;
+    resolutions?: unknown;
   };
 
   const rootDeps: Record<string, string> = { ...(rootPkg.dependencies ?? {}) };
   const devDeps = opts.includeDev ? { ...(rootPkg.devDependencies ?? {}) } : {};
   Object.assign(rootDeps, devDeps);
+
+  // `overrides`/`resolutions` steer the whole tree from the root, and they
+  // apply even on a lockfile-reusing install (that is the point of pinning).
+  const overrides = buildOverrideTable(rootPkg);
 
   if (Object.keys(rootDeps).length === 0) {
     log('nothing to install — no dependencies declared');
@@ -170,6 +245,7 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
   const platform = opts.platform ?? 'linux';
   const arch = opts.arch ?? 'wasm32';
   const warnings: string[] = [];
+  for (const key of overrides.ignored) warnings.push(`override ignored: ${key}`);
   const placements: Placement[] = [];
   /** nodeModulesDir -> (packageName -> resolved version) */
   const placed = new Map<string, Map<string, string>>();
@@ -177,18 +253,98 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
   const peerWanted = new Map<string, { range: string; by: string }>();
   let budget = opts.maxPackages ?? 512;
 
-  const resolve = async (name: string, range: string, quiet = false): Promise<Resolved | null> => {
+  const resolve = async (
+    name: string,
+    range: string,
+    fromDir: string,
+    ancestors: readonly string[],
+    quiet = false,
+  ): Promise<Resolved | null> => {
     const warn = (message: string): void => {
       if (!quiet) warnings.push(message);
     };
-    const spec = (range ?? '').trim() || '*';
-    if (/^(file:|link:|git\+|git:|https?:)/i.test(spec)) {
+    let spec = (range ?? '').trim() || '*';
+
+    // A root override wins over whatever the dependent asked for.
+    const override = overrides.find(name, ancestors);
+    if (override !== undefined && override !== spec) {
+      log(`override ${name}: ${spec} -> ${override}${ancestors.length ? ` (under ${ancestors.join('>')})` : ''}`);
+      spec = override;
+    }
+
+    // `file:`/`link:` resolve against the VFS, not the registry.
+    const local = localSpec(spec);
+    if (local) {
+      const target = local.target.startsWith('/') ? p.normalize(local.target) : p.resolve(fromDir, local.target);
+      if (!vfs.exists(target)) {
+        warn(`skipped ${name}: ${local.kind}: path not found: ${spec}`);
+        return null;
+      }
+      if (vfs.stat(target).type === 'dir') {
+        const manifestPath = p.join(target, 'package.json');
+        let manifest: { name?: string; version?: string; dependencies?: Record<string, string>; optionalDependencies?: Record<string, string>; peerDependencies?: Record<string, string>; peerDependenciesMeta?: Record<string, { optional?: boolean }>; bin?: string | Record<string, string> } | undefined;
+        if (vfs.exists(manifestPath)) {
+          try {
+            manifest = JSON.parse(decode(vfs.readFile(manifestPath)));
+          } catch (err) {
+            warn(`skipped ${name}: unreadable package.json in ${spec} (${(err as Error).message})`);
+            return null;
+          }
+        } else {
+          warn(`${name}: ${spec} has no package.json; using a synthetic manifest`);
+        }
+        return {
+          name: manifest?.name ?? name,
+          version: manifest?.version ?? '0.0.0',
+          dependencies: manifest?.dependencies ?? {},
+          optionalDependencies: manifest?.optionalDependencies ?? {},
+          peerDependencies: manifest?.peerDependencies ?? {},
+          peerOptional: optionalPeers(manifest?.peerDependenciesMeta),
+          peerDependenciesMeta: manifest?.peerDependenciesMeta,
+          bin: manifest?.bin,
+          kind: local.kind,
+          localDir: target,
+          spec,
+          fromLock: false,
+        };
+      }
+      if (local.kind === 'link') {
+        warn(`skipped ${name}: link: target is not a directory (${spec})`);
+        return null;
+      }
+      try {
+        const entries = await extractTarball(vfs.readFile(target));
+        const pkgEntry =
+          entries.find((e) => e.type === 'file' && e.path === 'package.json') ??
+          entries.find((e) => e.type === 'file' && e.path.endsWith('/package.json'));
+        const manifest = pkgEntry ? (JSON.parse(decode(pkgEntry.data)) as { name?: string; version?: string; dependencies?: Record<string, string>; optionalDependencies?: Record<string, string>; peerDependencies?: Record<string, string>; peerDependenciesMeta?: Record<string, { optional?: boolean }>; bin?: string | Record<string, string> }) : undefined;
+        return {
+          name: manifest?.name ?? name,
+          version: manifest?.version ?? '0.0.0',
+          dependencies: manifest?.dependencies ?? {},
+          optionalDependencies: manifest?.optionalDependencies ?? {},
+          peerDependencies: manifest?.peerDependencies ?? {},
+          peerOptional: optionalPeers(manifest?.peerDependenciesMeta),
+          peerDependenciesMeta: manifest?.peerDependenciesMeta,
+          bin: manifest?.bin,
+          kind: 'file',
+          localEntries: entries,
+          spec,
+          fromLock: false,
+        };
+      } catch (err) {
+        warn(`skipped ${name}: unreadable tarball ${spec} (${(err as Error).message})`);
+        return null;
+      }
+    }
+
+    if (/^(git\+|git:|https?:)/i.test(spec)) {
       warn(`skipped ${name}: unsupported specifier "${spec}"`);
       return null;
     }
 
     const entry = locked.get(name);
-    if (entry && entry.resolved && satisfies(entry.version, spec)) {
+    if (entry && entry.resolved && /^https?:/i.test(entry.resolved) && satisfies(entry.version, spec)) {
       fromLockfile += 1;
       return {
         name,
@@ -203,6 +359,7 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
         cpu: entry.cpu,
         tarball: entry.resolved,
         integrity: entry.integrity,
+        kind: 'registry',
         fromLock: true,
       };
     }
@@ -228,6 +385,7 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
       cpu: manifest.cpu,
       tarball: manifest.dist?.tarball,
       integrity: manifest.dist?.integrity ?? (manifest.dist?.shasum ? `sha1-${manifest.dist.shasum}` : undefined),
+      kind: 'registry',
       fromLock: false,
     };
   };
@@ -244,11 +402,13 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
     chain: string[],
     nestedUnder: string,
     mode: 'required' | 'optional',
+    packageDir: string,
+    ancestors: readonly string[],
   ): Promise<void> => {
     for (const [name, range] of Object.entries(deps)) {
       let resolved: Resolved | null;
       try {
-        resolved = await resolve(name, range, mode === 'optional');
+        resolved = await resolve(name, range, packageDir, ancestors, mode === 'optional');
       } catch (err) {
         if (mode === 'optional') continue; // optional failures are silent, like npm
         warnings.push(`${name}: ${(err as Error).message}`);
@@ -300,12 +460,13 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
       const idx = chain.indexOf(target);
       const baseChain = idx >= 0 ? chain.slice(0, idx + 1) : [...chain, target];
       const childDir = p.join(target, name);
-      await place(resolved.dependencies, [...baseChain, p.join(childDir, 'node_modules')], childDir, 'required');
-      await place(resolved.optionalDependencies, [...baseChain, p.join(childDir, 'node_modules')], childDir, 'optional');
+      const childAncestors = [...ancestors, resolved.name];
+      await place(resolved.dependencies, [...baseChain, p.join(childDir, 'node_modules')], childDir, 'required', childDir, childAncestors);
+      await place(resolved.optionalDependencies, [...baseChain, p.join(childDir, 'node_modules')], childDir, 'optional', childDir, childAncestors);
     }
   };
 
-  await place(rootDeps, [nmRoot], opts.cwd, 'required');
+  await place(rootDeps, [nmRoot], opts.cwd, 'required', opts.cwd, []);
 
   // npm 7+ auto-installs peers. Place any that no level of the tree satisfied.
   const missingPeers: Record<string, string> = {};
@@ -316,10 +477,39 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
       log(`peer  ${peer}@${want.range} (required by ${want.by})`);
     }
   }
-  if (Object.keys(missingPeers).length > 0) await place(missingPeers, [nmRoot], opts.cwd, 'required');
+  if (Object.keys(missingPeers).length > 0) await place(missingPeers, [nmRoot], opts.cwd, 'required', opts.cwd, []);
 
-  // Download + verify + extract each distinct name@version once.
-  const extracted = new Map<string, Awaited<ReturnType<typeof extractTarball>>>();
+  // Download + verify + extract each distinct registry tarball once, up to
+  // `concurrency` in flight. Everything is fetched *before* the tree is
+  // written, so a failed download (or an integrity mismatch) leaves
+  // `node_modules` untouched rather than half-populated.
+  const concurrency = Math.max(1, Math.floor(opts.concurrency ?? 8));
+  const extracted = new Map<string, Array<{ path: string; type: 'file' | 'dir'; data: Uint8Array }>>();
+  const integrityByKey = new Map<string, string | undefined>();
+  const skipped = new Set<string>();
+  const downloads: Array<{ key: string; resolved: Resolved }> = [];
+  const seen = new Set<string>();
+  for (const { resolved } of placements) {
+    if (resolved.localDir || resolved.localEntries) continue;
+    const key = `${resolved.name}@${resolved.version}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (!resolved.tarball) {
+      warnings.push(`${key}: no tarball URL (registry or lockfile)`);
+      skipped.add(key);
+      continue;
+    }
+    downloads.push({ key, resolved });
+  }
+  await runPool(downloads, concurrency, async ({ key, resolved }) => {
+    const url = resolved.tarball as string;
+    log(`↓ ${key}${resolved.fromLock ? ' (lockfile)' : ''}`);
+    const tgz = await client.tarball(url);
+    const verified = await verifyIntegrity(tgz, { tarball: url, integrity: resolved.integrity });
+    integrityByKey.set(key, verified ?? resolved.integrity);
+    extracted.set(key, await extractTarball(tgz));
+  });
+
   const installed: InstalledPackage[] = [];
   const lockPackages: Array<{ path: string; entry: LockedPackage }> = [];
   /** Every package directory written, in placement order (used for bins/scripts). */
@@ -327,29 +517,26 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
 
   for (const { nmDir, resolved } of placements) {
     const key = `${resolved.name}@${resolved.version}`;
-    let entries = extracted.get(key);
-    let integrity = resolved.integrity;
-    if (!entries) {
-      if (!resolved.tarball) {
-        warnings.push(`${key}: no tarball URL (registry or lockfile)`);
-        continue;
-      }
-      log(`↓ ${key}${resolved.fromLock ? ' (lockfile)' : ''}`);
-      const tgz = await client.tarball(resolved.tarball);
-      const verified = await verifyIntegrity(tgz, { tarball: resolved.tarball, integrity: resolved.integrity });
-      if (verified) integrity = verified;
-      entries = await extractTarball(tgz);
-      extracted.set(key, entries);
+    let entries = resolved.localEntries;
+    if (!entries && !resolved.localDir) {
+      if (skipped.has(key)) continue;
+      entries = extracted.get(key);
+      if (!entries) continue;
     }
+
     const dir = p.join(nmDir, resolved.name);
     ensureDir(vfs, dir);
-    for (const entry of entries) {
-      const dest = p.join(dir, entry.path);
-      if (entry.type === 'dir') {
-        ensureDir(vfs, dest);
-      } else {
-        ensureDir(vfs, p.dirname(dest));
-        vfs.writeFile(dest, entry.data);
+    if (resolved.localDir) {
+      copyTree(vfs, resolved.localDir, dir);
+    } else {
+      for (const entry of entries as Array<{ path: string; type: 'file' | 'dir'; data: Uint8Array }>) {
+        const dest = p.join(dir, entry.path);
+        if (entry.type === 'dir') {
+          ensureDir(vfs, dest);
+        } else {
+          ensureDir(vfs, p.dirname(dest));
+          vfs.writeFile(dest, entry.data);
+        }
       }
     }
     installed.push({ name: resolved.name, version: resolved.version, path: dir });
@@ -391,8 +578,10 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
       path: relPath,
       entry: lockEntryFor(manifest, {
         resolved: resolved.tarball,
-        integrity,
+        integrity: integrityByKey.get(key) ?? resolved.integrity,
         dev: Boolean(devDeps[resolved.name]) && !(rootPkg.dependencies ?? {})[resolved.name],
+        local: resolved.spec,
+        link: resolved.kind === 'link',
       }),
     });
   }

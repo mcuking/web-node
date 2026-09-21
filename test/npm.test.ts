@@ -533,3 +533,251 @@ describe('lockfile paths', () => {
     expect(nameFromLockPath('')).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// overrides / resolutions
+// ---------------------------------------------------------------------------
+
+function pkgManifest(name: string, version: string, extra: Record<string, unknown> = {}): unknown {
+  return {
+    name,
+    version,
+    ...extra,
+    dist: { tarball: `https://registry.npmjs.org/${name}/-/${name}-${version}.tgz` },
+  };
+}
+
+const pkgTarball = (name: string, version: string, extra: Record<string, unknown> = {}) =>
+  gzip(
+    makeTar([
+      { path: 'package/package.json', data: JSON.stringify({ name, version, main: 'index.js', ...extra }) },
+      { path: 'package/index.js', data: `module.exports = ${JSON.stringify(`${name}@${version}`)};` },
+    ]),
+  );
+
+function versionAt(vfs: MemoryVfs, path: string): string {
+  return (JSON.parse(new TextDecoder().decode(vfs.readFile(path))) as { version: string }).version;
+}
+
+/** alpha@1.0.0 depends on beta 1.0.0 exactly; beta has 1.0.0 and 1.0.1. */
+async function betaTarballs(): Promise<{ packuments: Record<string, unknown>; tarballs: Record<string, Uint8Array> }> {
+  const tarballsFor = {
+    'https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz': await pkgTarball('alpha', '1.0.0', { dependencies: { beta: '1.0.0' } }),
+    'https://registry.npmjs.org/beta/-/beta-1.0.0.tgz': await pkgTarball('beta', '1.0.0'),
+    'https://registry.npmjs.org/beta/-/beta-1.0.1.tgz': await pkgTarball('beta', '1.0.1'),
+  };
+  const packuments = {
+    alpha: { name: 'alpha', 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': pkgManifest('alpha', '1.0.0', { dependencies: { beta: '1.0.0' } }) } },
+    beta: { name: 'beta', 'dist-tags': { latest: '1.0.1' }, versions: { '1.0.0': pkgManifest('beta', '1.0.0'), '1.0.1': pkgManifest('beta', '1.0.1') } },
+  };
+  return { packuments, tarballs: tarballsFor };
+}
+
+describe('npm overrides', () => {
+  it('pins a transitive dependency with a flat override', async () => {
+    const { packuments, tarballs } = await betaTarballs();
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { alpha: '^1.0.0' }, overrides: { beta: '1.0.0' } }),
+    });
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: fakeRegistry(packuments, tarballs) });
+    expect(result.warnings).toEqual([]);
+    // Without the override this would have been 1.0.1 (the latest ~1.0.0).
+    expect(versionAt(vfs, '/project/node_modules/beta/package.json')).toBe('1.0.0');
+  });
+
+  it('scopes a nested override to the package that depends on it', async () => {
+    const { packuments, tarballs } = await betaTarballs();
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({
+        name: 'demo',
+        dependencies: { beta: '^1.0.0', alpha: '^1.0.0' },
+        overrides: { alpha: { beta: '1.0.0' } },
+      }),
+    });
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: fakeRegistry(packuments, tarballs) });
+    expect(result.warnings).toEqual([]);
+    // The root's own beta is untouched; alpha's is pinned and therefore nested.
+    expect(versionAt(vfs, '/project/node_modules/beta/package.json')).toBe('1.0.1');
+    expect(versionAt(vfs, '/project/node_modules/alpha/node_modules/beta/package.json')).toBe('1.0.0');
+  });
+
+  it('resolves a `$ref` override from the root dependencies', async () => {
+    const { packuments, tarballs } = await betaTarballs();
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({
+        name: 'demo',
+        dependencies: { beta: '1.0.0', alpha: '^1.0.0' },
+        overrides: { beta: '$beta' },
+      }),
+    });
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: fakeRegistry(packuments, tarballs) });
+    expect(result.warnings).toEqual([]);
+    expect(versionAt(vfs, '/project/node_modules/beta/package.json')).toBe('1.0.0');
+  });
+
+  it('reads a yarn `resolutions` table when `overrides` is absent', async () => {
+    const { packuments, tarballs } = await betaTarballs();
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { alpha: '^1.0.0' }, resolutions: { beta: '1.0.0' } }),
+    });
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: fakeRegistry(packuments, tarballs) });
+    expect(versionAt(vfs, '/project/node_modules/beta/package.json')).toBe('1.0.0');
+  });
+
+  it('reports version-scoped override keys instead of guessing', async () => {
+    const { packuments, tarballs } = await betaTarballs();
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { beta: '^1.0.0', alpha: '^1.0.0' }, overrides: { 'beta@^1.0.0': '1.0.0' } }),
+    });
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: fakeRegistry(packuments, tarballs) });
+    expect(result.warnings.join('\n')).toContain('override ignored: overrides.beta@^1.0.0');
+    // The unsupported key is not applied, so the latest satisfying version wins.
+    expect(versionAt(vfs, '/project/node_modules/beta/package.json')).toBe('1.0.1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// file: / link: specifiers
+// ---------------------------------------------------------------------------
+
+describe('npm local specifiers', () => {
+  it('installs a `file:` directory from the VFS', async () => {
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { 'local-pkg': 'file:local-pkg' } }),
+      '/project/local-pkg/package.json': JSON.stringify({ name: 'local-pkg', version: '0.4.2', main: 'index.js' }),
+      '/project/local-pkg/index.js': `module.exports = 'from disk';`,
+      '/project/local-pkg/lib/util.js': `module.exports = 1;`,
+    });
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: fakeRegistry({}, {}) });
+    expect(result.warnings).toEqual([]);
+    expect(versionAt(vfs, '/project/node_modules/local-pkg/package.json')).toBe('0.4.2');
+    expect(vfs.exists('/project/node_modules/local-pkg/lib/util.js')).toBe(true);
+    // `node_modules` inside the source directory is not copied along.
+    expect(vfs.exists('/project/node_modules/local-pkg/node_modules')).toBe(false);
+  });
+
+  it('installs a `file:` tarball', async () => {
+    const bytes = await pkgTarball('packed', '2.1.0');
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { packed: 'file:packed.tgz' } }),
+    });
+    vfs.writeFile('/project/packed.tgz', bytes);
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: fakeRegistry({}, {}) });
+    expect(result.warnings).toEqual([]);
+    expect(versionAt(vfs, '/project/node_modules/packed/package.json')).toBe('2.1.0');
+  });
+
+  it('materialises a `link:` directory and records it in the lockfile', async () => {
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { linked: 'link:../linked' } }),
+      '/linked/package.json': JSON.stringify({ name: 'linked', version: '1.0.0', main: 'index.js' }),
+      '/linked/index.js': `module.exports = 'linked';`,
+    });
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: fakeRegistry({}, {}) });
+    expect(result.warnings).toEqual([]);
+    expect(vfs.exists('/project/node_modules/linked/index.js')).toBe(true);
+    const lock = JSON.parse(new TextDecoder().decode(vfs.readFile('/project/package-lock.json'))) as {
+      packages: Record<string, { resolved?: string; link?: boolean }>;
+    };
+    expect(lock.packages['node_modules/linked'].link).toBe(true);
+    expect(lock.packages['node_modules/linked'].resolved).toBe('link:../linked');
+  });
+
+  it('warns when a `file:` target is missing', async () => {
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { gone: 'file:nope' } }),
+    });
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: fakeRegistry({}, {}) });
+    expect(result.packages).toBe(0);
+    expect(result.warnings.join('\n')).toContain('file: path not found');
+  });
+
+  it('does not hit the registry for a local specifier', async () => {
+    let requests = 0;
+    const counting: FetchLike = async () => {
+      requests += 1;
+      return notFound();
+    };
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { local: 'file:local' } }),
+      '/project/local/package.json': JSON.stringify({ name: 'local', version: '1.0.0' }),
+      '/project/local/index.js': `module.exports = 1;`,
+    });
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: counting });
+    expect(requests).toBe(0);
+    expect(result.warnings).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bounded-concurrency downloads
+// ---------------------------------------------------------------------------
+
+describe('npm download concurrency', () => {
+  async function manyPackages(count: number): Promise<{ packuments: Record<string, unknown>; tarballs: Record<string, Uint8Array> }> {
+    const packuments: Record<string, unknown> = {};
+    const tarballs: Record<string, Uint8Array> = {};
+    for (let i = 0; i < count; i++) {
+      const name = `pkg${i}`;
+      packuments[name] = { name, 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': pkgManifest(name, '1.0.0') } };
+      tarballs[`https://registry.npmjs.org/${name}/-/${name}-1.0.0.tgz`] = await pkgTarball(name, '1.0.0');
+    }
+    return { packuments, tarballs };
+  }
+
+  it('overlaps downloads but never exceeds the limit', async () => {
+    const { packuments, tarballs } = await manyPackages(6);
+    const deps: Record<string, string> = {};
+    for (let i = 0; i < 6; i++) deps[`pkg${i}`] = '^1.0.0';
+    const vfs = makeProject({ '/project/package.json': JSON.stringify({ name: 'demo', dependencies: deps }) });
+    const { runtime } = bootRuntime(vfs);
+
+    let inFlight = 0;
+    let peak = 0;
+    const inner = fakeRegistry(packuments, tarballs);
+    const slow: FetchLike = async (url, init) => {
+      if (!url.includes('/-/')) return inner(url, init);
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return inner(url, init);
+    };
+
+    const result = await runtime.installDependencies({ fetch: slow, concurrency: 2 });
+    expect(result.packages).toBe(6);
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(peak).toBeGreaterThan(1); // they really do overlap
+    for (let i = 0; i < 6; i++) {
+      expect(vfs.exists(`/project/node_modules/pkg${i}/index.js`)).toBe(true);
+    }
+  });
+
+  it('downloads each distinct version exactly once across placements', async () => {
+    const { packuments, tarballs } = await betaTarballs();
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { beta: '^1.0.0', alpha: '^1.0.0' } }),
+    });
+    const { runtime } = bootRuntime(vfs);
+    let downloads = 0;
+    const inner = fakeRegistry(packuments, tarballs);
+    const counting: FetchLike = async (url, init) => {
+      if (url.includes('/-/')) downloads += 1;
+      return inner(url, init);
+    };
+    const result = await runtime.installDependencies({ fetch: counting, concurrency: 4 });
+    expect(result.packages).toBe(3); // beta@1.0.1, alpha, beta@1.0.0 nested
+    // alpha, beta@1.0.0 and beta@1.0.1 — three distinct tarballs, one fetch each.
+    expect(downloads).toBe(3);
+  });
+});

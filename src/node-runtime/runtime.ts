@@ -512,6 +512,7 @@ export class NodeRuntime {
       onOutput?: (chunk: Uint8Array, stream: 'stdout' | 'stderr') => void;
       runScripts?: boolean;
       fetch?: FetchLike;
+      concurrency?: number;
     } = {},
   ): Promise<InstallResult> {
     const fetchImpl = opts.fetch ?? (typeof fetch === 'function' ? (fetch.bind(globalThis) as unknown as FetchLike) : undefined);
@@ -527,6 +528,7 @@ export class NodeRuntime {
       env: { ...(this.bindingCtx.env as Record<string, string>) },
       runScripts: opts.runScripts,
       onOutput: opts.onOutput,
+      concurrency: opts.concurrency,
     });
   }
 

@@ -27,11 +27,27 @@ export const DEMO_FILES: Record<string, string> = {
         picocolors: '^1.0.0',
         'source-map-js': '^1.2.0',
         nanoid: '^3.3.7',
+        // A `file:` dependency: installed straight out of this virtual file
+        // system (see lib/greeting) instead of the registry.
+        '@demo/greeting': 'file:lib/greeting',
       },
+      // Root overrides pin a transitive dependency's version (npm `overrides`,
+      // or yarn's `resolutions`). This one keeps nanoid on the 3.x line.
+      overrides: { nanoid: '^3.3.7' },
     },
     null,
     2,
   ),
+
+  '/project/lib/greeting/package.json': JSON.stringify(
+    { name: '@demo/greeting', version: '1.2.3', main: 'index.js' },
+    null,
+    2,
+  ),
+  '/project/lib/greeting/index.js': `// Installed with "file:lib/greeting", so this file is copied into
+// node_modules/@demo/greeting by the installer.
+module.exports = 'hello from file:lib/greeting@1.2.3';
+`,
 
   '/project/index.js': `// Runs on Node.js compiled-in-browser. No server. No install.
 const path = require('path');
@@ -547,6 +563,19 @@ try {
 } catch (err) {
   console.log('require(ms) : not installed yet - click "Install deps"');
 }
+console.log('');
+
+// --- npm resolution (milestone 39) ---
+// The installer understands two more things a real project uses: a "file:" (or
+// "link:") dependency installed straight from this virtual file system, and a
+// root "overrides"/"resolutions" table that pins a transitive dependency.
+console.log('-- npm resolution (milestone 39) --');
+try {
+  console.log('file: dep   : ' + require('@demo/greeting'));
+} catch (err) {
+  console.log('file: dep   : not installed yet - click "Install deps"');
+}
+console.log('overrides   : ' + JSON.stringify(pkg.overrides || null));
 console.log('');
 
 // --- http server (milestone 3: virtual TCP) ---
@@ -1175,6 +1204,11 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
   (lockfileVersion 3); a second install reuses the locked versions instead of
   re-resolving, and every tarball is checked against the registry's sha512/sha1
   before it is written. Missing peer dependencies are installed at the root too
+- **npm resolution (milestone 39)** — the installer honours a root "overrides"
+  (or yarn "resolutions") table, so a transitive dependency can be pinned without
+  editing the package that asked for it; "file:"/"link:" specifiers install a
+  package straight out of the virtual file system (see the demo's @demo/greeting);
+  and tarballs download with bounded concurrency instead of one at a time
 - **Build tools (milestone 5)** — "Build" runs esbuild (the WASM build, the same
   transformer Vite uses) inside the tab: it compiles src/app.ts, bundles a real
   node_modules dependency, and writes /project/dist/app.js. The browser field in
@@ -1200,9 +1234,9 @@ This project is mounted into an in-browser VFS. Edit any file and hit **Run**.
 - Subdomain preview routing on a static host (only the dev server has the wildcard DNS)
 - Real TLS (the https module is the http surface under a TLS-shaped name)
 - Buffer pooling (allocUnsafe / from(string) do not carve from an 8 KB slab)
-- npm/yarn/pnpm filesystem specs (file:, git+, link:)
 - Promise hooks (async_hooks sees timers/ticks, but V8 promises are not
   instrumented, so promiseResolve never fires)
+- git specs in package.json (git+, git:)
 - webpack (esbuild, rollup and Vite are milestones 5/5b/5c)
 `,
 };
