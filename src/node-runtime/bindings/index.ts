@@ -33,6 +33,8 @@ import { messagingBinding, workerBinding } from './messaging';
 import { stringDecoderBinding } from './string_decoder';
 import { blobBinding } from './blob';
 import { urlBinding, urlPatternBinding, encodingBinding } from './url';
+import { serdesBinding } from './serdes';
+import { heapUtilsBinding, profilerBinding, v8Binding } from './v8';
 
 /** The whitelist of internal bindings this runtime implements. */
 const REGISTRY: Record<string, BindingFactory> = {
@@ -69,6 +71,10 @@ const REGISTRY: Record<string, BindingFactory> = {
   url: urlBinding,
   url_pattern: urlPatternBinding,
   encoding_binding: encodingBinding,
+  serdes: serdesBinding,
+  v8: v8Binding,
+  heap_utils: heapUtilsBinding,
+  profiler: profilerBinding,
 };
 
 /** Bindings Node internal code knows about but that we deliberately do not ship. */
@@ -89,8 +95,6 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'cares_wrap',
   'http_parser',
   'trace_events',
-  'heap_utils',
-  'profiler',
   'builtins',
   'options',
   'sqlite',

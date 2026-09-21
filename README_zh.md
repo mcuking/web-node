@@ -113,6 +113,11 @@ close”会报 `ERR_STREAM_PREMATURE_CLOSE`。
 `internal/url`，本运行时把它桥到标签页自带的规范 URL 解析器（Node 那半是 native Ada）；
 `pathToFileURL`/`fileURLToPath` 按 Node 自己的算法重写（`src/node_url.cc` 的编码表 + POSIX 路径规则）。
 
+`v8` 也是真的 `lib/v8.js`：`v8.serialize`/`v8.deserialize` 说的是 V8 自己的结构化克隆线格式
+（版本 15）——在 `serdes` binding 里逐标签重写（页面 JS 拿不到 `ValueSerializer`）。普通对象、
+数组、Map/Set、Date、RegExp、Error、BigInt、ArrayBuffer 与 TypedArray 产出的字节与真 Node
+一致；堆快照与 profiler 那半边在标签页里没有对应物，一律抛错而不编造数字。
+
 响应到浏览器也是**真流式**：SW 直接把 `ReadableStream` 交给浏览器，`res.write()` / SSE / 大文件
 边产生边到达（HTML 例外，为注入 `<base>` 先缓冲）。连接默认 keep-alive，服务端支持 pipelining，
 客户端按端口做连接池。`https` 是 `http` 的同名壳（虚拟网络无 TLS）。
@@ -320,6 +325,7 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M51b | **`fs.opendir`/`Dir` + `fs.watchFile`**——真 `fs_dir` binding + 复刻 libuv `uv_fs_poll` 的 `StatWatcher` 轮询实现 | ✅ |
 | M52 | **真 `internal/fs/streams.js`**——`fs.ReadStream`/`fs.WriteStream` 换真源码（惰性加载，顶层 `require('fs')` 回环自然解除） | ✅ |
 | M53 | **真 `url`**——vendor `lib/url.js`（legacy parse/format/resolve + WHATWG 重导出）；`internal/url` 改成宿主 URL 桥，新增 `url`/`url_pattern`/`encoding_binding` binding | ✅ |
+| M54 | **真 `v8`**——vendor `lib/v8.js`；`serialize`/`deserialize` 与 `Serializer`/`Deserializer` 跑在新的 `serdes` binding 上（用 JS 重写 V8 结构化克隆线格式（版本 15），与真 Node v26.9.0 的 115 条差分语料逐字节一致）；堆快照/`queryObjects`/profiler 一律抛错 | ✅ |
 
 ## Vendored 真源码现状
 

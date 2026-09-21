@@ -1688,4 +1688,42 @@ export const vendoredBuiltins: BuiltinSpec[] = [
       'internal/validators',
     ],
   },
+  {
+    id: 'internal/v8/heap_profile',
+    vendorPath: 'internal/v8/heap_profile.js',
+    origin: 'node-source',
+    deps: ['internal/util', 'internal/validators'],
+  },
+  {
+    id: 'internal/v8/cpu_profiler',
+    vendorPath: 'internal/v8/cpu_profiler.js',
+    origin: 'node-source',
+    deps: ['internal/util', 'internal/validators'],
+  },
+  {
+    id: 'v8',
+    aliases: ['node:v8'],
+    vendorPath: 'v8.js',
+    origin: 'node-source',
+    // `v8.serialize`/`deserialize` and the `Serializer`/`Deserializer` classes
+    // are the real thing, running on the `serdes` binding (V8's wire format in
+    // JS). `internal/heap_utils` is our shim: heap snapshots and
+    // `queryObjects` need V8's heap walker and throw.
+    deps: [
+      'buffer',
+      'internal/assert',
+      'internal/buffer',
+      'internal/errors',
+      'internal/fs/utils',
+      'internal/heap_utils',
+      'internal/options',
+      'internal/promise_hooks',
+      'internal/util',
+      'internal/util/inspect',
+      'internal/validators',
+      'internal/v8/cpu_profiler',
+      'internal/v8/heap_profile',
+      'internal/v8/startup_snapshot',
+    ],
+  },
 ];

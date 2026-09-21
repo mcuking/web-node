@@ -206,6 +206,14 @@ which here is a bridge to the tab's own spec-compliant URL parser (Node's is
 native Ada); `pathToFileURL`/`fileURLToPath` are reimplemented to Node's own
 algorithms (the `src/node_url.cc` encode table, the POSIX path rules).
 
+`v8` is the real `lib/v8.js` too, and `v8.serialize`/`v8.deserialize` speak V8's
+own structured-clone wire format (version 15) — reimplemented tag for tag in the
+`serdes` binding, because page JavaScript cannot reach a `ValueSerializer`. The
+same bytes a real Node produces for plain objects, arrays, maps, sets, dates,
+regexps, errors, bigints, array buffers and typed arrays; the heap-snapshot and
+profiler half of the module has no equivalent in a tab and throws instead of
+inventing numbers.
+
 ## npm
 
 Hit **Install deps** and the client resolves your `package.json` dependencies
@@ -429,6 +437,7 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M51b | `fs.opendir`/`Dir` + `fs.watchFile` — a real `fs_dir` binding and a `StatWatcher` polling implementation mirroring libuv's `uv_fs_poll` | ✅ Done |
 | M52 | Real `internal/fs/streams.js` — `fs.ReadStream`/`fs.WriteStream` are the real classes (lazy-loaded, so the top-level `require('fs')` cycle resolves) | ✅ Done |
 | M53 | Real `url` — `lib/url.js` vendored (legacy parse/format/resolve + the WHATWG re-exports); `internal/url` becomes a bridge to the host URL classes, with `url`/`url_pattern`/`encoding_binding` bindings | ✅ Done |
+| M54 | Real `v8` — `lib/v8.js` vendored; `serialize`/`deserialize` and the `Serializer`/`Deserializer` classes run on a new `serdes` binding that reimplements V8's structured-clone wire format (version 15) in JS, byte-for-byte with Node v26.9.0 across a 115-case differential corpus; heap snapshots, `queryObjects` and profiling throw | ✅ Done |
 
 ## Vendored Node source
 

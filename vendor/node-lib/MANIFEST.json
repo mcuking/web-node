@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-21T11:14:29.222Z",
+  "generatedAt": "2026-09-21T11:45:49.816Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -1041,6 +1041,27 @@
       "sha256": "9037c1cae0efe6af02ea18da109ff0c406496cccaf9df4c3308ef057d009150f",
       "upstreamSha256": "9037c1cae0efe6af02ea18da109ff0c406496cccaf9df4c3308ef057d009150f",
       "bytes": 32689,
+      "patches": []
+    },
+    {
+      "path": "v8.js",
+      "sha256": "941a60534478888ed612ded3f2eb541903246d1b5de9bae18dd5aea9d3111f45",
+      "upstreamSha256": "941a60534478888ed612ded3f2eb541903246d1b5de9bae18dd5aea9d3111f45",
+      "bytes": 16475,
+      "patches": []
+    },
+    {
+      "path": "internal/v8/heap_profile.js",
+      "sha256": "55da093a13cac105c552901a2318a37508f702d40ece6f95f7283a3232ffc304",
+      "upstreamSha256": "55da093a13cac105c552901a2318a37508f702d40ece6f95f7283a3232ffc304",
+      "bytes": 1423,
+      "patches": []
+    },
+    {
+      "path": "internal/v8/cpu_profiler.js",
+      "sha256": "a7f70c5b8cb2f665ff6b7124ceb28e7302969cc42694bbbd485b135f212ce047",
+      "upstreamSha256": "a7f70c5b8cb2f665ff6b7124ceb28e7302969cc42694bbbd485b135f212ce047",
+      "bytes": 1439,
       "patches": []
     }
   ]

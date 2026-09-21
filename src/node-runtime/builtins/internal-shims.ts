@@ -1339,3 +1339,45 @@ export const internalTraceSigintSpec: BuiltinSpec = {
     setTraceSigInt: (_enable: boolean): void => undefined,
   }),
 };
+
+// ---------------------------------------------------------------------------
+// internal/heap_utils
+// ---------------------------------------------------------------------------
+//
+// The real module defines `HeapSnapshotStream` (a `Readable` fed by V8's heap
+// walker) and `getHeapSnapshotOptions`. A page cannot walk its own heap, so the
+// stream and `queryObjects` throw; the options normalizer is real, because
+// `lib/v8.js` runs it before it ever reaches the native call.
+
+/** V8's own validation and `Uint8Array([+exposeInternals, +exposeNumericValues])`. */
+function getHeapSnapshotOptions(options: unknown = {}): Uint8Array {
+  const { exposeInternals = false, exposeNumericValues = false } = (options ?? {}) as {
+    exposeInternals?: unknown;
+    exposeNumericValues?: unknown;
+  };
+  return new Uint8Array([Number(!!exposeInternals), Number(!!exposeNumericValues)]);
+}
+
+export const internalHeapUtilsSpec: BuiltinSpec = {
+  id: 'internal/heap_utils',
+  origin: 'web-node',
+  init: () => ({
+    getHeapSnapshotOptions,
+    HeapSnapshotStream: class HeapSnapshotStream {
+      constructor() {
+        throw notImplemented(
+          'api',
+          'v8.getHeapSnapshot',
+          'A heap snapshot needs V8\'s heap walker, which is not exposed to page JavaScript.',
+        );
+      }
+    },
+    queryObjects: (): never => {
+      throw notImplemented(
+        'api',
+        'v8.queryObjects',
+        'Enumerating a constructor\'s live objects needs V8\'s heap, which is not exposed to page JavaScript.',
+      );
+    },
+  }),
+};

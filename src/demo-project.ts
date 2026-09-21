@@ -598,6 +598,38 @@ console.log('file url    : ' + nodeUrl.pathToFileURL('/project/a b.js').href + '
 console.log('idna        : ' + nodeUrl.domainToASCII('münchen.de') + ' <- ' + nodeUrl.domainToUnicode('xn--mnchen-3ya.de'));
 console.log('');
 
+// --- v8 (milestone 54) ---
+// v8 is Node's real lib/v8.js. serialize/deserialize are the real V8
+// structured-clone wire format (version 15), reimplemented in JS in the
+// 'serdes' binding because a page cannot reach V8's ValueSerializer. The heap
+// and profiler surface is native-only, so it throws instead of inventing
+// numbers.
+console.log('-- v8 (milestone 54) --');
+function wireVersionOf(v8mod) {
+  var der = new v8mod.Deserializer(v8mod.serialize(1));
+  der.readHeader();
+  return der.getWireFormatVersion();
+}
+var nodeV8 = require('v8');
+var wire = nodeV8.serialize({ a: [1, 2], when: new Date(0), re: /ab+c/gi });
+console.log('serialize   : ' + wire.toString('hex'));
+var backAgain = nodeV8.deserialize(wire);
+console.log('deserialize : a=' + JSON.stringify(backAgain.a) + ' when=' + backAgain.when.toISOString() + ' re=' + backAgain.re.source + '/' + backAgain.re.flags);
+var sharedRef = { v: 1 };
+var twoRefs = nodeV8.deserialize(nodeV8.serialize({ x: sharedRef, y: sharedRef }));
+console.log('references  : same=' + (twoRefs.x === twoRefs.y) + ' value=' + twoRefs.x.v);
+console.log('typed array : ' + nodeV8.serialize(Buffer.from([1, 2, 3])).toString('hex'));
+console.log('wire version: ' + wireVersionOf(nodeV8));
+var oneByte = nodeV8.isStringOneByteRepresentation('abc');
+console.log('one byte    : abc=' + oneByte + ' cjk=' + nodeV8.isStringOneByteRepresentation('中文'));
+try {
+  nodeV8.getHeapStatistics();
+  console.log('heap stats  : unexpectedly available');
+} catch (err) {
+  console.log('heap stats  : throws (' + err.code + ')');
+}
+console.log('');
+
 // --- Blob (milestone 37) ---
 // Blob and File are now the real lib/internal/blob.js + lib/internal/file.js
 // running on a JS 'blob' binding. Blob is a global (and require('buffer').Blob

@@ -169,6 +169,14 @@ const FILES = [
   // milestone 53: the real `url` module (legacy parse/format/resolve built on
   // the WHATWG API that `internal/url` bridges to the host's own classes)
   'url.js',
+  // milestone 54: the real `v8` module. The serialization half runs on the
+  // `serdes` binding (the V8 wire format reimplemented in JS); the heap and
+  // profiler halves are native-only and throw from the binding.
+  // (`internal/v8/startup_snapshot.js` is already vendored above, for the
+  // console bootstrap.)
+  'v8.js',
+  'internal/v8/heap_profile.js',
+  'internal/v8/cpu_profiler.js',
 ];
 
 /**

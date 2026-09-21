@@ -65,12 +65,6 @@ export const unsupportedSpecs: BuiltinSpec[] = [
       }),
   },
   {
-    id: 'v8',
-    aliases: ['node:v8'],
-    origin: 'web-node',
-    init: () => unsupported('v8', { serialize: undefined, deserialize: undefined }),
-  },
-  {
     id: 'tls',
     aliases: ['node:tls'],
     origin: 'web-node',
