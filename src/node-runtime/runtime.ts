@@ -156,6 +156,11 @@ export class NodeRuntime {
   readonly Buffer: unknown;
 
   #timers = new Map<number, ReturnType<typeof nativeSetTimeout>>();
+  /** In-flight host requests (see `#trackHostRequest`); part of `activeCount`. */
+  #hostRequests = 0;
+  /** Bumped per run so a host request abandoned by a previous run can not leak
+   * its count into the next one (or drive it negative when it finally settles). */
+  #hostGeneration = 0;
   #nextTimerId = 1;
   #exitCode: number | null = null;
   #nextTickQueue: Array<() => void> = [];
@@ -359,6 +364,15 @@ export class NodeRuntime {
       const value = (globalThis as unknown as Record<string, unknown>)[name];
       if (value !== undefined) sandboxGlobal[name] = value;
     }
+    // `fetch` is the one host API a sandboxed program can park on, and the
+    // request outlives the synchronous return: wrap it so an in-flight request
+    // counts as live work (see `#trackHostRequest`).
+    const hostFetch = (globalThis as unknown as Record<string, unknown>).fetch;
+    if (typeof hostFetch === 'function') {
+      const boundFetch = (hostFetch as (...a: unknown[]) => unknown).bind(globalThis);
+      sandboxGlobal.fetch = (...args: unknown[]): Promise<unknown> =>
+        this.#trackHostRequest(Promise.resolve(boundFetch(...args)));
+    }
     // `Blob`/`File` are ours, not the host's: Node exposes them from
     // `internal/blob` + `internal/file` (bootstrap/web), and the vendored
     // `internal/streams/duplexify` gates its Blob path on the real `isBlob`. If
@@ -436,7 +450,32 @@ export class NodeRuntime {
    */
   #activeWorkCount(): number {
     const timers = this.realm?.internalBinding('timers') as { __liveCount?: () => number } | undefined;
-    return this.#timers.size + (timers?.__liveCount?.() ?? 0);
+    return this.#timers.size + (timers?.__liveCount?.() ?? 0) + this.#hostRequests;
+  }
+
+  /**
+   * Count a promise that belongs to the *host* as live work for as long as it is
+   * pending.
+   *
+   * The sandbox timer queue can only see timers the sandbox itself created. A
+   * host request — a real `fetch()`, the one such API a sandboxed program gets —
+   * lives on the host's event loop, so a child whose only remaining work is that
+   * request would look idle and be reported as exited before the response lands.
+   * Counting it here closes that gap. (Grounded in real Node: an in-flight
+   * `fetch` keeps the process alive until it settles, whereas `crypto.subtle`
+   * and `Blob.arrayBuffer()` — which resolve on the microtask queue — do not,
+   * and so are deliberately *not* tracked.)
+   */
+  #trackHostRequest<T>(promise: Promise<T>): Promise<T> {
+    const generation = this.#hostGeneration;
+    this.#hostRequests += 1;
+    const release = (): void => {
+      // A host request left pending when its run ended is no longer this
+      // process's work: drop its count without touching the current run's.
+      if (generation === this.#hostGeneration) this.#hostRequests -= 1;
+    };
+    void promise.then(release, release);
+    return promise;
   }
 
   #installGlobals(sandboxGlobal: Record<string, unknown>): void {
@@ -484,6 +523,11 @@ export class NodeRuntime {
     this.loader.reset();
     this.#clearAllTimers();
     this.network.reset();
+    // Host requests belong to the run that started them, like every other kind
+    // of pending work: a `fetch` the previous program abandoned must not look
+    // like live work to the next one.
+    this.#hostGeneration += 1;
+    this.#hostRequests = 0;
     // Children belong to the run that started them: like teardown of a process
     // group, nothing survives into the next Run.
     this.spawn.reset();

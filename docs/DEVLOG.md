@@ -185,7 +185,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
    - **`readline` / `internal/readline/*`**：⚠️ 已过时——M31 已整份换成真源码（含 `readline/promises` 与 `internal/repl/history`）。
 4. **promise hooks（M17 跲尾，可选）**：`async_hooks` 现在看得见 tick/timer/AsyncResource，但 V8 promise 未插桩，`promiseResolve` 不响。真做需要 `promiseHook` 级别的插桩，代价大，先放着。
 5. ~~**npm 再进一步**~~ ✅ **已处理（2026-09-21，M39）**：`overrides`/`resolutions`（扁平/嵌套/`.`/`$ref`，最长路径优先）、`file:`/`link:` 本地说明符（VFS 目录拷贝 / 本地 `.tgz` 解包，`link:` 物化为拷贝）、有界并发下载（默认 8，先全下载再写树）。剩：`git+`/`git:` 仍不支持（标签页里没有 git）。
-6. ~~**child_process 收尾（M7 遗留）— fork 的 IPC**~~ ✅ **已处理（2026-09-21，M40）**：`fork()` 真给两边一条通道（见下条变更记录）。剩：**child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见**（不变，下次开工优先项）；`execArgv` 传给子进程的 `process.execArgv`，但子进程不会真按它跑 flag。
+6. ~~**child_process 收尾（M7 遗留）— fork 的 IPC**~~ ✅ **已处理（2026-09-21，M40）**：`fork()` 真给两边一条通道（见下条变更记录）。~~剩：**child 剩余工作是 host promise（如 in-flight `fetch`）时退出判定不可见**~~ ✅ **已解决（2026-09-21，M44）**：runtime 现在把在飞的宿主请求计入 `activeCount()`（包装沙箱的 `fetch`），子进程只在归零后才判定退出；纯微任务 promise（`crypto.subtle`/`Blob.arrayBuffer`/裸 `new Promise`）**不**计数，与真 Node 一致（见下条变更记录）。剩：`execArgv` 传给子进程的 `process.execArgv`，但子进程不会真按它跑 flag。
 7. ~~**Buffer pooling 遗留（M9 尾声）**~~ ✅ **已处理（2026-09-21，M41）**：小分配从 64 KiB slab 切 8 字节对齐槽位，`allocUnsafeSlow`/`alloc`/大请求绕过池（见下条变更记录）。
 8. ~~**把 vendored 源改成按需加载 / code-split**~~ ✅ **已处理（2026-09-21，M32）**：**代码分割在这里是死路**——`require()` 是同步的，而 vendor 源是运行时用 `new Function` 编译的字符串，拆成异步 chunk 就无法同步拿到；拆成 N 个小 chunk 也只是把同一个总量分多次下载，没有净减。真正能减的是 **payload 本身**：构建期把注释删掉（真 Node 源注释占 **~23.3%**），同时**严格保留行号与代码列**、保留每文件 MIT 声明 → worker **1259KB → 1028KB（−18%）**、gzip **315KB → 237KB（−25%）**。未做：缩进未动（保留列号）；若要再减 ~100KB 可去缩进，但会牺牲堆栈列号。
 9. **`console.createTask` / inspector 面**：真 console 的 `createTask` 走 `async_hooks` 的 `createTask`；真 `initializeGlobalConsole` 的 snapshot/inspector 分支在我们这里不可达（`hasInspector:false`）。
@@ -196,6 +196,25 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-21 · M44 宿主请求计入退出判定（child_process M7 遗留收尾）
+
+**目标**：修掉 child_process 遗留的最后一个缺口——子进程的剩余工作是**宿主 promise**（in-flight `fetch`）时，退出判定看不见它，子进程会被提前报成已退出、它的输出直接丢掉。
+
+**改了什么**
+
+1. **runtime 把在飞的宿主请求计入 `activeCount()`**（`src/node-runtime/runtime.ts`）。新增 `#hostRequests` 计数与 `#trackHostRequest(promise)`：包装沙箱局部的 `fetch`，调用时 +1、settle 时 -1（成败都释放），并把计数并入 `#activeWorkCount()`。`proc/host.ts` 的 `#checkSettle`/`syncSettled` 用同一计数，所以子进程会在 fetch 落地后才判定退出。
+2. **只计真正的宿主 I/O，不计纯微任务 promise**。根因是拿真 Node v26.9.0 实测定的：in-flight `fetch` **会**把事件循环吊住（底层 socket 是 ref'd 句柄），而 `crypto.subtle.digest()`、`Blob.prototype.arrayBuffer()`、裸 `new Promise(() => {})` 都是微任务，**不**吊循环。因此只包装 `fetch`，后者一律不计数——计数错了会让纯 JS 项目永不退出。
+3. **按 run 隔离计数**（`resetRunState`）。加 `#hostGeneration`：上一次 run 遗留的 fetch settle 时不再减当前 run 的计数，避免计数泄漏或减成负数。
+4. 顺带更新 `proc/host.ts` 头部文档：把那段「唯一诚实缺口」改成说明已覆盖。
+
+**为什么**：这是 M40 遗留的最后一个「已知不正确」，且属于**静默数据丢失**（子进程的下载结果在打印前就没了）。修复后子进程的退出判定与真 Node 的「句柄/请求存活则循环不退出」语义对齐。
+
+**涉及文件**：`src/node-runtime/runtime.ts`、`src/node-runtime/proc/host.ts`、`test/host-request.test.ts`（新）。
+
+**验证**：`tsc --noEmit` 干净 · `vitest run` **467/467**（47 文件，+4）· `vite build` 绿（worker 1614.99 → 1615.25KB）。四条新测试均为 A/B 验证过：无修复时子进程输出为空（`done|""`），修复后拿到 `done|"fetched|..."`；反向测试（纯 pending promise 子进程仍立即退出、父进程自己的 in-flight fetch 不吊住子进程）防止计数过度。
+
+**仍缺（有意）**：沙箱的 `WebSocket` 是其构造出来的一个长命句柄，`fetch` 那样能等一个 promise，它需要包装构造函数才能追（同属「宿主请求」类）。实际构建脚本极少开 WS，且它的生命周期不像 fetch 有一个可挂的 promise，本轮暂不处理。
 
 ### 2026-09-21 · M43 `process` 表面补齐 + 未捕获异常路由 + VfsError 形状
 

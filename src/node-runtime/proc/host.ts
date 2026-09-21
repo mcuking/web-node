@@ -18,10 +18,15 @@
  *   b. it calls `process.exit()` / `process.kill()` on itself, or
  *   c. the caller kills it, or its `timeoutMs` expires.
  *
- * The one honest gap: a child whose remaining work is a pending *host* promise
- * (an in-flight `fetch`, say) is invisible to that delta and may be reported as
- * exited early. Everything a build script realistically does — reading and
- * writing files, running another script, `await`ing pure JS — is covered.
+ * The one gap that used to be honest: a child whose remaining work is a pending
+ * *host* request (an in-flight `fetch`, say) lives outside the sandbox timer
+ * queue and so was invisible to that delta, and could be reported as exited
+ * early. The runtime now counts such requests as active work (it wraps the
+ * sandbox's `fetch` and includes the in-flight count in `activeCount()`), so
+ * that case is covered too. Everything a build script realistically does —
+ * reading and writing files, running another script, `await`ing pure JS or a
+ * download — is covered. A pending promise that only resolves on the microtask
+ * queue still does not hold a child open, matching real Node.
  *
  * `process.exit()` inside a child throws a `ChildExit` to unwind the child's own
  * stack. That works from synchronous code; from inside a callback there is no
