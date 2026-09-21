@@ -1,6 +1,7 @@
 import type { Vfs } from '../vfs';
 import type { VirtualNetwork } from '../net/network';
 import type { ProcessHost } from '../proc/host';
+import type { WorkerHost } from '../proc/worker';
 
 /**
  * Everything a binding is allowed to see about the host. Bindings never reach
@@ -22,6 +23,11 @@ export interface BindingContext {
    * lifecycle scripts through it.
    */
   spawn: ProcessHost;
+  /**
+   * The worker surface. Node starts a thread; we start a second module registry
+   * on the same loop. `worker_threads` is written against this.
+   */
+  workers: WorkerHost;
   env: Record<string, string>;
   argv: string[];
   execPath: string;

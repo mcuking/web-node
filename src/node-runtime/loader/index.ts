@@ -126,6 +126,13 @@ export class ModuleLoader {
   /** Extra names injected into every user module's scope (a sandbox global). */
   #globals: Record<string, unknown>;
   #aliases: Record<string, string>;
+  /**
+   * Builtins this registry should resolve to something other than the realm's
+   * shared instance. Only a worker uses it: inside a worker, `require('worker_threads')`
+   * must hand back the worker-side view (`isMainThread === false`, its own
+   * `parentPort`/`workerData`), not the main thread's module.
+   */
+  #builtinOverrides: Record<string, unknown> = {};
   #globalNames!: string[];
   #globalValues!: unknown[];
   #paramNames!: string[];
@@ -141,6 +148,11 @@ export class ModuleLoader {
   setGlobals(globals: Record<string, unknown>): void {
     this.#globals = globals;
     this.#syncGlobals();
+  }
+
+  /** Register worker-side replacements for core modules in this registry. */
+  setBuiltinOverrides(overrides: Record<string, unknown>): void {
+    this.#builtinOverrides = { ...overrides };
   }
 
   /**
@@ -488,6 +500,8 @@ export class ModuleLoader {
     if (remapped === EMPTY_MODULE) return {};
     if (remapped !== null) request = remapped;
 
+    const override = this.#builtinOverrides[request];
+    if (override !== undefined) return override;
     if (this.#realm.hasBuiltin(request)) return this.#realm.require(request);
     if (request.startsWith('node:')) {
       throw notImplemented('module', request, 'Only whitelisted core modules are exposed.');

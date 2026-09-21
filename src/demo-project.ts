@@ -49,6 +49,20 @@ export const DEMO_FILES: Record<string, string> = {
 module.exports = 'hello from file:lib/greeting@1.2.3';
 `,
 
+  // The worker a `new Worker(...)` in index.js boots. It runs in its own module
+  // registry with its own globals, and talks to the parent over its parentPort.
+  '/project/lib/worker-demo.js': `const { parentPort, workerData, isMainThread, threadId } = require('worker_threads');
+parentPort.postMessage({
+  workerData: workerData,
+  isMainThread: isMainThread,
+  threadIdPositive: threadId > 0,
+});
+parentPort.on('message', function (m) {
+  parentPort.postMessage('re:' + m);
+  parentPort.close();
+});
+`,
+
   '/project/index.js': `// Runs on Node.js compiled-in-browser. No server. No install.
 const path = require('path');
 const fs = require('fs');
@@ -395,6 +409,27 @@ channel.port2.onmessage = function (e) {
 };
 channel.port1.postMessage({ payload: { hello: 'world' }, port: handoff.port1 }, [handoff.port1]);
 console.log('');
+
+// --- Worker (milestone 57) ---
+// A browser tab cannot start a thread, so a Worker here is a second module
+// registry on the same event loop with its own globals and a real MessageChannel
+// to the parent. workerData, the online/message/error/exit lifecycle and
+// terminate() all behave as in Node; what is missing is parallelism, and that
+// message-passing half is the whole point here.
+console.log('-- worker_threads.Worker (milestone 57) --');
+const { Worker } = require('worker_threads');
+(async function () {
+  const worker = new Worker(path.join(__dirname, 'lib/worker-demo.js'), {
+    workerData: { from: 'main' },
+  });
+  const seen = [];
+  worker.on('online', function () { seen.push('online'); worker.postMessage('ping'); });
+  worker.on('message', function (m) { seen.push('message:' + JSON.stringify(m)); });
+  worker.on('error', function (e) { seen.push('error:' + e.message); });
+  await new Promise(function (resolve) { worker.on('exit', function (code) { seen.push('exit:' + code); resolve(); }); });
+  console.log('events      : ' + seen.join(' '));
+  console.log('');
+})();
 
 // --- readline (milestone 31) ---
 // A "terminal" here is just an { input, output } stream pair - a tab has no TTY,

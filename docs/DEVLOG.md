@@ -79,6 +79,7 @@
 | M54 | **真 `v8`**：vendor 真 `lib/v8.js` + `lib/internal/v8/{heap_profile,cpu_profiler}.js`（MANIFEST 148 → 151）；新增 `serdes` binding——**把 V8 结构化克隆线格式（版本 15）用 JS 重写**（逐标签对照 `deps/v8/src/objects/value-serializer.cc`：varint/ZigZag、两字节字符串对齐 pad、对象 id 与反引用、dense/sparse 数组、Map/Set、Date/RegExp/Error（含 `cause`）、Boxed primitive、ArrayBuffer、Node 默认的 ABV host-object 路径），`v8.serialize`/`deserialize`/`Serializer`/`Deserializer` 全走它；`internal/heap_utils` 用 shim，堆与 profiler 面一律响亮抛错。验证：**115 条差分语料在真 Node v26.9.0 与 web-node 之间逐字节一致** | ✅ 完成 |
 | M55 | **真 `tty`**：vendor 真 `lib/tty.js` + `lib/internal/tty.js`（MANIFEST 151 → 153）；新增 `tty_wrap` binding（`isTTY` 恒 false，`TTY` 构造即抛，`UV_TTY_MODE_*` 常量）；`internal/errors` 补 `ERR_INVALID_FD`/`ERR_INVALID_CURSOR_POS`/`ERR_INVALID_FD_TYPE`/`ERR_TTY_INIT_FAILED` 与真 `SystemError` + `kIsNodeError`；`internal/util/colors` 的 `FORCE_COLOR` 惰性路径从此可用（之前会炸）。验证：**57 条颜色深度 + 10 条 `hasColors` 语料与真 Node v26.9.0 全等** | ✅ 完成 |
 | M56 | **真 `vm`**：vendor 真 `lib/vm.js` + `lib/internal/vm.js`（MANIFEST 153 → 155）；新增 `contextify` binding——把沙箱对象当作上下文（标 Node 的 contextify 符号），脚本跑在 `with (scope) { return eval(code) }` 里，`createContext`/`isContext`/`Script`/`compileFunction`/`runIn*Context` 全是真的；上下文对 `process`/`require`/`Buffer`/`setTimeout` 保持 `undefined`（只暴露标准内建 + `console`）。验证：**59 条差分语料与真 Node v26.9.0 逐条一致** | ✅ 完成 |
+| M57 | **真 `Worker`**：`worker_threads.Worker` 落地为“同 loop 的协作式工作器”（`proc/worker.ts`）——一个 worker = 第二个模块注册表 + 自己的 `process`/`worker_threads` 视图 + 一条真实的 `MessageChannel`；`workerData`/消息往返/`online`/`message`/`error`/`exit` 生命周期/`terminate()` 与构造校验均与真 Node 对齐（退出后 `threadId=-1`、`postMessage` no-op、`terminate()` 返回 `undefined` 也一致）。**无并行**是唯一要紧的偏离（故 `eval`/worker 标准 IO/`resourceLimits`/剖析/嵌套 `Worker` 响亮报错）。验证：**15 条差分语料与真 Node v26.9.0（真线程）逐条一致** | ✅ 完成 |
 | M51b | **`fs.opendir`/`Dir` + `fs.watchFile`**：`fs_dir` binding 真实现（`opendir`/`opendirSync` + `DirHandle`：`read` 返回 libuv 扁平 `[name,type,…]`、穷尽 `null`；`close`；`dirfd`），`lib/internal/fs/dir.js` 的 `Dir` 原样可跑；`StatWatcher` 从抛错换成**轮询实现**（复刻 libuv `uv_fs_poll` 协议，轮询走 `ctx.timers` 参与事件循环判定） | ✅ 完成 |
 | M51 | **真回调式 `fs`**：vendor 真 `lib/fs.js`（4083 行）+ `internal/fs/read/context.js` + `internal/fs/cp/cp-sync.js` + `internal/streams/fast-utf8-stream.js`（MANIFEST 142 → 146）；`fs` binding 补 `readFileUtf8`/`writeFileUtf8`（整文件 utf8 快路，写做成单次 VFS 操作使 `fs.watch` 每整写只报一个事件）/`handleToFd`/`cpSyncCheckPaths`/`cpSyncCopyDir`/`cpSyncOverrideFile`/`CpDirJob`/`StatWatcher`/`kFsStatsFieldsNumber`；`fs_event_wrap.FSEvent` 从抛错换成 **VFS 投影**（订阅 `Vfs.subscribe`，`create`/`delete`→`rename`、`change`→`change`），`fs.watch`/`fs.promises.watch` 因此走真 watchers 代码；`readSync`/`writeSync` 把 `position === -1` 按“当前位置”处理；`internal/fs/streams.js` 顶层回环不进 vendor，另写 `builtins/fs-streams.ts`（VFS 原生读写流） | ✅ 完成 |
 | M50 | **真 `fs/promises`**：vendor 真 `lib/fs/promises.js` + `lib/internal/fs/promises.js`（2304 行）+ `internal/fs/{dir,watchers,recursive_watch}.js` + `internal/vfs/setup.js` + `internal/fs/cp/cp.js`（MANIFEST 135 → 142）；`fs` binding 补齐整张 async/promise 面（`kUsePromises` 三态派发：Promise / 回调 / 同步；`FileHandle`/`ReadFileJob`/`WriteFileJob`；`stat` 家族返回 18 槽元组；`readdir` 返回 `{0:names,1:types}`）；`hideStackFrames` 补 `.withoutStackTrace`；`internal/fs/rimraf` 改成 VFS 原生 shim（真 rimraf 驱动回调 fs + Buffer 路径，标签页没有）；`fs.promises` 换成 `require('fs/promises')` 同一个对象 | ✅ 完成 |
@@ -198,7 +199,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
    - **`v8` 换真源码**：✅ **已处理（2026-09-21，M54）**：真 `lib/v8.js` 已 vendor（MANIFEST 148 → 151），`serdes` binding 用 JS 实现 V8 线格式（版本 15）并对 115 条差分语料逐字节对齐真 Node v26.9.0；堆与 profiler 面一律抛 `ERR_WEB_NODE_NOT_IMPLEMENTED`。剩：数组 elements kind 的“历史状态”、`Proxy` 识别、异常对象的 clone 错误文案是**已记录的近似**；`hasInspector: false` 使 `takeCoverage`/`stopCoverage` 不存在。
    - **`tty` 换真源码**：✅ **已处理（2026-09-21，M55）**：真 `lib/tty.js` + `lib/internal/tty.js` 已 vendor（MANIFEST 151 → 153），`tty_wrap` binding 让 `isatty` 与颜色深度成为真实现，`ReadStream`/`WriteStream` 构造即抛（标签页没有 TTY 句柄）。
    - **`vm` 换真源码**：✅ **已处理（2026-09-21，M56）**：真 `lib/vm.js` + `lib/internal/vm.js` 已 vendor（MANIFEST 153 → 155），`contextify` binding 把上下文/`Script`/`compileFunction` 落实为单 realm 内的 `with`-scope 语义，59 条差分语料与真 Node v26.9.0 逐条一致。`unsupported` 现在只剩 **`tls`**。
-   - **下一步（M57）候选**：`tls`（最后一块 stub；标签页没有原生 TLS，但可在虚拟 TCP 上桥到 WebCrypto/`SubtleCrypto` 提供 TLS-like 表面，或明确保留为抛错）；或继续拓宽 `internal/errors` 的错误码表；或给 `worker_threads` 补 `Worker` 本体。
+   - **下一步（M58）候选**：`tls`（最后一块 stub；标签页没有原生 TLS，且 vendored 代码里没有任何模块 require 它——硬做只能造假，倾向于明确保留为抛错）；或继续拓宽 `internal/errors` 的错误码表；或给 `worker_threads` 补 worker 标准 IO 的惰性流；或把 `Worker` 的可选并行（真嵌套 Web Worker）做成可选项。
    - ~~**`internal/fs/glob`**~~ ✅ **已处理（2026-09-21，M33）**：真 `internal/fs/glob.js` + 随包 `internal/deps/minimatch/index`；`path.matchesGlob`、`fs.glob`/`globSync`、`fs.promises.glob` 上线。剩：`internal/fs/utils` 仍是只含 `DirentFromStats` 的 shim（真文件是 fs 基座）；`withFileTypes` 的 `Dirent.parentPath` 与我们自研 readdir 的形状一致（绝对值 vs Node 按传入路径）已对齐。
    - ~~**`stream/iter` + `stream/consumers`**~~ ✅ **已处理（2026-09-21，M38）**：真 `lib/stream/iter.js` + `lib/stream/consumers.js` + 整个 `internal/streams/iter/*`（12 文件）。`internal/streams/iter/transform.js` 不在内（它顶层 `internalBinding('zlib')`；M45 的 builtin `zlib` 不能代替 native 绑定，故仍未支持）。
    - **`internal/perf/*` 的直方图半边**：⚠️ 部分过时——M35 已把 `perf_hooks` 换成真源码；仅 `createHistogram`/`importHistogram`/`monitorEventLoopDelay` 仍抛错（真 `internal/histogram` 背后是 native hdr_histogram + 一整套统计检验，JS 移植代价大、优先级低）。
@@ -222,6 +223,42 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-21 · M57 真 `Worker`（`worker_threads.Worker` 落地为“同 loop 的协作式工作器”）
+
+**目标**：`worker_threads` 此前只有消息传递那一半（`MessageChannel`/`MessagePort`/`BroadcastChannel`/`receiveMessageOnPort`），`Worker` 直接抛错。浏览器标签页起不了线程，但 worker 的**数据语义**可以在单一事件循环上复刻——和 `proc/host.ts` 复刻子进程是同一手法。
+
+**改了什么**
+
+1. **新增 worker 宿主**（`src/node-runtime/proc/worker.ts`，仿 `proc/host.ts`）：
+   - 一个 worker = **第二个模块注册表**（自己的模块缓存、自己的注入 globals、自己的 `process`/`worker_threads` 视图），与父侧用一条真实的 `MessageChannel` 端口对通信。
+   - `Worker` 构造时即建好端口对（因此启动前的 `postMessage` 会排队并在 worker 启动后投递，和 Node 一致）。
+   - **起点延到下一个宏任务**（`defer`），所以父侧的 `worker.on('message', …)` 一定先于 worker 的第一次发送；`online` 在 worker 脚本执行前发出（对应 Node 的 `upAndRunning`），顺序与 Node 一致（`online` → `error` → `exit`）。
+   - worker 的**定时器按 worker 计数**：`setTimeout`/`setInterval`/`setImmediate`/`clear*` 被包裹，既能把它回调里的异常路由到该 worker（`error` + `exit 1`），又能让退出判定只看**它自己**的待办（`entry 返回 && 自有定时器清零 && parentPort 未被引用`）——**不能用全局定时器增量**，否则父程序里无关的定时器会把 worker 永远吊住（浏览器 demo 里踩到的一个真 bug）。
+   - worker 侧 `worker_threads` 视图：`isMainThread:false`、`threadId`、`threadName`、`parentPort`、`workerData`、`SHARE_ENV`、`get/setEnvironmentData`（与主线程共享一张表），以及消息传递内建。嵌套 `Worker` 响亮报错。
+   - worker 侧 `process` 视图：自己的 `argv`（execPath、脚本、`...options.argv`）、自己的 `env`（默认拷贝，`SHARE_ENV` 则共享）、`execArgv`，`process.exit()` 退出的是 worker 而非整个程序；`process.threadId` 保持缺席（与真 Node 实测一致）。
+2. **`lib/loader` 增加每注册表的内建覆盖**（`setBuiltinOverrides`）：worker 里 `require('worker_threads')`/`require('process')` 必须拿到 worker 侧视图，而不是主线程的单例；`require` 门面在 realm 内建之前先查这张表。
+3. **`worker_threads.ts` 重写**：`Worker` 是运行时自己的实现，构造/校验与 Node 逐字对齐（`filename` 非字符串/非 URL、裸标识符、`options.env`/`name`/`argv` 的校验文案与 `code` 全部一致），`threadId`/`threadName` 在退出后分别报 `-1`/`null`、`postMessage` 退出后是 no-op、`terminate()` 退出后返回 `undefined`——这些都是真 Node v26.9.0 实测行为。
+4. **`internal/errors` shim** 补 `ERR_WORKER_PATH`（含条件化的 URL 提示）、`ERR_WORKER_INVALID_EXEC_ARGV`、`ERR_WORKER_NOT_RUNNING`。
+5. `BindingContext` 增加 `workers: WorkerHost`；`runtime.ts` 构造并把它计入 `#activeWorkCount`（被 ref 的活跃 worker 会吊住运行，与 Node 的 ref 语义一致），`resetRunState` 里一并 `reset()`。
+
+**验证**
+
+- **差分语料**：`test/fixtures/worker-corpus.mjs`（15 条：模块键与主线程常量 / `plain` 的 `online,exit` / `echo` 往返 / `workerData` 结构化克隆（含 `Date`）/ 同步抛错 → `online,error,exit:1` / 异步抛错 → `online,message,error,exit:1` / `terminate()` → `online,message:waiting,exit:1` + 返回 1 / 两个 worker 的 `threadId` / `Worker.prototype` 表面 / 四个构造校验的 name+code+message）+ `tools/worker-corpus-oracle.mjs`（真 Node v26.9.0 跑真线程生成 `test/fixtures/worker-corpus.json`）+ `test/worker-corpus.test.ts` → **15/15 一致**。
+- 另增 `test/worker.test.ts`（14 条）：模块表面、worker 自己的 `process`/`worker_threads` 视图（`process.argv`、`'threadId' in process === false`）、`workerData` 是隔离的深拷贝、worker 之间 globals 不串、双向消息与 `parentPort.close()`、退出后 `threadId=-1`/`postMessage` no-op/`terminate()` 返回 `undefined`、`terminate()` 返回 1 并发 `exit`、未捕获异常 → `online,error,exit:1`、`environmentData` 主/worker 共享、显式 `env` 与 `SHARE_ENV`、构造校验、以及“响亮报错”清单（`eval`/`resourceLimits`/worker 标准 IO/`getHeapSnapshot`/`cpuUsage`/嵌套 `Worker`）。
+- 门禁：`tsc` 干净 · vitest **691 → 705/705**（62 files）· build 绿（worker 2217.17 → **2229.19 kB**）。
+- 浏览器端到端：demo 新增 milestone 57 段（`lib/worker-demo.js` 发出 `workerData`/`isMainThread`/`threadId`，父侧回 `ping`，worker 回 `re:ping` 后 `close`），实测 **`events : online message:{…} message:"re:ping" exit:0`**。
+
+**已知偏离**（写进注释与本文）
+
+- **无并行**：worker 与主线程共用一个事件循环，不会真的并发；一个不让出的 worker 会阻塞父程序（反之亦然），`Atomics.wait` 式阻塞不可用。这是本 milestone 唯一要紧的偏离，是刻意的而非隐藏的。
+- **无独立 isolate/管道/资源上限**：`eval`、worker 标准 IO（`stdin`/`stdout`/`stderr` 选项与其 getter）、`resourceLimits`、堆/CPU 剖析、以及嵌套 `Worker` 一律抛 `ERR_WEB_NODE_NOT_IMPLEMENTED`。
+- **threadId 编号**：父侧 `worker.threadId` 与 worker 侧 `require('worker_threads').threadId` 用同一个计数（真 Node 两侧可能不同）；都保证 > 0。
+- **启动前 `terminate()`**：真 Node v26.9.0 对尚未启动的 worker 返回 0；本运行时返回 1（该分支本身在 Node 侧也带竞态，故不纳入语料）。
+- `worker.workerData` 不对外暴露（真 Node v26.9.0 也不暴露，实测为 `undefined`）。
+
+**涉及文件**
+新增：`src/node-runtime/proc/worker.ts`、`test/worker.test.ts`、`test/worker-corpus.test.ts`、`test/fixtures/worker-corpus.mjs`、`test/fixtures/worker-corpus.json`、`tools/worker-corpus-oracle.mjs`。修改：`src/node-runtime/bindings/context.ts`、`src/node-runtime/runtime.ts`、`src/node-runtime/loader/index.ts`、`src/node-runtime/builtins/worker-threads.ts`、`src/node-runtime/builtins/internal-shims.ts`、`src/demo-project.ts`、`README.md`、`README_zh.md`。
 
 ### 2026-09-21 · M56 真 `vm`（`lib/vm.js` + `lib/internal/vm.js` 换真源，新增 `contextify` binding）
 

@@ -227,6 +227,15 @@ Node's contextify symbol) and scripts run inside `with (context) { … }`, with
 a fresh context exposes the standard intrinsics (plus `console`) while keeping
 `process`, `require`, `Buffer` and `setTimeout` undefined.
 
+`Worker` is this runtime's own. A browser tab cannot start a thread, so a worker
+is a second module registry on the same event loop, with its own
+`process`/`worker_threads` views and a real `MessageChannel` to the parent.
+`workerData`, message round trips, the `online`/`message`/`error`/`exit`
+lifecycle, `terminate()` and the constructor validation behave as in Node; what
+is missing is parallelism, which the docs state plainly, and anything needing a
+native thread (`eval`, worker stdio, `resourceLimits`, profiling, nested workers)
+throws.
+
 ## npm
 
 Hit **Install deps** and the client resolves your `package.json` dependencies
@@ -453,6 +462,7 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M54 | Real `v8` — `lib/v8.js` vendored; `serialize`/`deserialize` and the `Serializer`/`Deserializer` classes run on a new `serdes` binding that reimplements V8's structured-clone wire format (version 15) in JS, byte-for-byte with Node v26.9.0 across a 115-case differential corpus; heap snapshots, `queryObjects` and profiling throw | ✅ Done |
 | M55 | Real `tty` — `lib/tty.js` + `lib/internal/tty.js` vendored, with a new `tty_wrap` binding (`isTTY` is always false, the `TTY` handle throws): `isatty` and `getColorDepth`/`hasColors` are real, `ReadStream`/`WriteStream` throw instead of faking a terminal; the `FORCE_COLOR` path through `internal/util/colors` (previously a missing module) now works and colours `util.styleText`. 57 colour-depth + 10 `hasColors` cases match Node v26.9.0 | ✅ Done |
 | M56 | Real `vm` — `lib/vm.js` + `lib/internal/vm.js` vendored, with a new `contextify` binding: the sandbox object *is* the context (tagged with Node's contextify symbol) and scripts run in a `with`-scope over it, so `createContext`/`isContext`/`Script`/`compileFunction`/`runIn*Context` are real while `process`/`require`/`Buffer`/`setTimeout` stay `undefined` inside a fresh context. 59 behaviours match Node v26.9.0 | ✅ Done |
+| M57 | Real `Worker` — a cooperative worker: a second module registry on the same event loop with its own `process`/`worker_threads` views and a real `MessageChannel` to the parent. `workerData`, message round trips, the `online`/`message`/`error`/`exit` lifecycle, `terminate()` and the constructor validation all match Node (including `threadId === -1` and a no-op `postMessage` after exit). The one deviation that matters — no real parallelism — is documented, and everything needing a native thread (`eval`, worker stdio, `resourceLimits`, profiling, nested workers) throws. 15 behaviours match Node v26.9.0 | ✅ Done |
 
 ## Vendored Node source
 
@@ -545,12 +555,13 @@ is vendorable when its only dependencies are shims we already provide;
 everything else is a binding away.
 
 The remaining large gaps are the ones with no browser story at all (`http2`,
-`dgram`, `tls`/`_tls_*`, `cluster`, the thread-spawning half of
-`worker_threads`, `inspector`, `repl`, `wasi`, `sqlite`, `sea`), plus
-native-layer reimplementations worth doing (`internal/util/inspect.js`, the
-native `string_decoder`, `internal/fs/*`). `vm` is a load-only stub whose only
-real member is `runInNewContext` — Node's own `internal/util.js` needs it to
-reach a cross-realm `RegExp`.
+`dgram`, `tls`/`_tls_*`, `cluster`, `inspector`, `repl`, `wasi`, `sqlite`,
+`sea`, and the *real threads* behind `worker_threads`), plus native-layer
+reimplementations worth doing (`internal/util/inspect.js`, the native
+`string_decoder`, `internal/fs/*`). `vm` is the real `lib/vm.js` on a JS
+stand-in for V8 contexts, and `worker_threads.Worker` runs as a cooperative
+worker (real messages and lifecycle, no parallelism). Of Node's core modules,
+only `tls` remains a pure throwing stub.
 
 ## Contributing
 

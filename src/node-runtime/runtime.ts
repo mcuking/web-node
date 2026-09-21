@@ -1,7 +1,9 @@
 import type { BindingContext } from './bindings/context';
 import type { Vfs } from './vfs';
 import type { ProcessHost } from './proc/host';
+import type { WorkerHost } from './proc/worker';
 import { createProcessHost } from './proc/host';
+import { createWorkerHost } from './proc/worker';
 import { triggerUncaughtException } from './bindings/uncaught';
 import { VirtualNetwork } from './net/network';
 import { Realm } from './realm';
@@ -151,6 +153,8 @@ export class NodeRuntime {
   readonly network: VirtualNetwork;
   /** The controlled spawn surface (`child_process` + npm lifecycle scripts). */
   readonly spawn: ProcessHost;
+  /** The worker surface (`worker_threads.Worker`). */
+  readonly workers: WorkerHost;
   readonly process: Record<string, unknown>;
   readonly console: Record<string, unknown>;
   readonly Buffer: unknown;
@@ -194,10 +198,23 @@ export class NodeRuntime {
       onChildEvent: (event) => opts.onChildEvent?.(event),
     });
 
+    // The worker surface, built exactly like the spawn surface: it reaches the
+    // realm/loader lazily so it can be constructed before them.
+    const workers = createWorkerHost({
+      vfs: opts.vfs,
+      realm: () => this.realm,
+      loader: () => this.loader,
+      globals: () => this.sandboxGlobals,
+      aliases: () => ({ ...MODULE_ALIASES }),
+      execPath,
+      baseEnv: env,
+    });
+
     const bindingCtx: BindingContext = {
       vfs: opts.vfs,
       network: new VirtualNetwork(),
       spawn,
+      workers,
       env,
       argv,
       execPath,
@@ -275,6 +292,7 @@ export class NodeRuntime {
     this.bindingCtx = bindingCtx;
     this.network = bindingCtx.network;
     this.spawn = spawn;
+    this.workers = workers;
 
     this.realm = new Realm(bindingCtx);
     this.loader = new ModuleLoader(this.realm, opts.vfs);
@@ -461,7 +479,13 @@ export class NodeRuntime {
    */
   #activeWorkCount(): number {
     const timers = this.realm?.internalBinding('timers') as { __liveCount?: () => number } | undefined;
-    return this.#timers.size + (timers?.__liveCount?.() ?? 0) + this.#hostRequests + this.#hostSockets;
+    return (
+      this.#timers.size +
+      (timers?.__liveCount?.() ?? 0) +
+      this.#hostRequests +
+      this.#hostSockets +
+      (this.workers?.activeWorkers ?? 0)
+    );
   }
 
   /**
@@ -599,9 +623,10 @@ export class NodeRuntime {
     this.#hostGeneration += 1;
     this.#hostRequests = 0;
     this.#hostSockets = 0;
-    // Children belong to the run that started them: like teardown of a process
-    // group, nothing survives into the next Run.
+    // Children and workers belong to the run that started them: like teardown of
+    // a process group, nothing survives into the next Run.
     this.spawn.reset();
+    this.workers.reset();
     this.#exitCode = null;
   }
 

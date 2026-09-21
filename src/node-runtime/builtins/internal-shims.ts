@@ -111,6 +111,11 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_INVALID_FD_TYPE: 'Unsupported fd type: %s',
   ERR_TTY_INIT_FAILED: 'TTY initialization failed',
   ERR_CONTEXT_NOT_INITIALIZED: 'context used is not initialized',
+  // Message body lives in CUSTOM_FORMATTERS (it is built conditionally).
+  ERR_WORKER_PATH:
+    'The worker script or module filename must be an absolute path or a relative path starting with \'./\' or \'../\'.',
+  ERR_WORKER_INVALID_EXEC_ARGV: 'Initiated Worker with %s: %s',
+  ERR_WORKER_NOT_RUNNING: 'Worker instance not running',
 };
 
 /**
@@ -179,6 +184,9 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_INVALID_FD: RangeError,
   ERR_INVALID_FD_TYPE: TypeError,
   ERR_CONTEXT_NOT_INITIALIZED: Error,
+  ERR_WORKER_PATH: TypeError,
+  ERR_WORKER_INVALID_EXEC_ARGV: Error,
+  ERR_WORKER_NOT_RUNNING: Error,
 };
 
 class NodeError extends Error {
@@ -261,6 +269,23 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
       ? `. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- ${JSON.stringify(option)}`
       : '';
     return `Unknown option '${option}'${suggest}`;
+  },
+  // `ERR_WORKER_PATH(filename)`: the advice about wrapping URL-shaped inputs is
+  // appended only when the path looks like a file:// or data: URL (lib/internal/errors.js).
+  ERR_WORKER_PATH: (args) => {
+    const filename = String(args[0]);
+    return (
+      'The worker script or module filename must be an absolute path or a ' +
+      "relative path starting with './' or '../'." +
+      (filename.startsWith('file://') ? ' Wrap file:// URLs with `new URL`.' : '') +
+      (filename.startsWith('data:text/javascript') ? ' Wrap data: URLs with `new URL`.' : '') +
+      ` Received "${filename}"`
+    );
+  },
+  // `ERR_WORKER_INVALID_EXEC_ARGV(errors, msg = 'invalid execArgv flags')`.
+  ERR_WORKER_INVALID_EXEC_ARGV: (args) => {
+    const [list, msg = 'invalid execArgv flags'] = args as [unknown[], string?];
+    return `Initiated Worker with ${msg}: ${list.join(', ')}`;
   },
 };
 

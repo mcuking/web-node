@@ -1,0 +1,77 @@
+{
+  "generatedBy": "node v26.9.0",
+  "results": {
+    "moduleKeys": "Worker:true,MessageChannel:true,MessagePort:true,parentPort:true,workerData:true,threadId:true,threadName:true,isMainThread:true,isInternalThread:true,receiveMessageOnPort:true,SHARE_ENV:true,markAsUncloneable:true,markAsUntransferable:true,isMarkedAsUntransferable:true,BroadcastChannel:true,getEnvironmentData:true,setEnvironmentData:true,resourceLimits:true,moveMessagePortToContext:true,postMessageToThread:true",
+    "mainConstants": "true|0||symbol|nodejs.worker_threads.SHARE_ENV",
+    "plainEvents": "online,exit",
+    "plainExit": 0,
+    "echoEvents": "online,message,exit",
+    "echoReply": "re:ping",
+    "reportEvents": "online,message,exit",
+    "reportData": {
+      "data": {
+        "n": 1,
+        "nested": {
+          "deep": [
+            1,
+            2,
+            3
+          ]
+        },
+        "when": "1970-01-01T00:00:00.000Z"
+      },
+      "isMainThread": false,
+      "threadIdPositive": true,
+      "hasThreadName": true,
+      "loadable": true
+    },
+    "badSync": {
+      "events": "online,error,exit",
+      "errorName": "Error",
+      "errorMessage": "kaboom",
+      "exit": 1
+    },
+    "badAsync": {
+      "events": "online,message,error,exit",
+      "errorName": "Error",
+      "errorMessage": "later",
+      "exit": 1
+    },
+    "terminateEvents": "online,message:waiting,exit:1",
+    "terminateCode": 1,
+    "threadIds": "true,true,true",
+    "workerSurface": "function,function,function,function,undefined,function,true,false",
+    "constructors": {
+      "noArgs": {
+        "ok": false,
+        "name": "TypeError",
+        "message": "The \"filename\" argument must be of type string or an instance of URL. Received undefined",
+        "code": "ERR_INVALID_ARG_TYPE"
+      },
+      "bare": {
+        "ok": false,
+        "name": "TypeError",
+        "message": "The worker script or module filename must be an absolute path or a relative path starting with './' or '../'. Received \"w\"",
+        "code": "ERR_WORKER_PATH"
+      },
+      "badEnv": {
+        "ok": false,
+        "name": "TypeError",
+        "message": "The \"options.env\" property must be of type object or one of undefined, null, or worker_threads.SHARE_ENV. Received type number (3)",
+        "code": "ERR_INVALID_ARG_TYPE"
+      },
+      "badName": {
+        "ok": false,
+        "name": "TypeError",
+        "message": "The \"options.name\" property must be of type string. Received type number (3)",
+        "code": "ERR_INVALID_ARG_TYPE"
+      },
+      "badArgv": {
+        "ok": false,
+        "name": "TypeError",
+        "message": "The \"options.argv\" property must be an instance of Array. Received type string ('no')",
+        "code": "ERR_INVALID_ARG_TYPE"
+      }
+    }
+  }
+}
