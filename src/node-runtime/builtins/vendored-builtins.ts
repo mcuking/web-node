@@ -691,8 +691,9 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     id: 'internal/webstreams/compression',
     vendorPath: 'internal/webstreams/compression.js',
     origin: 'node-source',
-    // Requires `zlib` lazily, so the module loads even though the runtime has
-    // no deflate backend: constructing a CompressionStream throws.
+    // Requires `zlib` lazily. Now that `zlib` is a real module, the whole
+    // CompressionStream/DecompressionStream surface works; only the `brotli`
+    // format throws (no browser codec).
     deps: [
       'internal/errors',
       'internal/util',

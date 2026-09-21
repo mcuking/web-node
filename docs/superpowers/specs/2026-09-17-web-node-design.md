@@ -111,7 +111,7 @@ primordials.js（真源码）→ domexception.js / messageport.js（真源码）
 
 **明确不支持**（抛错）：原生 `crypto`/OpenSSL 绑定、`zlib`、`tcp_wrap`、`udp_wrap`、`worker`、`inspector`、`sea`、`ffi`、`quic`、`cares_wrap`、`http_parser` 等。
 
-> 注：上表说的是 **native 绑定**。`crypto` 这个 **builtin 模块本身是支持的**（`origin: web-node`）：随机数走平台 WebCrypto，同步的摘要/HMAC/PBKDF2/HKDF/scrypt 在 JS 里实现（`src/node-runtime/crypto/hash.ts`）并对齐 Node 的 OpenSSL 输出；密文/签名/非对称密钥仍显式抛错。`perf_hooks` 也是真源码（`lib/perf_hooks.js` + `internal/perf/*`），只坐在上面那个 JS `performance` binding 上；直方图那一组（`createHistogram`/`importHistogram`/`monitorEventLoopDelay`）需要 native hdr_histogram，由 `internal/histogram` shim 显式抛错。`stream/web` 同样是真源码（`lib/stream/web.js` + 整个 `internal/webstreams/*`），坐在 `messaging`/`buffer`/`util`/`stream_wrap`（仅形状）四个 binding 上；`CompressionStream`/`DecompressionStream` 需要 native zlib，构造即抛错（模块本身可加载）。`Blob`/`File` 同样是真源码（`lib/internal/blob.js` + `lib/internal/file.js`），坐在上面那个 JS `blob` binding 上；它们同时也是**全局**，且与 `require('buffer').Blob` 同身份（真 `internal/streams/duplexify` 的 `isBlob` 门依赖这一点）。
+> 注：上表说的是 **native 绑定**。`crypto` 这个 **builtin 模块本身是支持的**（`origin: web-node`）：随机数走平台 WebCrypto，同步的摘要/HMAC/PBKDF2/HKDF/scrypt 在 JS 里实现（`src/node-runtime/crypto/hash.ts`）并对齐 Node 的 OpenSSL 输出；密文/签名/非对称密钥仍显式抛错。`perf_hooks` 也是真源码（`lib/perf_hooks.js` + `internal/perf/*`），只坐在上面那个 JS `performance` binding 上；直方图那一组（`createHistogram`/`importHistogram`/`monitorEventLoopDelay`）需要 native hdr_histogram，由 `internal/histogram` shim 显式抛错。`stream/web` 同样是真源码（`lib/stream/web.js` + 整个 `internal/webstreams/*`），坐在 `messaging`/`buffer`/`util`/`stream_wrap`（仅形状）四个 binding 上；`CompressionStream`/`DecompressionStream` 现在可用（它们拉的是新实现的 `zlib`），只有 `brotli` 格式抛错。`Blob`/`File` 同样是真源码（`lib/internal/blob.js` + `lib/internal/file.js`），坐在上面那个 JS `blob` binding 上；它们同时也是**全局**，且与 `require('buffer').Blob` 同身份（真 `internal/streams/duplexify` 的 `isBlob` 门依赖这一点）。`zlib` 这个 **builtin 模块本身也是支持的**（`origin: web-node`）：deflate/gzip（含流式与一次性异步形式）跑在平台的 `CompressionStream`/`DecompressionStream` 上，默认选项下输出与 Node 逐字节一致；同步形式与 `level`/`windowBits`/`memLevel`/`strategy`/`dictionary` 参数因平台无对应面而显式抛错，brotli/zstd/zip 同理。
 
 ---
 
@@ -192,7 +192,7 @@ web-node/
 
 ## 9. 已知限制
 
-> 本表按里程碑进展刷新（当前至 **M44**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
+> 本表按里程碑进展刷新（当前至 **M45**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
 >
 > **vendoring 进展**：`lib/stream.js` + `internal/streams/*`（整套流）、`lib/events.js`、`lib/internal/event_target.js` + `internal/webidl.js` + `internal/perf/utils.js`、`lib/internal/abort_controller.js`、`lib/console.js` + `internal/console/*` + `internal/cli_table.js` + `internal/trace_events.js` + `internal/util/debuglog.js`、`lib/os.js`、`lib/timers.js` + `internal/timers.js` + `timers/promises.js` + `internal/{linkedlist,priority_queue}.js`、`lib/internal/worker/io.js` + `internal/per_context/messageport.js` + `internal/worker/js_transferable.js`、`lib/readline.js` + `lib/readline/promises.js` + `internal/readline/{interface,emitKeypressEvents,promises}.js` + `internal/repl/history.js`、`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` + `internal/promise_hooks.js`、`lib/path.js`、`lib/querystring.js`、`lib/punycode.js`、`lib/domain.js`、`lib/diagnostics_channel.js`、`lib/string_decoder.js`、`internal/fs/glob.js` + `internal/deps/minimatch/index.js`、`internal/blob.js` + `internal/file.js`、`stream/iter.js` + `internal/streams/iter/{types,utils,webidl,ringbuffer,from,consumers,pull,push,duplex,broadcast,share,classic}.js`、`stream/consumers.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util.js`、`internal/util/diff.js`、`internal/util/parse_args/*`、`internal/validators.js`、`internal/mime.js`、`assert.js`、`internal/assert/{utils,assertion_error,myers_diff}.js`、`internal/streams/{state,from,utils}.js`、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`internal/per_context/*` 以及 `util.js` 已用 Node 真源码（MANIFEST 119 个文件）。
 
@@ -211,7 +211,8 @@ web-node/
 | `process` 的内部/原生面 | **已补齐公共面**（M43）：`getBuiltinModule`/`getActiveResourcesInfo`/`loadEnvFile`/未捕获异常捕获回调三件套/`reallyExit`/`openStdin`/`ref`/`unref`/`debugPort`/`domain`/`report` 已提供，并删掉真 Node 已删的三个 deprecation 开关。仍不存在（不面向用户代码）：`_debugEnd`/`_eval`/`_fatalException`/`_getActiveHandles`/`_tickCallback` 等 `_*` 内部面、`dlopen`/`execve`/`setegid`/`seteuid`/`setgroups` 等 Unix 原生、`moduleLoadList`（需 `--expose-internals`） |
 | 回调里抛出的异常 | **已修正**（M43）：timer / nextTick 回调里的抛出之前绕过 `process._fatalException`（捕获回调与 `uncaughtException` 监听器都不响）；现在统一经共享 dispatcher 路由 |
 | vendored 注释不进 bundle | 构建期剥离注释（行号/列号/ MIT 声明均保留）；`Function.prototype.toString()` 看不到注释，缩进未动 |
-| promise hooks 不触发 | V8 promise 未插桩，`createHook({ promiseResolve })` 不会响（tick/timer/AsyncResource 会） |
+| promise hooks 不触发 | 浏览器不向 JS 暴露 V8 的 promise hooks（`v8::SetPromiseHooks` 只给 embedder），无法拦截 `await`/async 函数创建的 promise，所以 `createHook({ promiseResolve })` 不会响（tick/timer/AsyncResource 会）。V8 判据只能靠 `Object.prototype.toString`，会漏掉 await-创建的 promise，故不做半吊子实现 |
+| `zlib` | **deflate/gzip 已支持**（M45）：流式与一次性异步形式（`createGzip`/`gzip`/`gunzip`/`unzip` 等）跑在平台 `CompressionStream`/`DecompressionStream` 上，默认选项下输出与 Node v26.9.0 **逐字节一致**；`crc32`/`constants`/`codes` 齐备。不支持（抛错）：同步形式（`gzipSync` 等，平台 codec 只有异步面）、`level`/`windowBits`/`memLevel`/`strategy`/`dictionary` 等**编码参数**（平台无参数面，传非默认值即抛，不静默忽略）、`flush()`/`params()`、brotli/zstd/zip |
 
 ---
 

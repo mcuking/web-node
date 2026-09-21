@@ -71,12 +71,43 @@ describe('stream/web: exports', () => {
     expect(typeof W.ReadableStream).toBe('function');
   });
 
-  it('throws a typed NotImplementedError for the zlib-backed codecs', () => {
+  it('compresses and decompresses through the zlib-backed codecs', async () => {
     const W = boot()('stream/web');
-    // CompressionStream/DecompressionStream pull in `zlib`, which needs a
-    // native deflate backend the runtime does not have.
-    expect(() => new W.CompressionStream('gzip')).toThrowError(/not implemented/);
-    expect(() => new W.DecompressionStream('gzip')).toThrowError(/not implemented/);
+    const data = new TextEncoder().encode('hello hello hello hello'.repeat(20));
+
+    const drain = async (stream: unknown): Promise<Uint8Array> => {
+      const parts: Uint8Array[] = [];
+      for await (const chunk of stream as AsyncIterable<Uint8Array>) parts.push(chunk);
+      let total = 0;
+      for (const part of parts) total += part.byteLength;
+      const out = new Uint8Array(total);
+      let offset = 0;
+      for (const part of parts) {
+        out.set(part, offset);
+        offset += part.byteLength;
+      }
+      return out;
+    };
+
+    for (const format of ['gzip', 'deflate', 'deflate-raw'] as const) {
+      const cs = new W.CompressionStream(format);
+      const writer = cs.writable.getWriter();
+      void writer.write(data);
+      void writer.close();
+      const compressed = await drain(cs.readable);
+
+      const ds = new W.DecompressionStream(format);
+      const writer2 = ds.writable.getWriter();
+      void writer2.write(compressed);
+      void writer2.close();
+      expect(await drain(ds.readable)).toEqual(data);
+    }
+  });
+
+  it('throws a typed NotImplementedError for the brotli codec', () => {
+    const W = boot()('stream/web');
+    // The platform ships no brotli codec, so only that format is unavailable.
+    expect(() => new W.CompressionStream('brotli')).toThrowError(/not implemented/);
   });
 });
 

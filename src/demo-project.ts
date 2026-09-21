@@ -533,6 +533,35 @@ const nodeStream = require('stream');
 })();
 console.log('');
 
+// --- zlib (milestone 45) ---
+// zlib is a real module now. The codec is the platform's CompressionStream /
+// DecompressionStream, so the streaming and one-shot async forms match Node
+// byte for byte with the default options; the sync forms have no platform
+// counterpart and throw a typed error instead of guessing.
+console.log('-- zlib (milestone 45) --');
+const zlib = require('zlib');
+zlib.gzip(Buffer.from('hello hello hello hello'), function (err, gz) {
+  if (err) { console.log('gzip        : ' + err.message); return; }
+  console.log('gzip hex    : ' + gz.toString('hex'));
+  zlib.gunzip(gz, function (e2, back) {
+    console.log('gunzip      : ' + (e2 ? e2.code : back.toString()));
+  });
+});
+console.log('crc32       : ' + zlib.crc32('hello'));
+const webZlib = require('stream/web');
+(async function () {
+  const cs = new webZlib.CompressionStream('deflate');
+  const writer = cs.writable.getWriter();
+  writer.write(Buffer.from('hello hello hello hello'));
+  writer.close();
+  const chunks = [];
+  const reader = cs.readable.getReader();
+  for (;;) { const r = await reader.read(); if (r.done) break; chunks.push(Buffer.from(r.value)); }
+  console.log('CS deflate  : ' + Buffer.concat(chunks).toString('hex'));
+})();
+try { zlib.gzipSync('x'); } catch (e) { console.log('gzipSync    : ' + e.code); }
+console.log('');
+
 // --- Blob (milestone 37) ---
 // Blob and File are now the real lib/internal/blob.js + lib/internal/file.js
 // running on a JS 'blob' binding. Blob is a global (and require('buffer').Blob

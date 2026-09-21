@@ -77,16 +77,6 @@ export const unsupportedSpecs: BuiltinSpec[] = [
     init: () => unsupported('tls'),
   },
   {
-    id: 'zlib',
-    aliases: ['node:zlib'],
-    origin: 'web-node',
-    init: () =>
-      unsupported('zlib', {
-        // Constants are just numbers; exposing them lets feature-detection pass.
-        constants: { Z_NO_COMPRESSION: 0, Z_BEST_SPEED: 1, Z_BEST_COMPRESSION: 9, Z_DEFAULT_COMPRESSION: -1 },
-      }),
-  },
-  {
     id: 'vm',
     aliases: ['node:vm'],
     origin: 'web-node',

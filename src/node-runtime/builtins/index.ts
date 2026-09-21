@@ -27,6 +27,7 @@ import { fsPromisesSpec } from './fs-promises';
 import { cryptoSpec } from './crypto';
 import { urlSpec } from './url';
 import { dnsSpec, dnsPromisesSpec } from './dns';
+import { zlibSpec } from './zlib';
 import { unsupportedSpecs } from './unsupported';
 import { processSpec } from './process';
 import { moduleSpec } from './module';
@@ -70,6 +71,7 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   cryptoSpec,
   dnsSpec,
   dnsPromisesSpec,
+  zlibSpec,
   // `internal/deps/undici/undici` is a two-line shim: only
   // `createFastMessageEvent` is reachable from the vendored graph.
   undiciSpec,

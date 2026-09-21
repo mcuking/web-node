@@ -202,8 +202,7 @@ describe('child_process', () => {
     });
     const { runtime, out } = bootRuntime(vfs);
     runtime.runMain('/project/index.js');
-    await tick();
-    expect(out.join('')).toBe('cb "mark=yes\\n" "cwd=/project/deep\\n"\n');
+    expect(await waitForOutput(out)).toBe('cb "mark=yes\\n" "cwd=/project/deep\\n"\n');
   });
 
   it('supports shell sequencing, pipelines and output redirection', async () => {

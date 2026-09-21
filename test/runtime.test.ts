@@ -185,17 +185,18 @@ describe('NodeRuntime — core', () => {
 
   it('loads stub modules for side-effect imports but throws when used', () => {
     // Bundlers do `import 'node:tty'` purely to keep the dependency; that must
-    // not explode. Actually *calling* the unsupported API must.
+    // not explode. Actually *calling* the unsupported API must. (`zlib` is no
+    // longer a stub — it exists — but its sync API has no platform counterpart.)
     const { stdout, error } = run({
       '/project/index.js': `
         const tty = require('tty');
-        const zlib = require('zlib');
+        const tls = require('tls');
         console.log('isatty', tty.isatty(1));
-        try { zlib.deflateSync('x'); } catch (e) { console.log('threw', /zlib\.deflateSync/.test(e.message)); }
+        try { tls.createServer(); } catch (e) { console.log('tls threw', e.code); }
       `,
     });
     expect(error).toBeNull();
-    expect(stdout).toBe('isatty false\nthrew true\n');
+    expect(stdout).toBe('isatty false\ntls threw ERR_WEB_NODE_NOT_IMPLEMENTED\n');
   });
 
   it('resolves every hostname to loopback in the virtual network', async () => {
