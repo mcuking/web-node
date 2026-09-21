@@ -447,6 +447,50 @@ console.log('nodeTiming  : nodeStart=' + perf.nodeTiming.nodeStart + ' loopStart
 console.log('createHistogram() -> ' + (function () { try { perfHooks.createHistogram(); return 'ok'; } catch (err) { return err.code || err.name; } })());
 console.log('');
 
+// --- stream/web (milestone 36) ---
+// stream/web is the real WHATWG implementation (lib/stream/web.js + the whole
+// internal/webstreams/* group): ReadableStream / WritableStream /
+// TransformStream, the queuing strategies and the text codecs. The classic <->
+// web bridges work too, so Readable.toWeb(stream) hands back a real web stream.
+console.log('-- stream/web (milestone 36) --');
+const webStreams = require('stream/web');
+const nodeStream = require('stream');
+(async function () {
+  const rs = new webStreams.ReadableStream({
+    start: function (c) { c.enqueue('node '); c.enqueue('in '); c.enqueue('the browser'); c.close(); },
+  });
+  const reader = rs.getReader();
+  const parts = [];
+  for (;;) {
+    const r = await reader.read();
+    if (r.done) break;
+    parts.push(r.value);
+  }
+  console.log('readable    : ' + parts.join(''));
+
+  const ts = new webStreams.TransformStream({
+    transform: function (chunk, c) { c.enqueue(String(chunk).toUpperCase()); },
+  });
+  const w = ts.writable.getWriter();
+  const collected = (async function () {
+    const out = [];
+    const r = ts.readable.getReader();
+    for (;;) { const x = await r.read(); if (x.done) break; out.push(x.value); }
+    return out;
+  })();
+  await w.write('hello');
+  await w.write(' web');
+  await w.close();
+  console.log('transform   : ' + (await collected).join(''));
+
+  const toWeb = nodeStream.Readable.toWeb(nodeStream.Readable.from(['classic ', 'to ', 'web']));
+  const tw = toWeb.getReader();
+  const tparts = [];
+  for (;;) { const x = await tw.read(); if (x.done) break; tparts.push(Buffer.from(x.value).toString()); }
+  console.log('toWeb       : ' + tparts.join(''));
+})();
+console.log('');
+
 // --- npm (milestone 4) ---
 // The npm client downloads and unpacks packages into the virtual node_modules.
 // require() already resolves node_modules from the VFS, so once "Install deps"

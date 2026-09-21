@@ -36,6 +36,7 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_INVALID_URI: 'URI malformed',
   ERR_OUT_OF_RANGE: 'The value of "%s" is out of range. It must be %s. Received %s',
   ERR_INVALID_STATE: 'Invalid state: %s',
+  ERR_OPERATION_FAILED: 'Operation failed: %s',
   ERR_MISSING_ARGS: 'The "%s" argument must be specified',
   ERR_UNKNOWN_FILE_EXTENSION: 'Unknown file extension "%s" for %s',
   ERR_MODULE_NOT_FOUND: 'Cannot find module \'%s\' imported from %s',
@@ -326,8 +327,23 @@ function formatInvalidArgType(args: unknown[]): string {
   return `${msg}. Received ${determineSpecificType(actual)}`;
 }
 
-function makeErrorClass(code: string): new (...args: unknown[]) => Error {
-  const Base = (ERROR_BASES[code] ?? Error) as ErrorConstructor;
+/**
+ * Codes declared with extra base classes in `lib/internal/errors.js` — i.e.
+ * `E(code, message, Base, ...Extra)`. Node hangs each extra base off the code
+ * class as `<Base.name>`, so `ERR_INVALID_STATE.TypeError` is a `TypeError` with
+ * the same code/message. The WHATWG stream code reaches for exactly that
+ * (`new ERR_INVALID_STATE.TypeError(...)` when a reader is already active).
+ */
+const ERROR_EXTRA_BASES: Record<string, ErrorConstructor[]> = {
+  ERR_INVALID_STATE: [TypeError, RangeError],
+  ERR_OPERATION_FAILED: [TypeError],
+};
+
+function makeErrorClass(
+  code: string,
+  Base: ErrorConstructor = (ERROR_BASES[code] ?? Error) as ErrorConstructor,
+  attachExtraBases = true,
+): new (...args: unknown[]) => Error {
   const initProps = CUSTOM_PROPS[code];
   class NodeErr extends Base {
     code = code;
@@ -342,6 +358,12 @@ function makeErrorClass(code: string): new (...args: unknown[]) => Error {
   // `internal/validators` so validation frames vanish from the stack). Our
   // runtime cannot rewrite captured stacks, so it aliases the same class.
   Object.defineProperty(NodeErr, 'HideStackFramesError', { value: NodeErr, configurable: true });
+  // The extra bases (`E(code, msg, Error, TypeError, ...)`).
+  if (attachExtraBases) {
+    for (const extra of ERROR_EXTRA_BASES[code] ?? []) {
+      Object.defineProperty(NodeErr, extra.name, { value: makeErrorClass(code, extra, false) });
+    }
+  }
   return NodeErr as unknown as new (...args: unknown[]) => Error;
 }
 
@@ -756,18 +778,24 @@ export const internalHistogramSpec: BuiltinSpec = {
   }),
 };
 
-export const internalWebStreamsAdaptersSpec: BuiltinSpec = {
-  id: 'internal/webstreams/adapters',
+/**
+ * `internal/process/task_queues`.
+ *
+ * The real module owns the tick queue and drives V8's microtask queue from
+ * C++. This runtime already schedules ticks itself, so the only surface the
+ * vendored `internal/webstreams/*` group reaches for is `queueMicrotask` (it
+ * uses it to keep spec-ordered continuations off the tick queue). Everything
+ * else — `setTickCallback`, the promises hooks — stays with the runtime.
+ */
+export const internalProcessTaskQueuesSpec: BuiltinSpec = {
+  id: 'internal/process/task_queues',
   origin: 'web-node',
-  init: () =>
-    new Proxy(
-      {},
-      {
-        get: (): never => {
-          throw notImplemented('api', 'Readable.fromWeb / toWeb', 'Web Stream adapters are outside the MVP whitelist.');
-        },
-      },
-    ),
+  init: () => ({
+    queueMicrotask: (fn: () => void): void => {
+      if (typeof fn !== 'function') throw new TypeError('queueMicrotask requires a function');
+      queueMicrotask(fn);
+    },
+  }),
 };
 
 export const internalStreamIterSpec: BuiltinSpec = {

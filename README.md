@@ -359,7 +359,7 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
 
 **Current coverage** (revision `7a3437d`, v26.9.1-dev):
 
-- **93 files vendored** — the whole `stream` layer, `events`,
+- **103 files vendored** — the whole `stream` layer, `events`,
   `internal/event_target` (+ `internal/webidl`, `internal/perf/utils`),
   `internal/abort_controller`, `console` (+ `internal/console/*`,
   `internal/cli_table`, `internal/util/debuglog`, `internal/trace_events`,
@@ -385,14 +385,23 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
   `PerformanceNodeTiming` and `timerify`, on a JS `performance` binding;
   histograms (`createHistogram`, `monitorEventLoopDelay`) need the native
   hdr_histogram and throw,
+  `stream/web` (+ the whole `internal/webstreams/*` group) — the real WHATWG
+  `ReadableStream` / `WritableStream` / `TransformStream`, the queuing
+  strategies and the text codecs, plus the classic↔web adapters so
+  `Readable.toWeb` / `Writable.toWeb` / `Duplex.toWeb` work;
+  `CompressionStream`/`DecompressionStream` need the native zlib and throw,
   `internal/util/comparisons` (the real `isDeepStrictEqual`),
   `internal/util/colors`, `util` (+ `internal/util.js`, `internal/util/diff`,
   `internal/util/parse_args/*`), `internal/mime`, and the `internal/*` pieces
   they need (`primordials`, `fixed_queue`, `constants`, `encoding/util`,
   `streams/state`, `streams/destroy`, `per_context/*`, …).
-- **29 of the 58 top-level `lib/*.js` modules are provided** — either as
-  vendored source, or by our own implementation where the real file needs a
-  native layer that cannot exist in a tab. `crypto` is the newest of these: the
+- **32 of the 58 top-level `lib/*.js` modules are provided** — 28 as real
+  implementations (vendored source, or our own JS where the real file needs a
+  native layer a tab cannot have) and 4 (`tty`, `v8`, `tls`, `zlib`) as
+  load-only stubs that keep `import` side-effect-free and throw a typed
+  `NotImplementedError` on use. The newest real ones are `perf_hooks` (the whole
+  `internal/perf/*` group) and `stream/web` (the whole `internal/webstreams/*`
+  group). `crypto` is the newest hand-written one: the
   WebCrypto API is promise-only, but Node's `createHash` / `createHmac` /
   `pbkdf2Sync` / `scryptSync` are synchronous, so MD5, SHA-1, SHA-2
   (224/256/384/512), HMAC, PBKDF2, HKDF and scrypt are implemented in plain JS

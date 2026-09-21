@@ -108,6 +108,16 @@ const FILES = [
   'internal/worker/io.js',
   'internal/fs/glob.js',
   'internal/deps/minimatch/index.js',
+  'internal/webstreams/util.js',
+  'internal/webstreams/transfer.js',
+  'internal/webstreams/readablestream.js',
+  'internal/webstreams/writablestream.js',
+  'internal/webstreams/transformstream.js',
+  'internal/webstreams/queuingstrategies.js',
+  'internal/webstreams/encoding.js',
+  'internal/webstreams/adapters.js',
+  'internal/webstreams/compression.js',
+  'stream/web.js',
 ];
 
 /**

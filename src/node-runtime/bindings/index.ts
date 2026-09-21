@@ -23,6 +23,7 @@ import {
   taskQueueBinding,
   traceEventsBinding,
   uvBinding,
+  streamWrapBinding,
 } from './misc';
 import { messagingBinding, workerBinding } from './messaging';
 import { stringDecoderBinding } from './string_decoder';
@@ -46,6 +47,7 @@ const REGISTRY: Record<string, BindingFactory> = {
   icu: icuBinding,
   messaging: messagingBinding,
   uv: uvBinding,
+  stream_wrap: streamWrapBinding,
   diagnostics_channel: diagnosticsChannelBinding,
   task_queue: taskQueueBinding,
   trace_events: traceEventsBinding,
@@ -62,7 +64,6 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'tcp_wrap',
   'udp_wrap',
   'pipe_wrap',
-  'stream_wrap',
   'tty_wrap',
   'contextify',
   'module_wrap',

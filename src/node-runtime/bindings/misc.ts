@@ -324,6 +324,10 @@ export const diagnosticsChannelBinding: BindingFactory = () => {
 
 /** `uv` binding: the event loop. We expose an explicit "no pending work" view. */
 export const uvBinding: BindingFactory = () => ({
+  // `uv.h`: `UV_EOF = -4095`. `internal/webstreams/adapters` compares a raw
+  // read result against it when it turns a `stream_base` socket into a web
+  // stream.
+  UV_EOF: -4095,
   hrtime: () => [0, 0],
   getLibuvNow: () => Date.now(),
   updateTime: () => undefined,
@@ -334,3 +338,44 @@ export const uvBinding: BindingFactory = () => ({
   getErrorMessage: (errno: number) => `Unknown system error ${errno}`,
   errname: () => undefined,
 });
+
+/**
+ * `stream_wrap` binding: the C++ `StreamBase` handle base plus the shared
+ * `streamBaseState` vector.
+ *
+ * `internal/webstreams/adapters` reads this at load time, and only *uses* it in
+ * `newWritableStreamFromStreamBase` / `newReadableStreamFromStreamBase`, which
+ * turn a raw `stream_base` (a real libuv socket handle) into a web stream. The
+ * runtime's networking is emulated and never hands out a `stream_base`, so the
+ * shapes below exist to let the module load and to keep the code paths honest
+ * if they are ever reached. The field order and offsets match
+ * `StreamBase::StreamBaseStateFields` in `src/stream_base.h`.
+ */
+export const streamWrapBinding: BindingFactory = () => {
+  // `Environment::stream_base_state()` is an `Int32Array` of
+  // `kNumStreamBaseStateFields` (4) slots.
+  const streamBaseState = new Int32Array(4);
+
+  /** `WriteWrap` (src/stream_wrap.cc): an `AsyncWrap` carrying one write. */
+  class WriteWrap {
+    async = false;
+    handle: unknown = null;
+    oncomplete: ((status: number) => void) | null = null;
+  }
+
+  /** `ShutdownWrap` (src/stream_wrap.cc): an `AsyncWrap` carrying a shutdown. */
+  class ShutdownWrap {
+    handle: unknown = null;
+    oncomplete: ((status: number) => void) | null = null;
+  }
+
+  return {
+    WriteWrap,
+    ShutdownWrap,
+    kReadBytesOrError: 0,
+    kArrayBufferOffset: 1,
+    kBytesWritten: 2,
+    kLastWriteWasAsync: 3,
+    streamBaseState,
+  };
+};

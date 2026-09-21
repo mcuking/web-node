@@ -14,7 +14,7 @@ import {
   internalStreamIterSpec,
   internalStreamIterTypesSpec,
   internalTraceSigintSpec,
-  internalWebStreamsAdaptersSpec,
+  internalProcessTaskQueuesSpec,
   internalEventsSymbolsSpec,
   internalBootstrapRealmSpec,
   internalUrlSpec,
@@ -52,8 +52,8 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalProcessPermissionSpec,
   internalEncodingSpec,
   internalTraceSigintSpec,
+  internalProcessTaskQueuesSpec,
   internalEventsSymbolsSpec,
-  internalWebStreamsAdaptersSpec,
   internalStreamIterSpec,
   internalStreamIterTypesSpec,
   // vendored real Node source

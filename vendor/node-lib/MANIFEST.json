@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-21T06:53:07.085Z",
+  "generatedAt": "2026-09-21T07:02:39.597Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -656,6 +656,76 @@
       "sha256": "f96315be454e1579bb685f035b015aca6c33d7275f03707f74d6c82089250c30",
       "upstreamSha256": "f96315be454e1579bb685f035b015aca6c33d7275f03707f74d6c82089250c30",
       "bytes": 67160,
+      "patches": []
+    },
+    {
+      "path": "internal/webstreams/util.js",
+      "sha256": "eb3d0c40edd55314356c73f1f44fe949a09b6a4f998dd31cf513170442643d86",
+      "upstreamSha256": "eb3d0c40edd55314356c73f1f44fe949a09b6a4f998dd31cf513170442643d86",
+      "bytes": 14435,
+      "patches": []
+    },
+    {
+      "path": "internal/webstreams/transfer.js",
+      "sha256": "89053e3328060085c2b4396ba06cd4017ca09b0abab85df3bb98c48485d17e29",
+      "upstreamSha256": "89053e3328060085c2b4396ba06cd4017ca09b0abab85df3bb98c48485d17e29",
+      "bytes": 5729,
+      "patches": []
+    },
+    {
+      "path": "internal/webstreams/readablestream.js",
+      "sha256": "89395ac3dc213333619250ab124d5bbc30d169e04711d1d68aaddb7c4eccf79d",
+      "upstreamSha256": "89395ac3dc213333619250ab124d5bbc30d169e04711d1d68aaddb7c4eccf79d",
+      "bytes": 118573,
+      "patches": []
+    },
+    {
+      "path": "internal/webstreams/writablestream.js",
+      "sha256": "be77bd7785d47adfe2ebfac9fa3c42c06e08b8ec40a53b2f6914f283e39edf54",
+      "upstreamSha256": "be77bd7785d47adfe2ebfac9fa3c42c06e08b8ec40a53b2f6914f283e39edf54",
+      "bytes": 44073,
+      "patches": []
+    },
+    {
+      "path": "internal/webstreams/transformstream.js",
+      "sha256": "9c25182543068e6fef4fbf998adf5bc1891c8d5daa8bafdff8f7c96fce05d585",
+      "upstreamSha256": "9c25182543068e6fef4fbf998adf5bc1891c8d5daa8bafdff8f7c96fce05d585",
+      "bytes": 22183,
+      "patches": []
+    },
+    {
+      "path": "internal/webstreams/queuingstrategies.js",
+      "sha256": "6fb1d6c2e150209c77673e0060eb8f2f9cf222a6cc46fb8cce1ca90ae9e56f37",
+      "upstreamSha256": "6fb1d6c2e150209c77673e0060eb8f2f9cf222a6cc46fb8cce1ca90ae9e56f37",
+      "bytes": 3198,
+      "patches": []
+    },
+    {
+      "path": "internal/webstreams/encoding.js",
+      "sha256": "88ecaf7b67ff16ca999945312d791e31b0c90742f46d13d25c69d01d5450b945",
+      "upstreamSha256": "88ecaf7b67ff16ca999945312d791e31b0c90742f46d13d25c69d01d5450b945",
+      "bytes": 5097,
+      "patches": []
+    },
+    {
+      "path": "internal/webstreams/adapters.js",
+      "sha256": "c4212676775e6279f63ae943fe0669d869a45d915e343d8a518bafa802824795",
+      "upstreamSha256": "c4212676775e6279f63ae943fe0669d869a45d915e343d8a518bafa802824795",
+      "bytes": 31298,
+      "patches": []
+    },
+    {
+      "path": "internal/webstreams/compression.js",
+      "sha256": "fbe6af810f448b794af84751e4ec663a4e21b1f31ae0b99f586ef45b2ad44d8a",
+      "upstreamSha256": "fbe6af810f448b794af84751e4ec663a4e21b1f31ae0b99f586ef45b2ad44d8a",
+      "bytes": 4638,
+      "patches": []
+    },
+    {
+      "path": "stream/web.js",
+      "sha256": "7de6f8ef62effcd9aee45ed6ae1170cde8b4bd3d588e1ae4be759913ff95485f",
+      "upstreamSha256": "7de6f8ef62effcd9aee45ed6ae1170cde8b4bd3d588e1ae4be759913ff95485f",
+      "bytes": 1787,
       "patches": []
     }
   ]

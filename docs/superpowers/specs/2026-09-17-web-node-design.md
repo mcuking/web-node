@@ -100,17 +100,17 @@ primordials.js（真源码）→ domexception.js / messageport.js（真源码）
 | `buffer` | TS | atob/btoa 桥 + isAscii/isUtf8 |
 | `symbols` | TS | 内部 symbol 表 |
 | `errors` | TS | source-map / uncaught 挂钩（空实现） |
-| `performance` | TS | `performance.now()` |
 | `process_methods` | TS | cwd/chdir/exit/umask |
 | `os` | TS | 静态宿主事实（真 `lib/os.js` 跑在其上） |
 | `string_decoder` | TS | decode 占位 |
 | `icu` / `uv` | TS | 最小满足 |
 | `messaging` | TS（真 `internal/worker/io.js` 跑在其上） | `MessagePort`/`MessageChannel`/`BroadcastChannel` + 纠缠组、缓冲、关闭握手、端口转移、DataCloneError |
 | `performance` | TS（真 `perf_hooks.js` + 整个 `internal/perf/*` 跑在其上） | milestone 枚举/`milestones`/`now`/`observerCounts`/`setupObservers`/GC 跟踪（inert）/`loopIdleTime`/`uvMetricsInfo`；时钟用浏览器 `performance.now()` |
+| `stream_wrap` | TS（仅形状，供真 `internal/webstreams/*` 加载） | `WriteWrap`/`ShutdownWrap`/`kReadBytesOrError`/`kArrayBufferOffset`/`kBytesWritten`/`kLastWriteWasAsync`/`streamBaseState`（`Int32Array(4)`）；网络是自研的，永不产出 `stream_base` |
 
-**明确不支持**（抛错）：原生 `crypto`/OpenSSL 绑定、`zlib`、`tcp_wrap`、`udp_wrap`、`stream_wrap`、`worker`、`inspector`、`sea`、`ffi`、`quic`、`cares_wrap`、`http_parser` 等。
+**明确不支持**（抛错）：原生 `crypto`/OpenSSL 绑定、`zlib`、`tcp_wrap`、`udp_wrap`、`worker`、`inspector`、`sea`、`ffi`、`quic`、`cares_wrap`、`http_parser` 等。
 
-> 注：上表说的是 **native 绑定**。`crypto` 这个 **builtin 模块本身是支持的**（`origin: web-node`）：随机数走平台 WebCrypto，同步的摘要/HMAC/PBKDF2/HKDF/scrypt 在 JS 里实现（`src/node-runtime/crypto/hash.ts`）并对齐 Node 的 OpenSSL 输出；密文/签名/非对称密钥仍显式抛错。`perf_hooks` 也是真源码（`lib/perf_hooks.js` + `internal/perf/*`），只坐在上面那个 JS `performance` binding 上；直方图那一组（`createHistogram`/`importHistogram`/`monitorEventLoopDelay`）需要 native hdr_histogram，由 `internal/histogram` shim 显式抛错。
+> 注：上表说的是 **native 绑定**。`crypto` 这个 **builtin 模块本身是支持的**（`origin: web-node`）：随机数走平台 WebCrypto，同步的摘要/HMAC/PBKDF2/HKDF/scrypt 在 JS 里实现（`src/node-runtime/crypto/hash.ts`）并对齐 Node 的 OpenSSL 输出；密文/签名/非对称密钥仍显式抛错。`perf_hooks` 也是真源码（`lib/perf_hooks.js` + `internal/perf/*`），只坐在上面那个 JS `performance` binding 上；直方图那一组（`createHistogram`/`importHistogram`/`monitorEventLoopDelay`）需要 native hdr_histogram，由 `internal/histogram` shim 显式抛错。`stream/web` 同样是真源码（`lib/stream/web.js` + 整个 `internal/webstreams/*`），坐在 `messaging`/`buffer`/`util`/`stream_wrap`（仅形状）四个 binding 上；`CompressionStream`/`DecompressionStream` 需要 native zlib，构造即抛错（模块本身可加载）。
 
 ---
 

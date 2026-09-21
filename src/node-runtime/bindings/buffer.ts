@@ -10,6 +10,22 @@ import type { BindingFactory } from './context';
 export const bufferBinding: BindingFactory = () => ({
   atob: (input: string): string => atob(input),
   btoa: (input: string): string => btoa(input),
+  // `binding.copyArrayBuffer(dest, destOffset, src, srcOffset, count)`
+  // (src/node_buffer.cc): the byte copy the WHATWG byte-stream controller uses
+  // when it fills a pull-into descriptor from its queue. It works on whole
+  // ArrayBuffers with explicit offsets rather than on views.
+  copyArrayBuffer: (
+    destination: ArrayBuffer,
+    destinationOffset: number,
+    source: ArrayBuffer,
+    sourceOffset: number,
+    byteCount: number,
+  ): void => {
+    if (destination === source) return;
+    new Uint8Array(destination, destinationOffset, byteCount).set(
+      new Uint8Array(source, sourceOffset, byteCount),
+    );
+  },
   // Encoding intrinsics Node exposes from C++ (fast paths). We fall back to the
   // JS implementations in the buffer builtin.
   isAscii: (buf: Uint8Array): boolean => {
