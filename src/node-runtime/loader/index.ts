@@ -2,11 +2,73 @@ import type { Realm } from '../realm';
 import type { Vfs } from '../vfs';
 import * as p from '../vfs/posix';
 import { transformEsmToCjs, EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING } from './esm-transform';
+import { codeMask } from './code-mask';
 import { notImplemented } from '../errors';
 import { compileTagged } from '../vm';
 
 const USER_CJS_PARAMS = ['exports', 'require', 'module', '__filename', '__dirname'] as const;
 const EXTENSIONS = ['', '.js', '.cjs', '.mjs', '.json'];
+
+const IDENT_START = /[A-Za-z_$]/;
+const IDENT_PART = /[A-Za-z0-9_$]/;
+/** Shared empty arrays for the no-injection paths (never mutated). */
+const EMPTY_GLOBALS: [] = [];
+
+/**
+ * Names bound at a module's top level by `let`/`const`/`class`.
+ *
+ * Sandbox globals are injected into every module as wrapper *parameters*, so a
+ * module that also declares one of those names lexically at its top level cannot
+ * compile — V8 rejects it with `Identifier 'X' has already been declared`. That
+ * is not hypothetical: bundles do this (`const WebSocket = websocket;`,
+ * `const btoa = …`) and it crosses library boundaries. Such a name is therefore
+ * excluded from the parameter list for *that* module only, so its own binding
+ * wins while every other module still sees the sandbox global.
+ *
+ * Strings, templates and comments are masked first, so a name inside a literal
+ * is not mistaken for a declaration.
+ */
+function topLevelLexicalBindings(code: string): Set<string> {
+  const names = new Set<string>();
+  const mask = codeMask(code);
+  const n = code.length;
+  const readIdent = (from: number): { name: string; end: number } => {
+    let j = from;
+    while (j < n && mask[j] === 1 && IDENT_PART.test(code[j])) j++;
+    return { name: code.slice(from, j), end: j };
+  };
+  let depth = 0;
+  let i = 0;
+  while (i < n) {
+    if (mask[i] === 0) {
+      i++;
+      continue;
+    }
+    const ch = code[i];
+    if (ch === '{' || ch === '(' || ch === '[') {
+      depth++;
+      i++;
+      continue;
+    }
+    if (ch === '}' || ch === ')' || ch === ']') {
+      depth--;
+      i++;
+      continue;
+    }
+    if (depth === 0 && IDENT_START.test(ch)) {
+      const { name, end } = readIdent(i);
+      if (name === 'let' || name === 'const' || name === 'class') {
+        let j = end;
+        while (j < n && mask[j] === 1 && /\s/.test(code[j])) j++;
+        if (j < n && mask[j] === 1 && IDENT_START.test(code[j])) names.add(readIdent(j).name);
+      }
+      i = end;
+      continue;
+    }
+    i++;
+  }
+  return names;
+}
 
 /**
  * Drop a leading `#!` line.
@@ -135,6 +197,27 @@ export class ModuleLoader {
     this.#globalNames = names;
     this.#globalValues = values;
     this.#paramNames = [...USER_CJS_PARAMS, ...names];
+  }
+
+  /**
+   * The injected globals that are safe for *this* module: everything except a
+   * name the module itself binds at its top level with `let`/`const`/`class`
+   * (see `topLevelLexicalBindings`). In the common case nothing is excluded and
+   * the shared arrays are returned without copying.
+   */
+  #injectedGlobals(code: string): { names: string[]; values: unknown[] } {
+    const names = this.#globalNames;
+    if (names.length === 0) return { names: EMPTY_GLOBALS, values: EMPTY_GLOBALS };
+    const declared = topLevelLexicalBindings(code);
+    if (declared.size === 0) return { names, values: this.#globalValues };
+    const keptNames: string[] = [];
+    const keptValues: unknown[] = [];
+    for (let i = 0; i < names.length; i++) {
+      if (declared.has(names[i])) continue;
+      keptNames.push(names[i]);
+      keptValues.push(this.#globalValues[i]);
+    }
+    return { names: keptNames, values: keptValues };
   }
 
   get realm(): Realm {
@@ -447,14 +530,19 @@ export class ModuleLoader {
     // line for assertions like `assert.ok`.
     const sourceUrl = isEsm ? `file://${absPath}` : absPath;
 
+    // A module that declares its own top-level `const`/`let`/`class` under a
+    // name that is also injected as a wrapper parameter cannot compile, so the
+    // few such names are dropped for this module (see `#injectedGlobals`).
+    const { names: globalNames, values: globalValues } = this.#injectedGlobals(code);
+
     // Real ESM has no `__filename`/`__dirname`/`require`/`exports` in scope, and
     // modules routinely declare their own (`const require = createRequire(...)`,
     // `const __filename = fileURLToPath(import.meta.url)`, as Vite's chunks do).
     // So ESM gets only the prefixed bindings the transform emits; CJS keeps the
     // Node-shaped parameter list.
     const params = isEsm
-      ? [EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING, ...this.#globalNames]
-      : this.#paramNames;
+      ? [EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING, ...globalNames]
+      : [...USER_CJS_PARAMS, ...globalNames];
 
     let fn: (...args: unknown[]) => void;
     try {
@@ -477,7 +565,6 @@ export class ModuleLoader {
         },
       },
     );
-    const globalValues = this.#globalValues;
     // Dynamic `import()` resolves relative to the importing module and always
     // uses the `import` condition, like real ESM.
     const dynamicImport = (specifier: string): Promise<unknown> =>

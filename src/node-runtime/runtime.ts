@@ -158,8 +158,10 @@ export class NodeRuntime {
   #timers = new Map<number, ReturnType<typeof nativeSetTimeout>>();
   /** In-flight host requests (see `#trackHostRequest`); part of `activeCount`. */
   #hostRequests = 0;
-  /** Bumped per run so a host request abandoned by a previous run can not leak
-   * its count into the next one (or drive it negative when it finally settles). */
+  /** Open host WebSockets (see `#trackHostSocket`); part of `activeCount`. */
+  #hostSockets = 0;
+  /** Bumped per run so a host request/socket abandoned by a previous run can
+   * not leak its count into the next one (or drive it negative once it settles). */
   #hostGeneration = 0;
   #nextTimerId = 1;
   #exitCode: number | null = null;
@@ -373,6 +375,15 @@ export class NodeRuntime {
       sandboxGlobal.fetch = (...args: unknown[]): Promise<unknown> =>
         this.#trackHostRequest(Promise.resolve(boundFetch(...args)));
     }
+    // A WebSocket is another host API that outlives the synchronous return: it
+    // is a long-lived handle, and an open socket keeps the process alive in real
+    // Node (verified against v26.9.0). The host constructor has no idea it is
+    // running inside a child that gets settled by an active-work delta, so wrap
+    // it and count each open socket until it closes (see `#trackHostSocket`).
+    const hostWebSocket = (globalThis as unknown as Record<string, unknown>).WebSocket;
+    if (typeof hostWebSocket === 'function') {
+      sandboxGlobal.WebSocket = this.#wrapHostSocket(hostWebSocket);
+    }
     // `Blob`/`File` are ours, not the host's: Node exposes them from
     // `internal/blob` + `internal/file` (bootstrap/web), and the vendored
     // `internal/streams/duplexify` gates its Blob path on the real `isBlob`. If
@@ -450,7 +461,7 @@ export class NodeRuntime {
    */
   #activeWorkCount(): number {
     const timers = this.realm?.internalBinding('timers') as { __liveCount?: () => number } | undefined;
-    return this.#timers.size + (timers?.__liveCount?.() ?? 0) + this.#hostRequests;
+    return this.#timers.size + (timers?.__liveCount?.() ?? 0) + this.#hostRequests + this.#hostSockets;
   }
 
   /**
@@ -476,6 +487,65 @@ export class NodeRuntime {
     };
     void promise.then(release, release);
     return promise;
+  }
+
+  /**
+   * Count an open host WebSocket as live work for as long as it is open.
+   *
+   * Like an in-flight `fetch`, a WebSocket lives on the host's event loop and so
+   * is invisible to the sandbox timer queue: a child whose only remaining work
+   * is a socket would be reported as exited while the socket is still open, and
+   * any message it delivers afterwards would be lost. Real Node treats an open
+   * socket as an active handle that keeps the process alive, so count it here.
+   *
+   * The count is released on the first of `close`/`error` (a failed connection
+   * fires both, in that order, so the release is guarded to fire once).
+   */
+  #trackHostSocket(socket: { addEventListener?: (type: string, listener: () => void) => void }): void {
+    const generation = this.#hostGeneration;
+    this.#hostSockets += 1;
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      // A socket left open when its run ended is no longer this process's work.
+      if (generation === this.#hostGeneration) this.#hostSockets -= 1;
+    };
+    if (typeof socket.addEventListener === 'function') {
+      socket.addEventListener('close', release);
+      socket.addEventListener('error', release);
+    }
+  }
+
+  /**
+   * Wrap the host `WebSocket` so each constructed socket is tracked. The wrapper
+   * returns the real socket (a plain constructor's return value overrides
+   * `this`), keeps `instanceof` working by sharing the prototype, and copies the
+   * static `CONNECTING`/`OPEN`/`CLOSING`/`CLOSED` constants — leaving a socket
+   * that behaves exactly like the host's except that the runtime can see it.
+   */
+  #wrapHostSocket(host: unknown): unknown {
+    type SocketCtor = { new (url: unknown, protocols?: unknown): unknown; prototype: object };
+    const Ctor = host as SocketCtor;
+    const runtime = this;
+    function WrappedCtor(this: unknown, url: unknown, protocols?: unknown): unknown {
+      if (new.target === undefined) {
+        throw new TypeError("Failed to construct 'WebSocket': Please use the 'new' operator.");
+      }
+      // `protocols` is optional: passing `undefined` explicitly is not the same
+      // as omitting it for every implementation, so branch on the argument count.
+      const socket = arguments.length > 1 ? new Ctor(url, protocols) : new Ctor(url);
+      runtime.#trackHostSocket(socket as { addEventListener?: (t: string, l: () => void) => void });
+      return socket;
+    }
+    WrappedCtor.prototype = Ctor.prototype;
+    for (const key of Object.getOwnPropertyNames(Ctor)) {
+      if (key === 'prototype' || key === 'length' || key === 'name' || key === 'arguments' || key === 'caller') continue;
+      const desc = Object.getOwnPropertyDescriptor(Ctor, key);
+      if (desc !== undefined) Object.defineProperty(WrappedCtor, key, desc);
+    }
+    Object.defineProperty(WrappedCtor, 'name', { value: 'WebSocket', configurable: true });
+    return WrappedCtor;
   }
 
   #installGlobals(sandboxGlobal: Record<string, unknown>): void {
@@ -523,11 +593,12 @@ export class NodeRuntime {
     this.loader.reset();
     this.#clearAllTimers();
     this.network.reset();
-    // Host requests belong to the run that started them, like every other kind
-    // of pending work: a `fetch` the previous program abandoned must not look
-    // like live work to the next one.
+    // Host requests/sockets belong to the run that started them, like every
+    // other kind of pending work: a `fetch` or socket the previous program
+    // abandoned must not look like live work to the next one.
     this.#hostGeneration += 1;
     this.#hostRequests = 0;
+    this.#hostSockets = 0;
     // Children belong to the run that started them: like teardown of a process
     // group, nothing survives into the next Run.
     this.spawn.reset();
