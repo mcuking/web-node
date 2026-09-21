@@ -595,7 +595,11 @@ export const internalErrorSourceSpec: BuiltinSpec = {
 // to answer; anything else is an unknown option and throws, like Node would.
 
 const OPTION_DEFAULTS: Record<string, unknown> = {
-  '--experimental-stream-iter': false,
+  // The runtime always exposes the iterable streams API (`stream/iter`); a tab
+  // has no flag surface, so report the flag as on. `internal/streams/readable`
+  // checks it before installing `toAsyncStreamable`, and the classic↔iter
+  // interop in `internal/streams/iter/classic` relies on that symbol.
+  '--experimental-stream-iter': true,
   '--experimental-stream-iter-compat': false,
   // The browser tab cannot switch to `AsyncContextFrame`; the default
   // (async_hooks-based) AsyncLocalStorage is the one we ship.

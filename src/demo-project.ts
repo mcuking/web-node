@@ -513,6 +513,29 @@ console.log('-- Blob (milestone 37) --');
 })();
 console.log('');
 
+// --- stream/iter (milestone 38) ---
+// stream/iter is the new experimental iterable-streams API, and stream/consumers
+// is the six-function consumer surface (text/json/buffer/bytes/arrayBuffer/blob).
+// Both are the real Node source now; consumers only became possible once Blob
+// (milestone 37) was real.
+console.log('-- stream/iter (milestone 38) --');
+(async function () {
+  const si = require('stream/iter');
+  const p = si.push();
+  const collected = si.text(p.readable);
+  await p.writer.write('node ');
+  await p.writer.write('iter');
+  await p.writer.end();
+  console.log('iter text   : ' + (await collected));
+  const up = si.pull(si.from(['a', 'b', 'c']), function (chunk) { return chunk; });
+  console.log('iter pull   : ' + (await si.text(up)));
+  console.log('iter merge  : ' + (await si.text(si.merge(si.from(['x']), si.from(['y'])))));
+  const cons = require('stream/consumers');
+  const R = require('stream').Readable;
+  console.log('consumers   : ' + (await cons.text(R.from(['h', 'i']))) + ' / ' + JSON.stringify(await cons.json(R.from(['{"n"', ':1}']))));
+})();
+console.log('');
+
 // --- npm (milestone 4) ---
 // The npm client downloads and unpacks packages into the virtual node_modules.
 // require() already resolves node_modules from the VFS, so once "Install deps"

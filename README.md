@@ -359,7 +359,7 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
 
 **Current coverage** (revision `7a3437d`, v26.9.1-dev):
 
-- **105 files vendored** — the whole `stream` layer, `events`,
+- **119 files vendored** — the whole `stream` layer, `events`,
   `internal/event_target` (+ `internal/webidl`, `internal/perf/utils`),
   `internal/abort_controller`, `console` (+ `internal/console/*`,
   `internal/cli_table`, `internal/util/debuglog`, `internal/trace_events`,
@@ -390,6 +390,10 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
   strategies and the text codecs, plus the classic↔web adapters so
   `Readable.toWeb` / `Writable.toWeb` / `Duplex.toWeb` work;
   `CompressionStream`/`DecompressionStream` need the native zlib and throw,
+  `stream/iter` (+ the whole `internal/streams/iter/*` group) — the new
+  experimental iterable-streams API (`push`/`pull`/`from`/`merge`/`broadcast`/
+  `share`/`tap`, sync and async consumers, and classic↔iter interop), plus
+  `stream/consumers` (`text`/`json`/`buffer`/`bytes`/`arrayBuffer`/`blob`),
   `internal/blob` (+ `internal/file`) — the real `Blob` and `File`, on a JS
   `blob` binding that keeps the `DataQueue` contract (a reader hands back one
   entry per `pull`, so `blob.stream()` chunks on the original source
@@ -406,8 +410,9 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
   native layer a tab cannot have) and 4 (`tty`, `v8`, `tls`, `zlib`) as
   load-only stubs that keep `import` side-effect-free and throw a typed
   `NotImplementedError` on use. The newest real ones are `perf_hooks` (the whole
-  `internal/perf/*` group) and `stream/web` (the whole `internal/webstreams/*`
-  group), plus the `Blob`/`File` globals behind `internal/blob` + `internal/file`.
+  `internal/perf/*` group), `stream/web` (the whole `internal/webstreams/*`
+  group), the `Blob`/`File` globals behind `internal/blob` + `internal/file`, and
+  `stream/iter` (+ `internal/streams/iter/*`) with `stream/consumers`.
   `crypto` is the newest hand-written one: the
   WebCrypto API is promise-only, but Node's `createHash` / `createHmac` /
   `pbkdf2Sync` / `scryptSync` are synchronous, so MD5, SHA-1, SHA-2
