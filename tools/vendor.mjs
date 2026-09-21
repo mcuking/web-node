@@ -159,6 +159,10 @@ const FILES = [
   'internal/fs/watchers.js',
   'internal/fs/recursive_watch.js',
   'internal/fs/cp/cp.js',
+  'internal/fs/cp/cp-sync.js',
+  'internal/fs/read/context.js',
+  'internal/streams/fast-utf8-stream.js',
+  'fs.js',
   'internal/fs/promises.js',
   'internal/vfs/setup.js',
 ];

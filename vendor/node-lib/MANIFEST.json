@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-21T10:37:39.347Z",
+  "generatedAt": "2026-09-21T10:44:18.833Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -985,6 +985,34 @@
       "sha256": "8c385c05f80346a580dac0b755f73a0f34034d14c9eeed2cce6149448f411a8e",
       "upstreamSha256": "8c385c05f80346a580dac0b755f73a0f34034d14c9eeed2cce6149448f411a8e",
       "bytes": 12715,
+      "patches": []
+    },
+    {
+      "path": "internal/fs/cp/cp-sync.js",
+      "sha256": "1b4be6ff0b9803acacc21f7dc8a69655bb1fb0173a9f651ea53d11121e9085e4",
+      "upstreamSha256": "1b4be6ff0b9803acacc21f7dc8a69655bb1fb0173a9f651ea53d11121e9085e4",
+      "bytes": 7222,
+      "patches": []
+    },
+    {
+      "path": "internal/fs/read/context.js",
+      "sha256": "1745213104ec0784ab518053d3b6373ca3bbeef493da1c470132f69e0f030a4b",
+      "upstreamSha256": "1745213104ec0784ab518053d3b6373ca3bbeef493da1c470132f69e0f030a4b",
+      "bytes": 4647,
+      "patches": []
+    },
+    {
+      "path": "internal/streams/fast-utf8-stream.js",
+      "sha256": "a9ed17a63618f974ccea962c4d330791ff819f047fe7c733833c453cba81b7b6",
+      "upstreamSha256": "a9ed17a63618f974ccea962c4d330791ff819f047fe7c733833c453cba81b7b6",
+      "bytes": 24814,
+      "patches": []
+    },
+    {
+      "path": "fs.js",
+      "sha256": "bbc983c80f815410cac9ee0e06a3649ef86c2f118fe1444e2bb479c6cce2e812",
+      "upstreamSha256": "bbc983c80f815410cac9ee0e06a3649ef86c2f118fe1444e2bb479c6cce2e812",
+      "bytes": 108419,
       "patches": []
     },
     {

@@ -19,9 +19,9 @@ import {
 } from './internal-shims';
 import { vendoredBuiltins } from './vendored-builtins';
 import { vfsSpec } from './vfs';
+import { internalFsStreamsSpec } from './fs-streams';
 import { undiciSpec } from './undici';
 import { workerThreadsSpec } from './worker-threads';
-import { fsSpec } from './fs';
 import { cryptoSpec } from './crypto';
 import { urlSpec } from './url';
 import { dnsSpec, dnsPromisesSpec } from './dns';
@@ -56,6 +56,7 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   ...vendoredBuiltins,
   // milestone 49: Node's virtual file system module (MemoryProvider-backed)
   vfsSpec,
+  internalFsStreamsSpec,
   // our implementations
   processSpec,
   moduleSpec,
@@ -63,7 +64,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   netSpec,
   // milestone 4: streams (fs/http are built on these) — `stream`/`stream/promises`
   // are the vendored Node source (see vendored-builtins.ts)
-  fsSpec,
   urlSpec,
   cryptoSpec,
   dnsSpec,

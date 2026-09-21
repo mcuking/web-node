@@ -79,6 +79,20 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_WEBASSEMBLY_NOT_SUPPORTED:
     'WebAssembly is not supported in this environment, but is required for %s',
   ERR_FALSY_VALUE_REJECTION: 'Promise was rejected with falsy value',
+  ERR_FS_FILE_TOO_LARGE: 'File size (%s) is greater than 2 GiB',
+  ERR_FS_CP_DIR_TO_NON_DIR: 'Cannot overwrite directory with non-directory',
+  ERR_FS_CP_NON_DIR_TO_DIR: 'Cannot overwrite non-directory with directory',
+  ERR_FS_CP_EEXIST: 'Target already exists',
+  ERR_FS_CP_EINVAL: 'Invalid src or dest',
+  ERR_FS_CP_FIFO_PIPE: 'Cannot copy a FIFO pipe',
+  ERR_FS_CP_SOCKET: 'Cannot copy a socket file',
+  ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY:
+    'Cannot copy symlink source into subdirectory of the destination',
+  ERR_FS_CP_UNKNOWN: 'Cannot copy an unknown file type',
+  ERR_FS_EISDIR: 'Path is a directory',
+  ERR_DIR_CLOSED: 'Directory handle was closed',
+  ERR_DIR_CONCURRENT_OPERATION:
+    'Cannot do synchronous work on directory handle with concurrent asynchronous operations',
   ERR_INVALID_MIME_SYNTAX: 'The MIME syntax for a %s in "%s" is invalid',
   ERR_PARSE_ARGS_INVALID_OPTION_VALUE: '%s',
   ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL:

@@ -1,4 +1,5 @@
 import type { BindingContext, BindingFactory } from './context';
+import { notImplemented } from '../errors';
 import { VfsError, type Stat } from '../vfs/types';
 import { FS_OPEN_FLAGS } from './constants';
 
@@ -115,11 +116,14 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     const entry = fds.get(fd);
     if (!entry) throw new VfsError('EBADF', 'read', String(fd));
     const data = vfs.readFile(entry.path);
-    const pos = position ?? entry.position;
+    // `-1` means "current position" to `src/node_file.cc` (the readFile context
+    // passes it); treat it like `null`.
+    const atCurrent = position === null || position === -1;
+    const pos = atCurrent ? entry.position : position;
     const available = Math.max(0, data.byteLength - pos);
     const n = Math.min(length, available);
     buffer.set(data.subarray(pos, pos + n), offset);
-    if (position === null) entry.position = pos + n;
+    if (atCurrent) entry.position = pos + n;
     return n;
   }
 
@@ -135,23 +139,54 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     const entry = fds.get(fd);
     if (!entry) throw new VfsError('EBADF', 'write', String(fd));
     const chunk = buffer.subarray(offset, offset + length);
+    const atCurrent = position === null || position === -1;
     if (entry.append) {
       vfs.appendFile(entry.path, chunk);
       entry.position = vfs.readFile(entry.path).byteLength;
     } else {
-      const pos = position ?? entry.position;
+      const pos = atCurrent ? entry.position : position;
       const existing = vfs.readFile(entry.path);
       const needed = pos + chunk.byteLength;
       const merged = new Uint8Array(Math.max(existing.byteLength, needed));
       merged.set(existing, 0);
       merged.set(chunk, pos);
       vfs.writeFile(entry.path, merged);
-      if (position === null) entry.position = needed;
+      if (atCurrent) entry.position = needed;
     }
     return chunk.byteLength;
   }
 
-  /** Wrap a sync op as a nextTick-deferred Node-style callback. */
+  /**
+   * `src/node_file.cc`'s `FSReqCallback`: the request object the callback API
+   * stashes `oncomplete` (and a `context`) on, then hands to a binding method.
+   * We run each operation synchronously and settle the request on the next tick,
+   * invoking `oncomplete` with `this === req` — the shape `internal/fs/read/
+   * context.js` relies on (`this.context`). `cancel()` is what an aborted
+   * `signal` calls (`bindSignalToReq`).
+   */
+  class FSReqCallback {
+    oncomplete: ((err: Error | null, result?: unknown) => void) | null = null;
+    context: unknown = undefined;
+    signal: unknown = undefined;
+    useBigint = false;
+    cancelled = false;
+    constructor(useBigint = false) {
+      this.useBigint = !!useBigint;
+    }
+    cancel(): void {
+      this.cancelled = true;
+    }
+  }
+
+  /** Settle a request exactly like `FSReqCallback::Resolve`/`Reject`. */
+  function settle(req: FSReqCallback, err: Error | null, result?: unknown): void {
+    const cb = req.oncomplete;
+    if (typeof cb !== 'function') return;
+    if (err) (cb as (e: Error) => void).call(req, err);
+    else if (result === undefined) (cb as (e: null) => void).call(req, null);
+    else (cb as (e: null, r: unknown) => void).call(req, null, result);
+  }
+
   function asyncCall<T>(fn: () => T, cb?: (err: Error | null, result?: T) => void, resultTransform?: (r: T) => unknown) {
     ctx.nextTick(() => {
       if (typeof cb !== 'function') return;
@@ -166,11 +201,23 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
 
   /**
    * Resolve Node's trailing "request wrap" argument: `kUsePromises` → a
-   * Promise, a function → callback style, anything else → synchronous return.
-   * Mirrors how `src/node_file.cc` discriminates the three modes.
+   * Promise, an `FSReqCallback` → callback style, a bare function → callback
+   * style, anything else → synchronous return. Mirrors how `src/node_file.cc`
+   * discriminates the modes.
    */
   function wrap<T>(fn: () => T, token: unknown): T | Promise<unknown> | undefined {
     if (token === USE_PROMISES) return Promise.resolve().then(fn);
+    if (token instanceof FSReqCallback) {
+      ctx.nextTick(() => {
+        if (token.cancelled) return;
+        try {
+          settle(token, null, fn() as unknown);
+        } catch (err) {
+          settle(token, err as Error);
+        }
+      });
+      return undefined;
+    }
     if (typeof token === 'function') {
       ctx.nextTick(() => {
         try {
@@ -409,7 +456,297 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     }
   }
 
+  /**
+   * `fs.watchFile`'s poller (`internal/fs/watchers.js`'s `_StatWatcher`). A
+   * browser tab has no inotify and no thread pool, so this is a shape whose
+   * `start()` fails loudly rather than silently never firing.
+   */
+  class StatWatcherShape {
+    start(): void {
+      throw notImplemented(
+        'binding',
+        'fs.StatWatcher.start',
+        'fs.watchFile needs an inotify-style poller, which a browser tab has no way to run.',
+      );
+    }
+    getAsyncId(): number {
+      return 0;
+    }
+    stop(): void {}
+    close(): void {}
+    ref(): this {
+      return this;
+    }
+    unref(): this {
+      return this;
+    }
+  }
+
+  /**
+   * `binding.readFileUtf8(path|fd, flags)`: the fast whole-file read path
+   * `fs.readFileSync(path, 'utf8')` takes. Synchronous, returns a string.
+   */
+  function readFileUtf8(pathOrFd: string | number, _flags?: number): string {
+    if (typeof pathOrFd === 'number') {
+      const entry = fds.get(pathOrFd);
+      if (!entry) throw new VfsError('EBADF', 'read', String(pathOrFd));
+      return new TextDecoder().decode(vfs.readFile(entry.path));
+    }
+    return new TextDecoder().decode(vfs.readFile(pathOrFd));
+  }
+
+  /**
+   * `binding.writeFileUtf8(path|fd, data, flags, mode)`: the fast whole-file
+   * write path `fs.writeFileSync(path, str, 'utf8')` takes. Synchronous. It is a
+   * *single* VFS operation (not open+write+close) so `fs.watch` reports one
+   * event for a whole-file write, the way the native path does.
+   */
+  function writeFileUtf8(
+    pathOrFd: string | number,
+    data: string,
+    flags: number,
+    mode: number,
+  ): void {
+    const bytes = new TextEncoder().encode(String(data));
+    if (typeof pathOrFd === 'number') {
+      writeSync(pathOrFd, bytes, 0, bytes.byteLength, 0);
+      return;
+    }
+    const flag = flagsToMode(flags);
+    if (flag.startsWith('a')) {
+      vfs.appendFile(pathOrFd, bytes);
+      return;
+    }
+    if (flag === 'wx' || flag === 'wx+' || flag === 'rs' || flag === 'rs+') {
+      // Exclusive create (or read-only): preserve the open() error semantics.
+      const fd = openSync(pathOrFd, flag, mode);
+      try {
+        writeSync(fd, bytes, 0, bytes.byteLength, 0);
+      } finally {
+        closeSync(fd);
+      }
+      return;
+    }
+    vfs.writeFile(pathOrFd, bytes);
+  }
+
+  /** A `SystemError`-shaped error: `name: 'Error'` plus the `ERR_*` code. */
+  function fsError(code: string, message: string): Error {
+    const err = new Error(message) as Error & { code: string };
+    err.code = code;
+    return err;
+  }
+
+  /** True when `child` is `parent` itself or lives underneath it. */
+  function isSubPath(parent: string, child: string): boolean {
+    const p = vfs.resolve(parent);
+    const c = vfs.resolve(child);
+    return c === p || c.startsWith(p === '/' ? '/' : p + '/');
+  }
+
+  /**
+   * `C++` `CpSyncCheckPaths`: validate a `fs.cpSync` source/destination pair.
+   * Mirrors the native checks (order, messages and codes all come from
+   * `src/node_file.cc`).
+   */
+  function cpSyncCheckPaths(
+    src: string,
+    dest: string,
+    _dereference: boolean,
+    recursive: boolean,
+  ): void {
+    const srcStat = vfs.stat(src);
+    const srcIsDir = srcStat.type === 'dir';
+    const destExists = vfs.exists(dest);
+    const srcStr = vfs.resolve(src);
+    const destStr = vfs.resolve(dest);
+    if (destExists) {
+      const destIsDir = vfs.stat(dest).type === 'dir';
+      if (srcStr === destStr) {
+        throw fsError('ERR_FS_CP_EINVAL', `src and dest cannot be the same ${destStr}`);
+      }
+      if (srcIsDir && !destIsDir) {
+        throw fsError(
+          'ERR_FS_CP_DIR_TO_NON_DIR',
+          `Cannot overwrite non-directory ${destStr} with directory ${srcStr}`,
+        );
+      }
+      if (!srcIsDir && destIsDir) {
+        throw fsError(
+          'ERR_FS_CP_NON_DIR_TO_DIR',
+          `Cannot overwrite directory ${destStr} with non-directory ${srcStr}`,
+        );
+      }
+    }
+    const srcPathStr = srcStr.endsWith('/') ? srcStr : `${srcStr}/`;
+    if (srcIsDir && destStr.startsWith(srcPathStr)) {
+      throw fsError(
+        'ERR_FS_CP_EINVAL',
+        `Cannot copy ${srcPathStr} to a subdirectory of self ${destStr}`,
+      );
+    }
+    if (srcIsDir && !recursive) {
+      throw fsError(
+        'ERR_FS_EISDIR',
+        `Recursive option not enabled, cannot copy a directory: ${srcPathStr}`,
+      );
+    }
+  }
+
+  /**
+   * `C++` `CpSyncOverrideFile`: copy `src` over the existing `dest`.
+   */
+  function cpSyncOverrideFile(
+    src: string,
+    dest: string,
+    mode: number,
+    _preserveTimestamps: boolean,
+  ): void {
+    const fd = openSync(dest, 'w', mode);
+    try {
+      const data = vfs.readFile(src);
+      writeSync(fd, data, 0, data.byteLength, 0);
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  /**
+   * `C++` `CpSyncCopyDir`: recursively copy `src` into `dest`. The VFS has no
+   * symlinks, so the link/special-file branches of the native version can never
+   * be reached.
+   */
+  function cpSyncCopyDir(
+    src: string,
+    dest: string,
+    force: boolean,
+    _dereference: boolean,
+    errorOnExist: boolean,
+    _verbatimSymlinks: boolean,
+    _preserveTimestamps: boolean,
+    mode?: number,
+  ): void {
+    const srcStat = vfs.stat(src);
+    if (srcStat.type !== 'dir') {
+      if (vfs.exists(dest)) {
+        if (!force) {
+          if (errorOnExist) throw fsError('ERR_FS_CP_EEXIST', 'Target already exists');
+          return;
+        }
+        const dstStat = vfs.stat(dest);
+        if (dstStat.type === 'dir') {
+          throw fsError(
+            'ERR_FS_CP_NON_DIR_TO_DIR',
+            `Cannot overwrite directory ${dest} with non-directory ${src}`,
+          );
+        }
+        cpSyncOverrideFile(src, dest, mode ?? 0o666, _preserveTimestamps);
+        return;
+      }
+      const fd = openSync(dest, 'w', mode ?? 0o666);
+      try {
+        const data = vfs.readFile(src);
+        writeSync(fd, data, 0, data.byteLength, 0);
+      } finally {
+        closeSync(fd);
+      }
+      return;
+    }
+    if (vfs.exists(dest)) {
+      const dstStat = vfs.stat(dest);
+      if (dstStat.type !== 'dir') {
+        throw fsError(
+          'ERR_FS_CP_DIR_TO_NON_DIR',
+          `Cannot overwrite non-directory ${dest} with directory ${src}`,
+        );
+      }
+    } else {
+      vfs.mkdir(dest, { recursive: true, mode: mode ?? 0o777 });
+    }
+    for (const entry of vfs.readdir(src)) {
+      cpSyncCopyDir(
+        src === '/' ? `/${entry.name}` : `${src}/${entry.name}`,
+        dest === '/' ? `/${entry.name}` : `${dest}/${entry.name}`,
+        force,
+        _dereference,
+        errorOnExist,
+        _verbatimSymlinks,
+        _preserveTimestamps,
+        mode,
+      );
+    }
+  }
+
+  /**
+   * `binding.CpDirJob` (`src/node_file.cc`): the async directory copy the
+   * promise `fs.cp` uses. Calls `ondone(err)` with `this === job`.
+   */
+  class CpDirJobBinding {
+    ondone:
+      | ((this: CpDirJobBinding, err: Error | null, specialFile?: string, specialFilePath?: string) => void)
+      | null = null;
+    private readonly src: string;
+    private readonly dest: string;
+    private readonly force: boolean;
+    private readonly dereference: boolean;
+    private readonly errorOnExist: boolean;
+    private readonly verbatimSymlinks: boolean;
+    private readonly preserveTimestamps: boolean;
+    constructor(
+      src: string,
+      dest: string,
+      force: boolean,
+      dereference: boolean,
+      errorOnExist: boolean,
+      verbatimSymlinks: boolean,
+      preserveTimestamps: boolean,
+      _mode?: number,
+    ) {
+      this.src = src;
+      this.dest = dest;
+      this.force = force;
+      this.dereference = dereference;
+      this.errorOnExist = errorOnExist;
+      this.verbatimSymlinks = verbatimSymlinks;
+      this.preserveTimestamps = preserveTimestamps;
+    }
+    run(): Error | undefined {
+      ctx.nextTick(() => {
+        try {
+          cpSyncCopyDir(
+            this.src,
+            this.dest,
+            this.force,
+            this.dereference,
+            this.errorOnExist,
+            this.verbatimSymlinks,
+            this.preserveTimestamps,
+          );
+          this.ondone?.call(this, null);
+        } catch (err) {
+          this.ondone?.call(this, err as Error);
+        }
+      });
+      return undefined;
+    }
+  }
+
   return {
+    // ---- request/job shapes ----
+    FSReqCallback,
+    FileHandle: FileHandleBinding,
+    ReadFileJob: ReadFileJobBinding,
+    WriteFileJob: WriteFileJobBinding,
+    CpDirJob: CpDirJobBinding,
+    StatWatcher: StatWatcherShape,
+    kFsStatsFieldsNumber: 18,
+    // ---- extra sync paths `lib/fs.js` takes ----
+    readFileUtf8,
+    writeFileUtf8,
+    handleToFd: (handle: { fd?: number }) => handle.fd ?? -1,
+    cpSyncCheckPaths,
+    cpSyncCopyDir,
+    cpSyncOverrideFile,
     // ---- sync primitives ----
     openSync,
     closeSync,
@@ -453,12 +790,9 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     // ---- async / promise surface (`internal/fs/promises` drives these) ----
     //
     // `src/node_file.cc` methods take a trailing "request wrap" argument: the
-    // `kUsePromises` token (return a Promise), a callback, or neither (run
-    // synchronously). `internal/fs/promises` mixes all three.
+    // `kUsePromises` token (return a Promise), an `FSReqCallback` or callback
+    // (invoke it), or neither (run synchronously). Both fs modules mix them.
     kUsePromises: USE_PROMISES,
-    FileHandle: FileHandleBinding,
-    ReadFileJob: ReadFileJobBinding,
-    WriteFileJob: WriteFileJobBinding,
 
     open: (path: string, flags: string | number, mode: number, token?: unknown) =>
       wrap(() => openSync(path, typeof flags === 'number' ? flagsToMode(flags) : flags, mode), token),

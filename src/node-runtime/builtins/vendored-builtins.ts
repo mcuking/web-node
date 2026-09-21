@@ -1551,7 +1551,6 @@ export const vendoredBuiltins: BuiltinSpec[] = [
       'internal/fs/dir',
       'internal/fs/watchers',
       'internal/fs/recursive_watch',
-      'internal/fs/glob',
       'internal/readline/interface',
       'internal/worker/js_transferable',
     ],
@@ -1586,5 +1585,67 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     vendorPath: 'fs/promises.js',
     origin: 'node-source',
     deps: ['internal/fs/promises'],
+  },
+  {
+    id: 'internal/fs/read/context',
+    vendorPath: 'internal/fs/read/context.js',
+    origin: 'node-source',
+    // `fs.readFile`'s streaming path: open + fstat + repeated read + close,
+    // driving the callback binding. Lazily required by `lib/fs.js`.
+    deps: ['buffer', 'internal/errors', 'internal/fs/utils'],
+  },
+  {
+    id: 'internal/fs/cp/cp-sync',
+    vendorPath: 'internal/fs/cp/cp-sync.js',
+    origin: 'node-source',
+    // `fs.cpSync`. Lazily required by `lib/fs.js`.
+    deps: [
+      'internal/assert',
+      'internal/errors',
+      'internal/fs/cp/cp',
+      'path',
+    ],
+  },
+  {
+    id: 'internal/streams/fast-utf8-stream',
+    vendorPath: 'internal/streams/fast-utf8-stream.js',
+    origin: 'node-source',
+    // `fs.openAsBlob`'s byte source. Lazily required by `lib/fs.js`.
+    deps: [
+      'buffer',
+      'events',
+      'path',
+      'timers',
+      'internal/errors',
+      'internal/util',
+      'internal/validators',
+    ],
+  },
+  {
+    id: 'fs',
+    aliases: ['node:fs'],
+    vendorPath: 'fs.js',
+    origin: 'node-source',
+    // The real callback `fs`. Every method first asks the mounted VFS
+    // (`internal/fs/utils`'s `vfsState.handlers`) and falls back to our `fs`
+    // binding. Only the modules `lib/fs.js` requires at load time are listed as
+    // `deps`: everything else (`internal/fs/cp/*`, `glob`, `promises`,
+    // `read/context`, `recursive_watch`, `rimraf`, `watchers`, `streams`,
+    // `fast-utf8-stream`) is lazily required precisely so it can `require('fs')`
+    // back without seeing a half-evaluated module.
+    deps: [
+      'buffer',
+      'path',
+      'util',
+      'internal/constants',
+      'internal/errors',
+      'internal/event_target',
+      'internal/fs/utils',
+      'internal/process/permission',
+      'internal/url',
+      'internal/util',
+      'internal/util/types',
+      'internal/validators',
+    ],
   },
 ];

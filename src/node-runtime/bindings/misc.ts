@@ -558,24 +558,71 @@ export const fsDirBinding: BindingFactory = () => {
 const kFSWatchStart = Symbol('kFSWatchStart');
 
 /**
- * `fs_event_wrap` (`src/fs_event_wrap.cc`). A browser tab has no inotify, so the
- * native watcher is a shape: `fs.watch` falls back to the VFS watcher (or, for
- * the callback API, fails loudly).
+ * `fs_event_wrap` (`src/fs_event_wrap.cc`). A browser tab has no inotify, so
+ * the handle is projected onto the VFS's change feed (`Vfs.subscribe`): the
+ * same events `fs.watch` reports are exactly the writes that go through this
+ * VFS, which for everything inside the runtime is all of them. The handle keeps
+ * the C++ contract `internal/fs/watchers.js` expects (`initialized`, `start()`
+ * returning an errno, `onchange(status, eventType, filename)`, `close()`).
  */
-export const fsEventWrapBinding: BindingFactory = () => {
+export const fsEventWrapBinding: BindingFactory = (ctx) => {
+  const vfs = ctx.vfs;
+
+  function toPathString(p: unknown): string {
+    if (typeof p === 'string') return p;
+    if (p instanceof Uint8Array) return new TextDecoder().decode(p);
+    return String(p);
+  }
+
   class FSEvent {
     static get kFSWatchStart() {
       return kFSWatchStart;
     }
-    start(): void {
-      throw notImplemented(
-        'binding',
-        'fs_event_wrap.FSEvent.start',
-        'There is no inotify in a browser tab; use the VFS watcher.',
-      );
+    onchange: ((status: number, eventType: string, filename: string | null) => void) | null =
+      null;
+    initialized = false;
+    #unsubscribe: (() => void) | null = null;
+
+    start(
+      filename: unknown,
+      _persistent?: boolean,
+      _recursive?: boolean,
+      _encoding?: string,
+    ): number {
+      if (this.initialized) return 0;
+      const target = vfs.resolve(toPathString(filename));
+      if (!vfs.exists(target)) return ERRNO.ENOENT;
+      const isDir = vfs.stat(target).type === 'dir';
+      const scope = target === '/' ? '/' : `${target}/`;
+      this.#unsubscribe = vfs.subscribe((change) => {
+        if (change.path !== target && !change.path.startsWith(scope)) return;
+        // Node reports `rename` for create/delete and `change` for edits; for a
+        // directory the filename is the path relative to it.
+        const name = isDir
+          ? change.path === target
+            ? ''
+            : change.path.slice(scope.length)
+          : (target.split('/').pop() ?? '');
+        const eventType = change.type === 'change' ? 'change' : 'rename';
+        this.onchange?.(0, eventType, name);
+      });
+      this.initialized = true;
+      return 0;
     }
-    stop(): void {}
-    close(): void {}
+    stop(): void {
+      this.close();
+    }
+    close(): void {
+      this.#unsubscribe?.();
+      this.#unsubscribe = null;
+      this.initialized = false;
+    }
+    ref(): this {
+      return this;
+    }
+    unref(): this {
+      return this;
+    }
   }
   return { FSEvent };
 };
