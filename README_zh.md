@@ -108,6 +108,11 @@ pipeline(fs.createReadStream('/project/a.txt'), new Transform({
 吃 options（`readable`/`writable` 覆盖、`AbortSignal` → `AbortError`），“writable 未完成就
 close”会报 `ERR_STREAM_PREMATURE_CLOSE`。
 
+`url` 同样是 Node 真 `lib/url.js`——legacy `Url`/`parse`/`format`/`resolve`/`resolveObject`
+与 WHATWG 重导出（`URL`/`URLSearchParams`/`URLPattern`）都在。WHATWG 那半边住在
+`internal/url`，本运行时把它桥到标签页自带的规范 URL 解析器（Node 那半是 native Ada）；
+`pathToFileURL`/`fileURLToPath` 按 Node 自己的算法重写（`src/node_url.cc` 的编码表 + POSIX 路径规则）。
+
 响应到浏览器也是**真流式**：SW 直接把 `ReadableStream` 交给浏览器，`res.write()` / SSE / 大文件
 边产生边到达（HTML 例外，为注入 `<base>` 先缓冲）。连接默认 keep-alive，服务端支持 pipelining，
 客户端按端口做连接池。`https` 是 `http` 的同名壳（虚拟网络无 TLS）。
@@ -303,6 +308,18 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M40 | **`fork()` IPC**——双向真通道（`child.send`/`process.send`）、默认 JSON 序列化、开着通道保活、`node nope.js` 像真 Node 一样 exit 1 | ✅ |
 | M41 | **Buffer slab 池化**——小于 `Buffer.poolSize` 一半（64 KiB）的分配共享一块对齐 slab，`.byteOffset`/`.buffer.byteLength` 与 Node 对齐 | ✅ |
 | M42 | **`util.inspect` / ICU 保真度**——`async function*` 既是 generator 又是 async（输出 `[AsyncGeneratorFunction: x]`）；`icu.getStringWidth` 按真实 Unicode 列宽度量，`console.table`/CJK 折行与 Node 一致 | ✅ |
+| M43 | **真 `process` 表面**——逐键对照 Node v26.9.0（`getBuiltinModule`/`getActiveResourcesInfo`/`loadEnvFile`/未捕获异常捕获三件套/`reallyExit` 等）；timer/nextTick 回调抛出的异常现在统一经 `process._fatalException` 路由 | ✅ |
+| M44 | **宿主 `fetch` 计入退出判定**——在飞的宿主请求会吊住子进程（不再丢输出）；纯微任务 promise（WebCrypto、`Blob.arrayBuffer`）不计数，与 Node 一致 | ✅ |
+| M45 | **真 `zlib`**——deflate/gzip 的流式与一次性形式跑在平台 `CompressionStream`/`DecompressionStream` 上，与 Node v26.9.0 逐字节一致；同步形式与编码参数显式抛 `NotImplementedError`（不静默忽略） | ✅ |
+| M46 | **宿主 `WebSocket` 计入退出判定**（M44 的姊妹缺口），并修一个 loader 顶层词法声明与注入沙箱全局冲突的 bug | ✅ |
+| M47 | **`crypto` 对称密码**——AES-128/192/256 的 ECB/CBC/CTR/CFB/OFB/GCM，纯 JS，逐字节对齐 OpenSSL；未实现的 cipher 抛类型化 `NotImplementedError` | ✅ |
+| M48 | **真 `Buffer`**——vendor `lib/buffer.js` + `lib/internal/buffer.js`，删手写 `buffer.ts`；`buffer` binding 扩成完整 JS 实现 | ✅ |
+| M49 | **真 `vfs` 子系统**——`lib/internal/vfs/*` + `lib/internal/fs/utils.js`；`vfs` 模块可用（完整 `MemoryProvider`）；`uv` binding 换成真 85 条 `UV_ERRNO_MAP` | ✅ |
+| M50 | **真 `fs/promises`**——`lib/fs/promises.js` + `lib/internal/fs/promises.js`；`fs` binding 补齐整张 async/promise 面 | ✅ |
+| M51 | **真回调式 `fs`**——`lib/fs.js`（4083 行）；`fs.watch`/`fs.promises.watch` 经 VFS 投影走真 watchers 代码 | ✅ |
+| M51b | **`fs.opendir`/`Dir` + `fs.watchFile`**——真 `fs_dir` binding + 复刻 libuv `uv_fs_poll` 的 `StatWatcher` 轮询实现 | ✅ |
+| M52 | **真 `internal/fs/streams.js`**——`fs.ReadStream`/`fs.WriteStream` 换真源码（惰性加载，顶层 `require('fs')` 回环自然解除） | ✅ |
+| M53 | **真 `url`**——vendor `lib/url.js`（legacy parse/format/resolve + WHATWG 重导出）；`internal/url` 改成宿主 URL 桥，新增 `url`/`url_pattern`/`encoding_binding` binding | ✅ |
 
 ## Vendored 真源码现状
 

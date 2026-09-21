@@ -51,6 +51,10 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_NOT_SUPPORTED_IN_SNAPSHOT: '%s is not supported in startup snapshot',
   ERR_INVALID_ARG_VALUE: 'The argument \'%s\' is invalid. Received %s',
   ERR_INVALID_URI: 'URI malformed',
+  ERR_INVALID_URL: 'Invalid URL',
+  ERR_INVALID_URL_SCHEME: 'The URL must be of scheme %s',
+  ERR_INVALID_FILE_URL_HOST: 'File URL host must be "localhost" or empty on %s',
+  ERR_INVALID_FILE_URL_PATH: 'File URL path %s',
   ERR_OUT_OF_RANGE: 'The value of "%s" is out of range. It must be %s. Received %s',
   ERR_INVALID_STATE: 'Invalid state: %s',
   ERR_OPERATION_FAILED: 'Operation failed: %s',
@@ -118,6 +122,10 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_INVALID_ARG_VALUE: TypeError,
   ERR_OUT_OF_RANGE: RangeError,
   ERR_INVALID_URI: TypeError,
+  ERR_INVALID_URL: TypeError,
+  ERR_INVALID_URL_SCHEME: TypeError,
+  ERR_INVALID_FILE_URL_HOST: TypeError,
+  ERR_INVALID_FILE_URL_PATH: TypeError,
   ERR_MISSING_ARGS: TypeError,
   ERR_STREAM_NULL_VALUES: TypeError,
   ERR_MULTIPLE_CALLBACK: Error,
@@ -212,6 +220,16 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
     const [input, name, value] = args as [string, string, unknown];
     return `Expected ${input} to be returned from the "${name}" function but got ${determineSpecificType(value)}.`;
   },
+  // `ERR_INVALID_URL_SCHEME(expected)`: one scheme, or a pair of them.
+  ERR_INVALID_URL_SCHEME: (args) => {
+    let expected = args[0] as string | string[];
+    if (typeof expected === 'string') expected = [expected];
+    const res =
+      expected.length === 2
+        ? `one of scheme ${expected[0]} or ${expected[1]}`
+        : `of scheme ${expected[0]}`;
+    return `The URL must be ${res}`;
+  },
   // Node's builder drops the parenthesised detail when nothing was passed.
   ERR_UNHANDLED_ERROR: (args) =>
     args.length === 0 || args[0] === undefined ? 'Unhandled error.' : `Unhandled error. (${String(args[0])})`,
@@ -242,6 +260,15 @@ const CUSTOM_PROPS: Record<string, (err: Record<string, unknown>, args: unknown[
   // Node keeps the rejected value on the error for callers to inspect.
   ERR_FALSY_VALUE_REJECTION: (err, args) => {
     err.reason = args[0];
+  },
+  // `ERR_INVALID_URL(input, base?)` carries the offending input and, when a
+  // base was in play, that too — the message itself is just "Invalid URL".
+  ERR_INVALID_URL: (err, args) => {
+    err.input = args[0];
+    if (args[1] != null) err.base = args[1];
+  },
+  ERR_INVALID_FILE_URL_PATH: (err, args) => {
+    err.input = args[1];
   },
 };
 
@@ -923,26 +950,215 @@ export const internalBootstrapRealmSpec: BuiltinSpec = {
 // internal/url
 // ---------------------------------------------------------------------------
 //
-// `internal/url` in Node carries the WHATWG implementation plus file-URL
-// helpers. We already expose all of that on the `url` builtin, so the internal
-// alias simply re-exports it. Loading is lazy in the vendored inspect code.
+// Node's `internal/url` is 1754 lines of WHATWG `URL`/`URLSearchParams` built on
+// the native Ada parser (`internalBinding('url')`: `parse`/`update`/`canParse`/
+// `domainToASCII`/...). Reproducing Ada in JS is out of scope, so this shim is a
+// **bridge to the host's own spec-compliant classes** and reimplements only the
+// file-URL / options helpers on top of them. The vendored `lib/url.js` (the real
+// `url` module) is written against exactly this surface.
+//
+// The helpers deliberately mirror Node's own algorithms:
+//   - `pathToFileURL` uses `src/node_url.cc`'s `EncodePathChars` table (the RFC
+//     1738 "unsafe" set) and then hands the encoded string to the host parser.
+//   - `fileURLToPath` follows `getPathFromURLPosix` (reject a non-empty
+//     hostname and any `%2f`, then `decodeURIComponent` the pathname).
+//   - `domainToASCII`/`domainToUnicode` lean on the host parser's UTS#46 host
+//     normalization and the vendored `punycode` for the `xn--` decode.
 
 export const internalUrlSpec: BuiltinSpec = {
   id: 'internal/url',
   origin: 'web-node',
   init: (ctx: BuiltinInitContext) => {
-    const url = ctx.require('url') as Record<string, unknown> & {
-      isURL?: (value: unknown) => boolean;
-      fileURLToPath?: (value: unknown) => string;
+    const errors = ctx.require('internal/errors') as {
+      codes: Record<string, new (...args: unknown[]) => Error>;
     };
+
+    // `src/node_url.cc`'s lookup table: the ASCII code points `pathToFileURL`
+    // percent-encodes. Everything above `~` is passed through untouched.
+    const PATH_ENCODE: Record<number, string> = {
+      0: '%00',
+      9: '%09',
+      10: '%0A',
+      13: '%0D',
+      32: '%20',
+      34: '%22',
+      35: '%23',
+      37: '%25',
+      63: '%3F',
+      91: '%5B',
+      92: '%5C',
+      93: '%5D',
+      94: '%5E',
+      124: '%7C',
+      126: '%7E',
+    };
+
+    const encodePathChars = (input: string): string => {
+      let out = 'file://';
+      for (let i = 0; i < input.length; i++) {
+        const code = input.charCodeAt(i);
+        if (code > 126) {
+          out += input[i];
+          continue;
+        }
+        out += PATH_ENCODE[code] ?? input[i];
+      }
+      return out;
+    };
+
+    const isURL = (self: unknown): boolean => {
+      const u = self as { href?: unknown; protocol?: unknown; auth?: unknown; path?: unknown } | null;
+      return Boolean(u && u.href && u.protocol && u.auth === undefined && u.path === undefined);
+    };
+    const isURLInstance = (value: unknown): boolean =>
+      typeof value === 'object' && value !== null && value instanceof URL;
+
+    const fileURLToPath = (input: string | URL, options: { windows?: boolean } = {}): string => {
+      let url: URL;
+      if (typeof input === 'string') {
+        url = new URL(input);
+      } else if (isURL(input)) {
+        url = input as URL;
+      } else {
+        throw new errors.codes.ERR_INVALID_ARG_TYPE('path', ['string', 'URL'], input);
+      }
+      if (url.protocol !== 'file:') {
+        throw new errors.codes.ERR_INVALID_URL_SCHEME('file');
+      }
+      const windows = options?.windows ?? false;
+      if (windows) {
+        // Windows file URLs have no counterpart in the POSIX-shaped VFS; be loud.
+        throw notImplemented('api', 'url.fileURLToPath({ windows: true })');
+      }
+      if (url.hostname !== '') {
+        const platform = (ctx.require('process') as { platform: string }).platform;
+        throw new errors.codes.ERR_INVALID_FILE_URL_HOST(platform);
+      }
+      const pathname = url.pathname;
+      for (let n = 0; n < pathname.length; n++) {
+        if (pathname[n] === '%') {
+          const third = pathname.charCodeAt(n + 2) | 0x20;
+          if (pathname[n + 1] === '2' && third === 102) {
+            throw new errors.codes.ERR_INVALID_FILE_URL_PATH('must not include encoded / characters', url);
+          }
+        }
+      }
+      return pathname.includes('%') ? decodeURIComponent(pathname) : pathname;
+    };
+
+    const fileURLToPathBuffer = (input: string | URL, options: { windows?: boolean } = {}): unknown => {
+      const { Buffer } = ctx.require('buffer') as { Buffer: { from(value: string): unknown } };
+      return Buffer.from(fileURLToPath(input, options));
+    };
+
+    const pathToFileURL = (filepath: string, options: { windows?: boolean } = {}): URL => {
+      if (options?.windows) {
+        throw new errors.codes.ERR_INVALID_ARG_VALUE('path', filepath, 'Windows paths are unsupported');
+      }
+      const path = ctx.require('path') as { resolve(...parts: string[]): string };
+      // Resolve relative paths against the runtime's own cwd (the VFS one), not
+      // whatever `path.resolve` would fall back to.
+      const cwd = (ctx.require('process') as { cwd(): string }).cwd();
+      const resolved = path.resolve(cwd, filepath);
+      // Node adds a trailing slash back that `path.resolve` stripped, when the
+      // caller passed one.
+      const endsWithSep = filepath.length > 1 && filepath[filepath.length - 1] === '/';
+      const withSep =
+        endsWithSep && resolved[resolved.length - 1] !== '/' ? `${resolved}/` : resolved;
+      return new URL(encodePathChars(withSep));
+    };
+
+    const toPathIfFileURL = (fileURLOrPath: unknown): unknown =>
+      isURL(fileURLOrPath) ? fileURLToPath(fileURLOrPath as URL) : fileURLOrPath;
+
+    const urlToHttpOptions = (input: URL): Record<string, unknown> => {
+      const { hostname, pathname, port, username, password, search } = input;
+      const options: Record<string, unknown> = {
+        __proto__: null,
+        ...input,
+        protocol: input.protocol,
+        hostname: hostname && hostname[0] === '[' ? hostname.slice(1, -1) : hostname,
+        hash: input.hash,
+        search,
+        pathname,
+        path: `${pathname || ''}${search || ''}`,
+        href: input.href,
+      };
+      if (port !== '') options.port = Number(port);
+      if (username || password) options.auth = `${decodeURIComponent(username)}:${decodeURIComponent(password)}`;
+      return options;
+    };
+
+    const domainToASCII = (domain: unknown): string => {
+      const input = `${domain}`;
+      if (input === '') return '';
+      try {
+        return new URL(`ws://${input}`).hostname;
+      } catch {
+        return '';
+      }
+    };
+    const domainToUnicode = (domain: unknown): string => {
+      const input = `${domain}`;
+      const labels = input.split('.');
+      let changed = false;
+      const punycode = ctx.require('punycode') as { toUnicode(value: string): string };
+      for (let i = 0; i < labels.length; i++) {
+        if (labels[i].startsWith('xn--')) {
+          try {
+            labels[i] = punycode.toUnicode(labels[i]);
+            changed = true;
+          } catch {
+            /* keep the ASCII label */
+          }
+        }
+      }
+      return changed ? labels.join('.') : input;
+    };
+
+    // `internal/url.js`'s legacy-protocol sets (used by `lib/url.js`'s parser).
+    const unsafeProtocol = new Set(['javascript', 'javascript:']);
+    const hostlessProtocol = new Set(['javascript', 'javascript:']);
+    const slashedProtocol = new Set([
+      'http',
+      'http:',
+      'https',
+      'https:',
+      'ftp',
+      'ftp:',
+      'gopher',
+      'gopher:',
+      'file',
+      'file:',
+      'ws',
+      'ws:',
+      'wss',
+      'wss:',
+    ]);
+
     return {
-      ...url,
-      // `internal/url`'s file-URL helper: pass a path through untouched, resolve
-      // a `file:` URL to a path. Vendored `internal/fs/glob` reads it.
-      toPathIfFileURL: (fileURLOrPath: unknown): unknown =>
-        typeof url.isURL === 'function' && url.isURL(fileURLOrPath)
-          ? url.fileURLToPath?.(fileURLOrPath)
-          : fileURLOrPath,
+      URL,
+      URLSearchParams,
+      URLPattern: (globalThis as { URLPattern?: unknown }).URLPattern,
+      URLParse: (input: string, base?: string): string | null => {
+        try {
+          return new URL(input, base).href;
+        } catch {
+          return null;
+        }
+      },
+      pathToFileURL,
+      fileURLToPath,
+      fileURLToPathBuffer,
+      toPathIfFileURL,
+      urlToHttpOptions,
+      domainToASCII,
+      domainToUnicode,
+      isURL,
+      isURLInstance,
+      unsafeProtocol,
+      hostlessProtocol,
+      slashedProtocol,
     };
   },
 };

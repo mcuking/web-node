@@ -103,6 +103,12 @@ describe('the vendored bundle', () => {
   });
 
   it('covers every file on disk', () => {
-    expect(VENDORED_FILES.length).toBe(147);
+    // Derive the expected count from the manifest rather than hard-coding it,
+    // so vendoring a new file cannot silently skip the bundle.
+    const manifest = JSON.parse(readFileSync('vendor/node-lib/MANIFEST.json', 'utf8')) as {
+      files: { path: string }[];
+    };
+    expect(VENDORED_FILES.length).toBe(manifest.files.length);
+    expect(VENDORED_FILES.length).toBeGreaterThan(100);
   });
 });

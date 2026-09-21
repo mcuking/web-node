@@ -22,7 +22,6 @@ import { vfsSpec } from './vfs';
 import { undiciSpec } from './undici';
 import { workerThreadsSpec } from './worker-threads';
 import { cryptoSpec } from './crypto';
-import { urlSpec } from './url';
 import { dnsSpec, dnsPromisesSpec } from './dns';
 import { zlibSpec } from './zlib';
 import { unsupportedSpecs } from './unsupported';
@@ -61,8 +60,7 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   // milestone 3: networking
   netSpec,
   // milestone 4: streams (fs/http are built on these) — `stream`/`stream/promises`
-  // are the vendored Node source (see vendored-builtins.ts)
-  urlSpec,
+  // are the vendored Node source (see vendored-builtins.ts), and `url` too
   cryptoSpec,
   dnsSpec,
   dnsPromisesSpec,

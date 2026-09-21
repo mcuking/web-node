@@ -166,6 +166,9 @@ const FILES = [
   'fs.js',
   'internal/fs/promises.js',
   'internal/vfs/setup.js',
+  // milestone 53: the real `url` module (legacy parse/format/resolve built on
+  // the WHATWG API that `internal/url` bridges to the host's own classes)
+  'url.js',
 ];
 
 /**

@@ -32,6 +32,7 @@ import {
 import { messagingBinding, workerBinding } from './messaging';
 import { stringDecoderBinding } from './string_decoder';
 import { blobBinding } from './blob';
+import { urlBinding, urlPatternBinding, encodingBinding } from './url';
 
 /** The whitelist of internal bindings this runtime implements. */
 const REGISTRY: Record<string, BindingFactory> = {
@@ -65,6 +66,9 @@ const REGISTRY: Record<string, BindingFactory> = {
   async_wrap: asyncWrapBinding,
   async_context_frame: asyncContextFrameBinding,
   worker: workerBinding,
+  url: urlBinding,
+  url_pattern: urlPatternBinding,
+  encoding_binding: encodingBinding,
 };
 
 /** Bindings Node internal code knows about but that we deliberately do not ship. */
@@ -84,9 +88,6 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'dtls',
   'cares_wrap',
   'http_parser',
-  'encoding_binding',
-  'url',
-  'url_pattern',
   'trace_events',
   'heap_utils',
   'profiler',

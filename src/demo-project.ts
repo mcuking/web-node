@@ -583,6 +583,21 @@ console.log('gcm tag     : ' + gcm.getAuthTag().toString('hex'));
 console.log('gcm ciphers : ' + crypto.getCiphers().filter(function (n) { return n.indexOf('aes-') === 0; }).length + ' aes entries');
 console.log('');
 
+// --- url (milestone 53) ---
+// url is Node's real lib/url.js now: the legacy Url/parse/format/resolve API
+// next to the WHATWG classes, and pathToFileURL/fileURLToPath. The WHATWG side
+// comes from internal/url, which is bridged to the tab's own URL parser (Node's
+// is native Ada; a browser already ships a spec-compliant one).
+console.log('-- url (milestone 53) --');
+var nodeUrl = require('url');
+var parsedUrl = nodeUrl.parse('http://u:p@h.com:81/p/q?x=1#f');
+console.log('parse       : ' + parsedUrl.hostname + ':' + parsedUrl.port + ' query=' + parsedUrl.query);
+console.log('format      : ' + nodeUrl.format({ protocol: 'https:', host: 'h.com', pathname: '/p', query: { a: '1' } }));
+console.log('resolve     : ' + nodeUrl.resolve('http://h.com/a/b', '../c'));
+console.log('file url    : ' + nodeUrl.pathToFileURL('/project/a b.js').href + ' -> ' + nodeUrl.fileURLToPath('file:///project/a%20b.js'));
+console.log('idna        : ' + nodeUrl.domainToASCII('münchen.de') + ' <- ' + nodeUrl.domainToUnicode('xn--mnchen-3ya.de'));
+console.log('');
+
 // --- Blob (milestone 37) ---
 // Blob and File are now the real lib/internal/blob.js + lib/internal/file.js
 // running on a JS 'blob' binding. Blob is a global (and require('buffer').Blob

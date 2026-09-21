@@ -199,6 +199,13 @@ the `destroy()` / `_undestroy()` lifecycle, `finished()` / `eos()`, and
 (`readable`/`writable` overrides, an `AbortSignal` → `AbortError`) and rejects a
 `close` that beats the writable half with `ERR_STREAM_PREMATURE_CLOSE`.
 
+`url` is Node's own `lib/url.js` as well — the legacy `Url`/`parse`/`format`/
+`resolve`/`resolveObject` API next to the WHATWG re-exports
+(`URL`/`URLSearchParams`/`URLPattern`). Its WHATWG half lives in `internal/url`,
+which here is a bridge to the tab's own spec-compliant URL parser (Node's is
+native Ada); `pathToFileURL`/`fileURLToPath` are reimplemented to Node's own
+algorithms (the `src/node_url.cc` encode table, the POSIX path rules).
+
 ## npm
 
 Hit **Install deps** and the client resolves your `package.json` dependencies
@@ -410,6 +417,18 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M40 | `fork()` IPC — a real channel both ways (`child.send`/`process.send`), default JSON serialization, an open channel keeps the child alive, `node nope.js` exits 1 like Node | ✅ Done |
 | M41 | Buffer slab pooling — allocations under half of `Buffer.poolSize` (64 KiB) share one aligned slab, so `.byteOffset`/`.buffer.byteLength` match Node | ✅ Done |
 | M42 | `util.inspect` / ICU fidelity — `async function*` is both a generator and async (`[AsyncGeneratorFunction: x]`), and `icu.getStringWidth` measures real Unicode columns so `console.table`/CJK wrapping match Node | ✅ Done |
+| M43 | Real `process` surface — every public key checked against Node v26.9.0 (`getBuiltinModule`, `getActiveResourcesInfo`, `loadEnvFile`, the uncaught-exception capture trio, `reallyExit`, …); uncaught throws from timer/nextTick callbacks now route through `process._fatalException` | ✅ Done |
+| M44 | Host `fetch` counts toward exit — an in-flight host request keeps a child alive so its output is no longer dropped; pure microtask promises (WebCrypto, `Blob.arrayBuffer`) don't count, matching Node | ✅ Done |
+| M45 | Real `zlib` — deflate/gzip stream and one-shot forms run on the platform `CompressionStream`/`DecompressionStream`, byte-for-byte with Node v26.9.0; sync forms and encoding params throw `NotImplementedError` rather than silently ignoring | ✅ Done |
+| M46 | Host `WebSocket` counts toward exit (the M44 sibling), plus a loader fix for top-level lexical declarations colliding with injected sandbox globals | ✅ Done |
+| M47 | `crypto` ciphers — AES-128/192/256 in ECB/CBC/CTR/CFB/OFB/GCM, plain JS, byte-for-byte with OpenSSL; unimplemented ciphers throw a typed `NotImplementedError` | ✅ Done |
+| M48 | Real `Buffer` — `lib/buffer.js` + `lib/internal/buffer.js` vendored, the hand-written `buffer.ts` deleted; the `buffer` binding grows into a full JS implementation | ✅ Done |
+| M49 | Real `vfs` subsystem — `lib/internal/vfs/*` + `lib/internal/fs/utils.js`; a working `vfs` module with a full `MemoryProvider`; the `uv` binding gets the real 85-entry `UV_ERRNO_MAP` | ✅ Done |
+| M50 | Real `fs/promises` — `lib/fs/promises.js` + `lib/internal/fs/promises.js`; the `fs` binding grows the whole async/promise surface | ✅ Done |
+| M51 | Real callback `fs` — `lib/fs.js` (4083 lines); `fs.watch`/`fs.promises.watch` run the real watchers code via a VFS projection | ✅ Done |
+| M51b | `fs.opendir`/`Dir` + `fs.watchFile` — a real `fs_dir` binding and a `StatWatcher` polling implementation mirroring libuv's `uv_fs_poll` | ✅ Done |
+| M52 | Real `internal/fs/streams.js` — `fs.ReadStream`/`fs.WriteStream` are the real classes (lazy-loaded, so the top-level `require('fs')` cycle resolves) | ✅ Done |
+| M53 | Real `url` — `lib/url.js` vendored (legacy parse/format/resolve + the WHATWG re-exports); `internal/url` becomes a bridge to the host URL classes, with `url`/`url_pattern`/`encoding_binding` bindings | ✅ Done |
 
 ## Vendored Node source
 

@@ -1047,6 +1047,25 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     deps: ['buffer', 'internal/querystring'],
   },
   {
+    id: 'url',
+    aliases: ['node:url'],
+    vendorPath: 'url.js',
+    origin: 'node-source',
+    // The real `url` module: the legacy `Url`/`parse`/`format`/`resolve` API
+    // plus the WHATWG surface it re-exports from `internal/url` (bridged to the
+    // host's own URL classes). `internal/querystring` gives it `encodeStr`/
+    // `hexTable`; `querystring` gives the query parser `parse(true)` uses.
+    deps: [
+      'internal/querystring',
+      'querystring',
+      'internal/errors',
+      'internal/validators',
+      'internal/util',
+      'internal/url',
+      'internal/constants',
+    ],
+  },
+  {
     id: 'punycode',
     aliases: ['node:punycode'],
     vendorPath: 'punycode.js',
