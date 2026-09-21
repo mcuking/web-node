@@ -22,6 +22,12 @@ export class ProcessExit extends Error {
 // our timer bindings would call themselves through globalThis.setTimeout.
 const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
 
+/** A node in the vendored `internal/timers.js` linked lists (only what reset needs). */
+interface TimerNode {
+  _idleNext: TimerNode | null;
+  _idlePrev: TimerNode | null;
+}
+
 /**
  * Seed a bootstrap `process` global when the host has none.
  *
@@ -174,7 +180,7 @@ export class NodeRuntime {
       loader: () => this.loader,
       globals: () => this.sandboxGlobals,
       aliases: () => ({ ...MODULE_ALIASES }),
-      activeCount: () => this.#timers.size,
+      activeCount: () => this.#activeWorkCount(),
       execPath,
       baseEnv: env,
       onChildEvent: (event) => opts.onChildEvent?.(event),
@@ -202,18 +208,7 @@ export class NodeRuntime {
       // already-queued promise jobs, which reorders stream/lifecycle events.
       nextTick: (fn, ...args) => {
         this.#nextTickQueue.push(() => fn(...args));
-        if (this.#nextTickScheduled) return;
-        this.#nextTickScheduled = true;
-        queueMicrotask(() => {
-          try {
-            for (let i = 0; i < this.#nextTickQueue.length; i++) {
-              this.#nextTickQueue[i]();
-            }
-          } finally {
-            this.#nextTickQueue.length = 0;
-            this.#nextTickScheduled = false;
-          }
-        });
+        this.#scheduleNextTickDrain();
       },
       timers: {
         setTimeout: (fn, ms, ...args) => {
@@ -243,7 +238,7 @@ export class NodeRuntime {
           return id;
         },
         clearImmediate: (id) => this.#clearTimer(id),
-        activeCount: () => this.#timers.size,
+        activeCount: () => this.#activeWorkCount(),
       },
       now: () => performance.now(),
       hrtime: () => {
@@ -302,6 +297,23 @@ export class NodeRuntime {
     const asyncHooks = this.realm.require('internal/async_hooks') as { nativeHooks: unknown };
     (this.realm.internalBinding('async_wrap') as { setupHooks: (h: unknown) => void }).setupHooks(asyncHooks.nativeHooks);
 
+    // Node installs the timer callbacks last during bootstrap
+    // (lib/internal/bootstrap/node.js): `getTimerCallbacks(runNextTicks)` builds
+    // the queue runners and `setupTimers` hands them to C++, whose libuv timers
+    // invoke them. Without this step the vendored timers never fire.
+    const internalTimers = this.realm.require('internal/timers') as {
+      getTimerCallbacks: (runNextTicks: () => void) => {
+        processImmediate: () => void;
+        processTimers: (now: number) => number;
+      };
+    };
+    const { processImmediate, processTimers } = internalTimers.getTimerCallbacks(() => this.#runNextTicks());
+    (
+      this.realm.internalBinding('timers') as {
+        setupTimers: (immediate: () => void, timers: (now: number) => number) => void;
+      }
+    ).setupTimers(processImmediate, processTimers);
+
     // Build the sandbox global object shared by all user modules. This is what
     // makes `process` / `Buffer` / `console` resolve inside user code without
     // touching the host realm's globals (which matters under Vitest).
@@ -346,6 +358,47 @@ export class NodeRuntime {
     return this.#exitCode;
   }
 
+  #scheduleNextTickDrain(): void {
+    if (this.#nextTickScheduled) return;
+    this.#nextTickScheduled = true;
+    queueMicrotask(() => {
+      this.#nextTickScheduled = false;
+      this.#drainNextTicks();
+    });
+  }
+
+  /**
+   * Drain the nextTick queue to exhaustion. A tick queued while draining runs in
+   * the same pass, which is what makes nested `process.nextTick` stay ahead of
+   * promise jobs — the ordering streams depend on.
+   */
+  #drainNextTicks(): void {
+    while (this.#nextTickQueue.length > 0) {
+      const batch = this.#nextTickQueue;
+      this.#nextTickQueue = [];
+      for (let i = 0; i < batch.length; i++) batch[i]();
+    }
+  }
+
+  /**
+   * `runNextTicks`, as `internal/timers.js` expects it: run the tick queue
+   * synchronously between timer lists (lib/internal/bootstrap/node.js passes the
+   * `setupTaskQueue()` version to `getTimerCallbacks`).
+   */
+  #runNextTicks(): void {
+    this.#drainNextTicks();
+  }
+
+  /**
+   * Pending asynchronous work: the runtime's own host-timer surface (the spawn
+   * host defers on) plus whatever the vendored `internal/timers.js` queue still
+   * holds. `proc/host.ts` uses this to decide whether a spawned child is done.
+   */
+  #activeWorkCount(): number {
+    const timers = this.realm?.internalBinding('timers') as { __liveCount?: () => number } | undefined;
+    return this.#timers.size + (timers?.__liveCount?.() ?? 0);
+  }
+
   #installGlobals(sandboxGlobal: Record<string, unknown>): void {
     const g = globalThis as unknown as Record<string, unknown>;
     for (const key of ['process', 'Buffer', 'console', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'setImmediate', 'clearImmediate']) {
@@ -364,7 +417,7 @@ export class NodeRuntime {
 
   /** Number of live timers (used by the runner / tests). */
   get activeTimers(): number {
-    return this.#timers.size;
+    return this.#activeWorkCount();
   }
 
   /**
@@ -399,6 +452,35 @@ export class NodeRuntime {
 
   #clearAllTimers(): void {
     for (const id of [...this.#timers.keys()]) this.#clearTimer(id);
+    // Each `runMain` models a fresh process, so a timeout/interval the previous
+    // program left pending must not fire in the next one. The queue lives in the
+    // vendored `internal/timers.js`, so clear it through the *public* path: that
+    // keeps its linked lists, priority queue and ref counts consistent, which a
+    // raw handle cancel would not. Then drop the host handles driving it.
+    const timers = this.realm.require('timers') as {
+      clearTimeout: (timer: unknown) => void;
+      clearImmediate: (immediate: unknown) => void;
+    };
+    const internals = this.realm.require('internal/timers') as {
+      timerListMap: Record<string, { _idleNext: TimerNode | null }>;
+      immediateQueue: { head: TimerNode | null };
+    };
+    for (const key of Object.keys(internals.timerListMap)) {
+      const list = internals.timerListMap[key];
+      let node = list._idleNext;
+      while (node !== null && node !== (list as unknown as TimerNode)) {
+        const next = node._idleNext;
+        timers.clearTimeout(node);
+        node = next;
+      }
+    }
+    let immediate = internals.immediateQueue.head;
+    while (immediate !== null) {
+      const next = immediate._idleNext;
+      timers.clearImmediate(immediate);
+      immediate = next;
+    }
+    (this.realm.internalBinding('timers') as { __reset?: () => void }).__reset?.();
   }
 
   /**

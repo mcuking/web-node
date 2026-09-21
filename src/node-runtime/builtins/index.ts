@@ -27,7 +27,6 @@ import { cryptoSpec } from './crypto';
 import { urlSpec } from './url';
 import { dnsSpec, dnsPromisesSpec } from './dns';
 import { unsupportedSpecs } from './unsupported';
-import { timersSpec } from './timers';
 import { processSpec } from './process';
 import { moduleSpec } from './module';
 import { netSpec } from './net';
@@ -58,7 +57,6 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   ...vendoredBuiltins,
   // our implementations
   bufferSpec,
-  timersSpec,
   processSpec,
   moduleSpec,
   // milestone 3: networking
