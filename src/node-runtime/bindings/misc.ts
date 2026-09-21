@@ -1,7 +1,7 @@
 import type { BindingFactory } from './context';
 import { notImplemented } from '../errors';
 import { triggerUncaughtException } from './uncaught';
-import { ERRNO, ERRNO_DESC } from '../vfs/types';
+import { ERRNO, ERRNO_DESC, VfsError } from '../vfs/types';
 
 /** `trace_events` binding: this runtime does not emit V8 trace events. */
 export const traceEventsBinding: BindingFactory = () => ({
@@ -533,25 +533,86 @@ export const diagnosticsChannelBinding: BindingFactory = () => {
 };
 
 /**
- * `fs_dir` — the native directory handle (`src/node_dir.cc`). The `Dir` class in
- * `lib/internal/fs/dir.js` is only reached when no VFS mount owns the path; when
- * one does, `internal/fs/promises` short-circuits `opendir`. The handle is a
- * shape so the module loads, and calling it is an explicit error.
+ * `fs_dir` (`src/node_dir.cc`). `lib/internal/fs/dir.js` only reaches this when
+ * no VFS mount owns the path (`vfsState.handlers` is null, which is our case).
+ * `opendirSync`/`opendir` hand back a `DirHandle` whose `read(encoding,
+ * bufferSize[, req])` returns libuv's flat `[name, type, …]` array (or `null` at
+ * end) and whose `close([req])` releases it. The entries are snapshotted from
+ * the VFS at open time.
  */
-export const fsDirBinding: BindingFactory = () => {
-  const unsupported = (name: string) => () => {
-    throw notImplemented(
-      'binding',
-      `fs_dir.${name}`,
-      'The native directory handle is bypassed by the mounted VFS.',
-    );
-  };
+export const fsDirBinding: BindingFactory = (ctx) => {
+  const vfs = ctx.vfs;
+
+  function dirTypeCode(type: string): number {
+    switch (type) {
+      case 'file': return 1; // UV_DIRENT_FILE
+      case 'dir': return 2; // UV_DIRENT_DIR
+      case 'symlink': return 3; // UV_DIRENT_LINK
+      default: return 0; // UV_DIRENT_UNKNOWN
+    }
+  }
+
+  class DirHandle {
+    #entries: Array<{ name: string; type: string }>;
+    #cursor = 0;
+    closed = false;
+
+    constructor(path: string) {
+      const target = vfs.resolve(String(path));
+      if (!vfs.exists(target)) throw new VfsError('ENOENT', 'opendir', target);
+      if (vfs.stat(target).type !== 'dir') throw new VfsError('ENOTDIR', 'opendir', target);
+      this.#entries = vfs.readdir(target);
+    }
+
+    /** `uv_fs_readdir`: up to `bufferSize` entries, `null` when exhausted. */
+    read(
+      _encoding: unknown,
+      bufferSize: number,
+      req?: { oncomplete?: (err: Error | null, result?: unknown) => void },
+    ): unknown {
+      const out: Array<string | number> = [];
+      for (let i = 0; i < bufferSize && this.#cursor < this.#entries.length; i += 1) {
+        const entry = this.#entries[this.#cursor];
+        this.#cursor += 1;
+        out.push(entry.name, dirTypeCode(entry.type));
+      }
+      const result = out.length === 0 ? null : out;
+      if (req) {
+        ctx.nextTick(() => req.oncomplete?.(null, result));
+        return undefined;
+      }
+      return result;
+    }
+
+    close(req?: { oncomplete?: (err: Error | null) => void }): void {
+      this.closed = true;
+      if (req) ctx.nextTick(() => req.oncomplete?.(null));
+    }
+
+    /** `uv_fs_get_dirfd` — a browser tab has no fd, so report "none". */
+    get dirfd(): number {
+      return -1;
+    }
+  }
+
   return {
     kDirHandle: Symbol('kDirHandle'),
-    opendir: unsupported('opendir'),
-    dirfd: unsupported('dirfd'),
-    readSync: unsupported('readSync'),
-    close: unsupported('close'),
+    DirHandle,
+    opendir(
+      path: string,
+      _encoding: unknown,
+      req: { oncomplete?: (err: Error | null, handle?: DirHandle) => void },
+    ): void {
+      try {
+        const handle = new DirHandle(path);
+        ctx.nextTick(() => req.oncomplete?.(null, handle));
+      } catch (err) {
+        ctx.nextTick(() => req.oncomplete?.(err as Error));
+      }
+    },
+    opendirSync(path: string): DirHandle {
+      return new DirHandle(path);
+    },
   };
 };
 

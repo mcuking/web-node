@@ -114,6 +114,52 @@ describe('fs (real lib/fs.js)', () => {
     expect(seen).toEqual(['rename:a.js', 'rename:nested/b.js', 'rename:a.js']);
   });
 
+  it('opendir / Dir.streams the directory, sync and async (real fs_dir)', async () => {
+    const { fs } = boot();
+    fs.writeFileSync('/project/a.txt', 'hello');
+    fs.mkdirSync('/project/d');
+    const dir = fs.opendirSync('/project');
+    const seen: string[] = [];
+    let ent: any;
+    while ((ent = dir.readSync()) !== null) {
+      seen.push(`${ent.name}:${ent.isFile() ? 'f' : ent.isDirectory() ? 'd' : '?'}`);
+    }
+    expect(seen.sort()).toEqual(['a.txt:f', 'd:d']);
+    dir.closeSync();
+    expect(() => dir.readSync()).toThrow(
+      expect.objectContaining({ code: 'ERR_DIR_CLOSED' }),
+    );
+
+    const dir2 = await new Promise<any>((res, rej) =>
+      fs.opendir('/project', (e: any, d: any) => (e ? rej(e) : res(d))),
+    );
+    const names: string[] = [];
+    for await (const e of dir2) names.push(e.name);
+    expect(names.sort()).toEqual(['a.txt', 'd']);
+  });
+
+  it('watchFile polls the VFS and reports change / delete / recreate', async () => {
+    const { fs } = boot();
+    fs.writeFileSync('/project/a.txt', 'x');
+    const events: string[] = [];
+    const w = fs.watchFile('/project/a.txt', { interval: 30 }, (curr: any, prev: any) => {
+      events.push(`${curr.size}<-${prev.size}`);
+    });
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    await wait(70);
+    fs.writeFileSync('/project/a.txt', 'hello');
+    await wait(90);
+    fs.unlinkSync('/project/a.txt');
+    await wait(90);
+    fs.writeFileSync('/project/a.txt', 'back');
+    await wait(90);
+    fs.unwatchFile('/project/a.txt');
+    // Same shape as Node v26.9.0: edit, then delete reports a zeroed stat
+    // against the last good one, then recreate reports against that same stat.
+    expect(events).toEqual(['5<-1', '0<-5', '4<-5']);
+    expect(w).toBeDefined();
+  });
+
   it('reports libuv-shaped ENOENT, byte-for-byte with Node v26.9.0', async () => {
     const { fs } = boot();
     let sync: any;

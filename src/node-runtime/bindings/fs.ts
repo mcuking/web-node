@@ -1,6 +1,5 @@
 import type { BindingContext, BindingFactory } from './context';
-import { notImplemented } from '../errors';
-import { VfsError, type Stat } from '../vfs/types';
+import { VfsError, ERRNO, type Stat } from '../vfs/types';
 import { FS_OPEN_FLAGS } from './constants';
 
 /**
@@ -457,28 +456,121 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
   }
 
   /**
-   * `fs.watchFile`'s poller (`internal/fs/watchers.js`'s `_StatWatcher`). A
-   * browser tab has no inotify and no thread pool, so this is a shape whose
-   * `start()` fails loudly rather than silently never firing.
+   * `binding.StatWatcher` (`src/node_stat_watcher.cc`): the poller behind
+   * `fs.watchFile`. A browser tab has no `inotify`, but libuv's `uv_fs_poll` is
+   * itself a stat poller, so this reproduces its exact observable protocol: the
+   * first successful stat sets the baseline silently, a later stat that differs
+   * calls `onchange(0, [curr…, prev…])`, and a vanished path calls
+   * `onchange(<negative errno>, [zeroed…, lastGood…])`. `onchange` runs with
+   * `this === handle`.
    */
-  class StatWatcherShape {
-    start(): void {
-      throw notImplemented(
-        'binding',
-        'fs.StatWatcher.start',
-        'fs.watchFile needs an inotify-style poller, which a browser tab has no way to run.',
-      );
+  class StatWatcherBinding {
+    onchange:
+      | ((this: StatWatcherBinding, status: number, stats: Float64Array | BigInt64Array) => void)
+      | null = null;
+    #bigint: boolean;
+    #timer: number | null = null;
+    #path = '';
+    #busyPolling = 0;
+    #last: Float64Array | BigInt64Array | null = null;
+    #asyncId = 1;
+
+    constructor(bigint?: boolean) {
+      this.#bigint = !!bigint;
     }
-    getAsyncId(): number {
+
+    #slots(): Float64Array | BigInt64Array | null {
+      try {
+        return statSlots(vfs.stat(this.#path), this.#bigint);
+      } catch (err) {
+        if (err instanceof VfsError && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) {
+          return null;
+        }
+        throw err;
+      }
+    }
+
+    #zero(): Float64Array | BigInt64Array {
+      const n = 18;
+      return this.#bigint
+        ? BigInt64Array.from({ length: n }, () => 0n)
+        : Float64Array.from({ length: n }, () => 0);
+    }
+
+    #equal(a: Float64Array | BigInt64Array, b: Float64Array | BigInt64Array): boolean {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+      return true;
+    }
+
+    #pair(curr: Float64Array | BigInt64Array | null): Float64Array | BigInt64Array {
+      const prev = this.#last ?? this.#zero();
+      const c = curr ?? this.#zero();
+      if (this.#bigint) {
+        const out = new BigInt64Array(36);
+        out.set(c as BigInt64Array, 0);
+        out.set(prev as BigInt64Array, 18);
+        return out;
+      }
+      const out = new Float64Array(36);
+      out.set(c as Float64Array, 0);
+      out.set(prev as Float64Array, 18);
+      return out;
+    }
+
+    #poll(): void {
+      const current = this.#slots();
+      if (current === null) {
+        // `uv_fs_poll`'s error branch: report the last good stat against a
+        // zeroed one, once per distinct errno.
+        if (this.#busyPolling !== ERRNO.ENOENT) {
+          this.onchange?.call(this, -ERRNO.ENOENT, this.#pair(null));
+          this.#busyPolling = ERRNO.ENOENT;
+        }
+        return;
+      }
+      if (this.#busyPolling !== 0) {
+        if (this.#busyPolling < 0 || !this.#last || !this.#equal(this.#last, current)) {
+          this.onchange?.call(this, 0, this.#pair(current));
+        }
+      }
+      this.#last = current;
+      this.#busyPolling = 1;
+    }
+
+    start(path: string, interval: number): number {
+      if (this.#timer !== null) return 0;
+      this.#path = vfs.resolve(path);
+      // First stat is baseline-only; `#busyPolling` starts at 0 so the initial
+      // tick records it silently, exactly like `uv_fs_poll_start`.
+      this.#poll();
+      // A live `StatWatcher` keeps the run alive (it is a libuv handle), and the
+      // runtime's `timers` surface is what participates in that decision.
+      this.#timer = ctx.timers.setInterval(
+        () => this.#poll(),
+        interval > 0 ? interval : 5007,
+      );
       return 0;
     }
-    stop(): void {}
-    close(): void {}
+
+    getAsyncId(): number {
+      return this.#asyncId;
+    }
     ref(): this {
       return this;
     }
     unref(): this {
       return this;
+    }
+    stop(): void {
+      this.close();
+    }
+    close(): void {
+      if (this.#timer !== null) {
+        ctx.timers.clearInterval(this.#timer);
+        this.#timer = null;
+      }
+      this.#asyncId += 1;
     }
   }
 
@@ -738,7 +830,7 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     ReadFileJob: ReadFileJobBinding,
     WriteFileJob: WriteFileJobBinding,
     CpDirJob: CpDirJobBinding,
-    StatWatcher: StatWatcherShape,
+    StatWatcher: StatWatcherBinding,
     kFsStatsFieldsNumber: 18,
     // ---- extra sync paths `lib/fs.js` takes ----
     readFileUtf8,

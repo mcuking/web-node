@@ -186,8 +186,8 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
    - ~~**`crypto`**~~ ✅ **部分处理（2026-09-21，M34）**：同步面（摘要/HMAC/PBKDF2/HKDF/scrypt/`timingSafeEqual`）已用 JS 实现并对齐 OpenSSL 输出；仍缺：密文（AES 等，需同步密码学或原生）、签名/验签、非对称密钥与 `KeyObject`、Diffie-Hellman、素数生成——它们需要原生 OpenSSL 或 keystore，保留显式抛错。
    - ~~**`internal/fs/utils`（fs 基座）**~~ ✅ **已处理（2026-09-21，M49）**：真 `lib/internal/fs/utils.js` 已 vendor，并连整个 `lib/internal/vfs/*` + `providers/memory` 一起搬进来，`vfs` 模块在运行时可用（`MemoryProvider` 全表面，对照 `node --experimental-vfs` 逐行为验证）；顺带把 `uv` errno 表做成真的（85 条）。
    - ~~**`fs/promises` 换真源码**~~ ✅ **已处理（2026-09-21，M50）**：真 `lib/internal/fs/promises.js` + `lib/fs/promises.js` 已跑起来（VFS 挂载路径走 Node 自己的派发，其余走我们的 `fs` binding，async/promise 面已补全，`fs.promises === require('fs/promises')`）。
-   - ~~**callback `fs`（真 `lib/fs.js`）换真源**~~ ✅ **已处理（2026-09-21，M51）**：真 `lib/fs.js`（4083 行）+ `internal/fs/read/context.js` + `internal/fs/cp/cp-sync.js` + `internal/streams/fast-utf8-stream.js`（MANIFEST 142 → 146）；`fs` binding 补 `readFileUtf8`/`writeFileUtf8`/`handleToFd`/`cpSyncCheckPaths`/`cpSyncCopyDir`/`cpSyncOverrideFile`/`CpDirJob`/`StatWatcher`/`kFsStatsFieldsNumber`；`fs_event_wrap.FSEvent` 从抛错换成 **VFS 投影**（订阅 `Vfs.subscribe`），`fs.watch`/`fs.promises.watch` 因此走真 watchers 代码；`readSync`/`writeSync` 把 `position === -1` 按“当前位置”处理；`internal/fs/streams.js` 顶层回环不进 vendor，另写 `builtins/fs-streams.ts`（VFS 原生读写流）。剩：`fs.watchFile`/`unwatchFile` 的轮询器（`StatWatcher.start`）在标签页里显式抛错（无 inotify/线程池）；`internal/fs/streams.js` 的真源因回环未 vendor。
-   - **下一步（M52）候选**：把 `internal/fs/dir.js` + `internal/fs/watchers.js` 的真源已随 M50/M51 就位的部分再接上 `fs.opendir`/`fs.watch` 的完整表面（现已有 `fs.promises.watch`）；或者继续把 `internal/fs/cp/cp.js` 的异步目录拷贝（`CpDirJob`）换成真源驱动；也可转向 `internal/fs/streams.js` 的回环拆分（把 `fs` 改为惰性注入以 vendor 真流）。
+   - ~~**callback `fs`（真 `lib/fs.js`）换真源**~~ ✅ **已处理（2026-09-21，M51）**：真 `lib/fs.js`（4083 行）+ `internal/fs/read/context.js` + `internal/fs/cp/cp-sync.js` + `internal/streams/fast-utf8-stream.js`（MANIFEST 142 → 146）；`fs` binding 补 `readFileUtf8`/`writeFileUtf8`/`handleToFd`/`cpSyncCheckPaths`/`cpSyncCopyDir`/`cpSyncOverrideFile`/`CpDirJob`/`StatWatcher`/`kFsStatsFieldsNumber`；`fs_event_wrap.FSEvent` 从抛错换成 **VFS 投影**（订阅 `Vfs.subscribe`），`fs.watch`/`fs.promises.watch` 因此走真 watchers 代码；`readSync`/`writeSync` 把 `position === -1` 按“当前位置”处理；`internal/fs/streams.js` 顶层回环不进 vendor，另写 `builtins/fs-streams.ts`（VFS 原生读写流）。剩：`internal/fs/streams.js` 的真源因回环未 vendor（M51b 已把 `fs.opendir`/`Dir` 与 `watchFile` 补真）。
+   - **下一步（M52）候选**：把 `internal/fs/cp/cp.js` 的异步目录拷贝（`CpDirJob`）换成真源驱动；或拆 `internal/fs/streams.js` 的回环（把 `fs` 改为惰性注入以 vendor 真流）；或继续拓宽 `internal/errors` 的错误码表。
    - ~~**`internal/fs/glob`**~~ ✅ **已处理（2026-09-21，M33）**：真 `internal/fs/glob.js` + 随包 `internal/deps/minimatch/index`；`path.matchesGlob`、`fs.glob`/`globSync`、`fs.promises.glob` 上线。剩：`internal/fs/utils` 仍是只含 `DirentFromStats` 的 shim（真文件是 fs 基座）；`withFileTypes` 的 `Dirent.parentPath` 与我们自研 readdir 的形状一致（绝对值 vs Node 按传入路径）已对齐。
    - ~~**`stream/iter` + `stream/consumers`**~~ ✅ **已处理（2026-09-21，M38）**：真 `lib/stream/iter.js` + `lib/stream/consumers.js` + 整个 `internal/streams/iter/*`（12 文件）。`internal/streams/iter/transform.js` 不在内（它顶层 `internalBinding('zlib')`；M45 的 builtin `zlib` 不能代替 native 绑定，故仍未支持）。
    - **`internal/perf/*` 的直方图半边**：⚠️ 部分过时——M35 已把 `perf_hooks` 换成真源码；仅 `createHistogram`/`importHistogram`/`monitorEventLoopDelay` 仍抛错（真 `internal/histogram` 背后是 native hdr_histogram + 一整套统计检验，JS 移植代价大、优先级低）。
@@ -211,6 +211,20 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-21 · M51b 补全 `fs.opendir`/`Dir` 与 `fs.watchFile` 的两个缺口
+
+**目标**：M51 后真 `lib/fs.js` 上还剩两个未实现面——`fs.opendir`/`fs.Dir`（`fs_dir` binding 还是抛错 shape）与 `fs.watchFile`（`StatWatcher.start` 抛错）。这一步按真 `src/node_dir.cc` / `src/node_stat_watcher.cc` 把它们补齐。
+
+**改了什么**
+
+1. **`fs_dir` binding 真实现**（`bindings/misc.ts`）：打开时从 VFS 快照目录项，新增 `DirHandle`（`read(encoding, bufferSize[, req])` 返回 libuv 的扁平 `[name, type, …]` 数组、穷尽返回 `null`；`close([req])`；`dirfd` 返回 -1），以及 `opendir`/`opendirSync`。`internal/fs/dir.js` 的 `Dir` 类因此可以直接跑（sync/回调/异步迭代/`Symbol.dispose` 全通）。错误形状对齐：不存在 `ENOENT`、非目录 `ENOTDIR`。
+2. **`StatWatcher` 从抛错换成轮询实现**（`bindings/fs.ts`）：标签页无 inotify，但 libuv 的 `uv_fs_poll` 本身就是一个 stat 轮询器，所以逐行复刻它可观察的协议——首次成功 stat 只做基线（不发事件）；后续 stat 变化时 `onchange(0, [curr…, prev…])`；路径消失时 `onchange(-ENOENT, [zeroed…, lastGood…])`，重现时 `onchange(0, [curr…, lastGood…])`；`onchange` 以 `this === handle` 调用。轮询器用 `ctx.timers.setInterval`（参与事件循环判定，与 libuv 句柄一致），`close()` 释放。
+
+**验证**
+
+- `test/fs.test.ts` 新增 2 例：`opendirSync` + `readSync` 逐个取 Dirent（`isFile`/`isDirectory` 正确、关闭后 `readSync` 抛 `ERR_DIR_CLOSED`）与 `fs.opendir` 的 `for await … of` 异步迭代；`watchFile` 驱动 VFS 写入/删除/重建，事件序列 `['5<-1','0<-5','4<-5']`（与 Node v26.9.0 oracle 的 `['2<-1','0<-2','3<-2']` 同构：change、删除报 0 且 prev=lastGood、重建 prev=lastGood）。
+- 门禁全绿：`npm run typecheck` 干净 · `npx vitest run` **639/639（53 文件）** · `npm run build` 绿（worker **2102.07KB**）。
 
 ### 2026-09-21 · M51 callback `fs` 换真源码（`lib/fs.js`）
 
