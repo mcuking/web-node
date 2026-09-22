@@ -23,8 +23,11 @@
  *     matters, and it is deliberate rather than hidden — see docs/DEVLOG.md.
  *
  * The pieces that need the native thread/isolate machinery — resource limits,
- * `eval`, worker stdio, heap/cpu profiling, `postMessageToThread` — refuse
- * loudly rather than approximate.
+ * `eval`, heap/cpu profiling, `postMessageToThread` — refuse loudly rather than
+ * approximate. Worker stdio is real instead: the worker's `process.stdout`/
+ * `stderr` and the parent's `worker.stdout`/`stderr`, plus `worker.stdin` under
+ * `stdin: true`, carry bytes over a second port pair (a tab has no per-thread
+ * pipe, so the transport differs, but the stream surface does not).
  */
 
 import type { Vfs } from '../vfs';
@@ -46,6 +49,12 @@ export interface WorkerRequest {
   env: Record<string, string>;
   /** The worker's `process.execArgv`. */
   execArgv: string[];
+  /** `stdin: true` — expose `worker.stdin`, a Writable feeding the worker's input. */
+  stdin?: boolean;
+  /** `stdout: true` — do not forward the worker's stdout to the parent's. */
+  stdout?: boolean;
+  /** `stderr: true` — do not forward the worker's stderr to the parent's. */
+  stderr?: boolean;
 }
 
 /** The parent's view of one worker. */
@@ -61,6 +70,12 @@ export interface WorkerHandle {
   unref(): void;
   hasRef(): boolean;
   eventLoopUtilization(): unknown;
+  /** The worker's stdout as the parent sees it: a Readable (Node always builds it). */
+  readonly stdout: unknown;
+  /** The worker's stderr as the parent sees it: a Readable. */
+  readonly stderr: unknown;
+  /** The worker's stdin as the parent sees it: a Writable, or null unless `stdin: true`. */
+  readonly stdin: unknown;
   onOnline(cb: () => void): () => void;
   onMessage(cb: (value: unknown) => void): () => void;
   onMessageError(cb: (err: unknown) => void): () => void;
@@ -105,6 +120,15 @@ class WorkerExit extends Error {
 /** Node's first worker thread id is 2 (0 is the main thread, 1 is reserved). */
 const FIRST_THREAD_ID = 2;
 
+/**
+ * How long the exit check waits after the last port/stdin activity. Port
+ * messages travel as ~1ms host macrotasks (`timers.setTimeout` clamps to 1ms),
+ * so a worker that stopped must not close its ports while a delivery is still in
+ * flight — the message would be lost. A short quiet period stands in for the
+ * event loop draining the port's queue.
+ */
+const SETTLE_GRACE_MS = 4;
+
 /** The `MessagePort` surface from `internal/worker/io.js` this host drives. */
 interface PortLike {
   postMessage(value?: unknown, transferList?: unknown): boolean;
@@ -124,6 +148,7 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
   // Captured before the sandbox shadows globals so the settle poll runs on the
   // host timer queue and never shows up in any sandbox timer count.
   const nativeSetTimeout = globalThis.setTimeout.bind(globalThis) as (fn: () => void, ms: number) => unknown;
+  const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis) as (handle: unknown) => void;
   const defer = deps.defer ?? ((fn: () => void) => void nativeSetTimeout(fn, 0));
 
   const workers = new Set<Worker>();
@@ -140,6 +165,16 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
     /** The worker's end (`parentPort`), kept so `terminate` can close it. */
     #workerPort: PortLike | null = null;
 
+    /** A second channel for stdio, so `workerData`/messages stay untouched. */
+    #stdioPort: PortLike | null = null;
+    #workerStdioPort: PortLike | null = null;
+    /** Parent-side views: the worker's stdout/stderr (Readables) and stdin. */
+    #stdout: Record<string, unknown> | null = null;
+    #stderr: Record<string, unknown> | null = null;
+    #stdin: Record<string, unknown> | null = null;
+    /** Whether the parent ended `worker.stdin` (an open stdin refs the worker). */
+    #stdinEnded = false;
+
     #onlineCbs: Array<() => void> = [];
     #messageCbs: Array<(value: unknown) => void> = [];
     #messageErrorCbs: Array<(err: unknown) => void> = [];
@@ -152,7 +187,8 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
     #refed = true;
     /** Outstanding one-shot timers and intervals the worker itself scheduled. */
     #timers = new Set<unknown>();
-    #settleScheduled = false;
+    #settleTimer: unknown = null;
+    #lastActivity = 0;
     #onlineEmitted = false;
 
     constructor(request: WorkerRequest) {
@@ -173,6 +209,93 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
       channel.port1.on('messageerror', (err: unknown) => {
         for (const cb of this.#messageErrorCbs.slice()) cb(err);
       });
+
+      // A second port pair carries stdio, so user messages never share a channel
+      // with it. Node always builds the parent-side stdout/stderr (it pipes them
+      // to `process.stdout`/`stderr` unless `stdout`/`stderr` was set to true);
+      // stdin exists only when `stdin: true` was passed.
+      const stdio = new MessageChannel();
+      this.#stdioPort = stdio.port1;
+      this.#workerStdioPort = stdio.port2;
+      const streams = deps.realm().require('stream') as {
+        Readable: new (opts: { read(): void }) => Record<string, unknown>;
+        Writable: new (opts: {
+          write(chunk: unknown, enc: string, cb: () => void): void;
+          final?(cb: () => void): void;
+        }) => Record<string, unknown>;
+      };
+      this.#stdout = new streams.Readable({ read() {} });
+      this.#stderr = new streams.Readable({ read() {} });
+      if (request.stdin) {
+        this.#stdin = new streams.Writable({
+          write: (chunk: unknown, _enc: string, cb: () => void): void => {
+            this.#toWorker('stdin', chunk);
+            cb();
+          },
+          final: (cb: () => void): void => {
+            this.#stdinEnded = true;
+            this.#toWorker('stdin-end', null);
+            cb();
+          },
+        });
+      }
+      stdio.port1.on('message', (msg: unknown) => this.#onStdio(msg));
+    }
+
+    get stdout(): unknown {
+      return this.#stdout;
+    }
+
+    get stderr(): unknown {
+      return this.#stderr;
+    }
+
+    get stdin(): unknown {
+      return this.#stdin;
+    }
+
+    /** Send one stdio frame to the worker (dropped if it is already gone). */
+    #toWorker(stream: 'stdout' | 'stderr' | 'stdin' | 'stdin-end', chunk: unknown): void {
+      if (this.#exited || this.#stdioPort === null) return;
+      let payload: { __wnStdio: string; data?: unknown };
+      if (stream === 'stdin-end') {
+        payload = { __wnStdio: 'stdin-end' };
+      } else {
+        const buffer = deps.realm().require('buffer') as { Buffer: { from(c: unknown): unknown } };
+        payload = { __wnStdio: stream, data: buffer.Buffer.from(chunk) };
+      }
+      try {
+        this.#stdioPort.postMessage(payload);
+      } catch {
+        /* the channel may already be closed */
+      }
+      this.#touch();
+    }
+
+    /** A stdio frame from the worker: surface it, and pipe it on unless opted out. */
+    #onStdio(msg: unknown): void {
+      const frame = msg as { __wnStdio?: string; data?: unknown };
+      const stream = frame?.__wnStdio;
+      if (stream !== 'stdout' && stream !== 'stderr') return;
+      this.#touch();
+      const sink = (stream === 'stdout' ? this.#stdout : this.#stderr) as {
+        push(c: unknown): boolean;
+      } | null;
+      const optedOut = stream === 'stdout' ? this.#request.stdout : this.#request.stderr;
+      if (!optedOut) {
+        // `pipeWithoutWarning(stdout, process.stdout)` in Node: the parent's own
+        // stdout/stderr receives it when the caller did not claim the stream.
+        const parentProcess = deps.realm().require('process') as Record<string, unknown>;
+        const target = (stream === 'stdout' ? parentProcess.stdout : parentProcess.stderr) as {
+          write?: (c: unknown) => void;
+        };
+        try {
+          target.write?.(frame.data);
+        } catch {
+          /* the host stream is gone */
+        }
+      }
+      sink?.push(frame.data);
     }
 
     get threadName(): string | null {
@@ -272,30 +395,46 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
     /** Handler for a message arriving from the worker. */
     #deliver(value: unknown): void {
       for (const cb of this.#messageCbs.slice()) cb(value);
-      this.#scheduleSettle();
+      this.#touch();
     }
 
     #fail(err: unknown): void {
       for (const cb of this.#errorCbs.slice()) cb(err);
     }
 
-    #scheduleSettle(): void {
-      if (this.#settleScheduled || this.#exited) return;
-      this.#settleScheduled = true;
-      defer(() => {
-        this.#settleScheduled = false;
+    #scheduleSettle(delayMs = SETTLE_GRACE_MS): void {
+      if (this.#settleTimer !== null || this.#exited) return;
+      this.#settleTimer = nativeSetTimeout(() => {
+        this.#settleTimer = null;
         if (this.#exited) return;
         // The worker is done once its entry returned, it scheduled no further
         // work of its own, and nothing is holding its parent port open. Only the
         // worker's *own* timers count — an unrelated timer on the shared loop
         // must not keep it alive (that is why this is not a global delta).
         const portOpen = this.#workerPort !== null && this.#workerPort.hasRef();
-        if (!portOpen && this.#timers.size === 0) {
-          this.#stop(0, null);
+        // An open `worker.stdin` refs the worker, the way an open pipe does in
+        // Node: it keeps the worker alive until the parent ends it.
+        const stdinOpen = this.#stdin !== null && !this.#stdinEnded;
+        if (portOpen || stdinOpen || this.#timers.size > 0) {
+          this.#scheduleSettle(1);
           return;
         }
-        this.#scheduleSettle();
-      });
+        this.#stop(0, null);
+      }, delayMs);
+    }
+
+    /**
+     * Note port/stdin activity and push the exit check back by the grace period,
+     * so a delivery already scheduled lands before the worker closes its ports.
+     */
+    #touch(): void {
+      if (this.#exited) return;
+      this.#lastActivity = Date.now();
+      if (this.#settleTimer !== null) {
+        nativeClearTimeout(this.#settleTimer);
+        this.#settleTimer = null;
+      }
+      this.#scheduleSettle(SETTLE_GRACE_MS);
     }
 
     #stop(code: number, _err: unknown): void {
@@ -306,6 +445,8 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
       try {
         this.#workerPort?.close();
         this.#port?.close();
+        this.#workerStdioPort?.close();
+        this.#stdioPort?.close();
       } catch {
         /* the port may already be gone */
       }
@@ -380,6 +521,17 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
       globals.global = globals;
       globals.globalThis = globals;
       this.#wrapTimers(globals, workerProcess);
+      // Node binds a worker's global `console` to *that worker's* stdout/stderr,
+      // so a `console.log` inside the worker lands on `worker.stdout` (and, by
+      // default, is piped on to the parent's stdout) — not straight on the host
+      // console as the inherited one would.
+      const consoleModule = realm.require('console') as {
+        Console: new (opts: unknown) => unknown;
+      };
+      globals.console = new consoleModule.Console({
+        stdout: workerProcess.stdout,
+        stderr: workerProcess.stderr,
+      });
 
       const Ctor = deps.loader().constructor as new (
         r: Realm,
@@ -504,7 +656,8 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
 
     /** The worker's `process` view: a copy that exits the worker, not the tab. */
     #workerProcess(): Record<string, unknown> {
-      const parent = deps.realm().require('process') as Record<string, unknown>;
+      const realm = deps.realm();
+      const parent = realm.require('process') as Record<string, unknown>;
       const Ctor = parent.constructor as new () => Record<string, unknown>;
       const proc = new Ctor();
       proc.argv = this.#request.argv;
@@ -514,6 +667,42 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
       proc.exit = (code?: number): void => {
         throw new WorkerExit(code ?? 0);
       };
+
+      // The worker's own stdio: real streams that carry bytes over the stdio
+      // port. `process.stdout`/`stderr` are Writables; `process.stdin` is a
+      // Readable fed by the parent's `worker.stdin`. (Node gives a worker these
+      // same objects; only the byte transport differs, a port instead of a pipe.)
+      const stdio = this.#workerStdioPort as PortLike;
+      const streams = realm.require('stream') as {
+        Writable: new (opts: {
+          write(chunk: unknown, enc: string, cb: () => void): void;
+          final?(cb: () => void): void;
+        }) => Record<string, unknown>;
+        Readable: new (opts: { read(): void }) => Record<string, unknown> & {
+          push(c: unknown): boolean;
+        };
+      };
+      const buffer = realm.require('buffer') as { Buffer: { from(c: unknown): unknown } };
+      const makeWritable = (stream: 'stdout' | 'stderr'): Record<string, unknown> =>
+        new streams.Writable({
+          write: (chunk: unknown, _enc: string, cb: () => void): void => {
+            try {
+              stdio.postMessage({ __wnStdio: stream, data: buffer.Buffer.from(chunk) });
+            } catch {
+              /* the channel is gone */
+            }
+            cb();
+          },
+        });
+      proc.stdout = makeWritable('stdout');
+      proc.stderr = makeWritable('stderr');
+      const stdinStream = new streams.Readable({ read() {} });
+      proc.stdin = stdinStream;
+      stdio.on('message', (msg: unknown) => {
+        const frame = msg as { __wnStdio?: string; data?: unknown };
+        if (frame?.__wnStdio === 'stdin') stdinStream.push(frame.data);
+        else if (frame?.__wnStdio === 'stdin-end') stdinStream.push(null);
+      });
       return proc;
     }
 

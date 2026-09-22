@@ -231,9 +231,11 @@ a fresh context exposes the standard intrinsics (plus `console`) while keeping
 is a second module registry on the same event loop, with its own
 `process`/`worker_threads` views and a real `MessageChannel` to the parent.
 `workerData`, message round trips, the `online`/`message`/`error`/`exit`
-lifecycle, `terminate()` and the constructor validation behave as in Node; what
-is missing is parallelism, which the docs state plainly, and anything needing a
-native thread (`eval`, worker stdio, `resourceLimits`, profiling, nested workers)
+lifecycle, `terminate()` and the constructor validation behave as in Node, and so
+do `worker.stdin`/`stdout`/`stderr` — real streams carried over a second
+`MessageChannel`, with the worker's `console` bound to its own stdout/stderr.
+What is missing is parallelism, which the docs state plainly, and anything
+needing a native isolate (`eval`, `resourceLimits`, profiling, nested workers)
 throws.
 
 ## npm
@@ -464,6 +466,7 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M56 | Real `vm` — `lib/vm.js` + `lib/internal/vm.js` vendored, with a new `contextify` binding: the sandbox object *is* the context (tagged with Node's contextify symbol) and scripts run in a `with`-scope over it, so `createContext`/`isContext`/`Script`/`compileFunction`/`runIn*Context` are real while `process`/`require`/`Buffer`/`setTimeout` stay `undefined` inside a fresh context. 59 behaviours match Node v26.9.0 | ✅ Done |
 | M57 | Real `Worker` — a cooperative worker: a second module registry on the same event loop with its own `process`/`worker_threads` views and a real `MessageChannel` to the parent. `workerData`, message round trips, the `online`/`message`/`error`/`exit` lifecycle, `terminate()` and the constructor validation all match Node (including `threadId === -1` and a no-op `postMessage` after exit). The one deviation that matters — no real parallelism — is documented, and everything needing a native thread (`eval`, worker stdio, `resourceLimits`, profiling, nested workers) throws. 15 behaviours match Node v26.9.0 | ✅ Done |
 | M58 | Complete the `internal/errors` table — diffing every `ERR_*` reference in the vendored/`src` trees against the shim turned up **9 codes that vendored modules pull off `internal/errors` but the table never defined**, so `codes.X` was `undefined` and `new` threw "is not a constructor" on the rare path that reached it. All 9 are now declared (word-for-word from `lib/internal/errors.js` and `src/node_errors.h`), guarded by a structural regression test (every referenced code must exist as a constructor; 76 scanned) and a differential corpus (a real Node's `internal/errors`, read through `--expose-internals`, compared field by field; 10/10 match) | ✅ Done |
+| M59 | Real worker stdio — `worker.stdin`/`stdout`/`stderr` used to throw from all three getters, but Node never does (`stdin` is null unless `stdin: true`; `stdout`/`stderr` are always Readables, merely piped to the parent's by default). They are now real streams carried over a second `MessageChannel`: the worker's `process.stdout`/`stderr`/`stdin` are real, its `console` is bound to its own stdout/stderr, forwarding matches Node, and an open `worker.stdin` refs the worker. A race where the worker could exit before an in-flight message was delivered is fixed with a short quiescence grace | ✅ Done |
 
 ## Vendored Node source
 
@@ -561,9 +564,9 @@ The remaining large gaps are the ones with no browser story at all (`http2`,
 reimplementations worth doing (`internal/util/inspect.js`, the native
 `string_decoder`, `internal/fs/*`). `vm` is the real `lib/vm.js` on a JS
 stand-in for V8 contexts, and `worker_threads.Worker` runs as a cooperative
-worker (real messages and lifecycle, no parallelism). `internal/errors` defines
-every code the vendored modules actually reach for, and a regression test keeps
-it that way. Of Node's core modules, only `tls` remains a pure throwing stub.
+worker (real messages, lifecycle and stdio, no parallelism). `internal/errors`
+defines every code the vendored modules actually reach for, and a regression test
+keeps it that way. Of Node's core modules, only `tls` remains a pure throwing stub.
 
 ## Contributing
 

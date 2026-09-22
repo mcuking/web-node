@@ -63,6 +63,15 @@ parentPort.on('message', function (m) {
 });
 `,
 
+  // The worker for the stdio demo: its console.log travels over `worker.stdout`
+  // (piped to the parent's by default), and `process.stdin` reads what the parent
+  // writes to `worker.stdin`.
+  '/project/lib/worker-io.js': `const { parentPort } = require('worker_threads');
+console.log('worker: hi over stdout');
+process.stdin.on('data', function (d) { parentPort.postMessage('stdin:' + String(d).trim()); });
+process.stdin.on('end', function () { parentPort.postMessage('end'); parentPort.close(); });
+`,
+
   '/project/index.js': `// Runs on Node.js compiled-in-browser. No server. No install.
 const path = require('path');
 const fs = require('fs');
@@ -428,6 +437,25 @@ const { Worker } = require('worker_threads');
   worker.on('error', function (e) { seen.push('error:' + e.message); });
   await new Promise(function (resolve) { worker.on('exit', function (code) { seen.push('exit:' + code); resolve(); }); });
   console.log('events      : ' + seen.join(' '));
+  console.log('');
+})();
+
+// --- worker stdio (milestone 59) ---
+// A worker's stdout/stderr are real streams: their bytes cross a second
+// MessageChannel. By default they are piped to the parent's, so the worker's
+// console.log shows up right here; stdin: true hands the parent a Writable the
+// worker reads as process.stdin.
+console.log('-- worker stdio (milestone 59) --');
+(async function () {
+  const ioWorker = new Worker(path.join(__dirname, 'lib/worker-io.js'), { stdin: true });
+  const ioEvents = [];
+  ioWorker.on('message', function (m) { ioEvents.push(m); });
+  ioWorker.on('online', function () {
+    ioWorker.stdin.write('ping to the worker\\n');
+    ioWorker.stdin.end();
+  });
+  await new Promise(function (resolve) { ioWorker.on('exit', function () { resolve(); }); });
+  console.log('stdio       : ' + ioEvents.join(' '));
   console.log('');
 })();
 

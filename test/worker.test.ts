@@ -7,25 +7,33 @@ import { NodeRuntime } from '../src/node-runtime/runtime';
  *
  * The corpus test (`worker-corpus.test.ts`) checks the lifecycle against a real
  * Node. This file covers the surface and the deliberate deviations: what the
- * worker's own globals look like, that modules/messages are isolated, and that
- * everything a single realm cannot honestly do (per-thread stdio, profiling,
- * nested workers, `eval`) refuses loudly rather than pretending.
+ * worker's own globals look like, that modules/messages are isolated, that
+ * `stdin`/`stdout`/`stderr` are real streams, and that everything a single realm
+ * cannot honestly do (profiling, nested workers, `eval`) refuses loudly rather
+ * than pretending.
  */
-function boot(files: Record<string, string>): { require: (id: string) => any; runtime: NodeRuntime } {
+function boot(files: Record<string, string>): {
+  require: (id: string) => any;
+  runtime: NodeRuntime;
+  out: string[];
+  err: string[];
+} {
   const vfs = new MemoryVfs({ cwd: '/project' });
   vfs.mkdir('/project', { recursive: true });
   vfs.writeFile('/project/index.js', new TextEncoder().encode(''));
   for (const [name, contents] of Object.entries(files)) {
     vfs.writeFile(`/project/${name}`, new TextEncoder().encode(contents));
   }
+  const out: string[] = [];
+  const err: string[] = [];
   const runtime = new NodeRuntime({
     vfs,
     argv: ['/project/index.js'],
     installGlobals: false,
-    onStdout: () => {},
-    onStderr: () => {},
+    onStdout: (s) => out.push(s),
+    onStderr: (s) => err.push(s),
   });
-  return { require: (id: string) => runtime.realm.require(id), runtime };
+  return { require: (id: string) => runtime.realm.require(id), runtime, out, err };
 }
 
 const tick = (ms = 250): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -242,17 +250,59 @@ catch (e) { parentPort.postMessage(e.code); }
     };
     opt({ eval: true }, 'eval');
     opt({ resourceLimits: { maxOldGenerationSizeMb: 1 } }, 'resourceLimits');
-    opt({ stdout: true }, 'stdout');
-    opt({ stdin: true }, 'stdin');
 
     const worker = new wt.Worker('/project/plain.js');
-    expect(() => worker.stdout).toThrow(/ERR_WEB_NODE_NOT_IMPLEMENTED|not implemented/);
     await expect(worker.getHeapSnapshot()).rejects.toThrow(/not implemented/);
     await expect(worker.cpuUsage()).rejects.toThrow(/not implemented/);
+    await new Promise((r) => worker.on('exit', r));
 
     // A worker cannot start another worker (no second thread to give it).
     const nested = await collect(new wt.Worker('/project/nested.js'));
     expect(nested.messages).toEqual(['ERR_WEB_NODE_NOT_IMPLEMENTED']);
+  });
+
+  it('gives the worker real stdio streams (a second port carries the bytes)', async () => {
+    const { require: req, out, err } = boot({
+      'io.js': `console.log('hello-from-worker'); process.stderr.write('oops\\n');\n`,
+      'echo.js': `
+const { parentPort } = require('worker_threads');
+const proc = require('process');
+proc.stdin.on('data', (d) => parentPort.postMessage('in:' + String(d).trim()));
+proc.stdin.on('end', () => parentPort.postMessage('end'));
+`,
+    });
+    const wt = req('worker_threads') as any;
+
+    // Defaults match Node: `stdin` is null, `stdout`/`stderr` are Readables.
+    const plain = new wt.Worker('/project/io.js');
+    expect(plain.stdin).toBeNull();
+    expect(plain.stdout).not.toBeNull();
+    expect(plain.stderr).not.toBeNull();
+    const seen: string[] = [];
+    plain.stdout.on('data', (d: unknown) => seen.push(String(d)));
+    await new Promise((r) => plain.on('exit', r));
+    // Forwarded to the parent's stdout by default *and* surfaced on worker.stdout.
+    expect(out.join('')).toContain('hello-from-worker');
+    expect(err.join('')).toContain('oops');
+    expect(seen.join('')).toContain('hello-from-worker');
+
+    // `stdout: true` claims the stream: no forwarding, only `worker.stdout`.
+    out.length = 0;
+    const claimed = new wt.Worker('/project/io.js', { stdout: true });
+    const seen2: string[] = [];
+    claimed.stdout.on('data', (d: unknown) => seen2.push(String(d)));
+    await new Promise((r) => claimed.on('exit', r));
+    expect(out.join('')).not.toContain('hello-from-worker');
+    expect(seen2.join('')).toContain('hello-from-worker');
+
+    // `stdin: true`: the parent writes, and the worker reads it from process.stdin.
+    const echo = new wt.Worker('/project/echo.js', { stdin: true });
+    const messages: unknown[] = [];
+    echo.on('message', (m: unknown) => messages.push(m));
+    echo.stdin.write('ping\n');
+    echo.stdin.end();
+    await new Promise((r) => echo.on('exit', r));
+    expect(messages).toEqual(['in:ping', 'end']);
   });
 
   it('still provides the message-passing classes', () => {

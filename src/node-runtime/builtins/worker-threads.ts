@@ -16,8 +16,10 @@ import type { WorkerHandle } from '../proc/worker';
  * `MessageChannel` to the parent (see `proc/worker.ts`). Messages, `workerData`,
  * the `online`/`message`/`error`/`exit` lifecycle and `terminate()` all behave as
  * in Node; what is missing is the parallelism a real thread would give, which the
- * documentation states plainly. The option shapes that need the native thread —
- * `eval`, worker stdio, `resourceLimits` — throw instead of being approximated.
+ * documentation states plainly. `stdin`/`stdout`/`stderr` are real streams (a
+ * second port pair carries their bytes, since a tab has no per-thread pipe);
+ * the option shapes that need the native isolate — `eval`, `resourceLimits` —
+ * throw instead of being approximated.
  *
  * The constants (`isMainThread`, `threadId`, `parentPort: null`) are the truth
  * for the main thread, and `markAsUntransferable`/`isMarkedAsUntransferable`
@@ -156,7 +158,7 @@ export const workerThreadsSpec: BuiltinSpec = {
           name = (options.name as string).trim();
         }
 
-        for (const key of ['stdin', 'stdout', 'stderr', 'resourceLimits'] as const) {
+        for (const key of ['resourceLimits'] as const) {
           if (options[key] !== undefined && options[key] !== null && options[key] !== false) {
             throw notImplemented(
               'api',
@@ -174,6 +176,9 @@ export const workerThreadsSpec: BuiltinSpec = {
           name,
           env,
           execArgv: (options.execArgv as string[] | undefined) ?? [],
+          stdin: Boolean(options.stdin),
+          stdout: Boolean(options.stdout),
+          stderr: Boolean(options.stderr),
         });
 
         const handle = this.#handle;
@@ -240,16 +245,16 @@ export const workerThreadsSpec: BuiltinSpec = {
         return Promise.reject(profilingUnsupported('startHeapProfile'));
       }
 
-      get stdin(): never {
-        throw notImplemented('api', 'worker_threads.Worker#stdin', 'A worker here has no separate OS pipes.');
+      get stdin(): unknown {
+        return this.#handle.stdin;
       }
 
-      get stdout(): never {
-        throw notImplemented('api', 'worker_threads.Worker#stdout', 'A worker here has no separate OS pipes.');
+      get stdout(): unknown {
+        return this.#handle.stdout;
       }
 
-      get stderr(): never {
-        throw notImplemented('api', 'worker_threads.Worker#stderr', 'A worker here has no separate OS pipes.');
+      get stderr(): unknown {
+        return this.#handle.stderr;
       }
     }
 
