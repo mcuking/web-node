@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-22（基线 = M90.4 完成）
+> - **最后更新**：2026-09-22（基线 = M90.5 完成）
 
 ---
 
@@ -14,16 +14,17 @@
 
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
-| A | crypto 收尾（接续 M87） | 11 | 6 | 5 |
+| A | crypto 收尾（接续 M87） | 15 | 7 | 8 |
 | B | 语义深度（差分语料继续扩面） | 4 | 0 | 4 |
 | C | 平台无对应物的补齐（选择性） | 3 | 0 | 3 |
 | D | 运行时常量小项收尾 | 4 | 0 | 4 |
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **30** | **6** | **23**（+1 不做） |
+| **合计** | | **34** | **7** | **26**（+1 不做） |
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 93 个里程碑，剩余 23 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 94 个里程碑，剩余 26 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
+> 注：M90 于 2026-09-22 拆为 M90.1–M90.4（26 → 30），同日晚 M90.5 又拆为 M90.5–M90.9（30 → 34）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
 
 ---
@@ -75,11 +76,26 @@
   - 差分：`test/fixtures/crypto-mac.json` 扩到 **78 个错误项** + blake2s/poly1305/siphash 正向向量——**0 diff**。
   - 风险：中低。
 
-- [ ] **M90.5 · 补齐 `getHashes` 面**（M90.1 发现的新缺口）
-  > **发现原因**：实现 M90.1 时发现 web-node 的 `crypto.getHashes()` 只覆盖 md5/sha1/sha224/256/384/512，而真 Node 还包含 `sha3-224/256/384/512`、`blake2b512`/`blake2s256`、`sm3`、`ripemd160`（及变体）。这也意味着 `createHmac('ripemd160')`、`createHash('sha3-256')` 目前都会响亮抛错（与 Node 不一致）。
-  - 需新增：SM3、RIPEMD-160；BLAKE2b-512 / BLAKE2s-256 现已就绪（`blake2b.ts` / `blake2s.ts`，M90.1/M90.4）；SHA-3 已随 **M90.2** 落地（`keccak.ts` 已含 sha3-224/256/384/512 + shake，只待接进 `DEFS`）。
-  - 同步把新名字加入 `listHashes()`，并加 `getHashes()` 差分门禁。
+- [x] **M90.5 · SHA-3 / Keccak / SHAKE / keccak-kmac 注册** ✅ 2026-09-22
+  > **拆分原因**：动手做 M90.5 时实测真 Node 的 `getHashes()` 有 **81 个可用名字**（不是原先以为的十来种），包含 SHA-3/Keccak/SHAKE/keccak-kmac/blake2/SM3/RIPEMD-160/SHA-512-t/SHA-256-192/md5-sha1 及大量 RSA-*/…WithRSAEncryption 别名。原估「中低」严重偏低，故拆为 **M90.5–M90.9** 五个子任务（任务数 30 → 34）。
+  - `keccak.ts` 导出原始 sponge；`Hash` 支持 XOF 的 `options.outputLength`（缺省 **shake128=16 / shake256=32**）；注册 `sha3-224/256/384/512`、`keccak-224/256/384/512`（pad 0x01）、`shake-128/256`、`keccak-kmac-128/256`（pad 0x04，rate 168/136）及其全部别名。
+  - 风险：低。
+
+- [ ] **M90.6 · BLAKE2b-512 / BLAKE2s-256 注册**
+  - 直接用 M90.1/M90.4 的 `blake2b.ts`/`blake2s.ts`（无 key/salt/personal 的普通摘要形式）；注册 `blake2b512`/`blake2b-512`/`blake2s256`/`blake2s-256`。
+  - 风险：低。
+
+- [ ] **M90.7 · SM3 + RIPEMD-160**
+  - 新增两个纯 JS 摘要实现（GB/T 32905 与 ISO/IEC 10118-3），并注册 `sm3`/`RSA-SM3`/`sm3WithRSAEncryption`、`ripemd160`/`ripemd`/`ripemd-160`/`rmd160`/`RSA-RIPEMD160`/`ripemd160WithRSA`。
+  - 风险：中低（两套轮函数）。
+
+- [ ] **M90.8 · 截断变体与复合摘要**
+  - `sha-512/224`、`sha-512/256`（SHA-512/t，需改 IV）+ `RSA-SHA512/224`/`RSA-SHA512/256`；`sha-256/192`（`sha2-256/192`/`sha256-192`，SHA-256 截断）；`md5-sha1`（复合）；`ssl3-md5`/`ssl3-sha1` 别名。
   - 风险：中低。
+
+- [ ] **M90.9 · `getHashes()` 全表对齐（差分门禁）**
+  - 把 `getHashes()` 与真 Node 的 **81 名列表**逐项比对（含排序与所有别名），并加 `createHash(每个名字)` 的差分回归。
+  - 风险：低。
 
 - [ ] **M91 · 后量子 KEM**
   - `encapsulate` / `decapsulate`（ML-KEM / Kyber）。
@@ -212,7 +228,7 @@
 - **构建工具**：M5 esbuild WASM · M5b rollup WASM · M5c Vite build · M5d Vite dev server · M5e HMR · M5f CSS 热更 · **M18 Vue 3 SFC 跑起来**
 - **性能/体积**：M32 worker 减重（1259→1028KB） · M41 Buffer slab 池化
 - **语义深度（差分语料）**：M79 http · M80 net · M81 fs
-- **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2 · M90.1 MAC（HMAC + BLAKE2b MAC） · M90.2 KMAC（Keccak/SHA-3/cSHAKE） · M90.3 CMAC/GMAC（AES） · M90.4 BLAKE2s MAC / Poly1305 / SipHash
+- **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2 · M90.1 MAC（HMAC + BLAKE2b MAC） · M90.2 KMAC（Keccak/SHA-3/cSHAKE） · M90.3 CMAC/GMAC（AES） · M90.4 BLAKE2s MAC / Poly1305 / SipHash · M90.5 SHA-3/Keccak/SHAKE/keccak-kmac
 
 ---
 

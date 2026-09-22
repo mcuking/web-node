@@ -244,6 +244,26 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M90.5 SHA-3 / Keccak / SHAKE / keccak-kmac 注册（先拆路线图）
+
+**先改路线图（按唐工要求）**：动手前实测真 Node 的 `getHashes()` 有 **81 个可用名字**（远不是原先以为的十来种），包含 SHA-3/Keccak/SHAKE/keccak-kmac/blake2/SM3/RIPEMD-160/SHA-512-t/SHA-256-192/md5-sha1 及大量 `RSA-*`/`…WithRSAEncryption` 别名。原估「中低」严重偏低 → 先将 M90.5 **拆为 M90.5–M90.9**（任务数 30 → 34），本次先完成 M90.5。
+
+**改了什么**：
+- `crypto/keccak.ts` 新增导出：`keccak224/256/384/512`（原始 Keccak 的 0x01 padding）与 `keccakKmac(bit, input, outLen)`（pad 0x04，rate 168/136）。
+- `crypto/hash.ts`：`HashAlgo` 新增 `xof`/`defaultOutputLength`，`DigestFn` 改为可接 `outputLength`；`DEFS` 注册 `sha3-224/256/384/512`（别名 `RSA-SHA3-*`、`id-rsassa-pkcs1-v1_5-with-sha3-*`）、`keccak-224/256/384/512`、`shake128/256`（别名 `shake-128/256`）、`keccak-kmac-128/256`（别名 `keccak-kmac128/256`）。
+- `builtins/crypto.ts` 的 `Hash`：支持 `options.outputLength`；XOF 缺省输出 **shake128=16 / shake256=32**；非 XOF 传 `outputLength` → `ERR_OSSL_EVP_NOT_XOF_OR_INVALID_LENGTH`；`createHash` 接上 `options`（arity 2，与 Node 一致）。
+
+**关键发现**：OpenSSL 的 `keccak-kmac-128/256` 不是带密钥的 KMAC，而是**裸 Keccak sponge**（pad 0x04、rate 168/136，默认输出 32/64）——从 `deps/openssl/.../sha3_prov.c` 的 `KMAC_newctx(..., '\x04')` 确认，实测与我们的 `keccak(rate,0x04,...)` 逐字节一致。
+
+**验证**：
+- 新差分语料 `tools/crypto-hashes-probe.cjs` → `test/fixtures/crypto-hashes.json`（21 个名字×输出长度 × 5 条消息 + 错误面），`test/crypto-hashes.test.ts` 同程序跑，**0 diff**。
+- demo 新增 `sha3-256` / `shake128` 演示（值已与真 Node 核对）；`getHashes()` 从 12 → **48** 个名字。
+- 门禁：`tsc` 干净 · vitest **947 passed / 2 skipped（93 文件）** · build worker **2397.93 kB**。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md`。
+
+**涉及文件**：`src/node-runtime/crypto/keccak.ts`、`src/node-runtime/crypto/hash.ts`、`src/node-runtime/builtins/crypto.ts`、`src/demo-project.ts`、`test/crypto-hashes.test.ts`（新增）、`tools/crypto-hashes-probe.cjs`（新增）、`tools/crypto-hashes-oracle.mjs`（新增）、`test/fixtures/crypto-hashes.json`（新增）、`docs/ROADMAP.md`。
+
 ### 2026-09-22 · M90.4 BLAKE2s MAC / Poly1305 / SipHash（顺带修正 M90.1 的 salt/customization 缺口）
 
 **改了什么**：

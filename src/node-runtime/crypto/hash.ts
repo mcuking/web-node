@@ -8,13 +8,28 @@
  * therefore implemented directly against its published specification and is
  * checked against Node's OpenSSL-backed output in `test/crypto.test.ts`.
  *
- * The surface only covers the digests OpenSSL exposes that we can implement in
- * plain JS: MD5, SHA-1, SHA-2 (224/256/384/512). `createHash`/`createHmac`
- * accept the usual OpenSSL spellings (`sha256`, `sha-256`, `RSA-SHA256`,
- * `sha256WithRSAEncryption`) through `resolveHash`.
+ * The surface now covers everything OpenSSL exposes that we can implement in
+ * plain JS: MD5, SHA-1, SHA-2 (224/256/384/512), SHA-3 and Keccak (224/256/
+ * 384/512), the SHAKE/KMAC XOFs, and the OpenSSL spellings around them
+ * (`sha256`, `sha-256`, `RSA-SHA256`, `sha256WithRSAEncryption`, ...) through
+ * `resolveHash`.
  */
 
-export type DigestFn = (bytes: Uint8Array) => Uint8Array;
+import {
+  keccak224,
+  keccak256,
+  keccak384,
+  keccak512,
+  keccakKmac,
+  sha3_224 as keccakSha3_224,
+  sha3_256 as keccakSha3_256,
+  sha3_384 as keccakSha3_384,
+  sha3_512 as keccakSha3_512,
+  shake128,
+  shake256,
+} from './keccak';
+
+export type DigestFn = (bytes: Uint8Array, outputLength?: number) => Uint8Array;
 
 export interface HashAlgo {
   /** Canonical lower-case name (`sha256`). */
@@ -24,6 +39,10 @@ export interface HashAlgo {
   /** Digest size in bytes. */
   digestSize: number;
   hash: DigestFn;
+  /** Extendable-output function: `digest()` may request any `outputLength`. */
+  xof?: boolean;
+  /** Output length used when a XOF is finalised without `options.outputLength`. */
+  defaultOutputLength?: number;
 }
 
 // --- shared helpers ----------------------------------------------------------
@@ -306,6 +325,8 @@ interface AlgoDef {
   digestSize: number;
   hash: DigestFn;
   aliases: string[];
+  xof?: boolean;
+  defaultOutputLength?: number;
 }
 
 const DEFS: AlgoDef[] = [
@@ -315,6 +336,21 @@ const DEFS: AlgoDef[] = [
   { name: 'sha256', blockSize: 64, digestSize: 32, hash: sha256, aliases: ['sha-256', 'sha256WithRSAEncryption', 'RSA-SHA256'] },
   { name: 'sha384', blockSize: 128, digestSize: 48, hash: sha384, aliases: ['sha-384', 'sha384WithRSAEncryption', 'RSA-SHA384'] },
   { name: 'sha512', blockSize: 128, digestSize: 64, hash: sha512, aliases: ['sha-512', 'sha512WithRSAEncryption', 'RSA-SHA512'] },
+  // SHA-3 (FIPS 202).
+  { name: 'sha3-224', blockSize: 144, digestSize: 28, hash: (b) => keccakSha3_224(b), aliases: ['RSA-SHA3-224', 'id-rsassa-pkcs1-v1_5-with-sha3-224'] },
+  { name: 'sha3-256', blockSize: 136, digestSize: 32, hash: (b) => keccakSha3_256(b), aliases: ['RSA-SHA3-256', 'id-rsassa-pkcs1-v1_5-with-sha3-256'] },
+  { name: 'sha3-384', blockSize: 104, digestSize: 48, hash: (b) => keccakSha3_384(b), aliases: ['RSA-SHA3-384', 'id-rsassa-pkcs1-v1_5-with-sha3-384'] },
+  { name: 'sha3-512', blockSize: 72, digestSize: 64, hash: (b) => keccakSha3_512(b), aliases: ['RSA-SHA3-512', 'id-rsassa-pkcs1-v1_5-with-sha3-512'] },
+  // Original Keccak padding (0x01), as exposed by OpenSSL.
+  { name: 'keccak-224', blockSize: 144, digestSize: 28, hash: (b) => keccak224(b), aliases: [] },
+  { name: 'keccak-256', blockSize: 136, digestSize: 32, hash: (b) => keccak256(b), aliases: [] },
+  { name: 'keccak-384', blockSize: 104, digestSize: 48, hash: (b) => keccak384(b), aliases: [] },
+  { name: 'keccak-512', blockSize: 72, digestSize: 64, hash: (b) => keccak512(b), aliases: [] },
+  // XOFs.
+  { name: 'shake128', blockSize: 168, digestSize: 16, hash: (b, n) => shake128(b, n ?? 16), xof: true, defaultOutputLength: 16, aliases: ['shake-128'] },
+  { name: 'shake256', blockSize: 136, digestSize: 32, hash: (b, n) => shake256(b, n ?? 32), xof: true, defaultOutputLength: 32, aliases: ['shake-256'] },
+  { name: 'keccak-kmac-128', blockSize: 168, digestSize: 32, hash: (b, n) => keccakKmac(128, b, n ?? 32), xof: true, defaultOutputLength: 32, aliases: ['keccak-kmac128'] },
+  { name: 'keccak-kmac-256', blockSize: 136, digestSize: 64, hash: (b, n) => keccakKmac(256, b, n ?? 64), xof: true, defaultOutputLength: 64, aliases: ['keccak-kmac256'] },
 ];
 
 /** Collapse an OpenSSL digest spelling to a bare, alphanumeric tag. */
@@ -333,6 +369,8 @@ for (const def of DEFS) {
     blockSize: def.blockSize,
     digestSize: def.digestSize,
     hash: def.hash,
+    xof: def.xof,
+    defaultOutputLength: def.defaultOutputLength,
   };
   LOOKUP.set(def.name, algo);
   LOOKUP.set(normalizeHashName(def.name), algo);

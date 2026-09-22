@@ -197,3 +197,26 @@ export function shake128(input: Uint8Array, outputLen: number): Uint8Array {
 export function shake256(input: Uint8Array, outputLen: number): Uint8Array {
   return keccak(136, 0x1f, outputLen, input);
 }
+
+// Original Keccak padding (0x01) — the pre-standardisation variants OpenSSL
+// still lists as `keccak-*`.
+export function keccak224(input: Uint8Array): Uint8Array {
+  return keccak(144, 0x01, 28, input);
+}
+export function keccak256(input: Uint8Array): Uint8Array {
+  return keccak(136, 0x01, 32, input);
+}
+export function keccak384(input: Uint8Array): Uint8Array {
+  return keccak(104, 0x01, 48, input);
+}
+export function keccak512(input: Uint8Array): Uint8Array {
+  return keccak(72, 0x01, 64, input);
+}
+
+/**
+ * The bare Keccak sponge OpenSSL exposes as `keccak-kmac-128`/`-256`: pad 0x04
+ * with the plain `Keccak[rate]` (no `KMAC` name prefix, no key), rate 168/136.
+ */
+export function keccakKmac(bitLevel: 128 | 256, input: Uint8Array, outputLen: number): Uint8Array {
+  return keccak(bitLevel === 128 ? 168 : 136, 0x04, outputLen, input);
+}

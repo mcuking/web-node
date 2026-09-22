@@ -575,6 +575,8 @@ const crypto = require('crypto');
 console.log('sha256(abc) : ' + crypto.createHash('sha256').update('abc').digest('hex'));
 console.log('sha512(abc) : ' + crypto.createHash('sha512').update('abc').digest('hex').slice(0, 40) + '...');
 console.log('md5(abc)    : ' + crypto.createHash('md5').update('abc').digest('hex'));
+console.log('sha3-256    : ' + crypto.createHash('sha3-256').update('abc').digest('hex').slice(0, 40) + '...');
+console.log('shake128    : ' + crypto.createHash('shake128', { outputLength: 16 }).update('abc').digest('hex'));
 console.log('hmac-sha256 : ' + crypto.createHmac('sha256', 'secret-key').update('hello world').digest('hex'));
 console.log('pbkdf2      : ' + crypto.pbkdf2Sync('password', 'salt', 1000, 16, 'sha256').toString('hex'));
 console.log('hkdf        : ' + Buffer.from(crypto.hkdfSync('sha256', 'key', 'salt', 'info', 16)).toString('hex'));

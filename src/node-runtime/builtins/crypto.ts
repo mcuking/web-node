@@ -391,6 +391,7 @@ export const cryptoSpec: BuiltinSpec = {
     class Hash extends LazyTransformBase {
       #name: string;
       #algo: HashAlgo;
+      #outputLength: number;
       #chunks: Uint8Array[] = [];
       #total = 0;
       #finalized = false;
@@ -408,6 +409,23 @@ export const cryptoSpec: BuiltinSpec = {
         if (!algo) throw new Error('Digest method not supported');
         this.#name = algorithm;
         this.#algo = algo;
+
+        let outputLength: number | undefined;
+        if (options !== undefined) {
+          validateObjectArg(options, 'options');
+          const opts = options as Record<string, unknown>;
+          if (opts.outputLength !== undefined) {
+            outputLength = validateIntegerBounds(opts.outputLength, 'options.outputLength', 1, MAX_UINT32);
+          }
+        }
+        if (outputLength !== undefined) {
+          if (!algo.xof) {
+            throw coded('Error', 'ERR_OSSL_EVP_NOT_XOF_OR_INVALID_LENGTH', 'error:030000B2:digital envelope routines::not XOF or invalid length');
+          }
+          this.#outputLength = outputLength;
+        } else {
+          this.#outputLength = algo.defaultOutputLength ?? algo.digestSize;
+        }
       }
 
       update(data: unknown, encoding?: string): this {
@@ -421,12 +439,14 @@ export const cryptoSpec: BuiltinSpec = {
       digest(encoding?: string): unknown {
         if (this.#finalized) throw coded('Error', 'ERR_CRYPTO_HASH_FINALIZED', 'Digest already called');
         this.#finalized = true;
-        const result = this.#algo.hash(concatBytes(this.#chunks, this.#total));
+        const result = this.#algo.hash(concatBytes(this.#chunks, this.#total), this.#outputLength);
         return encodeOutput(asBuffer(result), encoding);
       }
 
       copy(): Hash {
-        const clone = new Hash(this.#name);
+        const clone = this.#algo.xof
+          ? new Hash(this.#name, { outputLength: this.#outputLength })
+          : new Hash(this.#name);
         for (const chunk of this.#chunks) clone.update(chunk);
         return clone;
       }
@@ -451,7 +471,7 @@ export const cryptoSpec: BuiltinSpec = {
       }
     }
 
-    const createHash = (algorithm: string): Hash => new Hash(algorithm);
+    const createHash = (algorithm: string, options?: unknown): Hash => new Hash(algorithm, options);
 
     /** `crypto.Hmac` — and the class `crypto.createHmac()` returns. */
     class Hmac extends LazyTransformBase {
