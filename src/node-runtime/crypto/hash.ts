@@ -170,6 +170,7 @@ function sha2_32(bytes: Uint8Array, iv: Uint32Array, outBytes: number): Uint8Arr
 
 const sha256: DigestFn = (bytes) => sha2_32(bytes, IV256, 32);
 const sha224: DigestFn = (bytes) => sha2_32(bytes, IV224, 28);
+const sha256_192: DigestFn = (bytes) => sha2_32(bytes, IV256, 24);
 
 // --- SHA-384 / SHA-512 -------------------------------------------------------
 //
@@ -208,6 +209,15 @@ const IV512: bigint[] = [
 const IV384: bigint[] = [
   0xcbbb9d5dc1059ed8n, 0x629a292a367cd507n, 0x9159015a3070dd17n, 0x152fecd8f70e5939n,
   0x67332667ffc00b31n, 0x8eb44a8768581511n, 0xdb0c2e0d64f98fa7n, 0x47b5481dbefa4fa4n,
+];
+// SHA-512/t IVs (FIPS 180-4 §5.3.6).
+const IV512_224: bigint[] = [
+  0x8c3d37c819544da2n, 0x73e1996689dcd4d6n, 0x1dfab7ae32ff9c82n, 0x679dd514582f9fcfn,
+  0x0f6d2b697bd44da8n, 0x77e36f7304c48942n, 0x3f9d85a86a1d36c8n, 0x1112e6ad91d692a1n,
+];
+const IV512_256: bigint[] = [
+  0x22312194fc2bf72cn, 0x9f555fa3c84c64c2n, 0x2393b86b6f53b151n, 0x963877195940eabdn,
+  0x96283ee2a88effe3n, 0xbe5e1e2553863992n, 0x2b0199fc2c85b8aan, 0x0eb72ddc81c52ca2n,
 ];
 
 function rotr64(x: bigint, n: bigint): bigint {
@@ -270,6 +280,11 @@ function sha2_64(bytes: Uint8Array, iv: bigint[], outBytes: number): Uint8Array 
 
 const sha512: DigestFn = (bytes) => sha2_64(bytes, IV512, 64);
 const sha384: DigestFn = (bytes) => sha2_64(bytes, IV384, 48);
+const sha512_224: DigestFn = (bytes) => sha2_64(bytes, IV512_224, 28);
+const sha512_256: DigestFn = (bytes) => sha2_64(bytes, IV512_256, 32);
+
+/** `md5-sha1`: OpenSSL's TLS PRF helper, the MD5 followed by the SHA-1 digest. */
+const md5sha1: DigestFn = (bytes) => concat([md5(bytes), sha1(bytes)], 36);
 
 // --- MD5 ---------------------------------------------------------------------
 
@@ -334,12 +349,16 @@ interface AlgoDef {
 }
 
 const DEFS: AlgoDef[] = [
-  { name: 'md5', blockSize: 64, digestSize: 16, hash: md5, aliases: ['RSA-MD5', 'md5WithRSAEncryption'] },
-  { name: 'sha1', blockSize: 64, digestSize: 20, hash: sha1, aliases: ['sha-1', 'sha1WithRSAEncryption', 'RSA-SHA1', 'RSA-SHA1-2'] },
-  { name: 'sha224', blockSize: 64, digestSize: 28, hash: sha224, aliases: ['sha-224', 'sha224WithRSAEncryption', 'RSA-SHA224'] },
-  { name: 'sha256', blockSize: 64, digestSize: 32, hash: sha256, aliases: ['sha-256', 'sha256WithRSAEncryption', 'RSA-SHA256'] },
-  { name: 'sha384', blockSize: 128, digestSize: 48, hash: sha384, aliases: ['sha-384', 'sha384WithRSAEncryption', 'RSA-SHA384'] },
-  { name: 'sha512', blockSize: 128, digestSize: 64, hash: sha512, aliases: ['sha-512', 'sha512WithRSAEncryption', 'RSA-SHA512'] },
+  { name: 'md5', blockSize: 64, digestSize: 16, hash: md5, aliases: ['RSA-MD5', 'md5WithRSAEncryption', 'ssl3-md5'] },
+  { name: 'sha1', blockSize: 64, digestSize: 20, hash: sha1, aliases: ['sha-1', 'sha1WithRSAEncryption', 'RSA-SHA1', 'RSA-SHA1-2', 'ssl3-sha1'] },
+  { name: 'sha224', blockSize: 64, digestSize: 28, hash: sha224, aliases: ['sha-224', 'sha2-224', 'sha224WithRSAEncryption', 'RSA-SHA224'] },
+  { name: 'sha256', blockSize: 64, digestSize: 32, hash: sha256, aliases: ['sha-256', 'sha2-256', 'sha256WithRSAEncryption', 'RSA-SHA256'] },
+  { name: 'sha384', blockSize: 128, digestSize: 48, hash: sha384, aliases: ['sha-384', 'sha2-384', 'sha384WithRSAEncryption', 'RSA-SHA384'] },
+  { name: 'sha512', blockSize: 128, digestSize: 64, hash: sha512, aliases: ['sha-512', 'sha2-512', 'sha512WithRSAEncryption', 'RSA-SHA512'] },
+  { name: 'sha-256/192', blockSize: 64, digestSize: 24, hash: sha256_192, aliases: ['sha2-256/192', 'sha256-192'] },
+  { name: 'sha-512/224', blockSize: 128, digestSize: 28, hash: sha512_224, aliases: ['sha2-512/224', 'sha512-224', 'RSA-SHA512/224', 'sha512-224WithRSAEncryption'] },
+  { name: 'sha-512/256', blockSize: 128, digestSize: 32, hash: sha512_256, aliases: ['sha2-512/256', 'sha512-256', 'RSA-SHA512/256', 'sha512-256WithRSAEncryption'] },
+  { name: 'md5-sha1', blockSize: 64, digestSize: 36, hash: md5sha1, aliases: [] },
   // SHA-3 (FIPS 202).
   { name: 'sha3-224', blockSize: 144, digestSize: 28, hash: (b) => keccakSha3_224(b), aliases: ['RSA-SHA3-224', 'id-rsassa-pkcs1-v1_5-with-sha3-224'] },
   { name: 'sha3-256', blockSize: 136, digestSize: 32, hash: (b) => keccakSha3_256(b), aliases: ['RSA-SHA3-256', 'id-rsassa-pkcs1-v1_5-with-sha3-256'] },

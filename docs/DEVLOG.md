@@ -244,6 +244,24 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M90.8 + M90.9 截断变体/复合摘要 + getHashes 全表对齐（81/81）
+
+**改了什么（M90.8）**：
+- `hash.ts` 新增 `sha512_224`/`sha512_256`（SHA-512/t，FIPS 180-4 §5.3.6 专用 IV，输出 28/32）与 `sha256_192`（SHA-256 截断到 24 字节），复用已有的 `sha2_64`/`sha2_32`（它们本就支持自定义 IV 与截断）；新增 `md5sha1`（`md5||sha1`，36 字节）。
+- 注册：`sha-256/192`（别名 `sha2-256/192`/`sha256-192`）、`sha-512/224`（别名 `sha2-512/224`/`sha512-224`/`RSA-SHA512/224`/`sha512-224WithRSAEncryption`）、`sha-512/256`（同类别名）、`md5-sha1`；给 `md5`/`sha1` 补 `ssl3-md5`/`ssl3-sha1`，给 `sha224/256/384/512` 补 `sha2-*` 别名。
+
+**改了什么（M90.9）**：新增全表差分门禁 `test/crypto-gets-hashes.test.ts`：fixture 录自真 Node（`tools/crypto-gets-hashes-probe.cjs` → `tools/crypto-gets-hashes-oracle.mjs` → `test/fixtures/crypto-gets-hashes.json`，含 **81 个名字 + 每个名字的摘要**）。测试**不依赖我方列表**：直接断言 `getHashes()` 等于真 Node 的 81 名列表，且每个名字 `createHash(name).update('abc')` 与真 Node 逐字节一致。
+
+**结果**：`getHashes()` 从 12（M90.1 前）→ **81**，与真 Node **完全一致**（missing/extra 均为 0）。
+
+**验证**：
+- `test/fixtures/crypto-hashes.json` 扩到 **43 个名/长度组合**（含 sha-256/192、sha-512/224、sha-512/256、md5-sha1、ssl3-*） → `test/crypto-hashes.test.ts` **0 diff**；新增全表门禁 2 项全过。
+- 门禁：`tsc` 干净 · vitest **950 passed / 2 skipped（94 文件）** · build worker **2402.62 kB**。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md`。M90（`createMac`/`getMacs` + `getHashes` 全表）至此全部完成（M90.1–M90.9）。
+
+**涉及文件**：`src/node-runtime/crypto/hash.ts`、`test/crypto-gets-hashes.test.ts`（新增）、`tools/crypto-gets-hashes-probe.cjs`（新增）、`tools/crypto-gets-hashes-oracle.mjs`（新增）、`test/fixtures/crypto-gets-hashes.json`（新增）、`tools/crypto-hashes-probe.cjs`、`test/fixtures/crypto-hashes.json`、`docs/ROADMAP.md`。
+
 ### 2026-09-22 · M90.7 SM3 + RIPEMD-160
 
 **改了什么**：两个新的纯 JS 摘要实现，并注册进 `hash.ts` 的 `DEFS`：
