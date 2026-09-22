@@ -14,6 +14,7 @@ import {
 import {
   aesCmac,
   aesGmac,
+  desCmac,
   cipherTagLengthIsValid,
   createCipher,
   getCipherInfo as lookupCipherInfo,
@@ -1350,6 +1351,7 @@ export const cryptoSpec: BuiltinSpec = {
       #chunks: Uint8Array[] = [];
       #total = 0;
       #finalized = false;
+      #cmacIsDes = false;
 
       constructor(algorithm: unknown, key: unknown, options?: unknown) {
         super(options as Record<string, unknown> | undefined);
@@ -1383,18 +1385,18 @@ export const cryptoSpec: BuiltinSpec = {
         };
         // Maps an OpenSSL cipher name onto a usable AES key length, reprinting
         // the provider errors Node raises for a wrong mode or an unknown name.
-        const selectCipher = (want: 'cbc' | 'gcm'): number => {
+        const selectCipher = (want: 'cbc' | 'gcm'): CipherSpec => {
           const spec = resolveCipher(cipher!);
           if (spec !== undefined) {
             if (spec.mode !== want) {
               throw coded('Error', 'ERR_OSSL_INVALID_MODE', 'error:1C80007D:Provider routines::invalid mode');
             }
-            return spec.keyLength;
+            return spec;
           }
           const lower = cipher!.toLowerCase();
           if (isKnownCipherName(lower)) {
             const rightMode = want === 'cbc' ? /-cbc(-cts)?$/.test(lower) : /-gcm$/.test(lower);
-            // Non-AES block ciphers (DES, Camellia, ARIA, ...) reach here.
+            // Non-AES block ciphers (Camellia, ARIA, ...) reach here.
             if (rightMode) throw notImplemented('api', `crypto.createMac (${cipher})`);
             throw coded('Error', 'ERR_OSSL_INVALID_MODE', 'error:1C80007D:Provider routines::invalid mode');
           }
@@ -1477,14 +1479,15 @@ export const cryptoSpec: BuiltinSpec = {
           this.#outputLength = outputLength ?? (canonical === 'kmac-128' ? 32 : 64);
           this.#customization = customBytes ?? new Uint8Array(0);
         } else if (canonical === 'cmac') {
-          const keyLength = selectCipher('cbc');
-          if (keyBytes.length !== keyLength) {
+          const spec = selectCipher('cbc');
+          if (keyBytes.length !== spec.keyLength) {
             throw coded('Error', 'ERR_OSSL_EVP_INVALID_KEY_LENGTH', 'error:03000082:digital envelope routines::invalid key length');
           }
-          this.#outputLength = 16;
+          this.#cmacIsDes = spec.family === 'des';
+          this.#outputLength = spec.blockSize;
         } else if (canonical === 'gmac') {
-          const keyLength = selectCipher('gcm');
-          if (keyBytes.length !== keyLength) {
+          const spec = selectCipher('gcm');
+          if (keyBytes.length !== spec.keyLength) {
             throw coded('Error', 'ERR_OSSL_INVALID_KEY_LENGTH', 'error:1C800069:Provider routines::invalid key length');
           }
           this.#iv = ivBytes!;
@@ -1520,7 +1523,9 @@ export const cryptoSpec: BuiltinSpec = {
           const bits = this.#algorithm === 'kmac-128' ? 128 : 256;
           return kmac(bits, this.#key, data, this.#outputLength, this.#customization);
         }
-        if (this.#algorithm === 'cmac') return aesCmac(this.#key, data);
+        if (this.#algorithm === 'cmac') {
+          return this.#cmacIsDes ? desCmac(this.#key, data) : aesCmac(this.#key, data);
+        }
         if (this.#algorithm === 'gmac') return aesGmac(this.#key, this.#iv, data);
         if (this.#algorithm === 'poly1305') return poly1305(this.#key, data);
         if (this.#algorithm === 'siphash') return siphash(data, this.#key, this.#outputLength);

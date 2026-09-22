@@ -120,10 +120,14 @@ describe('crypto.createMac unit surface', () => {
     );
   });
 
-  it('raises NotImplementedError for non-AES CMAC ciphers', () => {
+  it('computes CMAC over DES-EDE and rejects ciphers it cannot serve', () => {
     const crypto = boot();
-    // Non-AES CMAC ciphers are correct in Node but outside the AES-only runtime.
-    expect(() => crypto.createMac('cmac', new Uint8Array(24).fill(1), { cipher: 'des-ede3-cbc' })).toThrowError(
+    // DES-EDE CMAC is real now (see test/crypto-des.test.ts); an 8-byte tag.
+    expect(
+      crypto.createMac('cmac', new Uint8Array(24).fill(1), { cipher: 'des-ede3-cbc' }).update('data').final('hex'),
+    ).toBe('c3edd74ff210864d');
+    // Ciphers still outside this runtime stay loud.
+    expect(() => crypto.createMac('cmac', new Uint8Array(16).fill(1), { cipher: 'camellia-128-cbc' })).toThrowError(
       /not implemented/i,
     );
   });

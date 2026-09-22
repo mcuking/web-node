@@ -1,0 +1,143 @@
+{
+  "info": {
+    "des-ede": {
+      "mode": "ecb",
+      "name": "des-ede",
+      "nid": 32,
+      "keyLength": 16,
+      "blockSize": 8
+    },
+    "des-ede-cbc": {
+      "mode": "cbc",
+      "name": "des-ede-cbc",
+      "nid": 43,
+      "keyLength": 16,
+      "blockSize": 8,
+      "ivLength": 8
+    },
+    "des-ede-cfb": {
+      "mode": "cfb",
+      "name": "des-ede-cfb",
+      "nid": 60,
+      "keyLength": 16,
+      "blockSize": 1,
+      "ivLength": 8
+    },
+    "des-ede-ecb": {
+      "mode": "ecb",
+      "name": "des-ede",
+      "nid": 32,
+      "keyLength": 16,
+      "blockSize": 8
+    },
+    "des-ede-ofb": {
+      "mode": "ofb",
+      "name": "des-ede-ofb",
+      "nid": 62,
+      "keyLength": 16,
+      "blockSize": 1,
+      "ivLength": 8
+    },
+    "des-ede3": {
+      "mode": "ecb",
+      "name": "des-ede3",
+      "nid": 33,
+      "keyLength": 24,
+      "blockSize": 8
+    },
+    "des-ede3-cbc": {
+      "mode": "cbc",
+      "name": "des-ede3-cbc",
+      "nid": 44,
+      "keyLength": 24,
+      "blockSize": 8,
+      "ivLength": 8
+    },
+    "des-ede3-cfb": {
+      "mode": "cfb",
+      "name": "des-ede3-cfb",
+      "nid": 61,
+      "keyLength": 24,
+      "blockSize": 1,
+      "ivLength": 8
+    },
+    "des-ede3-ecb": {
+      "mode": "ecb",
+      "name": "des-ede3",
+      "nid": 33,
+      "keyLength": 24,
+      "blockSize": 8
+    },
+    "des-ede3-ofb": {
+      "mode": "ofb",
+      "name": "des-ede3-ofb",
+      "nid": 63,
+      "keyLength": 24,
+      "blockSize": 1,
+      "ivLength": 8
+    },
+    "des3": {
+      "mode": "cbc",
+      "name": "des-ede3-cbc",
+      "nid": 44,
+      "keyLength": 24,
+      "blockSize": 8,
+      "ivLength": 8
+    }
+  },
+  "ct_des-ede-ecb": "ae904afd69fe1c514be1efd932e34fac4bbc5fdd3ab5e1b2cb9ae6e2d4d1c7a1d220e6401b8e51c48d7e3cb0e7796475",
+  "rt_des-ede-ecb": true,
+  "ct_des-ede-cbc": "ae904afd69fe1c51b565a206185bbf406040b04744c0550e7363f3f8eed864751e5ca85adc2c1154731dbf9fe019e763",
+  "rt_des-ede-cbc": true,
+  "ct_des-ede-cfb": "5cbfd1db13e861e63f464579bf631583eaf71fff9636919ab5754028f4212c4a58e449e8b3c42d63a24af4471b",
+  "rt_des-ede-cfb": true,
+  "ct_des-ede-ofb": "5cbfd1db13e861e661327fb1528c37678f0a3e9e93b841561a5a71b669d07febe080381446023d299fb759b959",
+  "rt_des-ede-ofb": true,
+  "ct_des-ede3-ecb": "ae904afd69fe1c514be1efd932e34fac4bbc5fdd3ab5e1b2cb9ae6e2d4d1c7a1d220e6401b8e51c48d7e3cb0e7796475",
+  "rt_des-ede3-ecb": true,
+  "ct_des-ede3-cbc": "ae904afd69fe1c51b565a206185bbf406040b04744c0550e7363f3f8eed864751e5ca85adc2c1154731dbf9fe019e763",
+  "rt_des-ede3-cbc": true,
+  "ct_des-ede3-cfb": "5cbfd1db13e861e63f464579bf631583eaf71fff9636919ab5754028f4212c4a58e449e8b3c42d63a24af4471b",
+  "rt_des-ede3-cfb": true,
+  "ct_des-ede3-ofb": "5cbfd1db13e861e661327fb1528c37678f0a3e9e93b841561a5a71b669d07febe080381446023d299fb759b959",
+  "rt_des-ede3-ofb": true,
+  "ct_des3": "ae904afd69fe1c51b565a206185bbf406040b04744c0550e7363f3f8eed864751e5ca85adc2c1154731dbf9fe019e763",
+  "rt_des3": true,
+  "ct_des-ede": "ae904afd69fe1c514be1efd932e34fac4bbc5fdd3ab5e1b2cb9ae6e2d4d1c7a1d220e6401b8e51c48d7e3cb0e7796475",
+  "rt_des-ede": true,
+  "ct_des-ede3": "ae904afd69fe1c514be1efd932e34fac4bbc5fdd3ab5e1b2cb9ae6e2d4d1c7a1d220e6401b8e51c48d7e3cb0e7796475",
+  "rt_des-ede3": true,
+  "streamCbc": "c8b1e48b0050d664b966820ecf23a0aa",
+  "padBlockLen": 24,
+  "noPadBlockLen": 16,
+  "errKeyShort": {
+    "ok": false,
+    "name": "RangeError",
+    "code": "ERR_CRYPTO_INVALID_KEYLEN",
+    "message": "Invalid key length"
+  },
+  "errKeyLong": {
+    "ok": false,
+    "name": "RangeError",
+    "code": "ERR_CRYPTO_INVALID_KEYLEN",
+    "message": "Invalid key length"
+  },
+  "errIv": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_IV",
+    "message": "Invalid initialization vector"
+  },
+  "errEcbIv": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_IV",
+    "message": "Invalid initialization vector"
+  },
+  "errBadPadding": {
+    "ok": false,
+    "name": "Error",
+    "code": "ERR_OSSL_BAD_DECRYPT",
+    "message": "error:1C800064:Provider routines::bad decrypt"
+  }
+}

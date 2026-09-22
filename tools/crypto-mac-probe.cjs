@@ -116,6 +116,13 @@ out.cmac = {
   block64: hex(crypto.createMac('cmac', k16, { cipher: 'aes-128-cbc' }).update(Buffer.alloc(64, 5)).final()),
   upper: hex(crypto.createMac('cmac', k16, { cipher: 'AES-128-CBC' }).update('data').final()),
   keyobj: hex(crypto.createMac('cmac', crypto.createSecretKey(k16), { cipher: 'aes-128-cbc' }).update('data').final()),
+  des3: hex(crypto.createMac('cmac', k24, { cipher: 'des-ede3-cbc' }).update('data').final()),
+  des3empty: hex(crypto.createMac('cmac', k24, { cipher: 'des-ede3-cbc' }).final()),
+  des2: hex(crypto.createMac('cmac', k16, { cipher: 'des-ede-cbc' }).update('data').final()),
+  des3alias: hex(crypto.createMac('cmac', k24, { cipher: 'des3' }).update('data').final()),
+  des3block8: hex(crypto.createMac('cmac', k24, { cipher: 'des-ede3-cbc' }).update(Buffer.alloc(8, 5)).final()),
+  des3block16: hex(crypto.createMac('cmac', k24, { cipher: 'des-ede3-cbc' }).update(Buffer.alloc(16, 5)).final()),
+  des3stream: hex(crypto.createMac('cmac', k24, { cipher: 'des-ede3-cbc' }).update('abcdefgh').update('ijkl').final()),
 };
 out.gmac = {
   aes128: hex(crypto.createMac('gmac', k16, { cipher: 'aes-128-gcm', iv: Buffer.alloc(12, 3) }).update('data').final()),

@@ -700,6 +700,26 @@ console.log('gcm tag     : ' + gcm.getAuthTag().toString('hex'));
 console.log('gcm ciphers : ' + crypto.getCiphers().filter(function (n) { return n.indexOf('aes-') === 0; }).length + ' aes entries');
 console.log('');
 
+// --- ChaCha20 and DES/3DES (milestone 93) ---
+// Beyond AES, the runtime also carries ChaCha20-Poly1305 (RFC 8439) and the
+// DES-EDE / DES-EDE3 family, all matching OpenSSL byte for byte.
+console.log('-- ChaCha20 / DES (milestone 93) --');
+const chaKey = Buffer.alloc(32, 1);
+const chaNonce = Buffer.alloc(12, 2);
+const chacha = crypto.createCipheriv('chacha20-poly1305', chaKey, chaNonce, { authTagLength: 16 });
+chacha.setAAD(Buffer.from('header'));
+const chaCt = Buffer.concat([chacha.update('secret data'), chacha.final()]);
+console.log('chacha ct   : ' + chaCt.toString('hex'));
+console.log('chacha tag  : ' + chacha.getAuthTag().toString('hex'));
+const desKey = Buffer.from('0123456789abcdeffedcba98765432100123456789abcdef', 'hex');
+const desIv = Buffer.alloc(8);
+const des = crypto.createCipheriv('des-ede3-cbc', desKey, desIv);
+const desCt = Buffer.concat([des.update('The quick brown fox'), des.final()]);
+console.log('des3 ct     : ' + desCt.toString('hex'));
+const desBack = crypto.createDecipheriv('des-ede3-cbc', desKey, desIv);
+console.log('des3 pt     : ' + Buffer.concat([desBack.update(desCt), desBack.final()]).toString());
+console.log('');
+
 // --- url (milestone 53) ---
 // url is Node's real lib/url.js now: the legacy Url/parse/format/resolve API
 // next to the WHATWG classes, and pathToFileURL/fileURLToPath. The WHATWG side

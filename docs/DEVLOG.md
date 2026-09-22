@@ -244,6 +244,20 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M93.2 DES / 3DES（并让 CMAC 支持 DES）
+
+**改了什么**：新增 `src/node-runtime/crypto/des.ts`——纯 JS DES 块密码（FIPS 46-3 的 IP/FP/E/P/PC1/PC2/S 盒/移位表）加上 EDE2（16 字节 key，K3 = K1）与 EDE3（24 字节 key）。`createCipheriv` 接入 `des-ede`/`des-ede-ecb`/`des-ede-cbc`/`des-ede-cfb`/`des-ede-ofb` 与 `des-ede3`/`des-ede3-ecb`/`des-ede3-cbc`/`des-ede3-cfb`/`des-ede3-ofb`/`des3`（ECB/CBC/CFB-128/OFB，8 字节块 + PKCS#7）。`cipher.ts` 的 `CipherSpec` 增 `family`，`createCipher` 据此分发到 `DesCipher`。
+
+顺带把 CMAC 从「AES 专用」改为**通用块密码 CMAC**：抽出 `cmacCore(encrypt, blockSize, rb, data)`，`aesCmac`（rb=0x87、块 16）与 `desCmac`（rb=0x1B、块 8）均基于它。于是 `createMac('cmac', key, { cipher: 'des-ede3-cbc' })` 能算出 8 字节 tag，M90.3 记的「非 AES CMAC 报 `NotImplementedError`」偏离因此收窄。
+
+**已知偏离**：`des-ede3-cfb1`/`des-ede3-cfb8`（1/8 位 CFB）与 `des3-wrap`/`id-smime-alg-cms3deswrap`（key wrap）仍抛 `NotImplementedError`。
+
+**验证（差分 0 diff）**：`tools/crypto-des-probe.cjs` 在真 Node 与 web-node 内各跑一遭，逐字节等于 `test/fixtures/crypto-des.json`（11 个算法名 × 固定 key/IV 的密文 + 回环、多次 update、padding、全套错误面）；DES CMAC 语料并入 `test/fixtures/crypto-mac.json`。
+
+**门禁**：`tsc` 干净 · vitest **956 passed / 2 skipped（96 文件）** · build worker **2421.63 kB**。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md` 的 M93 拆分顺序（M93.1 ChaCha20 → M93.2 DES/3DES → M93.3 CCM → M93.4 其余）。
+
 ### 2026-09-22 · M93.1 ChaCha20 / ChaCha20-Poly1305
 
 **改了什么**：新增 `src/node-runtime/crypto/chacha20.ts`——ChaCha20 块函数（10 轮 double-round）、流式 keystream（raw `chacha20` 用 64-bit 计数器，AEAD 用 32-bit），以及 RFC 8439 §2.6–2.8 的 Poly1305 AEAD（复用 `poly1305.ts`）。

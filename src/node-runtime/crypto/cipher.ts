@@ -280,6 +280,7 @@ function inc32(counter: Uint8Array): void {
 // --- the cipher surface ------------------------------------------------------
 
 import { ChaCha20Cipher, ChaCha20Poly1305, isValidTagLength, type SyncCipher } from './chacha20';
+import { DesCipher, DesEde, type DesMode } from './des';
 
 export type { SyncCipher };
 
@@ -299,6 +300,8 @@ export interface CipherSpec {
   blockSize: number;
   /** Required IV length, or `null` for ECB (no IV). */
   ivLength: number | null;
+  /** Which implementation backs the spec (defaults to AES). */
+  family?: 'aes' | 'des';
   /** GCM keys this spec under this alias (used to key the lookup table). */
   alias?: true;
 }
@@ -344,6 +347,25 @@ const SPECS: CipherSpec[] = [];
   // ChaCha20 and its AEAD (RFC 8439); OpenSSL reports both as mode `stream`.
   SPECS.push({ name: 'chacha20', infoName: 'chacha20', mode: 'chacha20', infoMode: 'stream', nid: 1019, keyLength: 32, blockSize: 1, ivLength: 16 });
   SPECS.push({ name: 'chacha20-poly1305', infoName: 'chacha20-poly1305', mode: 'chacha20-poly1305', infoMode: 'stream', nid: 1018, keyLength: 32, blockSize: 1, ivLength: 12 });
+  // DES / 3DES. OpenSSL 3 keeps only the EDE forms; `des-ede` takes a 16-byte
+  // key (K3 = K1) and `des-ede3` a 24-byte one. `des-ede`/`des-ede3` are the ECB
+  // spellings, and `des3` is the CBC one.
+  const des: Array<[string, CipherMode, number, number, number, number | null, string]> = [
+    ['des-ede', 'ecb', 32, 16, 8, null, 'des-ede'],
+    ['des-ede-ecb', 'ecb', 32, 16, 8, null, 'des-ede'],
+    ['des-ede-cbc', 'cbc', 43, 16, 8, 8, 'des-ede-cbc'],
+    ['des-ede-cfb', 'cfb', 60, 16, 1, 8, 'des-ede-cfb'],
+    ['des-ede-ofb', 'ofb', 62, 16, 1, 8, 'des-ede-ofb'],
+    ['des-ede3', 'ecb', 33, 24, 8, null, 'des-ede3'],
+    ['des-ede3-ecb', 'ecb', 33, 24, 8, null, 'des-ede3'],
+    ['des-ede3-cbc', 'cbc', 44, 24, 8, 8, 'des-ede3-cbc'],
+    ['des3', 'cbc', 44, 24, 8, 8, 'des-ede3-cbc'],
+    ['des-ede3-cfb', 'cfb', 61, 24, 1, 8, 'des-ede3-cfb'],
+    ['des-ede3-ofb', 'ofb', 63, 24, 1, 8, 'des-ede3-ofb'],
+  ];
+  for (const [name, mode, nid, keyLength, blockSize, ivLength, infoName] of des) {
+    SPECS.push({ name, infoName, mode, nid, keyLength, blockSize, ivLength, family: 'des' });
+  }
 }
 
 const LOOKUP = new Map<string, CipherSpec>(SPECS.map((s) => [s.name, s]));
@@ -448,6 +470,7 @@ export function createCipher(
   if (spec.mode === 'chacha20-poly1305') {
     return new ChaCha20Poly1305(key, iv as Uint8Array, encrypt, authTagLength);
   }
+  if (spec.family === 'des') return new DesCipher(spec.mode as DesMode, key, iv, encrypt);
   return new Cipheriv(spec, key, iv, encrypt, authTagLength);
 }
 
@@ -762,10 +785,12 @@ function incCounter128(counter: Uint8Array): void {
 // --- CMAC / GMAC -------------------------------------------------------------
 
 /** `x << 1` on a big-endian 128-bit block. */
-function shiftLeftOne(block: Uint8Array): Uint8Array {
-  const out = new Uint8Array(16);
+/** AES-CMAC (NIST SP 800-38B) over a single AES key. Digests are 16 bytes. */
+/** Shift a whole block left by one bit (the CMAC subkey step). */
+function shiftLeftBlock(block: Uint8Array): Uint8Array {
+  const out = new Uint8Array(block.length);
   let carry = 0;
-  for (let i = 15; i >= 0; i--) {
+  for (let i = block.length - 1; i >= 0; i--) {
     const b = block[i];
     out[i] = ((b << 1) | carry) & 0xff;
     carry = (b >> 7) & 1;
@@ -773,40 +798,54 @@ function shiftLeftOne(block: Uint8Array): Uint8Array {
   return out;
 }
 
-/** AES-CMAC (NIST SP 800-38B) over a single AES key. Digests are 16 bytes. */
-export function aesCmac(key: Uint8Array, data: Uint8Array): Uint8Array {
-  const aes = new AesKey(key);
-  const l = new Uint8Array(16);
-  aes.encryptBlock(l);
-  const k1 = shiftLeftOne(l);
-  if (l[0] & 0x80) k1[15] ^= 0x87;
-  const k2 = shiftLeftOne(k1);
-  if (k1[0] & 0x80) k2[15] ^= 0x87;
+/**
+ * CMAC (SP 800-38B) over an arbitrary block cipher: `encrypt` maps one block to
+ * one block, `rb` is the reduction polynomial's low byte (0x87 for AES, 0x1B for
+ * DES). The tag is one block long.
+ */
+function cmacCore(encrypt: (block: Uint8Array) => Uint8Array, blockSize: number, rb: number, data: Uint8Array): Uint8Array {
+  const l = encrypt(new Uint8Array(blockSize));
+  const k1 = shiftLeftBlock(l);
+  if (l[0] & 0x80) k1[blockSize - 1] ^= rb;
+  const k2 = shiftLeftBlock(k1);
+  if (k1[0] & 0x80) k2[blockSize - 1] ^= rb;
 
-  const blockCount = Math.max(1, Math.ceil(data.length / 16));
-  const lastComplete = data.length !== 0 && data.length % 16 === 0;
-  const chain = new Uint8Array(16);
-  const block = new Uint8Array(16);
+  const blockCount = Math.max(1, Math.ceil(data.length / blockSize));
+  const lastComplete = data.length !== 0 && data.length % blockSize === 0;
+  const chain = new Uint8Array(blockSize);
+  const block = new Uint8Array(blockSize);
   for (let i = 0; i < blockCount - 1; i++) {
-    block.set(data.subarray(i * 16, i * 16 + 16));
-    for (let j = 0; j < 16; j++) block[j] ^= chain[j];
-    aes.encryptBlock(block);
-    chain.set(block);
+    block.set(data.subarray(i * blockSize, i * blockSize + blockSize));
+    for (let j = 0; j < blockSize; j++) block[j] ^= chain[j];
+    chain.set(encrypt(block));
   }
-  const start = (blockCount - 1) * 16;
+  const start = (blockCount - 1) * blockSize;
   block.fill(0);
   if (lastComplete) {
-    block.set(data.subarray(start, start + 16));
-    for (let j = 0; j < 16; j++) block[j] ^= k1[j];
+    block.set(data.subarray(start, start + blockSize));
+    for (let j = 0; j < blockSize; j++) block[j] ^= k1[j];
   } else {
     const rem = data.length - start;
     block.set(data.subarray(start, start + rem));
     block[rem] = 0x80;
-    for (let j = 0; j < 16; j++) block[j] ^= k2[j];
+    for (let j = 0; j < blockSize; j++) block[j] ^= k2[j];
   }
-  for (let j = 0; j < 16; j++) block[j] ^= chain[j];
-  aes.encryptBlock(block);
-  return block;
+  for (let j = 0; j < blockSize; j++) block[j] ^= chain[j];
+  return encrypt(block);
+}
+
+export function aesCmac(key: Uint8Array, data: Uint8Array): Uint8Array {
+  const aes = new AesKey(key);
+  return cmacCore((block) => {
+    aes.encryptBlock(block);
+    return block;
+  }, 16, 0x87, data);
+}
+
+/** CMAC whose block cipher is DES-EDE (`des-ede`/`des-ede3`); an 8-byte tag. */
+export function desCmac(key: Uint8Array, data: Uint8Array): Uint8Array {
+  const ede = new DesEde(key);
+  return cmacCore((block) => ede.encrypt(block), 8, 0x1b, data);
 }
 
 /** AES-GMAC (NIST SP 800-38D): the GCM tag of `data` used as associated data. */

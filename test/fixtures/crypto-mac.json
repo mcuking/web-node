@@ -79,7 +79,14 @@
     "block32": "0743e0d312b4de04d7362355bded7015",
     "block64": "329cd706ad64a24be5ff69979ce1bb89",
     "upper": "f3346600cd81405c757d154341c4ee75",
-    "keyobj": "f3346600cd81405c757d154341c4ee75"
+    "keyobj": "f3346600cd81405c757d154341c4ee75",
+    "des3": "580b5821bc1de9dd",
+    "des3empty": "28bcfd10baffd151",
+    "des2": "c3edd74ff210864d",
+    "des3alias": "580b5821bc1de9dd",
+    "des3block8": "d4f6d12305643d31",
+    "des3block16": "ae249530e6d12da7",
+    "des3stream": "1d4b2437bfd9d66f"
   },
   "gmac": {
     "aes128": "c1ca454c2e1863efde9bca32ded11efd",
