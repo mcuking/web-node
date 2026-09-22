@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-21T12:20:15.787Z",
+  "generatedAt": "2026-09-22T02:16:52.362Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -1090,6 +1090,41 @@
       "sha256": "4a3048ab5892370c7fdf184e47aab7bf0f905b0f30282f27706d964d3044240a",
       "upstreamSha256": "4a3048ab5892370c7fdf184e47aab7bf0f905b0f30282f27706d964d3044240a",
       "bytes": 8860,
+      "patches": []
+    },
+    {
+      "path": "assert/strict.js",
+      "sha256": "07c94fd4322f33fb366bec83977c7aa4816802a0deb1a4ab54c1093d0c05a524",
+      "upstreamSha256": "07c94fd4322f33fb366bec83977c7aa4816802a0deb1a4ab54c1093d0c05a524",
+      "bytes": 58,
+      "patches": []
+    },
+    {
+      "path": "path/posix.js",
+      "sha256": "117a373870d6dd7ff7470e9e5d0eb7f0c284c39f036492da60453ad0615d643e",
+      "upstreamSha256": "117a373870d6dd7ff7470e9e5d0eb7f0c284c39f036492da60453ad0615d643e",
+      "bytes": 55,
+      "patches": []
+    },
+    {
+      "path": "path/win32.js",
+      "sha256": "cfa5914ed0ada68fbf7891014ddb2db26db353810c8bbc7b25d941537ddf22e5",
+      "upstreamSha256": "cfa5914ed0ada68fbf7891014ddb2db26db353810c8bbc7b25d941537ddf22e5",
+      "bytes": 55,
+      "patches": []
+    },
+    {
+      "path": "sys.js",
+      "sha256": "69903611817dc78f3f430b720425602bc5d50eeba6bee2a2a9a562cc88d078fa",
+      "upstreamSha256": "69903611817dc78f3f430b720425602bc5d50eeba6bee2a2a9a562cc88d078fa",
+      "bytes": 1619,
+      "patches": []
+    },
+    {
+      "path": "constants.js",
+      "sha256": "91c9af0602f8f474055e7d87d3138daa18d0cd2912c93940687d9db0af696f9a",
+      "upstreamSha256": "91c9af0602f8f474055e7d87d3138daa18d0cd2912c93940687d9db0af696f9a",
+      "bytes": 1713,
       "patches": []
     }
   ]

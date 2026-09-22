@@ -188,6 +188,16 @@ const FILES = [
   // `importModuleDynamically` plumbing.
   'vm.js',
   'internal/vm.js',
+  // milestone 64: thin re-export builtins Node ships as their own modules.
+  // Each is a one-line `require` of another builtin, so they are trivial but
+  // commonly imported (`import assert from 'node:assert/strict'`).
+  'assert/strict.js',
+  'path/posix.js',
+  'path/win32.js',
+  'sys.js',
+  // `constants` is the deprecated umbrella over `internalBinding('constants')`
+  // (os.dlopen/errno/priority/signals + fs + crypto), which we already build.
+  'constants.js',
 ];
 
 /**

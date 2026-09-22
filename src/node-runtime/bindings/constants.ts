@@ -33,6 +33,7 @@ const SIGNALS: Record<string, number> = {
   SIGILL: 4,
   SIGTRAP: 5,
   SIGABRT: 6,
+  SIGIOT: 6,
   SIGBUS: 7,
   SIGFPE: 8,
   SIGKILL: 9,
@@ -56,6 +57,7 @@ const SIGNALS: Record<string, number> = {
   SIGPROF: 27,
   SIGWINCH: 28,
   SIGIO: 29,
+  SIGINFO: 29,
   SIGPWR: 30,
   SIGSYS: 31,
 };
@@ -67,6 +69,109 @@ const PRIORITY = {
   PRIORITY_ABOVE_NORMAL: -7,
   PRIORITY_HIGH: -14,
   PRIORITY_HIGHEST: -20,
+};
+
+// `dlopen(3)` flags. The runtime is POSIX-shaped throughout (its errno table is
+// POSIX), so these are the macOS values Node reports here; `constants` exposes
+// them lazily and nothing in the runtime branches on them.
+const DLOPEN = {
+  RTLD_LAZY: 1,
+  RTLD_NOW: 2,
+  RTLD_GLOBAL: 8,
+  RTLD_LOCAL: 4,
+};
+
+/**
+ * Platform `errno` names/values, mirroring what Node's `DefineErrnoConstants`
+ * (`src/node_constants.cc`) emits from the host `<cerrno>` macros. This is a
+ * *different* set from the libuv `ERRNO` table above: libuv adds its own
+ * pseudo-codes (`EOF`, `ECHARSET`, …) and drops platform aliases. `constants`
+ * exposes this platform set (Node's `constants.os.errno`), while the VFS keeps
+ * using the libuv table for `uv_strerror`-shaped messages.
+ *
+ * Values are the local oracle's (`node --expose-internals` on darwin, v26.9.0),
+ * like the `O_*` flags above.
+ */
+const PLATFORM_ERRNO: Record<string, number> = {
+  E2BIG: 7,
+  EACCES: 13,
+  EADDRINUSE: 48,
+  EADDRNOTAVAIL: 49,
+  EAFNOSUPPORT: 47,
+  EAGAIN: 35,
+  EALREADY: 37,
+  EBADF: 9,
+  EBADMSG: 94,
+  EBUSY: 16,
+  ECANCELED: 89,
+  ECHILD: 10,
+  ECONNABORTED: 53,
+  ECONNREFUSED: 61,
+  ECONNRESET: 54,
+  EDEADLK: 11,
+  EDESTADDRREQ: 39,
+  EDOM: 33,
+  EDQUOT: 69,
+  EEXIST: 17,
+  EFAULT: 14,
+  EFBIG: 27,
+  EHOSTUNREACH: 65,
+  EIDRM: 90,
+  EILSEQ: 92,
+  EINPROGRESS: 36,
+  EINTR: 4,
+  EINVAL: 22,
+  EIO: 5,
+  EISCONN: 56,
+  EISDIR: 21,
+  ELOOP: 62,
+  EMFILE: 24,
+  EMLINK: 31,
+  EMSGSIZE: 40,
+  EMULTIHOP: 95,
+  ENAMETOOLONG: 63,
+  ENETDOWN: 50,
+  ENETRESET: 52,
+  ENETUNREACH: 51,
+  ENFILE: 23,
+  ENOBUFS: 55,
+  ENODATA: 96,
+  ENODEV: 19,
+  ENOENT: 2,
+  ENOEXEC: 8,
+  ENOLCK: 77,
+  ENOLINK: 97,
+  ENOMEM: 12,
+  ENOMSG: 91,
+  ENOPROTOOPT: 42,
+  ENOSPC: 28,
+  ENOSR: 98,
+  ENOSTR: 99,
+  ENOSYS: 78,
+  ENOTCONN: 57,
+  ENOTDIR: 20,
+  ENOTEMPTY: 66,
+  ENOTSOCK: 38,
+  ENOTSUP: 45,
+  ENOTTY: 25,
+  ENXIO: 6,
+  EOPNOTSUPP: 102,
+  EOVERFLOW: 84,
+  EPERM: 1,
+  EPIPE: 32,
+  EPROTO: 100,
+  EPROTONOSUPPORT: 43,
+  EPROTOTYPE: 41,
+  ERANGE: 34,
+  EROFS: 30,
+  ESPIPE: 29,
+  ESRCH: 3,
+  ESTALE: 70,
+  ETIME: 101,
+  ETIMEDOUT: 60,
+  ETXTBSY: 26,
+  EWOULDBLOCK: 35,
+  EXDEV: 18,
 };
 
 /**
@@ -91,8 +196,8 @@ export const constantsBinding: BindingFactory = () => {
     // as aliases for the runtime's own callers.
     os: {
       UV_UDP_REUSEADDR: 4,
-      dlopen: {},
-      errno,
+      dlopen: DLOPEN,
+      errno: PLATFORM_ERRNO,
       signals: SIGNALS,
       priority: PRIORITY,
       // `os.devNull` is a string the runtime resolves; `internal/vfs/router`
@@ -133,6 +238,15 @@ export const constantsBinding: BindingFactory = () => {
       S_IXUSR: 0o100,
       S_IRWXG: 0o070,
       S_IRWXO: 0o007,
+      // group/other permission bits (`<sys/stat.h>`, same in POSIX)
+      S_IRGRP: 0o040,
+      S_IWGRP: 0o020,
+      S_IXGRP: 0o010,
+      S_IROTH: 0o004,
+      S_IWOTH: 0o002,
+      S_IXOTH: 0o001,
+      // `O_NOFOLLOW` (darwin)
+      O_NOFOLLOW: 256,
       // libuv symlink / dirent discriminants (internal/fs/utils, internal/vfs)
       UV_FS_SYMLINK_DIR: 1,
       UV_FS_SYMLINK_JUNCTION: 2,
@@ -148,10 +262,19 @@ export const constantsBinding: BindingFactory = () => {
       COPYFILE_EXCL: 1,
       COPYFILE_FICLONE: 2,
       COPYFILE_FICLONE_FORCE: 4,
+      // libuv copyfile aliases of the same values (public `constants` keys)
+      UV_FS_COPYFILE_EXCL: 1,
+      UV_FS_COPYFILE_FICLONE: 2,
+      UV_FS_COPYFILE_FICLONE_FORCE: 4,
+      // Linux-only custom `O_*` bits; libuv reports 0 on darwin
+      UV_FS_O_RANDOM: 0,
+      UV_FS_O_SEQUENTIAL: 0,
+      UV_FS_O_SHORT_LIVED: 0,
+      UV_FS_O_TEMPORARY: 0,
     },
     crypto: {},
     zlib: {},
-    dlopen: {},
+    dlopen: DLOPEN,
     trace: {},
     // `constants.internal` (`src/node_constants.cc`): how a module with no
     // extension is classified. Read by `internal/vfs/setup.js` when it resolves

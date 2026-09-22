@@ -1769,4 +1769,44 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     // `--experimental-vm-modules`, which is off.
     deps: ['internal/vm', 'internal/errors', 'internal/validators', 'internal/util'],
   },
+  // milestone 64: thin re-export builtins (each a one-line `require` of another
+  // builtin, but part of the public module list and commonly imported).
+  {
+    id: 'constants',
+    aliases: ['node:constants'],
+    vendorPath: 'constants.js',
+    origin: 'node-source',
+    // The deprecated umbrella over `internalBinding('constants')`
+    // (os.dlopen/errno/priority/signals + fs + crypto), which we already build.
+    deps: [],
+  },
+  {
+    id: 'assert/strict',
+    aliases: ['node:assert/strict'],
+    vendorPath: 'assert/strict.js',
+    origin: 'node-source',
+    deps: ['assert'],
+  },
+  {
+    id: 'path/posix',
+    aliases: ['node:path/posix'],
+    vendorPath: 'path/posix.js',
+    origin: 'node-source',
+    deps: ['path'],
+  },
+  {
+    id: 'path/win32',
+    aliases: ['node:path/win32'],
+    vendorPath: 'path/win32.js',
+    origin: 'node-source',
+    deps: ['path'],
+  },
+  {
+    id: 'sys',
+    aliases: ['node:sys'],
+    vendorPath: 'sys.js',
+    origin: 'node-source',
+    // Deprecated alias of `util` (emits DEP0025 on load).
+    deps: ['util'],
+  },
 ];
