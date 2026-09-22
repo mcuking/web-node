@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-22（基线 = M93.4c 完成；AES-OCB 与 key wrap 上线；阶段 A crypto 收尾全部完成）
+> - **最后更新**：2026-09-22（基线 = M93.4d 完成；AES-SIV 与 AES-XTS 上线；**阶段 A crypto 收尾全部完成**）
 
 ---
 
@@ -14,16 +14,16 @@
 
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
-| A | crypto 收尾（接续 M87） | 19 | 19 | 0 |
+| A | crypto 收尾（接续 M87） | 22 | 20 | 2 |
 | B | 语义深度（差分语料继续扩面） | 4 | 0 | 4 |
 | C | 平台无对应物的补齐（选择性） | 3 | 0 | 3 |
 | D | 运行时常量小项收尾 | 4 | 0 | 4 |
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **41** | **19** | **21**（+1 不做） |
+| **合计** | | **41** | **20** | **20**（+1 不做） |
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 106 个里程碑，剩余 21 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 107 个里程碑，剩余 20 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.4（26 → 30），同日晚 M90.5 又拆为 M90.5–M90.9（30 → 34）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
 
@@ -116,7 +116,7 @@
   - 错误面：`options` 非对象 → `ERR_INVALID_ARG_TYPE`；私/公钥缺失 → `The property 'options.privateKey/publicKey' is invalid. Received undefined`；类型不符 → `ERR_CRYPTO_INCOMPATIBLE_KEY`（`Incompatible key types for Diffie-Hellman: dh and rsa`）；跨组 → `ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS`。
   - 风险：中低。
 
-- [x] **M93 · 更多对称密码**（拆为 M93.1–M93.4）✅ 部分完成
+- [x] **M93 · 更多对称密码**（拆为 M93.1–M93.4）✅ 完成
   > **2026-09-22 拆分原因**：原估「低–中」但覆盖面很大（DES/3DES、ChaCha20、CCM、OCB、SIV、XTS、wrap 系列，以及 Camellia/ARIA/SM4），每个都有各自的模式/参数/向量，混作一个里程碑无法逐项验证。按建议顺序拆为四个子项（任务数 35 → 38）。
 
 - [x] **M93.1 · ChaCha20 / ChaCha20-Poly1305** ✅ 2026-09-22
@@ -165,7 +165,14 @@
     - **已知偏离**：`aes-*-wrap-inv`/`-wrap-pad-inv`（OpenSSL 的逆 wrap）与 `des3-wrap`/`id-smime-alg-cms3deswrap` 仍抛 `NotImplementedError`。
     - 差分：`tools/crypto-ocb-wrap-probe.cjs` → `test/fixtures/crypto-ocb-wrap.json`（RFC 7253 附录 A、tag 8/12/16、IV 8/12/13/15、空/块/长 payload、流式分块、wrap/wrap-pad 的 RFC 3394/5649 向量与回环、全套错误面）——**0 diff**（首次运行）；`test/crypto-ocb-wrap.test.ts`。
     - 风险：中。
-  - [ ] **M93.4d · AES-SIV / AES-XTS**：`aes-*-siv`（RFC 5297）、`aes-*-xts`。风险：中高。
+  - [x] **M93.4d · AES-SIV / AES-XTS** ✅ 2026-09-22
+    - 新增 `src/node-runtime/crypto/siv.ts`：RFC 5297 的 S2V（`d = dbl(d) ^ CMAC(K, aad)`，载荷块 `len>=16` 用 `S||(S_last^d)`、否则 `dbl(d) ^ pad(S)`）+ AES-CTR；密钥为两半（CMAC 半 + CTR 半），tag 即 IV，tag 固定 16 字节。
+    - 新增 `src/node-runtime/crypto/xts.ts`：IEEE 1619 的 tweak = AES(k2, iv)、逐块 doubling、尾部不满块按**密文窃取**（CTS）处理；密钥两半不可相同（否则 `ERR_OSSL_XTS_DUPLICATED_KEYS`）。
+    - 接入 `aes-{128,192,256}-siv`（无 IV、`ivLength=0`、无 nid）与 `aes-{128,256}-xts`（IV 16、nid 913/914，无 192 变体）；`getCipherInfo` 现在会像 OpenSSL 那样在 nid/ivLength 为 0 时**省略该字段**。
+    - **关键坑**：①XTS 的 tweak doubling 是**小端**方向的 GF 倍乘（进位从末字节流向首字节），与 SIV/GCM 的大端方向相反——最初复用了大端的 `dbl` 导致从第 2 块起全错；②`Buffer.prototype.slice` 在本 runtime 里返回**共享内存的视图**，CTR 计数器自增因此改写了存起来的 auth tag 末字节，必须用 `new Uint8Array(x)` 显式拷贝。
+    - 语义细节：SIV/XTS 都是**单次 update**（二次 update 与不足一块报 `Trying to add data in unsupported state`）；SIV 未 `update` 就 `final` 报鉴权错误，XTS 报 `Unsupported state`；XTS 的 `setAAD`/`getAuthTag`/`setAuthTag` 报 `ERR_CRYPTO_INVALID_STATE`。
+    - 差分：`tools/crypto-siv-xts-probe.cjs` → `test/fixtures/crypto-siv-xts.json`（SIV：128/192/256 密钥、多 AAD、空/16/32/40 字节载荷；XTS：16/20/32/33/48/1000 字节、全块与 CTS、两套 key/iv；全套错误面）——**0 diff**；`test/crypto-siv-xts.test.ts`。
+    - 风险：中高。
 
 - [ ] **M94 · `crypto.Certificate`**
   - Node 已弃用的 `crypto.Certificate` 类（`verifySpkac`/`exportPublicKey`/`exportChallenge`）。
@@ -284,7 +291,7 @@
 - **构建工具**：M5 esbuild WASM · M5b rollup WASM · M5c Vite build · M5d Vite dev server · M5e HMR · M5f CSS 热更 · **M18 Vue 3 SFC 跑起来**
 - **性能/体积**：M32 worker 减重（1259→1028KB） · M41 Buffer slab 池化
 - **语义深度（差分语料）**：M79 http · M80 net · M81 fs
-- **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2 · M90.1 MAC（HMAC + BLAKE2b MAC） · M90.2 KMAC（Keccak/SHA-3/cSHAKE） · M90.3 CMAC/GMAC（AES） · M90.4 BLAKE2s MAC / Poly1305 / SipHash · M90.5 SHA-3/Keccak/SHAKE/keccak-kmac · M90.6 BLAKE2b-512/BLAKE2s-256 · M90.7 SM3/RIPEMD-160 · M90.8 截断变体与复合摘要 · M90.9 getHashes 全表对齐（81/81） · M92.1 DH KeyObject · M92.2 crypto.diffieHellman · M93.1 ChaCha20-Poly1305 · M93.2 DES/3DES · M93.3 AES-CCM · M93.4a Camellia · M93.4b ARIA/SM4 · M93.4c OCB/wrap
+- **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2 · M90.1 MAC（HMAC + BLAKE2b MAC） · M90.2 KMAC（Keccak/SHA-3/cSHAKE） · M90.3 CMAC/GMAC（AES） · M90.4 BLAKE2s MAC / Poly1305 / SipHash · M90.5 SHA-3/Keccak/SHAKE/keccak-kmac · M90.6 BLAKE2b-512/BLAKE2s-256 · M90.7 SM3/RIPEMD-160 · M90.8 截断变体与复合摘要 · M90.9 getHashes 全表对齐（81/81） · M92.1 DH KeyObject · M92.2 crypto.diffieHellman · M93.1 ChaCha20-Poly1305 · M93.2 DES/3DES · M93.3 AES-CCM · M93.4a Camellia · M93.4b ARIA/SM4 · M93.4c OCB/wrap · M93.4d SIV/XTS
 
 ---
 

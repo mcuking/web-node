@@ -244,6 +244,29 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M93.4d AES-SIV 与 AES-XTS
+
+**改了什么**：新增 `src/node-runtime/crypto/siv.ts`（RFC 5297）与 `src/node-runtime/crypto/xts.ts`（IEEE 1619），至此 **M93.4 四个子项全部完成，阶段 A crypto 收尾 22/22 到顶**。
+
+SIV 按 `crypto/modes/siv128.c` 写：密钥取两半（CMAC 半 + CTR 半），`d = CMAC(0^128)` 起手，每段 AAD 做 `d = dbl(d) ^ CMAC(K, aad)`；载荷 S2V 分两种（`len>=16` 用 `S || (S_last ^ d)`，否则 `pad(S) ^ dbl(d)`）；随后 `V = S2V(...)`，把 `V` 的第 31/63 位清掉做 CTR 计数器，密文 = CTR(K_ctr, V, P)，`tag = V`。tag 就是 IV（所以不允许再传 IV，`ivLength=0`）。tag 固定 16 字节。
+
+XTS 按 `crypto/modes/xts128.c` 写：`tweak = AES(k2, iv)`，每块前后 XOR tweak、块间 tweak 做 GF 倍乘；尾部不满块用**密文窃取**（把上一块的密文前 r 字节挪到末块、原末块明文补进去）。密钥两半相等时 OpenSSL 拒绝，报 `ERR_OSSL_XTS_DUPLICATED_KEYS`。
+
+**两个关键坑**：
+
+1. XTS 的 tweak doubling 是**小端**方向的倍乘（进位从末字节流向首字节、归约 0x87 落到首字节），与 SIV/GCM 用的大端 `dbl` **方向相反**。最初直接复用了大端 `dbl`，导致第 0 块正确、从第 1 块起全错——正是差分语料抓出来的。
+2. 本 runtime 的 `Buffer.prototype.slice` 返回**共享内存的视图**（不是拷贝）。SIV 解密时 `counter = tag.slice()` 后用 CTR 自增计数器，结果把存下来的 auth tag 末字节给改了（`…315e` 变成 `…315f`），鉴权莫名其妙失败。改用 `new Uint8Array(x)` 显式拷贝后正常。
+
+接入：`aes-{128,192,256}-siv`（无 IV、`authTagLength` 可省略且只能是 16）与 `aes-{128,256}-xts`（IV 16 字节必填，nid 913/914；无 192 变体）。`getCipherInfo` 现按 OpenSSL 语义：当 nid / ivLength 为 0 时**省略该字段**（SIV 即如此）。SIV/XTS 都是**单次 update**：二次 update、不足一块（XTS <16 字节）报 `Error: Trying to add data in unsupported state`；SIV 未 update 就 final 报鉴权错误，XTS 报 `Error: Unsupported state`；XTS 无鉴权，`setAAD`/`getAuthTag`/`setAuthTag` 报 `ERR_CRYPTO_INVALID_STATE`。
+
+**已知偏离**：`aes-*-siv` 的流式分块（本来也是单次语义，无影响）；`aes-*-wrap-inv` / `des3-wrap` 等仍抛 `NotImplementedError`。
+
+**验证（差分 0 diff）**：`tools/crypto-siv-xts-probe.cjs` 在真 Node 与 web-node 内各跑一遭，逐字段等于 `test/fixtures/crypto-siv-xts.json`。覆盖：SIV 的 128/192/256 密钥、多段 AAD、空/16/32/40 字节载荷与回环；XTS 的 16/20/32/33/48/1000 字节（全块与 CTS）、两套 key/iv 与回环；以及全套错误面（`ERR_CRYPTO_INVALID_AUTH_TAG`、`ERR_CRYPTO_INVALID_IV`、`ERR_CRYPTO_INVALID_KEYLEN`、`ERR_CRYPTO_INVALID_STATE`、`ERR_OSSL_XTS_DUPLICATED_KEYS`、`Unsupported state`、`Trying to add data in unsupported state`）。
+
+**门禁**：`tsc` 干净 · vitest **961 passed / 2 skipped（103 文件）** · build worker **2452.95 kB**。demo 新增 SIV/XTS 示例，输出对齐真 Node。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md` 的 M93.4 拆分顺序。至此阶段 A 全部完成。
+
 ### 2026-09-22 · M93.4c AES-OCB 与 key wrap
 
 **改了什么**：新增 `src/node-runtime/crypto/ocb.ts`（RFC 7253）与 `src/node-runtime/crypto/wrap.ts`（RFC 3394/5649）。

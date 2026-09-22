@@ -1,0 +1,209 @@
+{
+  "info": {
+    "aes-128-siv": {
+      "mode": "siv",
+      "name": "aes-128-siv",
+      "keyLength": 32,
+      "blockSize": 1
+    },
+    "aes-192-siv": {
+      "mode": "siv",
+      "name": "aes-192-siv",
+      "keyLength": 48,
+      "blockSize": 1
+    },
+    "aes-256-siv": {
+      "mode": "siv",
+      "name": "aes-256-siv",
+      "keyLength": 64,
+      "blockSize": 1
+    },
+    "aes-128-xts": {
+      "mode": "xts",
+      "name": "aes-128-xts",
+      "nid": 913,
+      "keyLength": 32,
+      "blockSize": 1,
+      "ivLength": 16
+    },
+    "aes-256-xts": {
+      "mode": "xts",
+      "name": "aes-256-xts",
+      "nid": 914,
+      "keyLength": 64,
+      "blockSize": 1,
+      "ivLength": 16
+    }
+  },
+  "siv": {
+    "a128": "59926f2c5fc8990d671f43||bcddd0ff246cdf8e7cc528577ff2315e|68656c6c6f20776f726c64",
+    "a192": "ec79bf9d53acf7e85ff7d2||709696fecee8a6187257b1a2d3a84b29|68656c6c6f20776f726c64",
+    "a256": "56e38b7df9c45f15ca19cb||2df9b3e84e2aa4dfe5a4f7ca461cc660|68656c6c6f20776f726c64",
+    "noAad": "6c0d9112685f6dafa929ef||389ed9b118503516ea5717d8a8ea824f|68656c6c6f20776f726c64",
+    "empty": "||57d8d40e10431c91ccc9b980cd0e3a9e|",
+    "block16": "6fc24e9d3301e854e52ab699c05bc388||af4cce731a110006b9d77321ed033b7b|07070707070707070707070707070707",
+    "block32": "b872c4786ec63cf5aa76bcbc53fddd7ca4b2a79a7cd4c40090d88e4417abfeb2||5fd0bfa8535eb35cbbf5baaf8af21987|0707070707070707070707070707070707070707070707070707070707070707",
+    "block40": "a6d34351db85ee3a93e9d216a9761b7ec272b28cacda6117a20bb7e9f4fdc60ac9e20459e2410a7b||cab2cd6497eb8b53b430d043878f429e|07070707070707070707070707070707070707070707070707070707070707070707070707070707"
+  },
+  "sivMultiAad": "0502|b654ac0cab297c040dc717981a5834da",
+  "sivErr": {
+    "iv16": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "ivEmptyOk": {
+      "ok": true,
+      "value": "e404|3f9529999cb9a054d937fd2f2d47672f"
+    },
+    "badKeyLen": {
+      "ok": false,
+      "name": "RangeError",
+      "code": "ERR_CRYPTO_INVALID_KEYLEN",
+      "message": "Invalid key length"
+    },
+    "tag12": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_AUTH_TAG",
+      "message": "Invalid authentication tag length: 12"
+    },
+    "defaultTag": {
+      "ok": true,
+      "value": "e404|3f9529999cb9a054d937fd2f2d47672f"
+    },
+    "secondUpdate": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "aadAfterUpdate": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation setAAD"
+    },
+    "getTagEarly": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation getAuthTag"
+    },
+    "finalNoUpdate": {
+      "ok": false,
+      "name": "Error",
+      "message": "Unsupported state or unable to authenticate data"
+    },
+    "badTag": {
+      "ok": false,
+      "name": "Error",
+      "message": "Unsupported state or unable to authenticate data"
+    },
+    "noTag": {
+      "ok": false,
+      "name": "Error",
+      "message": "Unsupported state or unable to authenticate data"
+    },
+    "setTagAfterUpdate": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation setAuthTag"
+    },
+    "setAutoPadding": {
+      "ok": true,
+      "value": "ok"
+    }
+  },
+  "xts": {
+    "a128_32": "655f27cac7e441f50d73370ae254b1a6980b4f3f4e8937c650d69dad71b61555||0707070707070707070707070707070707070707070707070707070707070707",
+    "a128_16": "655f27cac7e441f50d73370ae254b1a6||07070707070707070707070707070707",
+    "a128_20": "759ae4ea831718c0f785585c06c44949655f27ca||0707070707070707070707070707070707070707",
+    "a128_33": "6d37b562ef25126dbb5a3aff96751751220a04f97365d690ef674902e283e5a3f7||070707070707070707070707070707070707070707070707070707070707070707",
+    "a128_48": "bbae1ee0051a16f30aded78451c0b88d6617f7f5a3be445bf788b8bfa6acfaa871fb41abe65dec2d083708e9e1228f4f||090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909",
+    "a256_32": "1fc381502a55cce6dc44055cd938fcf77791dbf436fee9a652635930d8a473b9||0707070707070707070707070707070707070707070707070707070707070707",
+    "a256_20": "d921314c7c957107e33e6ba156b295401fc38150||0707070707070707070707070707070707070707"
+  },
+  "xtsBig": "c654d98c96bead8edb7aa46c70b29bd4728cabaaae798de836e9e995330675a35a757f52b42fe78c6419c7b246071b71fc92386f45079a876edc5317357d007d8a90816348110cf0bf7625761a4cc23e8b13e44b3d523e864d37b695dda2e42353f7adf3bb22ab49656033f15ff57359d770d26a01c81a32414c6da474605932704104437bf18a1fbfb694e6eb6e3a71cad350770fc203bcd964c6e0294ff5e7ff6c69bcd57ca112cde20f1bf20ac92f245f13e8de6e29bbd5479f3e4d5c39cd9bd1afa10fb84498d5cce12dc3661e0d6c5f7cfee8b863a697b5c4667b99638e2a002f21301283b3030996c80d6fc62cf01f1828de7fc75163c7c2f55659991356eef78429dd52b47e72eaa50e69154afc94a59647bff3729af047af813e2ec9a8d1e3e351b3a3214d044fd5cc812329fe5169fc104007e15a7e34d532df834bcca300aeecd0725362444829f5925df8936a8cbe4e06f61b7bdbb864ee835dd551c7e5ce649c7016db0c4d27d756aaab68ff1396c5e3a1f2d860cbd5f8247df749b0f060b614ec48006e9bbbfc6221d2a4f1b7ebea33efbcbcf77bf59d47c507fe5e45d8146dca932be35fb767eff77bc39e792e308e21561102aac7ba34e50905ac67494f1c36cbdd1027a83c1dc9c56622193232f775cc1acc6ba8c786715027bf9a6425041af58176751e48e7c0440408bbc7fea7819565a45c7fcbff26cb7e32f39fe8057b8471633a571e8039126ca00ad1799cc2aae3d269bfb30c20765e5f2e32bd4f14c00edc91544df1cbdf38894986d04e8a4d7408cb902a2cedf9b46c54e3e6ab6fa1bfef45ee599cec6e3ece65a7439560cc42798bd4767860078145720f2c7094c2287c944a697d17e3b815ffadc0477be332225c41dde750f2561d7755e8779df2f4c06ab3bc88625df861169f1085ff60511a6f8363468ede00b0d2bc20a5bf7000c248d3c34721e64b627f3e7af2aba8ff29c6ad93713cf2dc2bc541d07e6a65c07a7715036af9db0aea25522e938b81fe15264e75800c7226d2ba9cbabdc9295e1c6bf4eb1959b46c30e83e225a9a2ad0da3f6cfc163fcd9985310165c478998ac4371d711b6592918b4596acb49ecda7bad12edacbfb614ad11aa83d26a6960a37a6c4e9ebe7d484e84c71d8f2bdb5ac8badcd2367d5e6b0103681f9e29459de38d1a37f661b3a73d059c507563bdf228278b1baaf93649cfc7175fc56f2820f64d5b6693db9949f538ac787e5c1816fe271fe2e05bddc0dd2179b5b763096e2b00c9da04c0a2b8ab7add1e15d16f0fe45e2fdb34d14c1a8afbb7f47961cbc1a8100b99bfd2fb024fa9a588555f2944fa27c599e8b3e7a434e400fcfc96edf9f3eff233c3a9e9c4f1025a707434aa0fb8b5df929395ba9279268dc2a6410ce||000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+  "xtsErr": {
+    "short8": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "empty": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "secondUpdate": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "noIv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "iv8": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "badKeyLen": {
+      "ok": false,
+      "name": "RangeError",
+      "code": "ERR_CRYPTO_INVALID_KEYLEN",
+      "message": "Invalid key length"
+    },
+    "badKeyLen64": {
+      "ok": false,
+      "name": "RangeError",
+      "code": "ERR_CRYPTO_INVALID_KEYLEN",
+      "message": "Invalid key length"
+    },
+    "dupKeys": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_OSSL_XTS_DUPLICATED_KEYS",
+      "message": "error:1C800095:Provider routines::xts duplicated keys"
+    },
+    "dupKeys256": {
+      "ok": false,
+      "name": "RangeError",
+      "code": "ERR_CRYPTO_INVALID_KEYLEN",
+      "message": "Invalid key length"
+    },
+    "finalNoUpdate": {
+      "ok": false,
+      "name": "Error",
+      "message": "Unsupported state"
+    },
+    "getTag": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation getAuthTag"
+    },
+    "setAad": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation setAAD"
+    },
+    "setAutoPadding": {
+      "ok": true,
+      "value": "ok"
+    },
+    "decipherSetTag": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation setAuthTag"
+    }
+  }
+}

@@ -720,6 +720,11 @@ export const cryptoSpec: BuiltinSpec = {
       const invalid = (): never => {
         throw coded('TypeError', 'ERR_CRYPTO_INVALID_IV', 'Invalid initialization vector');
       };
+      if (spec.mode === 'siv') {
+        // SIV derives its own IV from the tag; any supplied IV is an error.
+        if (bytes !== null && bytes.length > 0) invalid();
+        return null;
+      }
       if (spec.ivLength === null) {
         // ECB takes no IV; anything non-empty is a mistake.
         if (bytes !== null && bytes.length > 0) invalid();

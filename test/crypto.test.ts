@@ -327,7 +327,7 @@ describe('crypto: unsupported surface', () => {
     // (RSA/EC/Ed25519, see test/crypto-asym.test.ts) and DH key agreement (see
     // test/crypto-dh-secret.test.ts), but the native-only surface still refuses
     // loudly.
-    expect(() => crypto.createCipheriv('aes-128-siv', 'k', 'iv')).toThrowError(/not implemented/);
+    expect(() => crypto.createCipheriv('aes-128-cbc-cts', 'k', 'iv')).toThrowError(/not implemented/);
     expect(() => crypto.generateKeyPairSync('x25519')).toThrowError(/not implemented/);
   });
 });

@@ -100,8 +100,10 @@ import { AesCcm } from './ccm';
 import { ChaCha20Cipher, ChaCha20Poly1305, isValidTagLength, type SyncCipher } from './chacha20';
 import { DesCipher, DesEde, type DesMode } from './des';
 import { AesOcb } from './ocb';
+import { AesSiv } from './siv';
 import { Sm4 } from './sm4';
 import { AesWrap } from './wrap';
+import { AesXts } from './xts';
 
 export type { SyncCipher };
 
@@ -121,6 +123,8 @@ export type CipherMode =
   | 'ccm'
   | 'ocb'
   | 'wrap'
+  | 'siv'
+  | 'xts'
   | 'chacha20'
   | 'chacha20-poly1305';
 
@@ -294,6 +298,22 @@ const SPECS: CipherSpec[] = [];
       }
     }
   }
+  // AES-SIV (RFC 5297). Two key halves; no IV; the tag is the IV. OpenSSL
+  // reports no nid and no ivLength for SIV.
+  for (const [keyLength, bits] of [
+    [32, 128],
+    [48, 192],
+    [64, 256],
+  ] as Array<[number, number]>) {
+    SPECS.push({ name: `aes-${bits}-siv`, infoName: `aes-${bits}-siv`, mode: 'siv', nid: 0, keyLength, blockSize: 1, ivLength: 0 });
+  }
+  // AES-XTS (IEEE 1619). Two key halves and a 16-byte IV; no 192-bit variant.
+  for (const [keyLength, bits, nid] of [
+    [32, 128, 913],
+    [64, 256, 914],
+  ] as Array<[number, number, number]>) {
+    SPECS.push({ name: `aes-${bits}-xts`, infoName: `aes-${bits}-xts`, mode: 'xts', nid, keyLength, blockSize: 1, ivLength: 16 });
+  }
 }
 
 const LOOKUP = new Map<string, CipherSpec>(SPECS.map((s) => [s.name, s]));
@@ -348,7 +368,7 @@ export function resolveCipher(name: unknown): CipherSpec | undefined {
 export interface CipherInfo {
   mode: string;
   name: string;
-  nid: number;
+  nid?: number;
   keyLength: number;
   blockSize?: number;
   ivLength?: number;
@@ -368,13 +388,15 @@ export function getCipherInfo(nameOrNid: string | number): CipherInfo | undefine
   const info: CipherInfo = {
     mode: spec.infoMode ?? spec.mode,
     name: spec.infoName,
-    nid: spec.nid,
     keyLength: spec.keyLength,
   };
+  // OpenSSL only reports a NID when it has one (SIV has none).
+  if (spec.nid !== 0) info.nid = spec.nid;
   // OpenSSL reports no `blockSize` for the stream-mode ciphers (ChaCha20 and
   // its AEAD); the block modes (ECB/CBC) and the AES stream modes do have one.
   if (spec.infoMode !== 'stream') info.blockSize = spec.blockSize;
-  if (spec.ivLength !== null) info.ivLength = spec.ivLength;
+  // A zero IV length means "no IV" (ECB, SIV); OpenSSL omits it.
+  if (spec.ivLength !== null && spec.ivLength !== 0) info.ivLength = spec.ivLength;
   return info;
 }
 
@@ -403,6 +425,8 @@ export function createCipher(
   if (spec.mode === 'ccm') return new AesCcm(key, iv as Uint8Array, encrypt, authTagLength, plaintextLength);
   if (spec.mode === 'ocb') return new AesOcb(key, iv as Uint8Array, encrypt, authTagLength);
   if (spec.mode === 'wrap') return new AesWrap(key, iv as Uint8Array, encrypt, spec.name.includes('-pad') ? 'wrap-pad' : 'wrap');
+  if (spec.mode === 'siv') return new AesSiv(key, encrypt);
+  if (spec.mode === 'xts') return new AesXts(key, iv as Uint8Array, encrypt);
   if (spec.family === 'des') return new DesCipher(spec.mode as DesMode, key, iv, encrypt);
   if (spec.family === 'camellia') return new Cipheriv(spec, key, iv, encrypt, authTagLength, new Camellia(key));
   if (spec.family === 'aria') return new Cipheriv(spec, key, iv, encrypt, authTagLength, new Aria(key));

@@ -700,12 +700,13 @@ console.log('gcm tag     : ' + gcm.getAuthTag().toString('hex'));
 console.log('gcm ciphers : ' + crypto.getCiphers().filter(function (n) { return n.indexOf('aes-') === 0; }).length + ' aes entries');
 console.log('');
 
-// --- ChaCha20, DES/3DES, CCM, Camellia, ARIA, SM4, OCB and key wrap (milestone 93) ---
+// --- ChaCha20, DES/3DES, CCM, Camellia, ARIA, SM4, OCB, wrap, SIV and XTS (milestone 93) ---
 // Beyond AES, the runtime also carries ChaCha20-Poly1305 (RFC 8439), the
 // DES-EDE / DES-EDE3 family, AES-CCM (SP 800-38C), Camellia (RFC 3713),
-// ARIA (RFC 5794), SM4 (GB/T 32907), AES-OCB (RFC 7253) and AES key wrap
-// (RFC 3394/5649), all matching OpenSSL byte for byte.
-console.log('-- ChaCha20 / DES / CCM / Camellia / ARIA / SM4 / OCB / wrap (milestone 93) --');
+// ARIA (RFC 5794), SM4 (GB/T 32907), AES-OCB (RFC 7253), AES key wrap
+// (RFC 3394/5649), AES-SIV (RFC 5297) and AES-XTS (IEEE 1619), all matching
+// OpenSSL byte for byte.
+console.log('-- ChaCha20 / DES / CCM / Camellia / ARIA / SM4 / OCB / wrap / SIV / XTS (milestone 93) --');
 const chaKey = Buffer.alloc(32, 1);
 const chaNonce = Buffer.alloc(12, 2);
 const chacha = crypto.createCipheriv('chacha20-poly1305', chaKey, chaNonce, { authTagLength: 16 });
@@ -744,6 +745,13 @@ console.log('ocb tag     : ' + ocb.getAuthTag().toString('hex'));
 const kek = Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex');
 const wrapped = crypto.createCipheriv('aes-128-wrap', kek, Buffer.from('a6a6a6a6a6a6a6a6', 'hex'));
 console.log('wrap ct     : ' + Buffer.concat([wrapped.update(camKey), wrapped.final()]).toString('hex'));
+const sivKey = Buffer.concat([camKey, Buffer.from('00112233445566778899aabbccddeeff', 'hex')]);
+const siv = crypto.createCipheriv('aes-128-siv', sivKey, null, { authTagLength: 16 });
+siv.setAAD(Buffer.from('header-v1'));
+console.log('siv ct      : ' + Buffer.concat([siv.update('hello world'), siv.final()]).toString('hex'));
+console.log('siv tag     : ' + siv.getAuthTag().toString('hex'));
+const xts = crypto.createCipheriv('aes-128-xts', sivKey, Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex'));
+console.log('xts ct      : ' + Buffer.concat([xts.update(Buffer.alloc(20, 7)), xts.final()]).toString('hex'));
 console.log('');
 
 // --- url (milestone 53) ---

@@ -311,5 +311,6 @@ export function isValidTagLength(mode: string, length: number): boolean {
   if (mode === 'chacha20-poly1305') return length >= 1 && length <= 16;
   if (mode === 'ccm') return [4, 6, 8, 10, 12, 14, 16].includes(length);
   if (mode === 'ocb') return length >= 0 && length <= 16;
+  if (mode === 'siv') return length === 16;
   return true;
 }
