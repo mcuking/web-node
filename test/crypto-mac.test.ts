@@ -73,6 +73,23 @@ describe('crypto.createMac unit surface', () => {
     expect(b2.final('hex')).toBe('5abfb747843a3d8e10269ad462e6d2db');
   });
 
+  it('computes KMAC128 / KMAC256 (NIST SP 800-185 sample #1 / #4)', () => {
+    const crypto = boot();
+    const fromHex = (h: string) => Uint8Array.from(h.match(/../g)!.map((b) => parseInt(b, 16)));
+    const k = fromHex('404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f');
+    const x = Uint8Array.from([0, 1, 2, 3]);
+    const s = new TextEncoder().encode('My Tagged Application');
+    expect(crypto.createMac('kmac128', k, { customization: s, outputLength: 32 }).update(x).final('hex')).toBe(
+      '3b1fba963cd8b0b59e8c1a6d71888b7143651af8ba0a7070c0979e2811324aa5',
+    );
+    expect(crypto.createMac('kmac256', k, { customization: s, outputLength: 64 }).update(x).final('hex')).toBe(
+      '20c570c31346f703c9ac36c61c03cb64c3970d0cfc787e9b79599d273a68d2f7f69d4cc3de9d104a351689f27cf6f5951f0103f33f4f24871024d9c27773a8dd',
+    );
+    // Defaults: 32 bytes for KMAC128, 64 for KMAC256.
+    expect(crypto.createMac('kmac128', new Uint8Array(32).fill(1)).update('data').final().length).toBe(32);
+    expect(crypto.createMac('kmac256', new Uint8Array(32).fill(1)).update('data').final().length).toBe(64);
+  });
+
   it('raises NotImplementedError for the providers still pending', () => {
     const crypto = boot();
     expect(() => crypto.createMac('poly1305', new Uint8Array(32).fill(1))).toThrowError(/not implemented/i);

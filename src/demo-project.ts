@@ -980,6 +980,9 @@ console.log('hmac sha256         :', hmacTag.toString('hex'));
 const b2mac = macCrypto.createMac('blake2bmac', Buffer.alloc(64, 1), { outputLength: 16 });
 b2mac.update('data');
 console.log('blake2bmac (16B)    :', b2mac.final('hex'));
+const kmacTag = macCrypto.createMac('kmac256', Buffer.alloc(32, 7), { customization: Buffer.from('demo'), outputLength: 32 });
+kmacTag.update('data');
+console.log('kmac256 (32B)       :', kmacTag.final('hex'));
 console.log('');
 
 // --- http server (milestone 3: virtual TCP) ---

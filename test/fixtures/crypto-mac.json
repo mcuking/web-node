@@ -35,6 +35,37 @@
     "key64": "206e0caf87ad74d1878baaa5ffc8bbbcc587634d01487fac14c04ba1cb7d467d6f97d47e455997e85ed0d80616f610478d5c96ef928a8d43a316e60e42975fbe",
     "multi": "6620c8f395c8a99af17be494a46e3d58ff24ddab78f7b3133cdfca41ff059de7810af1bb130ccfa27045b63c2987ac88"
   },
+  "kmac": {
+    "128-default": "a3a9ba84076e6ad8539519ae5f200970442d9369f9e114a7f025489f19b3052d",
+    "256-default": "f312455a56399b60cc92ca043061405ee2e5f336c6ff31bb305361b398cb3f7a86ca63ce33e4b608ec0b03af68b72e29fc276e519d126c5675ce92f9e6de6a33",
+    "128-out16": "4c0f5841081c644884cd9265b8270416",
+    "128-out64": "6e9624bd6174ba5ddc960d4947de4b598183112150579e5e044da1a57232ff423af7449cd9b81757a22b648054831d033f68d3ef2d3f9cda1c43d01f0ca73099",
+    "256-out32": "2a6950a81c6a790bf628b3f2c81a6ade64dffa7313b16951f1d81f1e9fc17be2",
+    "128-custom": "371356f95334c96674280bd8a9273293a5ee25d5f5653d44d7dee478af1c27cb",
+    "128-empty-msg": "7159d6075c5b047a195639ff40805852bf2eecbdef8c31178d5056ad88960f62",
+    "128-multi": "c22f28e2f154f521048a3891634a8c65a803609c531c5886eb57630f8716f6d7",
+    "sample#1": "3b1fba963cd8b0b59e8c1a6d71888b7143651af8ba0a7070c0979e2811324aa5",
+    "sample#2": "291a8bfc31ff8cccffaf7af281d9cbf274a674de4c3b73ccfa65f438c2e7bd8e",
+    "sample#4": "20c570c31346f703c9ac36c61c03cb64c3970d0cfc787e9b79599d273a68d2f7f69d4cc3de9d104a351689f27cf6f5951f0103f33f4f24871024d9c27773a8dd",
+    "sample#5": "f108b3ec791a698b55cd95862304a991620c918be373276eb67f23057fd6aaab12edba7cb4d88f12f1fac6481ff8df356b50edac38626242903113e8fa1ae673",
+    "sample#6": "232e53c4407e589b6dd2485f827d0c8eb55d26ba7602ccf528704f08ed18fc8b551869a0fc9078de0b2e23fcc2717537af45a443afe19981c49f3c3f4d5c14cb"
+  },
+  "kmacKeyLengths": {
+    "1": "ERR_OSSL_INVALID_KEY_LENGTH",
+    "2": "ERR_OSSL_INVALID_KEY_LENGTH",
+    "3": "ERR_OSSL_INVALID_KEY_LENGTH",
+    "4": "10f2c1b0fa4bc93ac641487d2eee250c5347691b3a612e0c50c94cea6f2a9905",
+    "8": "6cf1321e7ebaa3a3e4f6b02f2bf3e70b961962deb1b367f2af7dadd953d88424",
+    "12": "f64708301ccbe92eb79ded2a92e339921d3c8876d8a53f6caea792534a4350bf",
+    "15": "5260c456288d6e96e65496fd539319fa8d94615535b5393badb418d66939b439",
+    "16": "1283ea98e42f0be7f0191e652ed24e80250e5397ac03509d5efb0e22247f3994",
+    "17": "3a317a9ef3af34057b0c09608724ddfc7942a404a0706976acd0d2e61bf5296c",
+    "20": "7bdf0b9597bdfbe6b19feb4bf4d9d513e8b1685e947ee1543c8b6d07d8cc07a9",
+    "31": "e784093adc7297b3ae96ae07342b58a4f5adce2075c4ba1ecb9817395e94ac7e",
+    "32": "37a044ddeb62f0171d91d2b4172fb5db1ff16b08ee6edaf1aab115c5f8698a42",
+    "33": "a2c2cc6b9cc73eb1509a9e5fe2b372b892e79552d830d37c0d9e5b31c214dc14",
+    "64": "ac17c817ee6ee5261ef847170a404fa8dab93f5694b5e1b186ca6e8ef7fd0828"
+  },
   "encodings": {
     "finalHex": "e7ea21c3bcb63a4da3ad78503168d36bdca0be622382ea60a108fad4e4966679",
     "finalBase64": "5+ohw7y2Ok2jrXhQMWjTa9ygvmIjgupgoQj61OSWZnk=",
@@ -155,6 +186,26 @@
       "name": "Error",
       "code": "ERR_OSSL_NOT_XOF_OR_INVALID_LENGTH",
       "message": "error:1C800071:Provider routines::not xof or invalid length"
+    },
+    "kmacKeyEmpty": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_KEY_LENGTH",
+      "message": "error:1C800069:Provider routines::invalid key length"
+    },
+    "kmacDigestOpt": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.digest' is not supported by MAC kmac128"
+    },
+    "kmacCustomBad": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options.customization\" property must be an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type string ('x')"
+    },
+    "kmacOutNegative": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"options.outputLength\" is out of range. It must be >= 0 && <= 4294967295. Received -1"
     },
     "cmacNoCipher": {
       "name": "TypeError",

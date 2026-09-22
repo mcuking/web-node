@@ -244,6 +244,25 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M90.2 KMAC128 / KMAC256（Keccak / SHA-3 / cSHAKE 落地）
+
+**改了什么**：
+- 新建 `src/node-runtime/crypto/keccak.ts`：单个 Keccak-f[1600] 置换 + sponge，向上提供 **SHA3-224/256/384/512**、**SHAKE128/256**，以及 NIST SP 800-185 的 **cSHAKE128/256**（`left_encode`/`right_encode`/`encode_string`/`bytepad`）与 **KMAC128/256**。
+- `builtins/crypto.ts` 的 `Mac` 接入 `kmac-128`/`kmac-256`（新增 `#customization`）：默认输出 32/64 字节、`customization` 映射到 `S`、key 长度 < 4 → `ERR_OSSL_INVALID_KEY_LENGTH`、`options.digest` 不支持 → `The property 'options.digest' is not supported by MAC <name>`。
+
+**踩坑（重要）**：KMAC 的尾部是 `right_encode(L)`，L 是**输出比特长度**（KMACXOF 才用 `right_encode(0)`）。第一版写成 0，导致 SP 800-185 sample#1 完全对不上（`31a4…` vs `3b1f…`）；改回 `right_encode(outputLen*8)` 后逐字节对齐 OpenSSL。
+
+**关键语义**：OpenSSL 对 KMAC key 的**最小长度是 4 字节**（1/2/3 报 `ERR_OSSL_INVALID_KEY_LENGTH`，4 起正常）；`outputLength: 0` 合法（输出空）。
+
+**验证**：
+- 差分语料 `test/fixtures/crypto-mac.json` 已扩 KMAC：sample#1/#2/#4/#5/#6、默认/自定义长度、customization、空消息、key 长度扫描（1–64）、错误面 32 项 —— `test/crypto-mac.test.ts` 内跑同程序，**0 diff**。
+- 新增 `test/keccak.test.ts`：FIPS 202 的 SHA3-224/256/384/512（空串+“abc”）、SHAKE128/256、SP 800-185 cSHAKE128 sample#1、KMAC sample#1/#4 官方向量 **全中**。
+- 门禁：`tsc` 干净 · vitest **940 passed / 2 skipped（92 文件）** · build worker **2387.44 kB** · demo 新增 KMAC 演示段跑通。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md`。KMAC 依赖的 Keccak/SHA-3/cSHAKE 一并落地，**为 M90.5 补 `getHashes` 铺好了 SHA-3 的一半**（只剩接 `DEFS` + SM3/RIPEMD-160/BLAKE2b-512/BLAKE2s-256）。
+
+**涉及文件**：`src/node-runtime/crypto/keccak.ts`（新增）、`src/node-runtime/builtins/crypto.ts`、`src/demo-project.ts`、`test/keccak.test.ts`（新增）、`test/crypto-mac.test.ts`、`tools/crypto-mac-probe.cjs`、`test/fixtures/crypto-mac.json`、`docs/ROADMAP.md`。
+
 ### 2026-09-22 · M90.1 MAC 前端 + HMAC / BLAKE2b MAC（差分语料驱动）
 
 **改了什么**：`crypto.createMac` / `crypto.getMacs` 从响亮抛错的桩换成真实实现（第一阶段）。

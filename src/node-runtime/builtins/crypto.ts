@@ -60,6 +60,7 @@ import {
 } from '../crypto/primes';
 import { ARGON2_D, ARGON2_I, ARGON2_ID, argon2 as computeArgon2, type Argon2Params } from '../crypto/argon2';
 import { blake2b } from '../crypto/blake2b';
+import { kmac } from '../crypto/keccak';
 
 /**
  * `crypto` — the subset tooling actually calls in a browser tab.
@@ -1312,6 +1313,7 @@ export const cryptoSpec: BuiltinSpec = {
       #algorithm: MacAlgorithm;
       #key: Uint8Array;
       #digest: HashAlgo | undefined;
+      #customization: Uint8Array = new Uint8Array(0);
       #outputLength: number;
       #chunks: Uint8Array[] = [];
       #total = 0;
@@ -1329,7 +1331,7 @@ export const cryptoSpec: BuiltinSpec = {
           if (opts.digest !== undefined) digest = validateMacName(opts.digest, 'options.digest', 'property');
           if (opts.cipher !== undefined) cipher = validateMacName(opts.cipher, 'options.cipher', 'property');
           if (opts.iv !== undefined) normalizeMacBytes(opts.iv, 'options.iv');
-          if (opts.customization !== undefined) normalizeMacBytes(opts.customization, 'options.customization');
+          if (opts.customization !== undefined) this.#customization = normalizeMacBytes(opts.customization, 'options.customization');
           if (opts.salt !== undefined) normalizeMacBytes(opts.salt, 'options.salt');
           if (opts.outputLength !== undefined) {
             outputLength = validateIntegerBounds(opts.outputLength, 'options.outputLength', 0, MAX_UINT32);
@@ -1357,7 +1359,7 @@ export const cryptoSpec: BuiltinSpec = {
           this.#digest = algo;
         } else if (canonical === 'blake2bmac') {
           if (digest !== undefined) {
-            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.digest' is not supported by MAC blake2bmac");
+            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The property 'options.digest' is not supported by MAC ${name}`);
           }
           if (keyBytes.length < 1 || keyBytes.length > 64) {
             throw coded('Error', 'ERR_OSSL_INVALID_KEY_LENGTH', 'error:1C800069:Provider routines::invalid key length');
@@ -1367,6 +1369,14 @@ export const cryptoSpec: BuiltinSpec = {
             throw coded('Error', 'ERR_OSSL_NOT_XOF_OR_INVALID_LENGTH', 'error:1C800071:Provider routines::not xof or invalid length');
           }
           this.#outputLength = outLen;
+        } else if (canonical === 'kmac-128' || canonical === 'kmac-256') {
+          if (digest !== undefined) {
+            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The property 'options.digest' is not supported by MAC ${name}`);
+          }
+          if (keyBytes.length < 4) {
+            throw coded('Error', 'ERR_OSSL_INVALID_KEY_LENGTH', 'error:1C800069:Provider routines::invalid key length');
+          }
+          this.#outputLength = outputLength ?? (canonical === 'kmac-128' ? 32 : 64);
         } else if (canonical === 'cmac') {
           if (cipher === undefined) {
             throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.cipher' is required for CMAC");
@@ -1386,6 +1396,10 @@ export const cryptoSpec: BuiltinSpec = {
         const data = concatBytes(this.#chunks, this.#total);
         if (this.#algorithm === 'blake2bmac') {
           return blake2b(data, this.#outputLength, this.#key);
+        }
+        if (this.#algorithm === 'kmac-128' || this.#algorithm === 'kmac-256') {
+          const bits = this.#algorithm === 'kmac-128' ? 128 : 256;
+          return kmac(bits, this.#key, data, this.#outputLength, this.#customization);
         }
         return hmac(this.#digest!, this.#key, data);
       }
