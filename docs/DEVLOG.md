@@ -252,7 +252,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 **已知偏离/取舍**：`issuerCertificate` 恒 `undefined`（不回溯签发者，与 Node 未解析时一致）；链验证只做签名数学、不复刻 OpenSSL 的 CA/用途策略。
 
-**验证**：新差分语料 `tools/x509-probe.cjs` → `test/fixtures/x509.json`（自签 leaf/CA 证书，含 PEM/DER 两种输入）逐字段 **0 diff**。门禁全绿：tsc 干净 · vitest **911 通过 / 2 预存 skip（88 文件）** · build worker **2364.15KB**。
+**验证**：新差分语料 `tools/x509-probe.cjs` → `test/fixtures/x509.json`（自签 leaf/CA 证书，含 PEM/DER 两种输入）逐字段 **0 diff**。门禁全绿：tsc 干净 · vitest **911 通过 / 2 预存 skip（88 文件）** · build worker **2364.15KB**。浏览器端到端：demo 新增 milestone 87 段（内嵌自签 leaf 证书），实测打印 `subject`（多 RDN 行）/`serialNumber`/SHA-256 指纹/SAN/有效期与 `checkHost` 通配匹配；**顺带修掉该段一处 demo 转义 bug**——`[ … ].join('\n')` 里的 `\n` 会被 demo-project 的外层模板串提前解码成真换行，生成的 `/project/index.js` 里单引号字符串因此断裂、编译报 `Invalid or unexpected token`（应写 `'\\n'`），修复后页内 Run 正常。（线上 worker = 本地 `runtime.worker-CWuHksWY.js`，2364256 字节，sha `edabf13885454f28`。）
 
 ### 2026-09-22 · M86 对称密钥生成 + FIPS 开关（差分语料驱动）
 
