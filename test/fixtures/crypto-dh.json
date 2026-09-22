@@ -1,0 +1,213 @@
+{
+  "group_modp1": {
+    "primeLen": 96,
+    "genHex": "02",
+    "genIsBuffer": true,
+    "primeIsBuffer": true,
+    "verifyError": 0,
+    "isDH": false,
+    "ctor": "DiffieHellmanGroup",
+    "privLen": 96,
+    "privIsBuffer": true,
+    "pubIsBuffer": true,
+    "pubLenOk": true
+  },
+  "group_modp2": {
+    "primeLen": 128,
+    "genHex": "02",
+    "genIsBuffer": true,
+    "primeIsBuffer": true,
+    "verifyError": 0,
+    "isDH": false,
+    "ctor": "DiffieHellmanGroup",
+    "privLen": 128,
+    "privIsBuffer": true,
+    "pubIsBuffer": true,
+    "pubLenOk": true
+  },
+  "group_modp5": {
+    "primeLen": 192,
+    "genHex": "02",
+    "genIsBuffer": true,
+    "primeIsBuffer": true,
+    "verifyError": 0,
+    "isDH": false,
+    "ctor": "DiffieHellmanGroup",
+    "privLen": 25,
+    "privIsBuffer": true,
+    "pubIsBuffer": true,
+    "pubLenOk": true
+  },
+  "group_modp14": {
+    "primeLen": 256,
+    "genHex": "02",
+    "genIsBuffer": true,
+    "primeIsBuffer": true,
+    "verifyError": 0,
+    "isDH": false,
+    "ctor": "DiffieHellmanGroup",
+    "privLen": 29,
+    "privIsBuffer": true,
+    "pubIsBuffer": true,
+    "pubLenOk": true
+  },
+  "group_modp15": {
+    "primeLen": 384,
+    "genHex": "02",
+    "genIsBuffer": true,
+    "primeIsBuffer": true,
+    "verifyError": 0,
+    "isDH": false,
+    "ctor": "DiffieHellmanGroup",
+    "privLen": 35,
+    "privIsBuffer": true,
+    "pubIsBuffer": true,
+    "pubLenOk": true
+  },
+  "group_modp16": {
+    "primeLen": 512,
+    "genHex": "02",
+    "genIsBuffer": true,
+    "primeIsBuffer": true,
+    "verifyError": 0,
+    "isDH": false,
+    "ctor": "DiffieHellmanGroup",
+    "privLen": 41,
+    "privIsBuffer": true,
+    "pubIsBuffer": true,
+    "pubLenOk": true
+  },
+  "group_modp17": {
+    "primeLen": 768,
+    "genHex": "02",
+    "genIsBuffer": true,
+    "primeIsBuffer": true,
+    "verifyError": 0,
+    "isDH": false,
+    "ctor": "DiffieHellmanGroup",
+    "privLen": 47,
+    "privIsBuffer": true,
+    "pubIsBuffer": true,
+    "pubLenOk": true
+  },
+  "group_modp18": {
+    "primeLen": 1024,
+    "genHex": "02",
+    "genIsBuffer": true,
+    "primeIsBuffer": true,
+    "verifyError": 0,
+    "isDH": false,
+    "ctor": "DiffieHellmanGroup",
+    "privLen": 50,
+    "privIsBuffer": true,
+    "pubIsBuffer": true,
+    "pubLenOk": true
+  },
+  "detAPub": "4b290394fee81df64ca1127c8320be0f01cb86c5ea02d230b9db4e4a69720d2f4163cdfdfd19ae736b2c0fb5a9bc12a7f7fd53c3608e7a8005b2437b88438946a311da7fe4dc5180ab46987521811ee20d3073f04ffc8b40827b75b57f285a31",
+  "detAPubMatchesExp": true,
+  "detAPriv": "1111111111111111111111111111111111111111111111111111111111111111",
+  "detBpub": "f14a5fad8404f667ba93007efae585e4b88c21a2d80aff5f8f62e695730743057d277b8c0be768b70d2974e06ec807b67775d56fbc4b564b05a32aa1dd1d58633e5adc199acf0ce3da74f9134113670abf08b8e102716171c953b51c92be1266",
+  "detShared": "1dec91bb9759f512f22cdcb7d5fdad468a1cdd3600ee9787a4f6774ad316b85e4a3dc679c8b6dc02e490bdddbffdc84c39c6b178263c6285cf0646d4d3e6b1e3d5a2e6c3154007f7e42e7b799bdaf51020fb4316e8e51e2b1037bd1788d1433e",
+  "detSharedMatchesExp": true,
+  "detSymmetric": true,
+  "detSharedLen": 96,
+  "detSharedIsBuffer": true,
+  "detPrimeHex": "ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a63a3620ffffffffffffffff",
+  "detGenHex": "02",
+  "detVerifyError": 0,
+  "overloadPub": "4b290394fee81df64ca1127c8320be0f01cb86c5ea02d230b9db4e4a69720d2f4163cdfdfd19ae736b2c0fb5a9bc12a7f7fd53c3608e7a8005b2437b88438946a311da7fe4dc5180ab46987521811ee20d3073f04ffc8b40827b75b57f285a31",
+  "overloadPrimeLen": 96,
+  "classPub": "4b290394fee81df64ca1127c8320be0f01cb86c5ea02d230b9db4e4a69720d2f4163cdfdfd19ae736b2c0fb5a9bc12a7f7fd53c3608e7a8005b2437b88438946a311da7fe4dc5180ab46987521811ee20d3073f04ffc8b40827b75b57f285a31",
+  "classPrivLen": 32,
+  "lenForm": {
+    "primeLen": 64,
+    "privLen": 64,
+    "genHex": "02"
+  },
+  "strGenHex": "02",
+  "dhProto": [
+    "computeSecret",
+    "constructor",
+    "generateKeys",
+    "getGenerator",
+    "getPrime",
+    "getPrivateKey",
+    "getPublicKey",
+    "setPrivateKey",
+    "setPublicKey"
+  ],
+  "dhgProto": [
+    "computeSecret",
+    "constructor",
+    "generateKeys",
+    "getGenerator",
+    "getPrime",
+    "getPrivateKey",
+    "getPublicKey"
+  ],
+  "dhLength": 4,
+  "dhgLength": 1,
+  "createDHLength": 4,
+  "getDHLength": 1,
+  "errUnknownGroup": {
+    "ctor": "Error",
+    "code": "ERR_CRYPTO_UNKNOWN_DH_GROUP",
+    "message": "Unknown DH group"
+  },
+  "errGroupCtorUnknown": {
+    "ctor": "Error",
+    "code": "ERR_CRYPTO_UNKNOWN_DH_GROUP",
+    "message": "Unknown DH group"
+  },
+  "errNoArgs": {
+    "ctor": "TypeError",
+    "code": "ERR_INVALID_ARG_TYPE",
+    "message": "The \"sizeOrKey\" argument must be one of type number or string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received undefined"
+  },
+  "errTooSmall": {
+    "ctor": "TypeError",
+    "code": "ERR_INVALID_ARG_VALUE",
+    "message": "Invalid DH parameters"
+  },
+  "errNoPrivate": {
+    "ctor": "Error",
+    "code": "ERR_CRYPTO_INVALID_STATE",
+    "message": "No private key - did you forget to generate one?"
+  },
+  "errNoPublic": {
+    "ctor": "Error",
+    "code": "ERR_CRYPTO_INVALID_STATE",
+    "message": "No public key - did you forget to generate one?"
+  },
+  "errSetPrivThenPub": {
+    "ctor": "Error",
+    "code": "ERR_CRYPTO_INVALID_STATE",
+    "message": "No public key - did you forget to generate one?"
+  },
+  "errNoSecret": {
+    "ctor": "Error",
+    "code": "ERR_CRYPTO_OPERATION_FAILED",
+    "message": "Failed to compute shared secret"
+  },
+  "errBadGen": {
+    "ctor": "Error",
+    "code": "ERR_OSSL_DH_BAD_GENERATOR",
+    "message": "error:02800065:Diffie-Hellman routines::bad generator"
+  },
+  "errNewNoArgs": {
+    "ctor": "TypeError",
+    "code": "ERR_INVALID_ARG_TYPE",
+    "message": "The \"sizeOrKey\" argument must be one of type number or string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received undefined"
+  },
+  "errPeerZero": {
+    "ctor": "RangeError",
+    "code": "ERR_CRYPTO_INVALID_KEYLEN",
+    "message": "Supplied key is too small"
+  },
+  "errPeerFf": {
+    "ctor": "RangeError",
+    "code": "ERR_CRYPTO_INVALID_KEYLEN",
+    "message": "Supplied key is too large"
+  },
+  "peerOneLen": 256
+}

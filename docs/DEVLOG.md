@@ -242,6 +242,23 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M85 Diffie-Hellman（MODP 组 + 显式素数，差分语料驱动）
+
+**实现**（`src/node-runtime/crypto/dh.ts`、`src/node-runtime/crypto/modp.ts`）：`createDiffieHellman`（两种重载）、`getDiffieHellman`/`createDiffieHellmanGroup`（Node 中同一函数对象）、`DiffieHellman`、`DiffieHellmanGroup`（纯 JS 大数模幂）。
+
+**语义对齐（差分探测抓出的细节）**：
+- 私钥大小取决于 OpenSSL 走的路径：**具名组**用推荐指数位并用 `TOP_ONE`（字节长度固定：modp5→25、modp14→29、modp15→35、modp16→41、modp17→47、modp18→50），**等于标准组的显式素数**同样用推荐位但 `TOP_ANY`（长度可变，如 modp14 28/29），**其余**从 `[2, p-2]` 均匀取（modp1/modp2 因此是整长 96/128）。
+- `getPrime`/`getGenerator`/`getPublicKey`/`getPrivateKey` 返回**最短**大端字节；**共享密钥补齐到素数长度**。
+- `setPrivateKey` **只存私钥**（不会推导公钥，这一点与 ECDH 不同）；`setPublicKey` 同理。
+- `computeSecret` 先校验对端：`<= 1` → “Supplied key is too small”、`>= p-1` → “too large”（均 `ERR_CRYPTO_INVALID_KEYLEN`，`RangeError`）。
+- 两个类不是继承关系（`group instanceof crypto.DiffieHellman === false`），且 `DiffieHellmanGroup` **没有** `setPublicKey`/`setPrivateKey`；`verifyError` 为实例自身不可写属性。
+
+**顺带修复**：之前 ECDH/DH 方法返回裸 `Uint8Array`，而 Node 返回 `Buffer`。新增 `src/node-runtime/crypto/byte-out.ts` 的 `bufferedClass`（**用 `Proxy` 而非子类**，以保持 `prototype` 与 `instanceof` 与 Node 一致），由 builtin 层注入运行时 `Buffer` 工厂；ECDH 的 `convertKey` 静态方法也已返回 `Buffer`。
+
+**验证**：新差分语料 `tools/crypto-dh-probe.cjs` → `test/fixtures/crypto-dh.json`（8 个组、显式素数固定向量、原型/arity/错误形状）逐字段 0 diff；crypto-enc 语料增补 Buffer 断言。门禁全绿：tsc 干净 · vitest **898 通过 / 2 预存 skip（86 文件）** · build worker **2344.68KB**。
+
+**已知偏离**：`crypto.diffieHellman({ privateKey, publicKey })`（基于 DH KeyObject 的派生）仍未实现，继续响亮抛错。
+
 ### 2026-09-22 · M84 非对称加解密 + ECDH（差分语料驱动）
 
 **RSA 加解密**（`src/node-runtime/crypto/asym.ts`）：

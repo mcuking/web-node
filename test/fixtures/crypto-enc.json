@@ -24,5 +24,8 @@
   "convertKeyCompressedMatches": true,
   "convertKeyUncompressed": "04fd715b40f35d8f8376224a1c09f8e1ef7d2ba6b379ba4e56b9584571539204c59109ba5e5cf03fe2e324fbc6f680006ff42ed99499aca26474f1b6215bf91e8b",
   "convertKeyRoundtrip": true,
+  "ecdhPubIsBuffer": true,
+  "ecdhSecretIsBuffer": true,
+  "convertKeyIsBuffer": true,
   "badCurve": "throws"
 }

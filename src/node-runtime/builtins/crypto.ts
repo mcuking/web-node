@@ -45,7 +45,12 @@ import {
   type GenerateKeyPairOptions,
   type SignAlgorithm,
 } from '../crypto/asym';
-import { ECDH, createECDH as asymCreateECDH } from '../crypto/ecdh';
+import { ECDH as RawECDH } from '../crypto/ecdh';
+import {
+  DiffieHellman as RawDiffieHellman,
+  DiffieHellmanGroup as RawDiffieHellmanGroup,
+} from '../crypto/dh';
+import { bufferedClass } from '../crypto/byte-out';
 
 /**
  * `crypto` — the subset tooling actually calls in a browser tab.
@@ -848,9 +853,6 @@ export const cryptoSpec: BuiltinSpec = {
     const unsupportedApis = {
       generateKey: unsupportedApi('generateKey'),
       generateKeySync: unsupportedApi('generateKeySync'),
-      createDiffieHellman: unsupportedApi('createDiffieHellman'),
-      getDiffieHellman: unsupportedApi('getDiffieHellman'),
-      createDiffieHellmanGroup: unsupportedApi('createDiffieHellmanGroup'),
       diffieHellman: unsupportedApi('diffieHellman'),
       generatePrime: unsupportedApi('generatePrime'),
       generatePrimeSync: unsupportedApi('generatePrimeSync'),
@@ -912,7 +914,7 @@ export const cryptoSpec: BuiltinSpec = {
       asBuffer(asymPrivateEncrypt(key, toBytes(buffer)));
     const publicDecrypt = (key: unknown, buffer: unknown): Uint8Array =>
       asBuffer(asymPublicDecrypt(key, toBytes(buffer)));
-    const createECDH = (curve: unknown): ECDH => asymCreateECDH(curve);
+    const createECDH = (curve: unknown): InstanceType<typeof ECDH> => new ECDH(curve);
 
     // Asymmetric-key / engine / X.509 classes. Node exposes them as real
     // classes with a rich prototype; we have no backend, so each stays present
@@ -1050,32 +1052,18 @@ export const cryptoSpec: BuiltinSpec = {
       'validTo', 'validToDate', 'verify',
     ]);
 
-    const DiffieHellman = namedClass(
-      'DiffieHellman',
-      class {
-        constructor() {
-          throw notImplemented('api', 'crypto.DiffieHellman');
-        }
-      },
-    );
-    defineStubs(DiffieHellman.prototype, [
-      'computeSecret', 'generateKeys', 'getGenerator', 'getPrime', 'getPrivateKey', 'getPublicKey',
-      'setPrivateKey', 'setPublicKey',
-    ]);
-
-    const DiffieHellmanGroup = namedClass(
-      'DiffieHellmanGroup',
-      class {
-        constructor() {
-          throw notImplemented('api', 'crypto.DiffieHellmanGroup');
-        }
-      },
-    );
-    defineStubs(DiffieHellmanGroup.prototype, [
-      'computeSecret', 'generateKeys', 'getGenerator', 'getPrime', 'getPrivateKey', 'getPublicKey',
-    ]);
-
-    // `ECDH` is the real class from `../crypto/ecdh` (see the import above).
+    // `DiffieHellman` / `DiffieHellmanGroup` are the real pure-JS classes. The
+    // byte-output factory turns their `Uint8Array`s into runtime `Buffer`s (Node
+    // always returns Buffers). `getDiffieHellman` and `createDiffieHellmanGroup`
+    // are the same function object in Node.
+    const ECDH = bufferedClass(RawECDH, asBuffer);
+    const DiffieHellman = bufferedClass(RawDiffieHellman, asBuffer);
+    const DiffieHellmanGroup = bufferedClass(RawDiffieHellmanGroup, asBuffer);
+    const createDiffieHellman = (sizeOrKey: unknown, keyEncoding?: unknown, generator?: unknown, genEncoding?: unknown): InstanceType<typeof DiffieHellman> =>
+      new DiffieHellman(sizeOrKey, keyEncoding, generator, genEncoding);
+    const getDiffieHellman = (name: unknown): InstanceType<typeof DiffieHellmanGroup> =>
+      new DiffieHellmanGroup(name);
+    const createDiffieHellmanGroup = getDiffieHellman;
 
     // `Certificate` is a legacy class with the same three methods as statics.
     const Certificate = namedClass(
@@ -1167,6 +1155,9 @@ export const cryptoSpec: BuiltinSpec = {
       privateEncrypt,
       publicDecrypt,
       createECDH,
+      createDiffieHellman,
+      createDiffieHellmanGroup,
+      getDiffieHellman,
       createCipheriv,
       createDecipheriv,
       getCiphers: listCiphers,

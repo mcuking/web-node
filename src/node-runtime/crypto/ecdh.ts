@@ -12,6 +12,7 @@
  * the shared secret is the big-endian X coordinate padded to the field size.
  */
 import { bytesToBigInt } from './der';
+import { kByteFactory, outputBytes, type ByteFactory } from './byte-out';
 import {
   coordToBytes,
   decodePublicKey,
@@ -120,7 +121,7 @@ export class ECDH {
     const raw = toBytes(key, inputEncoding);
     const point = decodePublicKey(raw, resolved);
     const compressed = format === 'compressed';
-    return encodeOutput(encodePublicKey(point, resolved, compressed), outputEncoding);
+    return outputBytes(this, encodePublicKey(point, resolved, compressed), outputEncoding, encodeOutput);
   }
 
   generateKeys(encoding?: unknown, format?: unknown): Uint8Array | string {
@@ -141,12 +142,12 @@ export class ECDH {
     const shared = pointMul(this.#privateKey, point, this.#curve);
     if (shared === null) throw coded('Error', 'ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY', 'Public key is not valid for specified curve.');
     const x = mod(shared.x, this.#curve.p);
-    return encodeOutput(coordToBytes(x, this.#curve), outputEncoding);
+    return outputBytes(this, coordToBytes(x, this.#curve), outputEncoding, encodeOutput);
   }
 
   getPrivateKey(encoding?: unknown): Uint8Array | string {
     if (this.#privateKey === undefined) throw coded('Error', 'ERR_CRYPTO_INVALID_STATE', 'Invalid state: no private key');
-    return encodeOutput(coordToBytes(this.#privateKey, this.#curve), encoding);
+    return outputBytes(this, coordToBytes(this.#privateKey, this.#curve), encoding, encodeOutput);
   }
 
   setPrivateKey(key: unknown, encoding?: unknown): void {
@@ -163,7 +164,7 @@ export class ECDH {
   getPublicKey(encoding?: unknown, format?: unknown): Uint8Array | string {
     if (this.#publicKey === undefined) throw coded('Error', 'ERR_CRYPTO_INVALID_STATE', 'Invalid state: no public key');
     const compressed = format === 'compressed';
-    return encodeOutput(encodePublicKey(this.#publicKey, this.#curve, compressed), encoding);
+    return outputBytes(this, encodePublicKey(this.#publicKey, this.#curve, compressed), encoding, encodeOutput);
   }
 
   setPublicKey(key: unknown, encoding?: unknown): void {
@@ -174,3 +175,7 @@ export class ECDH {
 export function createECDH(curveName: unknown): ECDH {
   return new ECDH(curveName);
 }
+
+/** Re-exported for the builtin layer to install its `Buffer` factory. */
+export { kByteFactory };
+export type { ByteFactory };

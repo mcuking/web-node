@@ -65,9 +65,14 @@ describe('crypto stub classes', () => {
     }
     // KeyObject is real now: its constructor validates `type` like Node.
     expect(() => new crypto.KeyObject()).toThrowError(/The argument 'type' is invalid/);
-    for (const cls of ['X509Certificate', 'DiffieHellman']) {
-      expect(() => new crypto[cls]()).toThrowError(/not implemented/i);
-    }
+    expect(() => new crypto.X509Certificate()).toThrowError(/not implemented/i);
+    // DiffieHellman is real: no args is an argument-type error, an unknown group
+    // a crypto error.
+    expect(() => new crypto.DiffieHellman()).toThrowError(/sizeOrKey/);
+    expect(() => new crypto.DiffieHellmanGroup('nope')).toThrowError(/Unknown DH group/);
+    expect(typeof crypto.createDiffieHellman).toBe('function');
+    expect(typeof crypto.getDiffieHellman).toBe('function');
+    expect(crypto.getDiffieHellman).toBe(crypto.createDiffieHellmanGroup);
     // ECDH is real: it needs a curve name, and validates it.
     expect(() => new crypto.ECDH('nope')).toThrowError(/Invalid EC curve name/);
     expect(new crypto.ECDH('prime256v1').getPublicKey).toBeTypeOf('function');

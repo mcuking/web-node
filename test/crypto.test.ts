@@ -326,7 +326,7 @@ describe('crypto: unsupported surface', () => {
     // asymmetric keys/signatures (RSA/EC/Ed25519, see test/crypto-asym.test.ts),
     // but the native-only surface still refuses loudly.
     expect(() => crypto.createCipheriv('chacha20-poly1305', 'k', 'iv')).toThrowError(/not implemented/);
-    expect(() => crypto.getDiffieHellman('modp14')).toThrowError(/not implemented/);
+    expect(() => crypto.diffieHellman({})).toThrowError(/not implemented/);
     expect(() => crypto.generateKeyPairSync('x25519')).toThrowError(/not implemented/);
   });
 });

@@ -107,7 +107,7 @@ describe('crypto new real surface', () => {
 describe('crypto unsupported-but-present surface throws loudly', () => {
   it('native-only classes are constructible names that throw', () => {
     const crypto = boot();
-    for (const name of ['DiffieHellman', 'DiffieHellmanGroup']) {
+    for (const name of ['X509Certificate', 'Certificate']) {
       expect(typeof crypto[name]).toBe('function');
       expect(crypto[name].name).toBe(name);
       expect(() => new crypto[name]()).toThrowError(/not implemented/i);
@@ -116,7 +116,7 @@ describe('crypto unsupported-but-present surface throws loudly', () => {
 
   it('unsupported functions exist and throw', () => {
     const crypto = boot();
-    for (const name of ['argon2', 'argon2Sync', 'createMac', 'getMacs', 'encapsulate', 'decapsulate']) {
+    for (const name of ['argon2', 'argon2Sync', 'createMac', 'getMacs', 'encapsulate', 'decapsulate', 'diffieHellman']) {
       expect(typeof crypto[name]).toBe('function');
       expect(() => crypto[name]()).toThrowError(/not implemented/i);
     }

@@ -77,6 +77,9 @@ out.convertKeyCompressed = crypto.ECDH.convertKey(Buffer.from(FIX.bPub, 'hex'), 
 out.convertKeyCompressedMatches = out.convertKeyCompressed === FIX.bPubCompressed;
 out.convertKeyUncompressed = crypto.ECDH.convertKey(Buffer.from(FIX.bPubCompressed, 'hex'), 'prime256v1', 'hex', 'hex', 'uncompressed');
 out.convertKeyRoundtrip = out.convertKeyUncompressed === FIX.bPub;
+out.ecdhPubIsBuffer = Buffer.isBuffer(a.getPublicKey());
+out.ecdhSecretIsBuffer = Buffer.isBuffer(a.computeSecret(Buffer.from(FIX.bPub, 'hex')));
+out.convertKeyIsBuffer = Buffer.isBuffer(crypto.ECDH.convertKey(Buffer.from(FIX.bPub, 'hex'), 'prime256v1', undefined, undefined, 'compressed'));
 out.badCurve = (() => { try { crypto.createECDH('nope'); return 'no-throw'; } catch (e) { return 'throws'; } })();
 
 console.log('__OBS__' + JSON.stringify(out));
