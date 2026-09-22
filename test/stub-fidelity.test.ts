@@ -348,6 +348,128 @@ describe('https Server / Agent subclasses', () => {
   });
 });
 
+describe('module surface', () => {
+  it('provides wrap/wrapper/constants and the loader statics', () => {
+    const mod = boot().req('module');
+    expect(mod).toBe(mod.Module);
+    expect(mod.wrapper).toEqual([
+      '(function (exports, require, module, __filename, __dirname) { ',
+      '\n});',
+    ]);
+    expect(mod.wrap('x = 1;')).toBe(`${mod.wrapper[0]}x = 1;${mod.wrapper[1]}`);
+    expect(mod.wrap.length).toBe(1);
+    expect(mod.constants.compileCacheStatus).toEqual({
+      FAILED: 0,
+      ENABLED: 1,
+      ALREADY_ENABLED: 2,
+      DISABLED: 3,
+    });
+    expect(mod._pathCache instanceof Map).toBe(true);
+    expect(mod.isBuiltin('fs')).toBe(true);
+    expect(mod.builtinModules).toContain('fs');
+
+    const M = new mod.Module('a/b.js', null);
+    expect(M.parent).toBeNull();
+    expect(M.isPreloading).toBe(false);
+    expect('parent' in mod.Module.prototype).toBe(true);
+    for (const m of ['_compile', 'isPreloading', 'load', 'parent', 'require']) {
+      expect(m in mod.Module.prototype).toBe(true);
+    }
+    for (const m of [
+      'SourceMap',
+      'wrap',
+      'wrapper',
+      'constants',
+      '_pathCache',
+      '_findPath',
+      '_initPaths',
+      '_load',
+      '_preloadModules',
+      '_readPackage',
+      '_resolveLookupPaths',
+      '_stat',
+      'enableCompileCache',
+      'findPackageJSON',
+      'findSourceMap',
+      'flushCompileCache',
+      'getCompileCacheDir',
+      'getSourceMapsSupport',
+      'registerHooks',
+      'runMain',
+      'setSourceMapsSupport',
+      'stripTypeScriptTypes',
+    ]) {
+      expect(m in mod.Module).toBe(true);
+    }
+
+    expect(() => M._compile()).toThrowError(/not implemented/i);
+    expect(() => M.load()).toThrowError(/not implemented/i);
+    for (const call of [
+      () => mod._load('x', null, false),
+      () => mod._preloadModules(['x']),
+      () => mod._readPackage('x'),
+      () => mod._stat('/x'),
+      () => mod._findPath('x', ['/'], false),
+      () => mod.runMain(),
+      () => mod.registerHooks({}),
+      () => mod.stripTypeScriptTypes('const a: number = 1'),
+      () => mod.findPackageJSON('/project'),
+    ]) {
+      expect(call).toThrowError(/not implemented/i);
+    }
+    expect(Array.isArray(mod._resolveLookupPaths('x', {}))).toBe(true);
+    expect(mod._initPaths()).toBeUndefined();
+    expect(mod.globalPaths).toEqual([]);
+  });
+
+  it('tracks source-map support flags and the compile cache', () => {
+    const mod = boot().req('module');
+    expect(mod.getSourceMapsSupport()).toEqual({
+      enabled: false,
+      nodeModules: false,
+      generatedCode: false,
+    });
+    mod.setSourceMapsSupport(true, { nodeModules: false, generatedCode: true });
+    expect(mod.getSourceMapsSupport()).toEqual({
+      enabled: true,
+      nodeModules: false,
+      generatedCode: true,
+    });
+    expect(() => mod.setSourceMapsSupport('yes')).toThrowError(/boolean/);
+    expect(mod.findSourceMap('/x.js')).toBeUndefined();
+    expect(mod.getCompileCacheDir()).toBeUndefined();
+    expect(mod.flushCompileCache()).toBeUndefined();
+    expect(mod.enableCompileCache('/tmp').status).toBe(mod.constants.compileCacheStatus.FAILED);
+  });
+
+  it('exposes a working SourceMap', () => {
+    const mod = boot().req('module');
+    expect(typeof mod.SourceMap).toBe('function');
+    expect(mod.SourceMap.length).toBe(1);
+    for (const m of ['findEntry', 'findOrigin', 'lineLengths', 'payload']) {
+      expect(m in mod.SourceMap.prototype).toBe(true);
+    }
+    const sm = new mod.SourceMap({
+      version: 3,
+      sources: ['a.ts'],
+      names: [],
+      mappings: 'AAAA',
+    });
+    expect(sm.payload.version).toBe(3);
+    expect(sm.lineLengths).toBeUndefined();
+    const origin = sm.findOrigin(1, 1);
+    expect(origin.fileName).toBe('a.ts');
+    expect(origin.lineNumber).toBe(1);
+    expect(origin.columnNumber).toBe(1);
+
+    const withLines = new mod.SourceMap(
+      { version: 3, sources: ['a.ts'], names: [], mappings: 'AAAA' },
+      { lineLengths: [10, 20] },
+    );
+    expect(withLines.lineLengths).toEqual([10, 20]);
+  });
+});
+
 describe('net.Socket / net.Server prototype fidelity', () => {
   it('Socket carries Node\'s accessors and internal methods', () => {
     const net = boot().req('net');

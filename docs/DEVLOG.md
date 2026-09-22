@@ -241,6 +241,22 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M77 module 原型 / 静态差分清零
+
+**目标**：收掉扫描器剩余差分中的 `module`(22)。
+
+**改了什么**
+
+- 新增 `src/node-runtime/builtins/source-map.ts`：**逐行移置** Node 的 `lib/internal/source_map/source_map.js`（源出 V8）——VLQ 解码、`sections` 处理、`findEntry` 二分、`findOrigin`、`payload`/`lineLengths`，私有方法全用 `#`（不在原型上），与 Node 可观测面一致。
+- `module` 内建补全 Node 的成员：
+  - **真实实现**：`wrap`/`wrapper`（CJS 包裹）、`constants.compileCacheStatus`、`_pathCache`、`getSourceMapsSupport`/`setSourceMapsSupport`（自洽标志位）、`findSourceMap`（无注册 → `undefined`）、`getCompileCacheDir`/`flushCompileCache`（`undefined`）、`enableCompileCache`（返回 `FAILED` 状态，诚实告知不可用）、`_initPaths`（`globalPaths=[]`）、`_resolveLookupPaths`、`Module.prototype.isPreloading`（`false`）、`Module.prototype.parent`（改原型访问器）、`SourceMap`。
+  - **响亮抛**（这些需要 Node 自己的 CJS 加载器 / amaro TS 转换 / loader hooks，我们没有）：`_findPath`/`_load`/`_preloadModules`/`_readPackage`/`_stat`/`runMain`/`registerHooks`/`stripTypeScriptTypes`/`findPackageJSON`、`Module.prototype._compile`/`load`。
+- `arity` 表按 oracle 对齐（如 `_load:3`、`_findPath:3`、`stripTypeScriptTypes:1`、`SourceMap:1`…）。
+
+**验证**：`test/stub-fidelity.test.ts` 再扩 3 例（module 面/标志位/SourceMap 可用）。扫描器：`module` 22→0。门禁全绿：tsc 干净 · vitest **858 通过 / 2 预存 skip（78 文件）** · build worker **2292.19KB**。
+
+> 剩余差分：`tls`(12)。
+
 ### 2026-09-22 · M76 http / https 原型差分清零
 
 **目标**：收掉扫描器剩余差分中的 `http`(4)、`https`(2)。
