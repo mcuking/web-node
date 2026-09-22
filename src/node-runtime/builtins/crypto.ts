@@ -139,6 +139,7 @@ export const cryptoSpec: BuiltinSpec = {
   id: 'crypto',
   aliases: ['node:crypto'],
   origin: 'web-node',
+  deps: ['stream'],
   // Node's `Function.length` for the crypto surface (observable-equivalent).
   arity: {
     Hash: 2, Hmac: 3, Sign: 2, Verify: 2, KeyObject: 2, DiffieHellman: 4, DiffieHellmanGroup: 1,
@@ -697,8 +698,6 @@ export const cryptoSpec: BuiltinSpec = {
       getCurves: unsupportedApi('getCurves'),
       getFips: unsupportedApi('getFips'),
       setFips: unsupportedApi('setFips'),
-      X509Certificate: unsupportedApi('X509Certificate'),
-      Certificate: unsupportedApi('Certificate'),
       createECDH: unsupportedApi('createECDH'),
       argon2: unsupportedApi('argon2'),
       argon2Sync: unsupportedApi('argon2Sync'),
@@ -708,24 +707,148 @@ export const cryptoSpec: BuiltinSpec = {
       decapsulate: unsupportedApi('decapsulate'),
     };
 
-    // Asymmetric-key / engine classes Node exposes we have no backend for. They
-    // are real constructors in Node, so we keep them callable and throw a typed
-    // error the moment they are constructed.
-    const unsupportedClass = (name: string): new (...args: unknown[]) => never => {
-      const Ctor = class {
-        constructor() {
-          throw notImplemented('api', `crypto.${name}`);
-        }
-      };
-      Object.defineProperty(Ctor, 'name', { value: name });
-      return Ctor as unknown as new (...args: unknown[]) => never;
+    // Asymmetric-key / engine / X.509 classes. Node exposes them as real
+    // classes with a rich prototype; we have no backend, so each stays present
+    // and shaped like Node (right base class, right members) but every entry
+    // point throws a typed error instead of fabricating a result. This keeps
+    // feature detection (`instanceof`, `'sign' in x`, `typeof x.foo`) honest.
+    const { Writable } = ctx.require('stream') as {
+      Writable: new (opts?: Record<string, unknown>) => object;
     };
-    const Sign = unsupportedClass('Sign');
-    const Verify = unsupportedClass('Verify');
-    const KeyObject = unsupportedClass('KeyObject');
-    const DiffieHellman = unsupportedClass('DiffieHellman');
-    const DiffieHellmanGroup = unsupportedClass('DiffieHellmanGroup');
-    const ECDH = unsupportedClass('ECDH');
+    const stubMethod =
+      (name: string): ((...args: unknown[]) => never) =>
+      () => {
+        throw notImplemented('api', `crypto.${name}`);
+      };
+    const defineStubs = (proto: object, names: readonly string[]): void => {
+      for (const name of names) {
+        Object.defineProperty(proto, name, {
+          value: stubMethod(name),
+          writable: true,
+          configurable: true,
+        });
+      }
+    };
+    const defineStaticStubs = (Ctor: object, names: readonly string[]): void => {
+      for (const name of names) {
+        Object.defineProperty(Ctor, name, {
+          value: stubMethod(name),
+          writable: true,
+          configurable: true,
+        });
+      }
+    };
+    const namedClass = <T extends new (...args: any[]) => any>(name: string, Ctor: T): T => {
+      Object.defineProperty(Ctor, 'name', { value: name, configurable: true });
+      return Ctor;
+    };
+
+    // `Sign`/`Verify` are `stream.Writable` subclasses in Node.
+    const Sign = namedClass(
+      'Sign',
+      class extends (Writable as new (opts?: Record<string, unknown>) => object) {
+        constructor() {
+          super();
+          throw notImplemented('api', 'crypto.Sign');
+        }
+      },
+    );
+    defineStubs(Sign.prototype, ['update', 'sign']);
+
+    const Verify = namedClass(
+      'Verify',
+      class extends (Writable as new (opts?: Record<string, unknown>) => object) {
+        constructor() {
+          super();
+          throw notImplemented('api', 'crypto.Verify');
+        }
+      },
+    );
+    defineStubs(Verify.prototype, ['update', 'verify']);
+
+    const KeyObject = namedClass(
+      'KeyObject',
+      class {
+        constructor() {
+          throw notImplemented('api', 'crypto.KeyObject');
+        }
+        get type(): never {
+          throw notImplemented('api', 'crypto.KeyObject#type');
+        }
+        static from(): never {
+          throw notImplemented('api', 'crypto.KeyObject.from');
+        }
+      },
+    );
+    defineStubs(KeyObject.prototype, ['equals', 'toCryptoKey']);
+
+    const X509Certificate = namedClass(
+      'X509Certificate',
+      class {
+        constructor() {
+          throw notImplemented('api', 'crypto.X509Certificate');
+        }
+      },
+    );
+    defineStubs(X509Certificate.prototype, [
+      'ca', 'checkEmail', 'checkHost', 'checkIP', 'checkIssued', 'checkPrivateKey', 'fingerprint',
+      'fingerprint256', 'fingerprint512', 'infoAccess', 'issuer', 'issuerCertificate', 'keyUsage',
+      'publicKey', 'raw', 'serialNumber', 'signatureAlgorithm', 'signatureAlgorithmOid', 'subject',
+      'subjectAltName', 'toJSON', 'toLegacyObject', 'toString', 'validFrom', 'validFromDate',
+      'validTo', 'validToDate', 'verify',
+    ]);
+
+    const DiffieHellman = namedClass(
+      'DiffieHellman',
+      class {
+        constructor() {
+          throw notImplemented('api', 'crypto.DiffieHellman');
+        }
+      },
+    );
+    defineStubs(DiffieHellman.prototype, [
+      'computeSecret', 'generateKeys', 'getGenerator', 'getPrime', 'getPrivateKey', 'getPublicKey',
+      'setPrivateKey', 'setPublicKey',
+    ]);
+
+    const DiffieHellmanGroup = namedClass(
+      'DiffieHellmanGroup',
+      class {
+        constructor() {
+          throw notImplemented('api', 'crypto.DiffieHellmanGroup');
+        }
+      },
+    );
+    defineStubs(DiffieHellmanGroup.prototype, [
+      'computeSecret', 'generateKeys', 'getGenerator', 'getPrime', 'getPrivateKey', 'getPublicKey',
+    ]);
+
+    const ECDH = namedClass(
+      'ECDH',
+      class {
+        constructor() {
+          throw notImplemented('api', 'crypto.ECDH');
+        }
+        static convertKey(): never {
+          throw notImplemented('api', 'crypto.ECDH.convertKey');
+        }
+      },
+    );
+    defineStubs(ECDH.prototype, [
+      'computeSecret', 'generateKeys', 'getPrivateKey', 'getPublicKey', 'setPrivateKey', 'setPublicKey',
+    ]);
+
+    // `Certificate` is a legacy class with the same three methods as statics.
+    const Certificate = namedClass(
+      'Certificate',
+      class {
+        constructor() {
+          throw notImplemented('api', 'crypto.Certificate');
+        }
+      },
+    );
+    defineStubs(Certificate.prototype, ['exportChallenge', 'exportPublicKey', 'verifySpkac']);
+    defineStaticStubs(Certificate, ['exportChallenge', 'exportPublicKey', 'verifySpkac']);
 
     const randomUUID = (): string => webcrypto.randomUUID();
 
@@ -773,7 +896,7 @@ export const cryptoSpec: BuiltinSpec = {
       throw coded('Error', 'ERR_CRYPTO_ENGINE_UNKNOWN', `Engine "${String(id)}" was not found`);
     };
 
-    return {
+    const api: Record<string, unknown> = {
       createHash,
       createHmac,
       Hash,
@@ -786,6 +909,8 @@ export const cryptoSpec: BuiltinSpec = {
       DiffieHellman,
       DiffieHellmanGroup,
       ECDH,
+      X509Certificate,
+      Certificate,
       hash,
       getHashes: listHashes,
       createCipheriv,
@@ -815,5 +940,16 @@ export const cryptoSpec: BuiltinSpec = {
       ...unsupportedApis,
       default: { createHash, createHmac, randomBytes, randomUUID, webcrypto },
     };
+    // Node keeps `prng`/`pseudoRandomBytes`/`rng` as non-enumerable, lazily
+    // created aliases of `randomBytes` (DEP0115).
+    for (const key of ['prng', 'pseudoRandomBytes', 'rng'] as const) {
+      Object.defineProperty(api, key, {
+        value: randomBytes,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      });
+    }
+    return api;
   },
 };
