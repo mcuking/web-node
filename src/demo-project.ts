@@ -1002,6 +1002,27 @@ sipTag.update('data');
 console.log('siphash             :', sipTag.final('hex'));
 console.log('');
 
+// --- DH key agreement (milestone 92) ---
+// crypto.diffieHellman takes two KeyObjects: a DH pair (modp14 here) or an EC
+// pair, and returns the shared secret. The KeyObjects are real DER/PEM
+// carriers (PKCS#8 / SPKI), so a pair can be serialised and re-imported.
+console.log('-- DH key agreement (milestone 92) --');
+const dhCrypto = require('crypto');
+const dhAlice = dhCrypto.generateKeyPairSync('dh', { group: 'modp14' });
+const dhBob = dhCrypto.generateKeyPairSync('dh', { group: 'modp14' });
+const dhSharedA = dhCrypto.diffieHellman({ privateKey: dhAlice.privateKey, publicKey: dhBob.publicKey });
+const dhSharedB = dhCrypto.diffieHellman({ privateKey: dhBob.privateKey, publicKey: dhAlice.publicKey });
+console.log('dh key type         :', dhAlice.publicKey.asymmetricKeyType);
+console.log('dh shared secret    :', dhSharedA.length + ' bytes');
+console.log('dh agreement        :', dhSharedA.equals(dhSharedB));
+const dhReimported = dhCrypto.createPublicKey(dhAlice.publicKey.export({ type: 'spki', format: 'pem' }));
+console.log('dh spki round-trip  :', dhReimported.equals(dhAlice.publicKey));
+const ecdhA = dhCrypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const ecdhB = dhCrypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const ecdhSecret = dhCrypto.diffieHellman({ privateKey: ecdhA.privateKey, publicKey: ecdhB.publicKey });
+console.log('ecdh shared secret  :', ecdhSecret.length + ' bytes');
+console.log('');
+
 // --- http server (milestone 3: virtual TCP) ---
 // listen(3000) binds a port inside this runtime. The ServiceWorker bridge at
 // /preview/3000/ dials it, so this URL is reachable from the browser tab.

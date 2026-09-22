@@ -52,12 +52,19 @@ import {
   type Point,
 } from './ec';
 import { resolveHash } from './hash';
+import {
+  modpGroup,
+  modpGroupPrivateBits,
+  modpGroupPrivateBitsForParams,
+} from './modp';
 
 // --- OIDs -------------------------------------------------------------------
 
 const OID_RSA = '2a864886f70d010101';
 const OID_EC = '2a8648ce3d0201';
 const OID_ED25519 = '2b6570';
+/** `dhKeyAgreement` (1.2.840.113549.1.3.1), the OID OpenSSL tags DH with. */
+const OID_DH = '2a864886f70d010301';
 
 // --- random -----------------------------------------------------------------
 
@@ -76,10 +83,25 @@ function randomBelow(limit: bigint): bigint {
   }
 }
 
+/** Uniform random integer in `[0, 2^bits)`. */
+function randomBitsBelowPow2(bits: number): bigint {
+  if (bits <= 0) return 0n;
+  const bytes = (bits + 7) >> 3;
+  const buf = randomBytes(bytes);
+  const excess = bytes * 8 - bits;
+  if (excess > 0) buf[0] &= 0xff >>> excess;
+  return bytesToBigInt(buf);
+}
+
+/** Number of significant bits in a positive bigint (`BN_num_bits`). */
+function bitLength(value: bigint): number {
+  return value.toString(2).length;
+}
+
 // --- key material -----------------------------------------------------------
 
 export type KeyType = 'private' | 'public' | 'secret';
-export type AsymType = 'rsa' | 'ec' | 'ed25519';
+export type AsymType = 'rsa' | 'ec' | 'ed25519' | 'dh';
 
 export interface RsaMaterial {
   n: bigint;
@@ -106,12 +128,22 @@ export interface EdMaterial {
   publicKey: Uint8Array;
 }
 
+export interface DhMaterial {
+  prime: bigint;
+  generator: bigint;
+  /** Public value `y = g^x mod p`; present on both halves. */
+  publicKey?: bigint;
+  /** Private exponent `x`; only present on private keys. */
+  privateKey?: bigint;
+}
+
 export interface KeyMaterial {
   type: KeyType;
   asym?: AsymType;
   rsa?: RsaMaterial;
   ec?: EcMaterial;
   ed?: EdMaterial;
+  dh?: DhMaterial;
   /** Raw bytes for `type: 'secret'`. */
   secret?: Uint8Array;
 }
@@ -178,6 +210,12 @@ function parseEdPrivate(inner: Uint8Array): EdMaterial {
   return { seed: owned, publicKey: ed25519PublicFromSeed(owned) };
 }
 
+function parseDhParams(node: DerNode | undefined): { prime: bigint; generator: bigint } {
+  if (!node) throw new Error('dh: missing domain parameters');
+  const seq = expectSeq(node);
+  return { prime: derInt(seq[0]), generator: derInt(seq[1]) };
+}
+
 function parsePrivateKeyInfo(der: Uint8Array): KeyMaterial {
   const seq = expectSeq(derParse(der));
   const algId = expectSeq(seq[1]);
@@ -189,6 +227,10 @@ function parsePrivateKeyInfo(der: Uint8Array): KeyMaterial {
     return { type: 'private', asym: 'ec', ec: parseEcPrivate(inner, curve) };
   }
   if (oid === OID_ED25519) return { type: 'private', asym: 'ed25519', ed: parseEdPrivate(inner) };
+  if (oid === OID_DH) {
+    const params = parseDhParams(algId[1]);
+    return { type: 'private', asym: 'dh', dh: { ...params, privateKey: derInt(derParse(inner)) } };
+  }
   throw new Error(`unsupported private key algorithm ${oid}`);
 }
 
@@ -206,6 +248,10 @@ function parseSubjectPublicKeyInfo(der: Uint8Array): KeyMaterial {
   }
   if (oid === OID_ED25519) {
     return { type: 'public', asym: 'ed25519', ed: { publicKey: Uint8Array.from(bits) } };
+  }
+  if (oid === OID_DH) {
+    const params = parseDhParams(algId[1]);
+    return { type: 'public', asym: 'dh', dh: { ...params, publicKey: derInt(derParse(bits)) } };
   }
   throw new Error(`unsupported public key algorithm ${oid}`);
 }
@@ -299,6 +345,13 @@ function encodePrivateKeyInfo(m: KeyMaterial): Uint8Array {
       derOctet(derOctet(m.ed.seed)),
     );
   }
+  if (m.asym === 'dh' && m.dh && m.dh.privateKey !== undefined) {
+    return derSeq(
+      derIntValue(0n),
+      derSeq(derOid(oidDotted(OID_DH)), derSeq(derIntValue(m.dh.prime), derIntValue(m.dh.generator))),
+      derOctet(derIntValue(m.dh.privateKey)),
+    );
+  }
   throw new Error('key: cannot encode private key');
 }
 
@@ -314,6 +367,12 @@ function encodeSubjectPublicKeyInfo(m: KeyMaterial): Uint8Array {
   }
   if (m.asym === 'ed25519' && m.ed) {
     return derSeq(derSeq(derOid('1.3.101.112')), derBitString(m.ed.publicKey));
+  }
+  if (m.asym === 'dh' && m.dh && m.dh.publicKey !== undefined) {
+    return derSeq(
+      derSeq(derOid(oidDotted(OID_DH)), derSeq(derIntValue(m.dh.prime), derIntValue(m.dh.generator))),
+      derBitString(derIntValue(m.dh.publicKey)),
+    );
   }
   throw new Error('key: cannot encode public key');
 }
@@ -362,6 +421,7 @@ export class KeyObject {
     if (m.asym === 'rsa' && m.rsa) return { modulusLength: rsaModulusLength(m.rsa), publicExponent: m.rsa.e };
     if (m.asym === 'ec' && m.ec) return { namedCurve: m.ec.curve.nodeName };
     if (m.asym === 'ed25519') return {};
+    if (m.asym === 'dh') return {};
     return undefined;
   }
 
@@ -415,25 +475,42 @@ export class KeyObject {
   }
 }
 
+function incompatibleKeyOptions(type: string, alg: string): Error {
+  return coded(
+    'Error',
+    'ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS',
+    `The selected key encoding ${type} can only be used for ${alg} keys.`,
+  );
+}
+
+/** `export()` rejects a `type` outside the format's enum with an arg-value error. */
+function invalidExportType(type: string, _isPublic: boolean): Error {
+  return coded(
+    'TypeError',
+    'ERR_INVALID_ARG_VALUE',
+    `The property 'options.type' is invalid. Received '${type}'`,
+  );
+}
+
 function exportDer(m: KeyMaterial, type: string): Uint8Array {
   if (m.type === 'private') {
     if (type === 'pkcs8') return encodePrivateKeyInfo(m);
     if (type === 'pkcs1') {
-      if (!m.rsa) throw keyTypeError(type);
+      if (!m.rsa) throw incompatibleKeyOptions('pkcs1', 'RSA');
       return encodeRsaPrivate(m.rsa);
     }
     if (type === 'sec1') {
-      if (!m.ec) throw keyTypeError(type);
+      if (!m.ec) throw incompatibleKeyOptions('sec1', 'EC');
       return encodeEcPrivate(m.ec);
     }
-    throw keyTypeError(type);
+    throw invalidExportType(type, false);
   }
   if (type === 'spki') return encodeSubjectPublicKeyInfo(m);
   if (type === 'pkcs1') {
-    if (!m.rsa) throw keyTypeError(type);
+    if (!m.rsa) throw incompatibleKeyOptions('pkcs1', 'RSA');
     return encodeRsaPublic(m.rsa);
   }
-  throw keyTypeError(type);
+  throw invalidExportType(type, true);
 }
 
 export function makeKeyObject(material: KeyMaterial): KeyObject {
@@ -493,6 +570,9 @@ function exportJwk(m: KeyMaterial): Record<string, string> {
     const jwk: Record<string, string> = { kty: 'OKP', crv: 'Ed25519', x: base64Url(m.ed.publicKey) };
     if (m.type === 'private' && m.ed.seed) jwk.d = base64Url(m.ed.seed);
     return jwk;
+  }
+  if (m.dh) {
+    throw coded('Error', 'ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE', 'Unsupported JWK Key Type.');
   }
   throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', 'The property \'options.format\' must be one of: undefined, \'buffer\', \'jwk\'');
 }
@@ -555,6 +635,10 @@ export function createPublicKey(input: unknown): KeyObject {
     if (m.asym === 'rsa' && m.rsa) return makeKeyObject({ type: 'public', asym: 'rsa', rsa: { n: m.rsa.n, e: m.rsa.e } });
     if (m.asym === 'ec' && m.ec) return makeKeyObject({ type: 'public', asym: 'ec', ec: { curve: m.ec.curve, x: m.ec.x, y: m.ec.y } });
     if (m.asym === 'ed25519' && m.ed) return makeKeyObject({ type: 'public', asym: 'ed25519', ed: { publicKey: m.ed.publicKey } });
+    if (m.asym === 'dh' && m.dh && m.dh.privateKey !== undefined) {
+      const publicKey = m.dh.publicKey ?? modPow(m.dh.generator, m.dh.privateKey, m.dh.prime);
+      return makeKeyObject({ type: 'public', asym: 'dh', dh: { prime: m.dh.prime, generator: m.dh.generator, publicKey } });
+    }
     throw new Error('key: cannot derive public key');
   }
   const material = parsePublicDer(derFromInput(normalizeKeyInput(input)));
@@ -1049,6 +1133,13 @@ export interface GenerateKeyPairOptions {
   modulusLength?: number;
   publicExponent?: number;
   namedCurve?: string;
+  /** DH: a named MODP group, e.g. `'modp14'`. */
+  group?: string;
+  /** DH: an explicit prime (Buffer/TypedArray/DataView). */
+  prime?: unknown;
+  primeLength?: number;
+  /** DH: the generator for an explicit prime. */
+  generator?: number;
   publicKeyEncoding?: { type?: string; format?: string };
   privateKeyEncoding?: { type?: string; format?: string };
 }
@@ -1122,7 +1213,100 @@ function generateMaterial(type: string, options: GenerateKeyPairOptions): { priv
       public: { type: 'public', asym: 'ed25519', ed: { publicKey } },
     };
   }
+  if (type === 'dh') {
+    const { prime, generator } = resolveDhParams(options);
+    const privateKey = dhPrivateExponent(prime, generator);
+    const publicKey = modPow(generator, privateKey, prime);
+    const dh: DhMaterial = { prime, generator };
+    return {
+      private: { type: 'private', asym: 'dh', dh: { ...dh, publicKey, privateKey } },
+      public: { type: 'public', asym: 'dh', dh: { ...dh, publicKey } },
+    };
+  }
   throw notImplementedError('crypto', `generateKeyPair type ${type}`);
+}
+
+/** Node's `Received type ...` rendering for a rejected option value. */
+function receivedArgType(value: unknown): string {
+  if (value === undefined) return 'undefined';
+  if (value === null) return 'null';
+  const type = typeof value;
+  if (type === 'string') return `type string ('${value as string}')`;
+  if (type === 'number' || type === 'boolean' || type === 'symbol') {
+    return `type ${type} (${String(value)})`;
+  }
+  if (type === 'bigint') return `type bigint (${String(value)}n)`;
+  return `type ${type}`;
+}
+
+function dhPrimeToBigInt(value: unknown): bigint {
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView;
+    return bytesToBigInt(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+  }
+  throw coded(
+    'TypeError',
+    'ERR_INVALID_ARG_TYPE',
+    `The "options.prime" property must be an instance of Buffer, TypedArray, or DataView. Received ${receivedArgType(value)}`,
+  );
+}
+
+function generateSafePrime(bits: number): bigint {
+  for (;;) {
+    const q = generatePrime(bits - 1);
+    const p = 2n * q + 1n;
+    if (bitLength(p) === bits && isProbablePrime(p)) return p;
+  }
+}
+
+/** Resolves the DH parameters `generateKeyPair('dh')` was asked for. */
+function resolveDhParams(options: GenerateKeyPairOptions): { prime: bigint; generator: bigint } {
+  if (options.group === undefined && options.prime === undefined && options.primeLength === undefined) {
+    throw coded('TypeError', 'ERR_MISSING_OPTION', 'At least one of the group, prime, or primeLength options is required');
+  }
+  if (options.group !== undefined) {
+    if (typeof options.group !== 'string') {
+      throw coded(
+        'TypeError',
+        'ERR_INVALID_ARG_TYPE',
+        `The "options.group" property must be of type string. Received ${receivedArgType(options.group)}`,
+      );
+    }
+    const group = modpGroup(options.group);
+    if (!group) throw coded('Error', 'ERR_CRYPTO_UNKNOWN_DH_GROUP', 'Unknown DH group');
+    return { prime: BigInt('0x' + group.primeHex), generator: BigInt('0x' + group.generatorHex) };
+  }
+  let generator = 2n;
+  if (options.generator !== undefined) {
+    if (typeof options.generator !== 'number') {
+      throw coded(
+        'TypeError',
+        'ERR_INVALID_ARG_TYPE',
+        `The "options.generator" property must be of type number. Received ${receivedArgType(options.generator)}`,
+      );
+    }
+    generator = BigInt(options.generator);
+  }
+  if (options.prime !== undefined) return { prime: dhPrimeToBigInt(options.prime), generator };
+  return { prime: generateSafePrime(options.primeLength as number), generator };
+}
+
+/**
+ * The private exponent OpenSSL keygen draws. A named group (or a prime that
+ * matches one) samples uniformly from `[1, 2^keylength]`; anything else uses
+ * `bits(p) - 2` bits with the top bit forced (`BN_RAND_TOP_ONE`), clearing bit
+ * 0 when `g == 2` and `p % 8 == 3` (so the exponent is not a non-residue).
+ */
+function dhPrivateExponent(prime: bigint, generator: bigint): bigint {
+  const named = modpGroupPrivateBitsForParams(
+    toHex(bigIntToBytes(prime)),
+    toHex(bigIntToBytes(generator)),
+  );
+  if (named > 0) return randomBitsBelowPow2(named) + 1n;
+  const bits = bitLength(prime) - 2;
+  let x = randomBitsBelowPow2(bits - 1) + (1n << BigInt(bits - 1));
+  if (generator === 2n && (prime & 7n) === 3n) x &= ~1n;
+  return x;
 }
 
 function gcd(a: bigint, b: bigint): bigint {
@@ -1156,6 +1340,10 @@ function invalidArgType(name: string, expected: string, actual: unknown): Error 
 
 function invalidArgValue(name: string, value: unknown): Error {
   return coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The argument '${name}' is invalid. Received ${describe(value)}`);
+}
+
+function invalidProperty(name: string, value: unknown): Error {
+  return coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The property '${name}' is invalid. Received ${describe(value)}`);
 }
 
 function base64Url(bytes: Uint8Array): string {
@@ -1196,6 +1384,53 @@ function decodeString(input: string, encoding: string): Uint8Array {
 
 /** Exposed for `KeyObject.from` and the corpus. */
 export { notImplementedError as asymNotImplemented };
+
+export interface DiffieHellmanInput {
+  privateKey?: unknown;
+  publicKey?: unknown;
+}
+
+/**
+ * `crypto.diffieHellman({ privateKey, publicKey })` — the shared secret between
+ * two key objects. Supports DH and (EC)DH; both keys must be the same kind and
+ * share their domain parameters.
+ */
+export function diffieHellman(options: unknown): Uint8Array {
+  if (options === null || typeof options !== 'object') {
+    throw invalidArgType('options', 'of type object', options);
+  }
+  const { privateKey, publicKey } = options as DiffieHellmanInput;
+  if (!(privateKey instanceof KeyObject)) throw invalidProperty('options.privateKey', privateKey);
+  if (!(publicKey instanceof KeyObject)) throw invalidProperty('options.publicKey', publicKey);
+  if (privateKey.type !== 'private') {
+    throw coded('TypeError', 'ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE', `Invalid key object type ${privateKey.type}, expected private.`);
+  }
+  const privMat = keyMaterialOf(privateKey);
+  const pubMat = keyMaterialOf(publicKey);
+  if (privMat.asym !== pubMat.asym || (privMat.asym !== 'dh' && privMat.asym !== 'ec')) {
+    throw coded(
+      'Error',
+      'ERR_CRYPTO_INCOMPATIBLE_KEY',
+      `Incompatible key types for Diffie-Hellman: ${privMat.asym} and ${pubMat.asym}`,
+    );
+  }
+  const mismatch = (): Error =>
+    coded('Error', 'ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS', 'error:1C8000CB:Provider routines::mismatching domain parameters');
+  if (privMat.asym === 'dh') {
+    const priv = privMat.dh!;
+    const pub = pubMat.dh!;
+    if (priv.prime !== pub.prime || priv.generator !== pub.generator) throw mismatch();
+    const peer = pub.publicKey ?? (pub.privateKey !== undefined ? modPow(pub.generator, pub.privateKey, pub.prime) : undefined);
+    const secret = modPow(peer as bigint, priv.privateKey as bigint, priv.prime);
+    return bigIntToBytes(secret, Math.ceil(bitLength(priv.prime) / 8));
+  }
+  const priv = privMat.ec!;
+  const pub = pubMat.ec!;
+  if (priv.curve !== pub.curve) throw mismatch();
+  const point = pointMul(priv.d as bigint, { x: pub.x, y: pub.y }, priv.curve);
+  if (point === null) throw mismatch();
+  return bigIntToBytes(point.x, priv.curve.byteLength);
+}
 
 /** Curve lookup used by `crypto.getCurves()`. */
 export function listCurves(): string[] {

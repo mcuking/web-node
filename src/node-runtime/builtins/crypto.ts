@@ -43,6 +43,7 @@ import {
   publicEncrypt as asymPublicEncrypt,
   sign as asymSign,
   verify as asymVerify,
+  diffieHellman as asymDiffieHellman,
   type EncryptOptions,
   type GenerateKeyPairOptions,
   type SignAlgorithm,
@@ -899,7 +900,6 @@ export const cryptoSpec: BuiltinSpec = {
       throw notImplemented('api', `crypto.${name}`);
     };
     const unsupportedApis = {
-      diffieHellman: unsupportedApi('diffieHellman'),
       encapsulate: unsupportedApi('encapsulate'),
       decapsulate: unsupportedApi('decapsulate'),
     };
@@ -1794,6 +1794,7 @@ export const cryptoSpec: BuiltinSpec = {
     const getDiffieHellman = (name: unknown): InstanceType<typeof DiffieHellmanGroup> =>
       new DiffieHellmanGroup(name);
     const createDiffieHellmanGroup = getDiffieHellman;
+    const diffieHellman = (options: unknown): Uint8Array => asBuffer(asymDiffieHellman(options));
 
     // `Certificate` is a legacy class with the same three methods as statics.
     const Certificate = namedClass(
@@ -1888,6 +1889,7 @@ export const cryptoSpec: BuiltinSpec = {
       createDiffieHellman,
       createDiffieHellmanGroup,
       getDiffieHellman,
+      diffieHellman,
       generateKey,
       generateKeySync,
       generatePrime,

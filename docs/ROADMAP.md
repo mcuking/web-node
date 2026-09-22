@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-22（基线 = M90.9 完成；`getHashes()` 已全表对齐 81 名）
+> - **最后更新**：2026-09-22（基线 = M92.2 完成；`getHashes()` 81 名全对齐；DH KeyObject + `diffieHellman` 上线）
 
 ---
 
@@ -14,16 +14,16 @@
 
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
-| A | crypto 收尾（接续 M87） | 15 | 11 | 4 |
+| A | crypto 收尾（接续 M87） | 16 | 13 | 3 |
 | B | 语义深度（差分语料继续扩面） | 4 | 0 | 4 |
 | C | 平台无对应物的补齐（选择性） | 3 | 0 | 3 |
 | D | 运行时常量小项收尾 | 4 | 0 | 4 |
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **34** | **11** | **22**（+1 不做） |
+| **合计** | | **35** | **13** | **21**（+1 不做） |
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 98 个里程碑，剩余 22 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 100 个里程碑，剩余 21 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.4（26 → 30），同日晚 M90.5 又拆为 M90.5–M90.9（30 → 34）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
 
@@ -32,6 +32,8 @@
 ## 阶段 A — crypto 收尾（接续 M87）
 
 > 现状：非对称半边（RSA/EC/Ed25519/ECDH/DH/X509）已在 M83–M87 完成。剩下的都是「还没做的算法/API」。
+>
+> **本阶段执行顺序**：M88 → M89 → M90.* → **M92 → M93 → M94 → M91**。其中 **M91（PQC KEM）按原说明后置到末尾**（代码量大、依赖向量多，可后置或砍）；2026-09-22 据其「优先级最低」的原始标注调整了排序。
 
 - [x] **M88 · 素数生成与素性检验** ✅ 2026-09-22
   - `generatePrime` / `generatePrimeSync` / `checkPrime` / `checkPrimeSync`
@@ -102,9 +104,17 @@
   - 纯 JS 实现 ML-KEM（FIPS 203），或明确评估代价后再定。
   - 风险：高（代码量大、向量多）。**优先级最低，可后置或砍。**
 
-- [ ] **M92 · DH KeyObject 派生**
-  - `crypto.diffieHellman({ privateKey, publicKey })`——基于 DH `KeyObject` 的共享密钥派生（M85 记的已知偏离，目前抛错）。
-  - 风险：低（复用 M85 的 `dh.ts` 模幂）。
+- [x] **M92 · `crypto.diffieHellman` + DH KeyObject** ✅ 2026-09-22
+  > **拆分原因**：动手前调查发现 web-node **根本没有 DH 类型的 `KeyObject`**（`AsymType` 只有 `rsa|ec|ed25519`，`generateKeyPairSync('dh')` 会抛错）。而 `crypto.diffieHellman` 既接 DH 也接 EC 的 `KeyObject`，所以要先把 DH KeyObject 补上。原估「低风险」偏低，故拆为 M92.1/M92.2（任务数 34 → 35）。
+
+- [x] **M92.1 · DH `KeyObject`** ✅ 2026-09-22
+  - `KeyMaterial` 增 `dh`；`generateKeyPairSync('dh', { group } | { prime, generator })`；`asymmetricKeyType === 'dh'`；导出/解析 PKCS#3（私钥）与 SPKI（公钥，OID `dhKeyAgreement`），PEM 标签 `DH PRIVATE KEY`/`PUBLIC KEY`；`export`/`equals`/`toCryptoKey` 相应支持。
+  - 风险：中（DER 编解码 + 参数校验）。
+
+- [x] **M92.2 · `crypto.diffieHellman({ privateKey, publicKey })`** ✅ 2026-09-22
+  - DH：`y_b^{x_a} mod p`，按 prime 长度补前导零；EC：`d_a · Q_b` 的 x 坐标，按曲线字节长补齐。
+  - 错误面：`options` 非对象 → `ERR_INVALID_ARG_TYPE`；私/公钥缺失 → `The property 'options.privateKey/publicKey' is invalid. Received undefined`；类型不符 → `ERR_CRYPTO_INCOMPATIBLE_KEY`（`Incompatible key types for Diffie-Hellman: dh and rsa`）；跨组 → `ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS`。
+  - 风险：中低。
 
 - [ ] **M93 · 更多对称密码**
   - 目前未实现（抛 `NotImplementedError`）：DES / 3DES / ChaCha20-Poly1305 / CCM / OCB / SIV / XTS / wrap 系列；以及 Camellia / ARIA / SM4。
@@ -228,7 +238,7 @@
 - **构建工具**：M5 esbuild WASM · M5b rollup WASM · M5c Vite build · M5d Vite dev server · M5e HMR · M5f CSS 热更 · **M18 Vue 3 SFC 跑起来**
 - **性能/体积**：M32 worker 减重（1259→1028KB） · M41 Buffer slab 池化
 - **语义深度（差分语料）**：M79 http · M80 net · M81 fs
-- **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2 · M90.1 MAC（HMAC + BLAKE2b MAC） · M90.2 KMAC（Keccak/SHA-3/cSHAKE） · M90.3 CMAC/GMAC（AES） · M90.4 BLAKE2s MAC / Poly1305 / SipHash · M90.5 SHA-3/Keccak/SHAKE/keccak-kmac · M90.6 BLAKE2b-512/BLAKE2s-256 · M90.7 SM3/RIPEMD-160 · M90.8 截断变体与复合摘要 · M90.9 getHashes 全表对齐（81/81）
+- **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2 · M90.1 MAC（HMAC + BLAKE2b MAC） · M90.2 KMAC（Keccak/SHA-3/cSHAKE） · M90.3 CMAC/GMAC（AES） · M90.4 BLAKE2s MAC / Poly1305 / SipHash · M90.5 SHA-3/Keccak/SHAKE/keccak-kmac · M90.6 BLAKE2b-512/BLAKE2s-256 · M90.7 SM3/RIPEMD-160 · M90.8 截断变体与复合摘要 · M90.9 getHashes 全表对齐（81/81） · M92.1 DH KeyObject · M92.2 crypto.diffieHellman
 
 ---
 

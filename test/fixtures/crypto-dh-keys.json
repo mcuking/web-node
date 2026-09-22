@@ -1,0 +1,93 @@
+{
+  "privType": "private",
+  "privAsym": "dh",
+  "pubType": "public",
+  "pubAsym": "dh",
+  "privDetailsKeys": [],
+  "pubDetailsKeys": [],
+  "reencodePriv": true,
+  "reencodePub": true,
+  "pemPrivFirst": "-----BEGIN PRIVATE KEY-----",
+  "pemPubFirst": "-----BEGIN PUBLIC KEY-----",
+  "derivedEqualsPub": true,
+  "derivedDerMatches": true,
+  "privEqualsSelf": true,
+  "privNotEqualPub": false,
+  "expPrivSec1": {
+    "ok": false,
+    "name": "Error",
+    "code": "ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS",
+    "message": "The selected key encoding sec1 can only be used for EC keys."
+  },
+  "expPrivPkcs1": {
+    "ok": false,
+    "name": "Error",
+    "code": "ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS",
+    "message": "The selected key encoding pkcs1 can only be used for RSA keys."
+  },
+  "expPubSec1": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_INVALID_ARG_VALUE",
+    "message": "The property 'options.type' is invalid. Received 'sec1'"
+  },
+  "expPubPkcs1": {
+    "ok": false,
+    "name": "Error",
+    "code": "ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS",
+    "message": "The selected key encoding pkcs1 can only be used for RSA keys."
+  },
+  "expPubJwk": {
+    "ok": false,
+    "name": "Error",
+    "code": "ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE",
+    "message": "Unsupported JWK Key Type."
+  },
+  "expPrivJwk": {
+    "ok": false,
+    "name": "Error",
+    "code": "ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE",
+    "message": "Unsupported JWK Key Type."
+  },
+  "genAsym": "dh",
+  "genPubAsym": "dh",
+  "genDetails": [],
+  "genDerived": true,
+  "genPrivRoundtrip": true,
+  "genPubRoundtrip": true,
+  "genPubLenInRange": true,
+  "modp14PrimeDerived": true,
+  "modp14PrimePrivRoundtrip": true,
+  "modp1PrivDerLen": 223,
+  "modp1Derived": true,
+  "genNoParams": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_MISSING_OPTION",
+    "message": "At least one of the group, prime, or primeLength options is required"
+  },
+  "genBadGroup": {
+    "ok": false,
+    "name": "Error",
+    "code": "ERR_CRYPTO_UNKNOWN_DH_GROUP",
+    "message": "Unknown DH group"
+  },
+  "genGroupType": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_INVALID_ARG_TYPE",
+    "message": "The \"options.group\" property must be of type string. Received type number (123)"
+  },
+  "genPrimeType": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_INVALID_ARG_TYPE",
+    "message": "The \"options.prime\" property must be an instance of Buffer, TypedArray, or DataView. Received type string ('modp14')"
+  },
+  "genGeneratorType": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_INVALID_ARG_TYPE",
+    "message": "The \"options.generator\" property must be of type number. Received type bigint (2n)"
+  }
+}

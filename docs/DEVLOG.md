@@ -244,6 +244,22 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M92.1 + M92.2 DH KeyObject + `crypto.diffieHellman`
+
+**改了什么（M92.1）**：给 web-node 补上 DH 类型的 `KeyObject`（此前 `AsymType` 只有 `rsa|ec|ed25519`）。`KeyMaterial` 增 `dh: { prime, generator, publicKey?, privateKey? }`；`generateKeyPairSync('dh', …)` 支持 `{ group }`、`{ prime, generator }`、`{ primeLength }`；导出/解析走 PKCS#8（内层 `dhKeyAgreement` 参数 + OCTET STRING(INTEGER x)）与 SPKI（`dhKeyAgreement` 参数 + BIT STRING(INTEGER y)），PEM 标签 `PRIVATE KEY`/`PUBLIC KEY`；`equals`/`toCryptoKey`/`createPublicKey(priv)` 相应支持。
+
+私钥指数的位数对齐 OpenSSL 的 named-group `keylength`（modp5=200、modp14=225、modp15=275、modp16=325、modp17=375、modp18=400），从 `[1, 2^bits]` 均匀取样；非 named-group（如 modp1、显式随机素数）用 `bits(p) - 2` 位（`BN_RAND_TOP_ONE`），且 `g == 2 && p % 8 == 3` 时清 bit 0。显式传入与标准组相同的 p/g 时按 `ossl_ffc_numbers_to_dh_named_group` 归到该 named group。新增 `modp.ts` 的 `modpGroupPrivateBits`/`modpGroupPrivateBitsForParams`。
+
+**改了什么（M92.2）**：`crypto.diffieHellman({ privateKey, publicKey })` 从「抛 not implemented」改为真实现：DH 算 `y_b^{x_a} mod p` 并按 prime 字节长补齐，EC 算 `d_a · Q_b` 的 x 坐标并按曲线字节长补齐；两者密钥类型/参数不一致时报 `ERR_CRYPTO_INCOMPATIBLE_KEY`（`Incompatible key types for Diffie-Hellman: dh and rsa`）与 `ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS`。顺带修了 `export()` 的 `type` 错误分支（之前统一报 `pkcs1` 文案，现改为与 Node 一致的 `ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS` + 按公私钥列举期望值）。
+
+**验证（差分 0 diff）**：
+- `test/crypto-dh-keys.test.ts`：`tools/crypto-dh-keys-probe.cjs` 在真 Node 与 web-node 内各跑一遭，**逐字节等于** `test/fixtures/crypto-dh-keys.json`（类型/重编码/round-trip/导出错误面/DER 长度）。
+- `test/crypto-dh-secret.test.ts`：`tools/crypto-dh-secret-probe.cjs` 同法对比 `test/fixtures/crypto-dh-secret.json`（DH/EC 固定夹具共享密钥 + 交叉/边界错误）。
+- demo 新增 DH 段落（`dh shared secret`/`dh agreement`/`dh spki round-trip`/`ecdh shared secret`）。
+- 门禁：`tsc` 干净 · vitest **954 passed / 2 skipped（94 文件）** · build worker **2408.71 kB**。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md`（M92 开工前发现 DH KeyObject 缺失，已拆为 M92.1/M92.2 并在路线图注明）。
+
 ### 2026-09-22 · M90.8 + M90.9 截断变体/复合摘要 + getHashes 全表对齐（81/81）
 
 **改了什么（M90.8）**：

@@ -41,3 +41,39 @@ export function modpGroup(name: string): ModpGroup | undefined {
 export function modpGroupNames(): string[] {
   return GROUPS.map((group) => group.name);
 }
+
+/**
+ * Private-exponent bit length OpenSSL's *named-group* keygen uses (the
+ * `keylength` column of `dh_named_groups[]`, taken from RFC 7919). A named
+ * group draws its exponent uniformly from `[1, 2^bits]`. Groups that OpenSSL
+ * does not know as named (modp1, modp2) return 0, meaning "fall back to
+ * `bits(p) - 2`".
+ */
+const PRIVATE_BITS: Record<string, number> = {
+  modp5: 200,
+  modp14: 225,
+  modp15: 275,
+  modp16: 325,
+  modp17: 375,
+  modp18: 400,
+};
+
+export function modpGroupPrivateBits(name: string): number {
+  return PRIVATE_BITS[name.toLowerCase()] ?? 0;
+}
+
+/**
+ * Mirrors OpenSSL's `ossl_ffc_numbers_to_dh_named_group`: an explicitly
+ * supplied prime/generator that matches a standard group is treated as that
+ * named group (so keygen uses its `keylength`).
+ */
+export function modpGroupPrivateBitsForParams(primeHex: string, generatorHex: string): number {
+  const p = primeHex.toLowerCase();
+  const g = generatorHex.toLowerCase();
+  for (const group of GROUPS) {
+    if (group.primeHex.toLowerCase() === p && group.generatorHex.toLowerCase() === g) {
+      return PRIVATE_BITS[group.name.toLowerCase()] ?? 0;
+    }
+  }
+  return 0;
+}
