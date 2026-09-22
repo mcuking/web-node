@@ -375,6 +375,84 @@ export const httpSpec: BuiltinSpec = {
       return Buffer_.from(bytes);
     }
 
+    /**
+     * Node's `matchKnownFields` (`_http_incoming.js`): returns the lowercased
+     * name, optionally flag-prefixed so `_addHeaderLine` knows how to fold
+     * duplicates. `\u0000` = join with `', '`, `\u0002` = join with `'; '`,
+     * `\u0001` = array field (Set-Cookie), no prefix = drop duplicates.
+     */
+    function matchKnownFields(field: string, lowercased?: boolean): string {
+      switch (field.length) {
+        case 3:
+          if (field === 'Age' || field === 'age') return 'age';
+          break;
+        case 4:
+          if (field === 'Host' || field === 'host') return 'host';
+          if (field === 'From' || field === 'from') return 'from';
+          if (field === 'ETag' || field === 'etag') return 'etag';
+          if (field === 'Date' || field === 'date') return '\u0000date';
+          if (field === 'Vary' || field === 'vary') return '\u0000vary';
+          break;
+        case 6:
+          if (field === 'Server' || field === 'server') return 'server';
+          if (field === 'Cookie' || field === 'cookie') return '\u0002cookie';
+          if (field === 'Origin' || field === 'origin') return '\u0000origin';
+          if (field === 'Expect' || field === 'expect') return '\u0000expect';
+          if (field === 'Accept' || field === 'accept') return '\u0000accept';
+          break;
+        case 7:
+          if (field === 'Referer' || field === 'referer') return 'referer';
+          if (field === 'Expires' || field === 'expires') return 'expires';
+          if (field === 'Upgrade' || field === 'upgrade') return '\u0000upgrade';
+          break;
+        case 8:
+          if (field === 'Location' || field === 'location') return 'location';
+          if (field === 'If-Match' || field === 'if-match') return '\u0000if-match';
+          break;
+        case 10:
+          if (field === 'User-Agent' || field === 'user-agent') return 'user-agent';
+          if (field === 'Set-Cookie' || field === 'set-cookie') return '\u0001';
+          if (field === 'Connection' || field === 'connection') return '\u0000connection';
+          break;
+        case 11:
+          if (field === 'Retry-After' || field === 'retry-after') return 'retry-after';
+          break;
+        case 12:
+          if (field === 'Content-Type' || field === 'content-type') return 'content-type';
+          if (field === 'Max-Forwards' || field === 'max-forwards') return 'max-forwards';
+          break;
+        case 13:
+          if (field === 'Authorization' || field === 'authorization') return 'authorization';
+          if (field === 'Last-Modified' || field === 'last-modified') return 'last-modified';
+          if (field === 'Cache-Control' || field === 'cache-control') return '\u0000cache-control';
+          if (field === 'If-None-Match' || field === 'if-none-match') return '\u0000if-none-match';
+          break;
+        case 14:
+          if (field === 'Content-Length' || field === 'content-length') return 'content-length';
+          break;
+        case 15:
+          if (field === 'Accept-Encoding' || field === 'accept-encoding') return '\u0000accept-encoding';
+          if (field === 'Accept-Language' || field === 'accept-language') return '\u0000accept-language';
+          if (field === 'X-Forwarded-For' || field === 'x-forwarded-for') return '\u0000x-forwarded-for';
+          break;
+        case 16:
+          if (field === 'Content-Encoding' || field === 'content-encoding') return '\u0000content-encoding';
+          if (field === 'X-Forwarded-Host' || field === 'x-forwarded-host') return '\u0000x-forwarded-host';
+          break;
+        case 17:
+          if (field === 'If-Modified-Since' || field === 'if-modified-since') return 'if-modified-since';
+          if (field === 'Transfer-Encoding' || field === 'transfer-encoding') return '\u0000transfer-encoding';
+          if (field === 'X-Forwarded-Proto' || field === 'x-forwarded-proto') return '\u0000x-forwarded-proto';
+          break;
+        case 19:
+          if (field === 'Proxy-Authorization' || field === 'proxy-authorization') return 'proxy-authorization';
+          if (field === 'If-Unmodified-Since' || field === 'if-unmodified-since') return 'if-unmodified-since';
+          break;
+      }
+      if (lowercased) return '\u0000' + field;
+      return matchKnownFields(field.toLowerCase(), true);
+    }
+
     /** Node's `headersDistinct`/`trailersDistinct` shape: name -> string[]. */
     function distinct(src: Record<string, string | string[]>): Record<string, string[]> {
       const out: Record<string, string[]> = {};
@@ -394,9 +472,165 @@ export const httpSpec: BuiltinSpec = {
 
     /**
      * Base class of both `ServerResponse` and `ClientRequest` — exported so
-     * `res instanceof http.OutgoingMessage` holds, like Node.
+     * `res instanceof http.OutgoingMessage` holds, like Node. It carries the
+     * shared header surface and the internal plumbing (`_send`/`_storeHeader`/
+     * `_flush`/…`_implicitHeader`); the transport-specific line is supplied by
+     * the subclasses.
      */
-    class OutgoingMessage extends (Writable as new (opts?: Record<string, unknown>) => WritableLike) {}
+    class OutgoingMessage extends (Writable as new (opts?: Record<string, unknown>) => WritableLike) {
+      /** @internal — the rendered head block, once stored. */
+      _header = '';
+
+      #headers = new Map<string, string | string[]>();
+      #rawHeaderNames = new Map<string, string>();
+      #trailers = new Map<string, string | string[]>();
+      #rawTrailerNames = new Map<string, string>();
+      #socket: NetSocket | null = null;
+
+      /** `message.socket` / `message.connection` — the bound transport. */
+      get socket(): NetSocket | null {
+        return this.#socket;
+      }
+      set socket(value: NetSocket | null) {
+        this.#socket = value;
+      }
+      get connection(): NetSocket | null {
+        return this.#socket;
+      }
+      set connection(value: NetSocket | null) {
+        this.#socket = value;
+      }
+
+      /** Node: `!!this._header` — true once the head block has been staged. */
+      get headersSent(): boolean {
+        return !!this._header;
+      }
+
+      setHeader(name: string, value: string | string[]): this {
+        if (this._header) throw new Error('Cannot set headers after they are sent to the client');
+        this.#headers.set(name.toLowerCase(), value);
+        this.#rawHeaderNames.set(name.toLowerCase(), name);
+        return this;
+      }
+      getHeader(name: string): string | string[] | undefined {
+        return this.#headers.get(name.toLowerCase());
+      }
+      getHeaders(): Record<string, string | string[]> {
+        return Object.fromEntries(this.#headers);
+      }
+      getHeaderNames(): string[] {
+        return [...this.#headers.keys()];
+      }
+      /** The header names exactly as they were first set (case preserved). */
+      getRawHeaderNames(): string[] {
+        return [...this.#rawHeaderNames.values()];
+      }
+      hasHeader(name: string): boolean {
+        return this.#headers.has(name.toLowerCase());
+      }
+      removeHeader(name: string): void {
+        if (this._header) throw new Error('Cannot remove headers after they are sent to the client');
+        this.#headers.delete(name.toLowerCase());
+        this.#rawHeaderNames.delete(name.toLowerCase());
+      }
+      setHeaders(headers: Record<string, string | string[]> | Array<[string, string | string[]]>): void {
+        const entries = Array.isArray(headers) ? headers : Object.entries(headers);
+        for (const [name, value] of entries) this.setHeader(String(name), value);
+      }
+      appendHeader(name: string, value: string | string[]): this {
+        const key = name.toLowerCase();
+        if (!this.#headers.has(key)) return this.setHeader(name, value);
+        const prev = this.#headers.get(key)!;
+        const next = Array.isArray(prev)
+          ? prev.concat(value as string | string[])
+          : [prev as string].concat(value as string | string[]);
+        this.#headers.set(key, next as string[]);
+        return this;
+      }
+      addTrailers(headers: Record<string, string | string[]> | Array<[string, string | string[]]>): void {
+        const entries = Array.isArray(headers) ? headers : Object.entries(headers);
+        for (const [name, value] of entries) {
+          const key = String(name).toLowerCase();
+          this.#trailers.set(key, value);
+          this.#rawTrailerNames.set(key, String(name));
+        }
+      }
+      setTimeout(msecs: number, cb?: () => void): this {
+        if (typeof cb === 'function') this.once('timeout' as never, cb as never);
+        (this.#socket as unknown as { setTimeout?: (ms: number) => void } | null)?.setTimeout?.(msecs);
+        return this;
+      }
+
+      /** @internal — Node reads the `httpValidation` option; we default strict. */
+      _isLenientHeaderValidation(): boolean {
+        const self = this as unknown as {
+          httpValidation?: string;
+          req?: { socket?: { server?: { httpValidation?: string } } };
+        };
+        if (self.httpValidation !== undefined) return self.httpValidation !== 'strict';
+        const fromServer = self.req?.socket?.server?.httpValidation;
+        if (fromServer !== undefined) return fromServer !== 'strict';
+        return false;
+      }
+      /** @internal — the header names/values exactly as sent. */
+      _renderHeaders(): Record<string, string | string[]> {
+        if (this._header) {
+          throw Object.assign(new Error('Cannot render headers after they are sent to the client'), {
+            code: 'ERR_HTTP_HEADERS_SENT',
+          });
+        }
+        return this.getHeaders();
+      }
+      /** @internal — subclasses supply the request/status line. */
+      _implicitHeader(): void {
+        throw Object.assign(new Error('The _implicitHeader() method is not implemented'), {
+          code: 'ERR_METHOD_NOT_IMPLEMENTED',
+        });
+      }
+      /** @internal — render and stage the head block. */
+      _storeHeader(firstLine: string, headers: Record<string, string | string[]>): void {
+        let head = firstLine;
+        for (const [name, value] of Object.entries(headers)) {
+          if (Array.isArray(value)) for (const v of value) head += `${name}: ${v}\r\n`;
+          else head += `${name}: ${value}\r\n`;
+        }
+        head += '\r\n';
+        this._header = head;
+      }
+      /** @internal — write a body chunk (or the staged head) to the transport. */
+      _send(data: unknown, _encoding: string, callback?: (err?: Error | null) => void): boolean {
+        this.#socket?.write(data);
+        if (typeof callback === 'function') callback(null);
+        return true;
+      }
+      /** @internal — like `_send`, but bypasses framing. */
+      _writeRaw(data: unknown, _encoding: string, callback?: (err?: Error | null) => void): boolean {
+        this.#socket?.write(data);
+        if (typeof callback === 'function') callback(null);
+        return true;
+      }
+      /** @internal — Node asserts a socket and emits 'prefinish'. */
+      _finish(): void {
+        this.emit('prefinish');
+      }
+      /** @internal — flush the pending head block, then finish if ended. */
+      _flush(): void {
+        this._flushOutput();
+        if ((this as unknown as { finished?: boolean }).finished) this._finish();
+      }
+      /** @internal — drain the staged head block into the transport. */
+      _flushOutput(_socket?: NetSocket | null): boolean | undefined {
+        if (!this._header) return undefined;
+        const head = this._header;
+        this.#socket?.write(head);
+        return true;
+      }
+      /** `message.flushHeaders()` — force the head block out. */
+      flushHeaders(): void {
+        if (!this._header) this._implicitHeader();
+        this._send('', 'utf8');
+      }
+    }
 
     // -- IncomingMessage ------------------------------------------------------
 
@@ -410,16 +644,62 @@ export const httpSpec: BuiltinSpec = {
       url = '';
       statusCode = 0;
       statusMessage = '';
-      headers: Record<string, string | string[]> = {};
       rawHeaders: string[] = [];
-      trailers: Record<string, string> = {};
       rawTrailers: string[] = [];
       socket: NetSocket | null = null;
-      connection: NetSocket | null = null;
       req: unknown = undefined;
+      /** @internal — `joinDuplicateHeaders` option (RFC 9110 leniency). */
+      joinDuplicateHeaders = false;
+
+      #headersObj: Record<string, string | string[]> | null = null;
+      #headersCount = 0;
+      #trailersObj: Record<string, string | string[]> | null = null;
+      #trailersCount = 0;
+      #dumped = false;
       #abortController: AbortController | null = null;
       #headersDistinct: Record<string, string[]> | null = null;
       #trailersDistinct: Record<string, string[]> | null = null;
+
+      /**
+       * The parsed header map. Lazily built from `rawHeaders` the first time it
+       * is read (matching Node), and directly assignable.
+       */
+      get headers(): Record<string, string | string[]> {
+        if (this.#headersObj === null) {
+          this.#headersObj = {};
+          const dest = this.#headersObj;
+          for (let n = 0; n < this.#headersCount; n += 2) {
+            this._addHeaderLine(this.rawHeaders[n], this.rawHeaders[n + 1], dest);
+          }
+        }
+        return this.#headersObj;
+      }
+      set headers(value: Record<string, string | string[]>) {
+        this.#headersObj = value;
+      }
+
+      /** The parsed trailer map (lazily built from `rawTrailers`). */
+      get trailers(): Record<string, string | string[]> {
+        if (this.#trailersObj === null) {
+          this.#trailersObj = {};
+          const dest = this.#trailersObj;
+          for (let n = 0; n < this.#trailersCount; n += 2) {
+            this._addHeaderLine(this.rawTrailers[n], this.rawTrailers[n + 1], dest);
+          }
+        }
+        return this.#trailersObj;
+      }
+      set trailers(value: Record<string, string | string[]>) {
+        this.#trailersObj = value;
+      }
+
+      /** `message.connection` — alias of the bound socket (Node accessor). */
+      get connection(): NetSocket | null {
+        return this.socket;
+      }
+      set connection(value: NetSocket | null) {
+        this.socket = value;
+      }
 
       /** `message.signal` — aborted when the message is destroyed/aborted. */
       get signal(): AbortSignal {
@@ -487,11 +767,92 @@ export const httpSpec: BuiltinSpec = {
         if (idx < 0) return;
         const name = line.slice(0, idx).trim();
         const value = line.slice(idx + 1).trim();
+        // Materialise the trailer map *before* recording the raw pair so the
+        // lazy builder and this call do not both insert the same value.
+        const dest = this.trailers;
         this.rawTrailers.push(name, value);
-        const key = name.toLowerCase();
-        const prev = this.trailers[key];
-        // Node joins duplicate trailer values with a comma, like headers.
-        this.trailers[key] = prev === undefined ? value : `${prev}, ${value}`;
+        this.#trailersCount = this.rawTrailers.length;
+        this._addHeaderLine(name, value, dest);
+      }
+
+      /** @internal — parse every (name, value) pair into `headers`/`trailers`. */
+      _addHeaderLines(headers: string[], n: number): void {
+        if (headers?.length) {
+          let dest: Record<string, string | string[]> | null;
+          if (this.complete) {
+            this.rawTrailers = headers;
+            this.#trailersCount = n;
+            dest = this.#trailersObj;
+          } else {
+            this.rawHeaders = headers;
+            this.#headersCount = n;
+            dest = this.#headersObj;
+          }
+          if (dest) {
+            for (let i = 0; i < n; i += 2) {
+              this._addHeaderLine(headers[i], headers[i + 1], dest);
+            }
+          }
+        }
+      }
+
+      /** @internal — fold one header line into `dest` (Node's joining rules). */
+      _addHeaderLine(field: string, value: string, dest: Record<string, string | string[]>): void {
+        field = matchKnownFields(field);
+        const flag = field.charCodeAt(0);
+        if (flag === 0 || flag === 2) {
+          field = field.slice(1);
+          const existing = dest[field];
+          if (typeof existing === 'string') {
+            dest[field] = existing + (flag === 0 ? ', ' : '; ') + value;
+          } else {
+            dest[field] = value;
+          }
+        } else if (flag === 1) {
+          const existing = dest['set-cookie'];
+          if (existing !== undefined) (existing as string[]).push(value);
+          else dest['set-cookie'] = [value];
+        } else if (this.joinDuplicateHeaders) {
+          const existing = dest[field];
+          if (existing === undefined) dest[field] = value;
+          else dest[field] = `${existing}, ${value}`;
+        } else if (dest[field] === undefined) {
+          dest[field] = value;
+        }
+      }
+
+      /** @internal — every value as an array, never joined. */
+      _addHeaderLineDistinct(field: string, value: string, dest: Record<string, string[]>): void {
+        field = field.toLowerCase();
+        if (!dest[field]) dest[field] = [value];
+        else dest[field].push(value);
+      }
+
+      /** @internal — drain incoming data without buffering it. */
+      _dump(): void {
+        if (this.#dumped) return;
+        this.#dumped = true;
+        const self = this as unknown as {
+          destroyed: boolean;
+          readableLength: number;
+          read(n?: number): unknown;
+          resume(): unknown;
+          removeAllListeners(event?: string): unknown;
+        };
+        self.removeAllListeners('data');
+        if (this.complete && !self.destroyed && self.readableLength === 0) self.read(0);
+        else self.resume();
+      }
+
+      /** @internal — mark the readable as fully closed (no 'end' event). */
+      _dumpAndCloseReadable(): void {
+        this.#dumped = true;
+        const state = (this as unknown as { _readableState: Record<string, unknown> })._readableState;
+        state.ended = true;
+        state.endEmitted = true;
+        state.destroyed = true;
+        state.closed = true;
+        state.closeEmitted = true;
       }
 
       /** @internal */
@@ -534,14 +895,13 @@ export const httpSpec: BuiltinSpec = {
     // -- ServerResponse -------------------------------------------------------
 
     class ServerResponse extends OutgoingMessage {
-      statusCode = 200;
-      statusMessage: string | undefined = undefined;
-      headersSent = false;
       finished = false;
       sendDate = true;
-      socket: NetSocket | null = null;
       req: IncomingMessage | null = null;
 
+      #statusCode = 200;
+      #statusMessage: string | undefined = undefined;
+      #sent = false;
       #headers = new Map<string, string | string[]>();
       #rawHeaderNames = new Map<string, string>();
       #trailers = new Map<string, string | string[]>();
@@ -551,6 +911,23 @@ export const httpSpec: BuiltinSpec = {
       #bodyLength = 0;
       #keepAlive = false;
 
+      get statusCode(): number {
+        return this.#statusCode;
+      }
+      set statusCode(value: number) {
+        this.#statusCode = value;
+      }
+      get statusMessage(): string | undefined {
+        return this.#statusMessage;
+      }
+      set statusMessage(value: string | undefined) {
+        this.#statusMessage = value;
+      }
+      /** True once the response head has been staged. */
+      get headersSent(): boolean {
+        return this.#sent;
+      }
+
       /** @internal — set by the server so it can re-arm the connection. */
       _onResponseFinish: (() => void) | null = null;
 
@@ -559,14 +936,14 @@ export const httpSpec: BuiltinSpec = {
         return this.#keepAlive;
       }
 
-      /** Node's `res.connection` is a getter for the bound socket. */
-      get connection(): NetSocket | null {
-        return this.socket;
-      }
-
       /** True once the response is being framed with chunked transfer-encoding. */
       get chunkedEncoding(): boolean {
         return this.#chunked;
+      }
+
+      /** @internal — implicitly send the head when the body starts. */
+      _implicitHeader(): void {
+        this.writeHead(this.statusCode);
       }
 
       constructor(socket: NetSocket) {
@@ -713,7 +1090,7 @@ export const httpSpec: BuiltinSpec = {
         } else if (a && typeof a === 'object') {
           for (const [k, v] of Object.entries(a as Record<string, string>)) this.setHeader(k, v);
         }
-        this.headersSent = true;
+        this.#sent = true;
         return this;
       }
 
@@ -767,7 +1144,7 @@ export const httpSpec: BuiltinSpec = {
       #flush(): void {
         if (this.#flushed) return;
         this.#flushed = true;
-        this.headersSent = true;
+        this.#sent = true;
 
         const message = this.statusMessage ?? STATUS_CODES[this.statusCode] ?? 'Unknown';
         const lines: string[] = [`HTTP/1.1 ${this.statusCode} ${message}`];
@@ -1076,7 +1453,6 @@ export const httpSpec: BuiltinSpec = {
 
     class ClientRequest extends OutgoingMessage {
       method: string;
-      path: string;
       host: string;
       port: number;
       protocol = 'http:';
@@ -1087,7 +1463,7 @@ export const httpSpec: BuiltinSpec = {
       reusedSocket = false;
       agent: unknown = globalAgent;
 
-      #socket: NetSocket | null = null;
+      #path = '/';
       #conn: Connection | null = null;
       #rawHeaderNames = new Map<string, string>();
       #keepAlive = true;
@@ -1095,6 +1471,14 @@ export const httpSpec: BuiltinSpec = {
       #chunks: Uint8Array[] = [];
       #cb: ((res: IncomingMessage) => void) | undefined;
       #response: IncomingMessage | null = null;
+
+      /** The request target (path + query) as sent on the request line. */
+      get path(): string {
+        return this.#path;
+      }
+      set path(value: string) {
+        this.#path = value;
+      }
 
       constructor(options: RequestOptions | string, cb?: (res: IncomingMessage) => void) {
         // See ServerResponse: outgoing messages never auto-destroy on finish.
@@ -1143,28 +1527,20 @@ export const httpSpec: BuiltinSpec = {
         this.#rawHeaderNames.delete(name.toLowerCase());
       }
 
-      /** `request.socket` / `request.connection` — the underlying transport. */
-      get socket(): NetSocket | null {
-        return this.#socket;
-      }
-      get connection(): NetSocket | null {
-        return this.#socket;
-      }
-
       /** `request.setTimeout(msecs, cb)` — arm a socket inactivity timer. */
       setTimeout(msecs: number, cb?: () => void): this {
         if (typeof cb === 'function') this.once('timeout' as never, cb as never);
-        (this.#socket as unknown as { setTimeout?: (ms: number) => void } | null)?.setTimeout?.(msecs);
+        (this.socket as unknown as { setTimeout?: (ms: number) => void } | null)?.setTimeout?.(msecs);
         return this;
       }
       /** `request.clearTimeout()` — disarm the socket inactivity timer. */
       clearTimeout(): void {
-        (this.#socket as unknown as { setTimeout?: (ms: number) => void } | null)?.setTimeout?.(0);
+        (this.socket as unknown as { setTimeout?: (ms: number) => void } | null)?.setTimeout?.(0);
       }
 
       /** `request.onSocket(socket, err)` — adopt an already-connected socket. */
       onSocket(socket: NetSocket, err?: Error): void {
-        this.#socket = socket;
+        this.socket = socket;
         if (err) ctx.binding.nextTick(() => this.emit('error', err));
       }
       /** `request.setNoDelay(noDelay)` — TCP_NODELAY toggle (no-op for a VFS socket). */
@@ -1177,6 +1553,30 @@ export const httpSpec: BuiltinSpec = {
         void enable;
         void initialDelay;
         return this;
+      }
+
+      /** @internal — the request headers as they will be sent. */
+      _renderHeaders(): Record<string, string | string[]> {
+        return { ...this.headers };
+      }
+      /** @internal — stage the request line + headers. */
+      _implicitHeader(): void {
+        this._storeHeader(`${this.method} ${this.path} HTTP/1.1\r\n`, this._renderHeaders());
+      }
+      /**
+       * @internal — Node defers `method(...args)` until the socket connects. Our
+       * socket is adopted synchronously, so the call goes straight through.
+       */
+      _deferToConnect(method: string, ...args: unknown[]): void {
+        const socket = this.socket as unknown as
+          | { connecting?: boolean; once?: (event: string, fn: () => void) => void }
+          | null;
+        const run = () => {
+          const fn = (this as unknown as Record<string, unknown>)[method];
+          if (typeof fn === 'function') (fn as (...a: unknown[]) => unknown).apply(this, args);
+        };
+        if (!socket || !socket.connecting) run();
+        else socket.once?.('connect', run);
       }
 
       /** @internal — Writable contract: stash the body until `end()`. */
@@ -1205,7 +1605,7 @@ export const httpSpec: BuiltinSpec = {
           return;
         }
         this.#conn = conn;
-        this.#socket = conn.socket as unknown as NetSocket;
+        this.socket = conn.socket as unknown as NetSocket;
 
         const body = concatAll(this.#chunks);
         const lines: string[] = [`${this.method} ${this.path} HTTP/1.1`];
@@ -1223,6 +1623,8 @@ export const httpSpec: BuiltinSpec = {
           else lines.push(`${canonical}: ${value}`);
         }
         lines.push('', '');
+        // Mark the head as sent so `req.headersSent` reflects Node's `!!_header`.
+        this._header = lines.join('\r\n');
 
         conn.send(
           {
@@ -1252,7 +1654,7 @@ export const httpSpec: BuiltinSpec = {
 
       abort(): void {
         this.aborted = true;
-        (this.#socket as unknown as VirtualSocket | null)?.destroy();
+        (this.socket as unknown as VirtualSocket | null)?.destroy();
         this.emit('abort');
       }
       _destroy(err: Error | null, cb: (err?: Error | null) => void): void {

@@ -208,6 +208,146 @@ describe('v8 coverage entry points', () => {
   });
 });
 
+describe('http.OutgoingMessage surface', () => {
+  it('exposes the shared header/plumbing members', () => {
+    const { req } = boot();
+    const http = req('http');
+    const proto = http.OutgoingMessage.prototype;
+    for (const m of [
+      '_finish',
+      '_flush',
+      '_flushOutput',
+      '_implicitHeader',
+      '_isLenientHeaderValidation',
+      '_renderHeaders',
+      '_send',
+      '_storeHeader',
+      '_writeRaw',
+      'addTrailers',
+      'appendHeader',
+      'flushHeaders',
+      'getHeader',
+      'getHeaderNames',
+      'getHeaders',
+      'getRawHeaderNames',
+      'hasHeader',
+      'headersSent',
+      'removeHeader',
+      'setHeader',
+      'setHeaders',
+      'setTimeout',
+      'socket',
+      'connection',
+    ]) {
+      expect(m in proto).toBe(true);
+    }
+
+    const m = new http.OutgoingMessage();
+    expect(m.headersSent).toBe(false);
+    expect(m.socket).toBeNull();
+    m.setHeader('X-A', '1');
+    m.appendHeader('X-A', '2');
+    expect(m.getHeader('x-a')).toEqual(['1', '2']);
+    expect(m.getHeaderNames()).toEqual(['x-a']);
+    expect(m.getRawHeaderNames()).toEqual(['X-A']);
+    expect(m.getHeaders()).toEqual({ 'x-a': ['1', '2'] });
+    m.setHeaders({ 'X-B': 'b' });
+    expect(m.hasHeader('x-b')).toBe(true);
+    m.removeHeader('x-b');
+    expect(m.hasHeader('x-b')).toBe(false);
+
+    m._storeHeader('GET / HTTP/1.1\r\n', m._renderHeaders());
+    expect(m.headersSent).toBe(true);
+    expect(m._header).toContain('x-a: 1\r\n');
+    expect(() => m.setHeader('a', 'b')).toThrowError(/after they are sent/);
+    expect(() => m._renderHeaders()).toThrowError(/after they are sent/);
+
+    const fresh = new http.OutgoingMessage();
+    expect(() => fresh._implicitHeader()).toThrowError(/not implemented/i);
+    expect(fresh._isLenientHeaderValidation()).toBe(false);
+  });
+});
+
+describe('http.IncomingMessage header folding', () => {
+  it('folds duplicates the way Node does', () => {
+    const http = boot().req('http');
+    const msg = new http.IncomingMessage();
+    msg._addHeaderLine('Set-Cookie', 'a=1', msg.headers);
+    msg._addHeaderLine('Set-Cookie', 'b=2', msg.headers);
+    expect(msg.headers['set-cookie']).toEqual(['a=1', 'b=2']);
+    msg._addHeaderLine('X-Multi', '1', msg.headers);
+    msg._addHeaderLine('X-Multi', '2', msg.headers);
+    expect(msg.headers['x-multi']).toBe('1, 2');
+    msg._addHeaderLine('Cookie', 'a=1', msg.headers);
+    msg._addHeaderLine('Cookie', 'b=2', msg.headers);
+    expect(msg.headers['cookie']).toBe('a=1; b=2');
+    msg._addHeaderLine('Content-Type', 'text/plain', msg.headers);
+    msg._addHeaderLine('Content-Type', 'text/html', msg.headers);
+    // Content-Type is a drop-duplicates field: the first value wins.
+    expect(msg.headers['content-type']).toBe('text/plain');
+
+    const distinct: Record<string, string[]> = {};
+    msg._addHeaderLineDistinct('X-D', '1', distinct);
+    msg._addHeaderLineDistinct('X-D', '2', distinct);
+    expect(distinct['x-d']).toEqual(['1', '2']);
+
+    const msg2 = new http.IncomingMessage();
+    msg2._addHeaderLines(['A', '1', 'B', '2'], 4);
+    expect(msg2.rawHeaders).toEqual(['A', '1', 'B', '2']);
+    expect(msg2.headers).toEqual({ a: '1', b: '2' });
+  });
+});
+
+describe('https Server / Agent subclasses', () => {
+  it('Server keeps a real ticket-key store and records TLS config', () => {
+    const { req } = boot();
+    const http = req('http');
+    const https = req('https');
+    expect(https.Server).not.toBe(http.Server);
+    expect(https.Agent).not.toBe(http.Agent);
+
+    const server = new https.Server();
+    expect(server instanceof http.Server).toBe(true);
+    expect(server.getTicketKeys().byteLength).toBe(48);
+
+    const keys = new Uint8Array(48).fill(7);
+    server.setTicketKeys(keys);
+    expect(server.getTicketKeys()).toBe(keys);
+    expect(server._getServerData()).toEqual({ ticketKeys: '07'.repeat(48) });
+    server._setServerData({ ticketKeys: '0a'.repeat(48) });
+    expect(server.getTicketKeys()[0]).toBe(0x0a);
+    expect(() => server.setTicketKeys(new Uint8Array(47))).toThrowError(/48-byte/);
+
+    server.addContext('example.com', { ca: 'x' });
+    expect(() => server.addContext('', {})).toThrowError(/servername/i);
+    server.setSecureContext({ key: 'k', cert: 'c' });
+    expect(server.key).toBe('k');
+    expect(server.cert).toBe('c');
+  });
+
+  it('Agent is an LRU TLS session cache', () => {
+    const { req } = boot();
+    const http = req('http');
+    const https = req('https');
+    const agent = new https.Agent({ maxCachedSessions: 2 });
+    expect(agent instanceof http.Agent).toBe(true);
+    expect(agent.maxCachedSessions).toBe(2);
+    agent._cacheSession('k1', 's1');
+    expect(agent._getSession('k1')).toBe('s1');
+    agent._cacheSession('k2', 's2');
+    agent._cacheSession('k3', 's3');
+    // k1 is evicted (LRU) once the cache is full.
+    expect(agent._getSession('k1')).toBeUndefined();
+    expect(agent._getSession('k3')).toBe('s3');
+    agent._evictSession('k3');
+    expect(agent._getSession('k3')).toBeUndefined();
+
+    const disabled = new https.Agent({ maxCachedSessions: 0 });
+    disabled._cacheSession('k', 's');
+    expect(disabled._getSession('k')).toBeUndefined();
+  });
+});
+
 describe('net.Socket / net.Server prototype fidelity', () => {
   it('Socket carries Node\'s accessors and internal methods', () => {
     const net = boot().req('net');

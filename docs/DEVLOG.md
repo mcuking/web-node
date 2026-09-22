@@ -241,6 +241,23 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M76 http / https 原型差分清零
+
+**目标**：收掉扫描器剩余差分中的 `http`(4)、`https`(2)。
+
+**改了什么**
+
+- **`http.OutgoingMessage`**（先前是空壳）补全 Node 的共享面：头操作 `setHeader`/`getHeader(s)`/`getHeaderNames`/`getRawHeaderNames`/`hasHeader`/`removeHeader`/`setHeaders`/`appendHeader`/`addTrailers`/`flushHeaders`/`setTimeout`；访问器 `socket`/`connection`/`headersSent`（`headersSent` 与 Node 一致为 `!!this._header`、getter-only）；内部管线 `_send`/`_writeRaw`/`_storeHeader`/`_renderHeaders`（`_header` 已置时抛 `ERR_HTTP_HEADERS_SENT`）/`_flush`/`_flushOutput`/`_finish`/`_isLenientHeaderValidation`/`_implicitHeader`（基类抛 `ERR_METHOD_NOT_IMPLEMENTED`，同 Node）。
+- **`ServerResponse`**：`statusCode`/`statusMessage` 改为原型访问器（私有字段）；去掉自有 `socket`/`headersSent`/`connection`（改用基类访问器，避免 TS 「accessor vs property」冲突）；补 `_implicitHeader()` → `writeHead(statusCode)`。
+- **`ClientRequest`**：`path` 改访问器；去掉自有 `#socket`（改用基类访问器）；补 `_renderHeaders`/`_implicitHeader`/`_deferToConnect`；`#send` 里把请求头写进 `_header`，让 `headersSent` 变真。
+- **`IncomingMessage`**：`headers`/`trailers` 改为**惰性访问器**（首次读从 `rawHeaders`/`rawTrailers` 构建，可赋值）、`connection` 改访问器；移植 Node 的 `matchKnownFields`（大小写保留 + 去重标志）、`_addHeaderLine`（`', '` / `'; '` / Set-Cookie 数组 / 丢弃重复）、`_addHeaderLineDistinct`、`_addHeaderLines`、`_dump`、`_dumpAndCloseReadable`。
+- **`https`**：不再把 `http` 整个照搬 —— 新增 **`https.Server`**（继承 `http.Server`，补 `setSecureContext`/`addContext`/`getTicketKeys`/`setTicketKeys`/`_getServerData`/`_setServerData`；TLS 物料只记录不参与握手；ticket keys 是一份 48 字节真随机密钥，可 get/set/集群往返）与 **`https.Agent`**（继承 `http.Agent`，带 Node 的 `_sessionCache` LRU：`_getSession`/`_cacheSession`/`_evictSession`）；`https.createServer` 返回 `HttpsServer`，`https.request`/`get` 默认 agent 为 `https.globalAgent`。
+
+**验证**：`test/stub-fidelity.test.ts` 再扩 4 例（OutgoingMessage 面、IncomingMessage 折叠、https.Server、https.Agent）。扫描器：`http` 4→0、`https` 2→0。门禁全绿：`npm run typecheck` 干净 · `npx vitest run` **855 通过 / 2 预存 skip（78 文件）** · `npm run build` 绿（worker **2286.94KB**）。
+
+> 注：`test/worker.test.ts` 的 worker stdio 子用例在并行负载下偶发（单跑稳定通过）——属既有计时敏感用例，与本轮改动无关。
+> 剩余差分：`module`(22)、`tls`(12)。
+
 ### 2026-09-22 · M75 扫描器剩余差分第一批：console / child_process / zlib / v8 / net(+tty)
 
 **目标**：扁平化原型链扫描器点出的「公开模块表面」剩余差分，先做便宜的那几块（`console`、`child_process`、`zlib`、`v8`、`net`/`tty`）。
