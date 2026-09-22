@@ -467,6 +467,7 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 | M57 | Real `Worker` — a cooperative worker: a second module registry on the same event loop with its own `process`/`worker_threads` views and a real `MessageChannel` to the parent. `workerData`, message round trips, the `online`/`message`/`error`/`exit` lifecycle, `terminate()` and the constructor validation all match Node (including `threadId === -1` and a no-op `postMessage` after exit). The one deviation that matters — no real parallelism — is documented, and everything needing a native thread (`eval`, worker stdio, `resourceLimits`, profiling, nested workers) throws. 15 behaviours match Node v26.9.0 | ✅ Done |
 | M58 | Complete the `internal/errors` table — diffing every `ERR_*` reference in the vendored/`src` trees against the shim turned up **9 codes that vendored modules pull off `internal/errors` but the table never defined**, so `codes.X` was `undefined` and `new` threw "is not a constructor" on the rare path that reached it. All 9 are now declared (word-for-word from `lib/internal/errors.js` and `src/node_errors.h`), guarded by a structural regression test (every referenced code must exist as a constructor; 76 scanned) and a differential corpus (a real Node's `internal/errors`, read through `--expose-internals`, compared field by field; 10/10 match) | ✅ Done |
 | M59 | Real worker stdio — `worker.stdin`/`stdout`/`stderr` used to throw from all three getters, but Node never does (`stdin` is null unless `stdin: true`; `stdout`/`stderr` are always Readables, merely piped to the parent's by default). They are now real streams carried over a second `MessageChannel`: the worker's `process.stdout`/`stderr`/`stdin` are real, its `console` is bound to its own stdout/stderr, forwarding matches Node, and an open `worker.stdin` refs the worker. A race where the worker could exit before an in-flight message was delivered is fixed with a short quiescence grace | ✅ Done |
+| M60 | SystemError-based codes fixed — codes Node declares as `E(code, msg, SystemError)` (`ERR_FS_CP_*`, `ERR_FS_EISDIR`, `ERR_SYSTEM_ERROR`) must build their message from a context object and call themselves `SystemError`; the table registered only `ERR_TTY_INIT_FAILED` that way, so the rest lost both the name and the `: syscall returned code (message) path => dest` suffix. All 11 are now correct, with the `HideStackFramesError` companion; a new full message-text differential also caught three copies of real drift (two `ERR_FS_CP_*` codes had each other's wording) | ✅ Done |
 
 ## Vendored Node source
 
@@ -565,8 +566,8 @@ reimplementations worth doing (`internal/util/inspect.js`, the native
 `string_decoder`, `internal/fs/*`). `vm` is the real `lib/vm.js` on a JS
 stand-in for V8 contexts, and `worker_threads.Worker` runs as a cooperative
 worker (real messages, lifecycle and stdio, no parallelism). `internal/errors`
-defines every code the vendored modules actually reach for, and a regression test
-keeps it that way. Of Node's core modules, only `tls` remains a pure throwing stub.
+defines every code the vendored modules actually reach for (and every word of their
+messages), with regression tests keeping it that way. Of Node's core modules, only `tls` remains a pure throwing stub.
 
 ## Contributing
 

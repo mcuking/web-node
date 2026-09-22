@@ -472,6 +472,23 @@ console.log('use-after-close : ' + useAfterClose.name + ' ' + useAfterClose.code
 console.log('not-iterable    : ' + notIterable.name + ' ' + notIterable.code + ' - ' + notIterable.message);
 console.log('');
 
+// --- internal/errors: SystemError codes (milestone 60) ---
+// Codes Node declares with E(code, msg, SystemError) build their message from a
+// *context object* and call themselves "SystemError" (the suffix is
+// ": syscall returned code (message) path => dest"). The table used to build
+// them like ordinary codes, which dropped both, and two sibling codes had each
+// other's wording.
+console.log('-- internal/errors: SystemError codes (milestone 60) --');
+const cpConflict = new codes.ERR_FS_CP_EINVAL({
+  message: 'src and dest cannot be the same',
+  path: '/a',
+  dest: '/b',
+  syscall: 'cp',
+  code: 'EINVAL',
+});
+console.log('system-error    : ' + cpConflict.name + ' [' + cpConflict.code + '] ' + cpConflict.message);
+console.log('');
+
 // --- readline (milestone 31) ---
 // A "terminal" here is just an { input, output } stream pair - a tab has no TTY,
 // but the line editor, the keypress decoder, the ANSI cursor writers and the

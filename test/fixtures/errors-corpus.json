@@ -193,5 +193,355 @@
     "permutationNames": [],
     "props": {},
     "extra": {}
+  },
+  {
+    "code": "ERR_FS_CP_EINVAL",
+    "args": [
+      {
+        "message": "src and dest cannot be the same",
+        "path": "/a",
+        "dest": "/b",
+        "syscall": "cp",
+        "code": "EINVAL"
+      }
+    ],
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_EINVAL",
+    "message": "Invalid src or dest: cp returned EINVAL (src and dest cannot be the same) /a => /b",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "info": {
+        "message": "src and dest cannot be the same",
+        "path": "/a",
+        "dest": "/b",
+        "syscall": "cp",
+        "code": "EINVAL"
+      },
+      "syscall": "cp",
+      "path": "/a",
+      "dest": "/b"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_FS_CP_EEXIST",
+    "args": [
+      {
+        "message": "dest already exists: /b",
+        "path": "/a",
+        "dest": "/b",
+        "syscall": "cp",
+        "code": "EEXIST"
+      }
+    ],
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_EEXIST",
+    "message": "Target already exists: cp returned EEXIST (dest already exists: /b) /a => /b",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "info": {
+        "message": "dest already exists: /b",
+        "path": "/a",
+        "dest": "/b",
+        "syscall": "cp",
+        "code": "EEXIST"
+      },
+      "syscall": "cp",
+      "path": "/a",
+      "dest": "/b"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_FS_CP_DIR_TO_NON_DIR",
+    "args": [
+      {
+        "message": "cannot overwrite non-directory /b with directory /a",
+        "path": "/b",
+        "syscall": "cp",
+        "code": "EISDIR"
+      }
+    ],
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_DIR_TO_NON_DIR",
+    "message": "Cannot overwrite non-directory with directory: cp returned EISDIR (cannot overwrite non-directory /b with directory /a) /b",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "info": {
+        "message": "cannot overwrite non-directory /b with directory /a",
+        "path": "/b",
+        "syscall": "cp",
+        "code": "EISDIR"
+      },
+      "syscall": "cp",
+      "path": "/b"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_FS_CP_NON_DIR_TO_DIR",
+    "args": [
+      {
+        "message": "cannot overwrite directory /b with non-directory /a",
+        "path": "/b",
+        "syscall": "cp",
+        "code": "ENOTDIR"
+      }
+    ],
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_NON_DIR_TO_DIR",
+    "message": "Cannot overwrite directory with non-directory: cp returned ENOTDIR (cannot overwrite directory /b with non-directory /a) /b",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "info": {
+        "message": "cannot overwrite directory /b with non-directory /a",
+        "path": "/b",
+        "syscall": "cp",
+        "code": "ENOTDIR"
+      },
+      "syscall": "cp",
+      "path": "/b"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_FS_CP_FIFO_PIPE",
+    "args": [
+      {
+        "message": "cannot copy a FIFO pipe",
+        "path": "/a",
+        "syscall": "cp",
+        "code": "EINVAL"
+      }
+    ],
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_FIFO_PIPE",
+    "message": "Cannot copy a FIFO pipe: cp returned EINVAL (cannot copy a FIFO pipe) /a",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "info": {
+        "message": "cannot copy a FIFO pipe",
+        "path": "/a",
+        "syscall": "cp",
+        "code": "EINVAL"
+      },
+      "syscall": "cp",
+      "path": "/a"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_FS_CP_SOCKET",
+    "args": [
+      {
+        "message": "cannot copy a socket file: /b",
+        "path": "/a",
+        "syscall": "cp",
+        "code": "EINVAL"
+      }
+    ],
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_SOCKET",
+    "message": "Cannot copy a socket file: cp returned EINVAL (cannot copy a socket file: /b) /a",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "info": {
+        "message": "cannot copy a socket file: /b",
+        "path": "/a",
+        "syscall": "cp",
+        "code": "EINVAL"
+      },
+      "syscall": "cp",
+      "path": "/a"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY",
+    "args": [
+      {
+        "message": "cannot overwrite /a with /b",
+        "path": "/b",
+        "syscall": "cp",
+        "code": "EINVAL"
+      }
+    ],
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY",
+    "message": "Cannot overwrite symlink in subdirectory of self: cp returned EINVAL (cannot overwrite /a with /b) /b",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "info": {
+        "message": "cannot overwrite /a with /b",
+        "path": "/b",
+        "syscall": "cp",
+        "code": "EINVAL"
+      },
+      "syscall": "cp",
+      "path": "/b"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_FS_CP_UNKNOWN",
+    "args": [
+      {
+        "message": "cannot copy an unknown file type",
+        "path": "/a",
+        "syscall": "cp",
+        "code": "EINVAL"
+      }
+    ],
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_UNKNOWN",
+    "message": "Cannot copy an unknown file type: cp returned EINVAL (cannot copy an unknown file type) /a",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "info": {
+        "message": "cannot copy an unknown file type",
+        "path": "/a",
+        "syscall": "cp",
+        "code": "EINVAL"
+      },
+      "syscall": "cp",
+      "path": "/a"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_FS_EISDIR",
+    "args": [
+      {
+        "message": "is a directory: /a",
+        "path": "/a",
+        "syscall": "cp",
+        "code": "EISDIR"
+      }
+    ],
+    "name": "SystemError",
+    "errorCode": "ERR_FS_EISDIR",
+    "message": "Path is a directory: cp returned EISDIR (is a directory: /a) /a",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "info": {
+        "message": "is a directory: /a",
+        "path": "/a",
+        "syscall": "cp",
+        "code": "EISDIR"
+      },
+      "syscall": "cp",
+      "path": "/a"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_SYSTEM_ERROR",
+    "args": [
+      {
+        "syscall": "stat",
+        "code": "ENOENT",
+        "message": "no such file or directory",
+        "errno": -2,
+        "path": "/x"
+      }
+    ],
+    "name": "SystemError",
+    "errorCode": "ERR_SYSTEM_ERROR",
+    "message": "A system error occurred: stat returned ENOENT (no such file or directory) /x",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "info": {
+        "syscall": "stat",
+        "code": "ENOENT",
+        "message": "no such file or directory",
+        "errno": -2,
+        "path": "/x"
+      },
+      "errno": -2,
+      "syscall": "stat",
+      "path": "/x"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_TTY_INIT_FAILED",
+    "args": [
+      {
+        "syscall": "uv_tty_init",
+        "code": "ENOTTY",
+        "message": "inappropriate ioctl",
+        "errno": -25
+      }
+    ],
+    "name": "SystemError",
+    "errorCode": "ERR_TTY_INIT_FAILED",
+    "message": "TTY initialization failed: uv_tty_init returned ENOTTY (inappropriate ioctl)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "info": {
+        "syscall": "uv_tty_init",
+        "code": "ENOTTY",
+        "message": "inappropriate ioctl",
+        "errno": -25
+      },
+      "errno": -25,
+      "syscall": "uv_tty_init"
+    },
+    "extra": {}
   }
 ]

@@ -24,6 +24,35 @@ const CASES = [
   ['ERR_PERFORMANCE_INVALID_TIMESTAMP', [5]],
   ['ERR_PERFORMANCE_MEASURE_INVALID_OPTIONS', ['Option start must be a number']],
   ['ERR_USE_AFTER_CLOSE', ['readline']],
+  // `E(code, msg, SystemError)` codes format from a *context* object and carry
+  // `name: 'SystemError'`. `ERR_FS_CP_*` are thrown by the vendored `fs.cpSync`
+  // path; `ERR_SYSTEM_ERROR` by `os.getPriority`/`os.setPriority`.
+  ['ERR_FS_CP_EINVAL', [{ message: 'src and dest cannot be the same', path: '/a', dest: '/b', syscall: 'cp', code: 'EINVAL' }]],
+  [
+    'ERR_FS_CP_EEXIST',
+    [{ message: 'dest already exists: /b', path: '/a', dest: '/b', syscall: 'cp', code: 'EEXIST' }],
+  ],
+  [
+    'ERR_FS_CP_DIR_TO_NON_DIR',
+    [{ message: 'cannot overwrite non-directory /b with directory /a', path: '/b', syscall: 'cp', code: 'EISDIR' }],
+  ],
+  [
+    'ERR_FS_CP_NON_DIR_TO_DIR',
+    [{ message: 'cannot overwrite directory /b with non-directory /a', path: '/b', syscall: 'cp', code: 'ENOTDIR' }],
+  ],
+  ['ERR_FS_CP_FIFO_PIPE', [{ message: 'cannot copy a FIFO pipe', path: '/a', syscall: 'cp', code: 'EINVAL' }]],
+  ['ERR_FS_CP_SOCKET', [{ message: 'cannot copy a socket file: /b', path: '/a', syscall: 'cp', code: 'EINVAL' }]],
+  [
+    'ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY',
+    [{ message: 'cannot overwrite /a with /b', path: '/b', syscall: 'cp', code: 'EINVAL' }],
+  ],
+  ['ERR_FS_CP_UNKNOWN', [{ message: 'cannot copy an unknown file type', path: '/a', syscall: 'cp', code: 'EINVAL' }]],
+  ['ERR_FS_EISDIR', [{ message: 'is a directory: /a', path: '/a', syscall: 'cp', code: 'EISDIR' }]],
+  [
+    'ERR_SYSTEM_ERROR',
+    [{ syscall: 'stat', code: 'ENOENT', message: 'no such file or directory', errno: -2, path: '/x' }],
+  ],
+  ['ERR_TTY_INIT_FAILED', [{ syscall: 'uv_tty_init', code: 'ENOTTY', message: 'inappropriate ioctl', errno: -25 }]],
 ];
 
 const describe = (code, args) => {

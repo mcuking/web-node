@@ -84,14 +84,13 @@ export const ERROR_CODES: Record<string, string> = {
     'WebAssembly is not supported in this environment, but is required for %s',
   ERR_FALSY_VALUE_REJECTION: 'Promise was rejected with falsy value',
   ERR_FS_FILE_TOO_LARGE: 'File size (%s) is greater than 2 GiB',
-  ERR_FS_CP_DIR_TO_NON_DIR: 'Cannot overwrite directory with non-directory',
-  ERR_FS_CP_NON_DIR_TO_DIR: 'Cannot overwrite non-directory with directory',
+  ERR_FS_CP_DIR_TO_NON_DIR: 'Cannot overwrite non-directory with directory',
+  ERR_FS_CP_NON_DIR_TO_DIR: 'Cannot overwrite directory with non-directory',
   ERR_FS_CP_EEXIST: 'Target already exists',
   ERR_FS_CP_EINVAL: 'Invalid src or dest',
   ERR_FS_CP_FIFO_PIPE: 'Cannot copy a FIFO pipe',
   ERR_FS_CP_SOCKET: 'Cannot copy a socket file',
-  ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY:
-    'Cannot copy symlink source into subdirectory of the destination',
+  ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY: 'Cannot overwrite symlink in subdirectory of self',
   ERR_FS_CP_UNKNOWN: 'Cannot copy an unknown file type',
   ERR_FS_EISDIR: 'Path is a directory',
   ERR_DIR_CLOSED: 'Directory handle was closed',
@@ -555,20 +554,53 @@ class SystemError extends Error {
         configurable: true,
       });
     }
+    if (context.dest !== undefined) {
+      Object.defineProperty(this, 'dest', {
+        get: () => (context.dest != null ? String(context.dest) : context.dest),
+        set: (value: unknown) => {
+          context.dest = value ? String(value) : undefined;
+        },
+        enumerable: true,
+        configurable: true,
+      });
+    }
+  }
+
+  toString(): string {
+    return `${this.name} [${this.code}]: ${this.message}`;
   }
 }
 
 /** Codes `lib/internal/errors.js` declares with the `SystemError` base. */
 const SYSTEM_ERROR_CODES: Record<string, true> = {
+  ERR_FS_CP_DIR_TO_NON_DIR: true,
+  ERR_FS_CP_EEXIST: true,
+  ERR_FS_CP_EINVAL: true,
+  ERR_FS_CP_FIFO_PIPE: true,
+  ERR_FS_CP_NON_DIR_TO_DIR: true,
+  ERR_FS_CP_SOCKET: true,
+  ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY: true,
+  ERR_FS_CP_UNKNOWN: true,
+  ERR_FS_EISDIR: true,
+  ERR_SYSTEM_ERROR: true,
   ERR_TTY_INIT_FAILED: true,
 };
 
 function makeSystemErrorWithCode(key: string): new (ctx: Record<string, unknown>) => Error {
-  return class NodeSystemError extends SystemError {
+  class NodeSystemError extends SystemError {
     constructor(ctx: Record<string, unknown>) {
       super(key, ctx);
     }
-  } as unknown as new (ctx: Record<string, unknown>) => Error;
+  }
+  // `E(code, msg, SystemError, HideStackFramesError)` (`ERR_FS_EISDIR`,
+  // `ERR_SYSTEM_ERROR`) exposes the hide-stack-frames companion on the class;
+  // `os.js` reaches for `ERR_SYSTEM_ERROR.HideStackFramesError`. As with the
+  // regular codes we cannot rewrite captured stacks, so it aliases the class.
+  Object.defineProperty(NodeSystemError, 'HideStackFramesError', {
+    value: NodeSystemError,
+    configurable: true,
+  });
+  return NodeSystemError as unknown as new (ctx: Record<string, unknown>) => Error;
 }
 
 function createErrorsBindingContext(): Record<string, unknown> {
@@ -577,10 +609,12 @@ function createErrorsBindingContext(): Record<string, unknown> {
     codes[code] = makeErrorClass(code);
   }
   // `SystemError`-based codes format their message from a *context*, not from
-  // `%s` placeholders (`lib/internal/errors.js`'s `makeSystemErrorWithCode`).
-  // Only `ERR_TTY_INIT_FAILED` uses that base here; in this runtime the TTY
-  // handle cannot be built at all, so the path is unreachable, but the class
-  // is still the honest shape.
+  // `%s` placeholders (`lib/internal/errors.js`'s `makeSystemErrorWithCode`):
+  // `E(code, msg, SystemError)` for every `ERR_FS_CP_*`/`ERR_FS_EISDIR`/
+  // `ERR_SYSTEM_ERROR`/`ERR_TTY_INIT_FAILED`. Building them through
+  // `makeErrorClass` instead would leave `name` at 'Error' and the message at
+  // the bare prefix, dropping the `: {syscall} returned {code} ({message})`
+  // suffix the call sites rely on.
   for (const code of Object.keys(SYSTEM_ERROR_CODES)) {
     codes[code] = makeSystemErrorWithCode(code);
   }

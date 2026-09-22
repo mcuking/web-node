@@ -348,6 +348,7 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M57 | **真 `Worker`**——协作式工作器：同一事件循环上的第二个模块注册表，拥有自己的 `process`/`worker_threads` 视图与与父侧的**真** `MessageChannel`。`workerData`、消息往返、`online`/`message`/`error`/`exit` 生命周期、`terminate()` 与构造校验均与 Node 对齐（包括退出后 `threadId === -1`、`postMessage` 为 no-op）。唯一要紧的偏离是**无真并行**（已写明），需原生线程的东西（`eval`/worker 标准 IO/`resourceLimits`/剖析/嵌套 `Worker`）全部响亮报错。15 条行为与真 Node v26.9.0 全等 | ✅ |
 | M58 | **补齐 `internal/errors` 码表**——把 vendored/`src` 树里所有 `ERR_*` 引用与 shim 表对了一遍，发现 **9 个码被 `internal/errors` 解构引用但表里从未定义**，于是 `codes.X` 是 `undefined`、`new` 在罕至路径上报 “is not a constructor”。9 个码已逐字（对齐 `lib/internal/errors.js` 与 `src/node_errors.h`）补齐，并有结构回归门测试（每个被引用的码都必须是构造函数，扫到 76 个）与差分语料（真 Node 经 `--expose-internals` 直取 `internal/errors` 逐字段比对，10/10 一致）兵护 | ✅ |
 | M59 | **真 worker 标准 IO**——`worker.stdin`/`stdout`/`stderr` 三个 getter 以前都抛错，而 Node 从不（`stdin` 默认 null，仅 `stdin: true` 时是流；`stdout`/`stderr` 总是可读流、默认只是转发到父进程）。现为经**第二条 MessageChannel** 传输的真流：worker 侧 `process.stdout/stderr/stdin` 是真流、其 `console` 绑到自己的 stdout/stderr、转发行为与 Node 一致，未 `end()` 的 `worker.stdin` 会 ref 住 worker；顺带用静默期修复了“worker 可能在在途消息送达前先退出”的竞态 | ✅ |
+| M60 | **修正 SystemError 基底错误码**——Node 用 `E(code, msg, SystemError)` 声明的码（`ERR_FS_CP_*`、`ERR_FS_EISDIR`、`ERR_SYSTEM_ERROR`）本应从**上下文对象**拼消息且 `name='SystemError'`；表里只登记了 `ERR_TTY_INIT_FAILED`，其余丢了名字与 `: syscall returned code (message) path => dest` 后缀。11 个码现已全部正确，并带上 `HideStackFramesError` 伴生类；一条新的全量消息文案差分还抓出 3 处真实文案错误（两个 `ERR_FS_CP_*` 互换了文案） | ✅ |
 
 ## Vendored 真源码现状
 
