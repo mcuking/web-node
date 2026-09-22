@@ -17,6 +17,7 @@ export const httpsSpec: BuiltinSpec = {
   id: 'https',
   aliases: ['node:https'],
   origin: 'web-node',
+  arity: { Agent: 1, Server: 2, createServer: 2, get: 3, request: 0 },
   deps: ['http'],
   init: (ctx: BuiltinInitContext) => {
     const http = ctx.require('http') as Record<string, unknown>;

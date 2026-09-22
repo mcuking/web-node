@@ -10,6 +10,7 @@ export const moduleSpec: BuiltinSpec = {
   id: 'module',
   aliases: ['node:module'],
   origin: 'web-node',
+  arity: { register: 1, _resolveFilename: 4 },
   init: (ctx: BuiltinInitContext) => {
     const builtinModuleIds = [...ctx.builtinModuleIds].sort();
 

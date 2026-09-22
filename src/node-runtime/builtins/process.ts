@@ -8,6 +8,11 @@ import { notImplemented } from '../errors';
 export const processSpec: BuiltinSpec = {
   id: 'process',
   aliases: ['node:process'],
+  arity: {
+    cpuUsage: 1, threadCpuUsage: 1, emitWarning: 4, kill: 2, umask: 1, reallyExit: 0,
+    loadEnvFile: 0, setSourceMapsEnabled: 1, ref: 1, unref: 1,
+    execve: 1, initgroups: 2, setegid: 1, seteuid: 1, setgid: 1, setgroups: 1, setuid: 1,
+  },
   origin: 'web-node',
   deps: ['events'],
   init: (ctx: BuiltinInitContext) => {

@@ -306,6 +306,10 @@ export const httpSpec: BuiltinSpec = {
   id: 'http',
   aliases: ['node:http'],
   origin: 'web-node',
+  arity: {
+    Agent: 1, ClientRequest: 3, Server: 2, ServerResponse: 2, IncomingMessage: 1, OutgoingMessage: 1,
+    createServer: 2, get: 3, request: 3, validateHeaderName: 0, validateHeaderValue: 0,
+  },
   deps: ['net', 'events', 'stream'],
   init: (ctx: BuiltinInitContext) => {
     const { EventEmitter } = ctx.require('events') as { EventEmitter: new () => Emitter };

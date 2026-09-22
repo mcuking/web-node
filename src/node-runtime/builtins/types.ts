@@ -33,6 +33,12 @@ export interface BuiltinSpec {
   init?: (ctx: BuiltinInitContext) => Record<string, unknown>;
   /** Ids that must be materialized before this one runs. */
   deps?: string[];
+  /**
+   * Node's `Function.length` for exported callables, applied after
+   * materialization so optional-argument probing matches Node even where our
+   * implementation uses rest parameters. See `alignArity`.
+   */
+  arity?: Record<string, number>;
   /** Marks provenance for docs/UI. */
   origin: 'node-source' | 'web-node';
 }

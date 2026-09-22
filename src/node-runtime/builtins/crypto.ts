@@ -139,6 +139,19 @@ export const cryptoSpec: BuiltinSpec = {
   id: 'crypto',
   aliases: ['node:crypto'],
   origin: 'web-node',
+  // Node's `Function.length` for the crypto surface (observable-equivalent).
+  arity: {
+    Hash: 2, Hmac: 3, Sign: 2, Verify: 2, KeyObject: 2, DiffieHellman: 4, DiffieHellmanGroup: 1,
+    ECDH: 1, X509Certificate: 1,
+    createHash: 2, createHmac: 3, createSign: 2, createVerify: 2, createPrivateKey: 1,
+    createPublicKey: 1, createSecretKey: 2, createECDH: 1, createDiffieHellman: 4,
+    createDiffieHellmanGroup: 1, getDiffieHellman: 1, diffieHellman: 2,
+    randomInt: 3, randomUUID: 1, scrypt: 4, scryptSync: 3, timingSafeEqual: 0,
+    sign: 4, verify: 5, privateEncrypt: 2, privateDecrypt: 2, publicEncrypt: 2, publicDecrypt: 2,
+    generateKey: 3, generateKeySync: 2, generateKeyPair: 3, generateKeyPairSync: 2,
+    generatePrime: 3, generatePrimeSync: 1, checkPrime: 1, checkPrimeSync: 1,
+    argon2: 3, argon2Sync: 2, createMac: 3, encapsulate: 2, decapsulate: 3, setFips: 1,
+  },
   init: (ctx: BuiltinInitContext) => {
     const webcrypto = (globalThis as { crypto?: Crypto }).crypto;
     if (!webcrypto) throw new Error('web-node: this host has no WebCrypto');

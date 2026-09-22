@@ -516,6 +516,16 @@ export const zlibSpec: BuiltinSpec = {
   id: 'zlib',
   aliases: ['node:zlib'],
   origin: 'web-node',
+  arity: {
+    BrotliCompress: 1, BrotliDecompress: 1, ZstdCompress: 1, ZstdDecompress: 1,
+    ZipBuffer: 1, ZipEntry: 1, ZipFile: 1,
+    brotliCompress: 3, brotliCompressSync: 2, brotliDecompress: 3, brotliDecompressSync: 2,
+    createBrotliCompress: 1, createBrotliDecompress: 1,
+    zstdCompress: 3, zstdCompressSync: 2, zstdDecompress: 3, zstdDecompressSync: 2,
+    createZstdCompress: 1, createZstdDecompress: 1,
+    deflateSync: 2, inflateSync: 2, deflateRawSync: 2, inflateRawSync: 2,
+    gzipSync: 2, gunzipSync: 2, unzipSync: 2,
+  },
   deps: ['stream', 'buffer'],
   init: (ctx: BuiltinInitContext): Record<string, unknown> => {
     const { Transform } = ctx.require('stream') as { Transform: TransformCtor };

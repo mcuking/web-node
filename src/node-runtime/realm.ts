@@ -5,6 +5,7 @@ import type { BuiltinInitContext, BuiltinSpec, UserRequireFn } from './builtins/
 import { vendoredSource } from './vendored';
 import { compileCjs } from './vm';
 import { notImplemented } from './errors';
+import { alignArity } from './builtins/arity';
 
 /**
  * A symbol bag that lazily mints a stable Symbol per requested name.
@@ -159,6 +160,8 @@ export class Realm {
     } else {
       throw new Error(`Builtin "${key}" has neither vendorPath nor init`);
     }
+
+    if (rec.spec.arity) alignArity(rec.exports, rec.spec.arity);
 
     rec.state = 'loaded';
     return rec.exports;

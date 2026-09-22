@@ -16,6 +16,7 @@ export const netSpec: BuiltinSpec = {
   id: 'net',
   aliases: ['node:net'],
   origin: 'web-node',
+  arity: { Server: 2, Socket: 1, Stream: 1, connect: 0, createConnection: 0, createServer: 2 },
   deps: ['events'],
   init: (ctx: BuiltinInitContext) => {
     const { EventEmitter } = ctx.require('events') as { EventEmitter: new () => EmitterLike };

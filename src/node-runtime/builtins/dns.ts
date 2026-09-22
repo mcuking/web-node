@@ -257,10 +257,18 @@ function buildNamespaces() {
   return { cbSurface, promiseSurface, ERROR_CODES };
 }
 
+const dnsArity: Record<string, number> = {
+  Resolver: 0,
+  resolve: 3, resolveAny: 2, resolveCaa: 2, resolveCname: 2, resolveMx: 2, resolveNaptr: 2,
+  resolveNs: 2, resolvePtr: 2, resolveSoa: 2, resolveSrv: 2, resolveTlsa: 2, resolveTxt: 2,
+  setDefaultResultOrder: 1,
+};
+
 export const dnsPromisesSpec: BuiltinSpec = {
   id: 'dns/promises',
   aliases: ['node:dns/promises'],
   origin: 'web-node',
+  arity: dnsArity,
   init: () => {
     const { promiseSurface, ERROR_CODES: codes } = buildNamespaces();
     return { ...promiseSurface, ...codes };
@@ -271,6 +279,7 @@ export const dnsSpec: BuiltinSpec = {
   id: 'dns',
   aliases: ['node:dns'],
   origin: 'web-node',
+  arity: dnsArity,
   init: (_ctx: BuiltinInitContext) => {
     const { cbSurface, promiseSurface, ERROR_CODES: codes } = buildNamespaces();
     return { ...cbSurface, promises: promiseSurface, ...FLAGS, ...codes };

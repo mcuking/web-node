@@ -43,6 +43,7 @@ export const workerThreadsSpec: BuiltinSpec = {
   id: 'worker_threads',
   aliases: ['node:worker_threads'],
   origin: 'web-node',
+  arity: { moveMessagePortToContext: 0, postMessageToThread: 4 },
   deps: ['events', 'internal/worker/io', 'internal/buffer'],
   init: (ctx: BuiltinInitContext) => {
     const binding = ctx.binding;

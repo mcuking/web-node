@@ -151,6 +151,7 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     aliases: ['node:perf_hooks'],
     vendorPath: 'perf_hooks.js',
     origin: 'node-source',
+    arity: { importHistogram: 1 },
     deps: [
       'internal/errors',
       'internal/histogram',
@@ -1221,6 +1222,7 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     aliases: ['node:console'],
     vendorPath: 'console.js',
     origin: 'node-source',
+    arity: { assert: 0, dir: 0, table: 0 },
     deps: ['internal/console/global'],
   },
   {
@@ -1705,6 +1707,7 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     aliases: ['node:v8'],
     vendorPath: 'v8.js',
     origin: 'node-source',
+    arity: { queryObjects: 1 },
     // `v8.serialize`/`deserialize` and the `Serializer`/`Deserializer` classes
     // are the real thing, running on the `serdes` binding (V8's wire format in
     // JS). `internal/heap_utils` is our shim: heap snapshots and

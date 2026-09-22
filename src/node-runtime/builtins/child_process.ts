@@ -32,6 +32,7 @@ export const childProcessSpec: BuiltinSpec = {
   id: 'child_process',
   aliases: ['node:child_process'],
   origin: 'web-node',
+  arity: { ChildProcess: 0, fork: 1 },
   deps: ['events', 'stream', 'buffer'],
   init: (ctx: BuiltinInitContext) => {
     const binding = ctx.binding;
