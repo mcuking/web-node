@@ -19,6 +19,27 @@ import {
   resolveCipher,
   type CipherSpec,
 } from '../crypto/cipher';
+import {
+  KeyObject as AsymKeyObject,
+  RSA_NO_PADDING,
+  RSA_PKCS1_OAEP_PADDING,
+  RSA_PKCS1_PADDING,
+  RSA_PKCS1_PSS_PADDING,
+  RSA_PSS_SALTLEN_DIGEST,
+  RSA_PSS_SALTLEN_MAX,
+  RSA_PSS_SALTLEN_MAX_SIGN,
+  RSA_X931_PADDING,
+  createPrivateKey as asymCreatePrivateKey,
+  createPublicKey as asymCreatePublicKey,
+  createSecretKey as asymCreateSecretKey,
+  generateKeyPairSync as asymGenerateKeyPairSync,
+  listCurves,
+  parseSignAlgorithm,
+  sign as asymSign,
+  verify as asymVerify,
+  type GenerateKeyPairOptions,
+  type SignAlgorithm,
+} from '../crypto/asym';
 
 /**
  * `crypto` — the subset tooling actually calls in a browser tab.
@@ -819,21 +840,12 @@ export const cryptoSpec: BuiltinSpec = {
       throw notImplemented('api', `crypto.${name}`);
     };
     const unsupportedApis = {
-      createSign: unsupportedApi('createSign'),
-      createVerify: unsupportedApi('createVerify'),
-      sign: unsupportedApi('sign'),
-      verify: unsupportedApi('verify'),
-      generateKeyPair: unsupportedApi('generateKeyPair'),
-      generateKeyPairSync: unsupportedApi('generateKeyPairSync'),
       generateKey: unsupportedApi('generateKey'),
       generateKeySync: unsupportedApi('generateKeySync'),
       createDiffieHellman: unsupportedApi('createDiffieHellman'),
       getDiffieHellman: unsupportedApi('getDiffieHellman'),
       createDiffieHellmanGroup: unsupportedApi('createDiffieHellmanGroup'),
       diffieHellman: unsupportedApi('diffieHellman'),
-      createPrivateKey: unsupportedApi('createPrivateKey'),
-      createPublicKey: unsupportedApi('createPublicKey'),
-      createSecretKey: unsupportedApi('createSecretKey'),
       publicEncrypt: unsupportedApi('publicEncrypt'),
       publicDecrypt: unsupportedApi('publicDecrypt'),
       privateEncrypt: unsupportedApi('privateEncrypt'),
@@ -842,7 +854,6 @@ export const cryptoSpec: BuiltinSpec = {
       generatePrimeSync: unsupportedApi('generatePrimeSync'),
       checkPrime: unsupportedApi('checkPrime'),
       checkPrimeSync: unsupportedApi('checkPrimeSync'),
-      getCurves: unsupportedApi('getCurves'),
       getFips: unsupportedApi('getFips'),
       setFips: unsupportedApi('setFips'),
       createECDH: unsupportedApi('createECDH'),
@@ -853,6 +864,42 @@ export const cryptoSpec: BuiltinSpec = {
       encapsulate: unsupportedApi('encapsulate'),
       decapsulate: unsupportedApi('decapsulate'),
     };
+
+    // -- asymmetric keys and signatures --------------------------------------
+    //
+    // Implemented synchronously in `../crypto/asym` (ASN.1 + curve maths), so
+    // these behave like Node even though WebCrypto is async-only.
+
+    const createSign = (algorithm: unknown, options?: unknown) => new Sign(algorithm, options);
+    const createVerify = (algorithm: unknown, options?: unknown) => new Verify(algorithm, options);
+    const sign = (algorithm: unknown, data: unknown, key: unknown): Uint8Array =>
+      asBuffer(asymSign(parseSignAlgorithm(algorithm), toBytes(data), key));
+    const verify = (algorithm: unknown, data: unknown, key: unknown, signature: unknown): boolean =>
+      asymVerify(
+        parseSignAlgorithm(algorithm),
+        toBytes(data),
+        key,
+        toBytes(signature, undefined),
+      );
+    const createPrivateKey = (key: unknown): AsymKeyObject => asymCreatePrivateKey(key);
+    const createPublicKey = (key: unknown): AsymKeyObject => asymCreatePublicKey(key);
+    const createSecretKey = (key: unknown, encoding?: unknown): AsymKeyObject =>
+      asymCreateSecretKey(key, encoding);
+    const generateKeyPairSync = (type: string, options?: GenerateKeyPairOptions): unknown =>
+      asymGenerateKeyPairSync(type, options ?? {});
+    const generateKeyPair = (type: string, options: unknown, callback?: unknown): void => {
+      let cb: unknown = callback;
+      let opts: GenerateKeyPairOptions = {};
+      if (typeof options === 'function') cb = options;
+      else if (options && typeof options === 'object') opts = options as GenerateKeyPairOptions;
+      const result = asymGenerateKeyPairSync(type, opts);
+      if (typeof cb === 'function') {
+        queueMicrotask(() => (cb as (e: Error | null, pub: unknown, priv: unknown) => void)(null, result.publicKey, result.privateKey));
+        return;
+      }
+      return result as unknown as void;
+    };
+    const getCurves = (): string[] => listCurves();
 
     // Asymmetric-key / engine / X.509 classes. Node exposes them as real
     // classes with a rich prototype; we have no backend, so each stays present
@@ -887,44 +934,92 @@ export const cryptoSpec: BuiltinSpec = {
       return Ctor;
     };
 
-    // `Sign`/`Verify` are `stream.Writable` subclasses in Node.
+    // `Sign`/`Verify` are `stream.Writable` subclasses in Node. The digest /
+    // signature work is synchronous (see `../crypto/asym`), so they behave like
+    // Node's: `update()` accumulates, `sign()`/`verify()` finish.
+    const joinChunks = (chunks: Uint8Array[]): Uint8Array => {
+      let total = 0;
+      for (const chunk of chunks) total += chunk.length;
+      const out = new Uint8Array(total);
+      let at = 0;
+      for (const chunk of chunks) {
+        out.set(chunk, at);
+        at += chunk.length;
+      }
+      return out;
+    };
     const Sign = namedClass(
       'Sign',
       class extends WritableBase {
-        constructor() {
-          super();
-          throw notImplemented('api', 'crypto.Sign');
+        #algorithm: SignAlgorithm;
+        #chunks: Uint8Array[] = [];
+
+        constructor(algorithm: unknown, options?: unknown) {
+          super(options as Record<string, unknown> | undefined);
+          if (typeof algorithm !== 'string') {
+            throw coded(
+              'TypeError',
+              'ERR_INVALID_ARG_TYPE',
+              `The "algorithm" argument must be of type string. Received ${describe(algorithm)}`,
+            );
+          }
+          this.#algorithm = parseSignAlgorithm(algorithm);
+        }
+
+        update(data: unknown, encoding?: unknown): this {
+          this.#chunks.push(toBytes(data, typeof encoding === 'string' ? encoding : undefined));
+          return this;
+        }
+
+        sign(key: unknown, encoding?: unknown): unknown {
+          if (key !== null && typeof key === 'object' && !(key instanceof AsymKeyObject) && 'key' in (key as object)) {
+            const options = key as { key: unknown; encoding?: unknown; padding?: unknown; saltLength?: unknown; dsaEncoding?: unknown };
+            encoding = options.encoding ?? encoding;
+            this.#algorithm = {
+              ...this.#algorithm,
+              padding: typeof options.padding === 'number' ? options.padding : this.#algorithm.padding,
+              saltLength: typeof options.saltLength === 'number' ? options.saltLength : this.#algorithm.saltLength,
+              dsaEncoding: options.dsaEncoding === 'ieee-p1363' ? 'ieee-p1363' : this.#algorithm.dsaEncoding,
+            };
+            key = options.key;
+          }
+          const signature = asymSign(this.#algorithm, joinChunks(this.#chunks), key);
+          return encodeOutput(signature, typeof encoding === 'string' ? encoding : undefined);
         }
       },
     );
-    defineStubs(Sign.prototype, ['update', 'sign']);
 
     const Verify = namedClass(
       'Verify',
       class extends WritableBase {
-        constructor() {
-          super();
-          throw notImplemented('api', 'crypto.Verify');
-        }
-      },
-    );
-    defineStubs(Verify.prototype, ['update', 'verify']);
+        #algorithm: SignAlgorithm;
+        #chunks: Uint8Array[] = [];
 
-    const KeyObject = namedClass(
-      'KeyObject',
-      class {
-        constructor() {
-          throw notImplemented('api', 'crypto.KeyObject');
+        constructor(algorithm: unknown, options?: unknown) {
+          super(options as Record<string, unknown> | undefined);
+          if (typeof algorithm !== 'string') {
+            throw coded(
+              'TypeError',
+              'ERR_INVALID_ARG_TYPE',
+              `The "algorithm" argument must be of type string. Received ${describe(algorithm)}`,
+            );
+          }
+          this.#algorithm = parseSignAlgorithm(algorithm);
         }
-        get type(): never {
-          throw notImplemented('api', 'crypto.KeyObject#type');
+
+        update(data: unknown, encoding?: unknown): this {
+          this.#chunks.push(toBytes(data, typeof encoding === 'string' ? encoding : undefined));
+          return this;
         }
-        static from(): never {
-          throw notImplemented('api', 'crypto.KeyObject.from');
+
+        verify(key: unknown, signature: unknown, encoding?: unknown): boolean {
+          const bytes = toBytes(signature, typeof encoding === 'string' ? encoding : undefined);
+          return asymVerify(this.#algorithm, joinChunks(this.#chunks), key, bytes);
         }
       },
     );
-    defineStubs(KeyObject.prototype, ['equals', 'toCryptoKey']);
+
+    const KeyObject = AsymKeyObject;
 
     const X509Certificate = namedClass(
       'X509Certificate',
@@ -1057,6 +1152,16 @@ export const cryptoSpec: BuiltinSpec = {
       Certificate,
       hash,
       getHashes: listHashes,
+      createSign,
+      createVerify,
+      sign,
+      verify,
+      createPrivateKey,
+      createPublicKey,
+      createSecretKey,
+      generateKeyPair,
+      generateKeyPairSync,
+      getCurves,
       createCipheriv,
       createDecipheriv,
       getCiphers: listCiphers,
@@ -1080,7 +1185,18 @@ export const cryptoSpec: BuiltinSpec = {
       setEngine,
       webcrypto,
       crypto: webcrypto,
-      constants: {},
+      constants: {
+        RSA_PKCS1_PADDING,
+        RSA_SSLV23_PADDING: 2,
+        RSA_NO_PADDING,
+        RSA_PKCS1_OAEP_PADDING,
+        RSA_X931_PADDING,
+        RSA_PKCS1_PSS_PADDING,
+        RSA_PSS_SALTLEN_DIGEST,
+        RSA_PSS_SALTLEN_MAX_SIGN,
+        RSA_PSS_SALTLEN_AUTO: RSA_PSS_SALTLEN_MAX_SIGN,
+        RSA_PSS_SALTLEN_MAX,
+      },
       ...unsupportedApis,
       default: { createHash, createHmac, randomBytes, randomUUID, webcrypto },
     };

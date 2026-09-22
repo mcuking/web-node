@@ -24,7 +24,7 @@ function boot() {
 }
 
 describe('crypto stub classes', () => {
-  it('Sign/Verify extend stream.Writable with Node prototype members', () => {
+  it('Sign/Verify extend stream.Writable and are real', () => {
     const { req } = boot();
     const crypto = req('crypto');
     const { Writable } = req('stream');
@@ -33,7 +33,8 @@ describe('crypto stub classes', () => {
       expect(Ctor.name).toBe(name);
       expect(Ctor.prototype).toBeInstanceOf(Writable);
       expect(typeof Ctor.prototype.write).toBe('function'); // inherited
-      expect(() => new Ctor()).toThrowError(/not implemented/i);
+      // Node validates the algorithm up front; ours does too.
+      expect(() => new Ctor()).toThrowError(/The "algorithm" argument must be of type string/);
     }
     for (const m of ['update', 'sign']) expect(typeof crypto.Sign.prototype[m]).toBe('function');
     for (const m of ['update', 'verify']) expect(typeof crypto.Verify.prototype[m]).toBe('function');
@@ -61,6 +62,10 @@ describe('crypto stub classes', () => {
           Object.getOwnPropertyDescriptor(Object.getPrototypeOf(crypto[cls].prototype), n);
         expect(descriptor, `${cls}.prototype.${n}`).toBeTruthy();
       }
+    }
+    // KeyObject is real now: its constructor validates `type` like Node.
+    expect(() => new crypto.KeyObject()).toThrowError(/The argument 'type' is invalid/);
+    for (const cls of ['X509Certificate', 'DiffieHellman', 'ECDH']) {
       expect(() => new crypto[cls]()).toThrowError(/not implemented/i);
     }
     expect(typeof crypto.KeyObject.from).toBe('function');

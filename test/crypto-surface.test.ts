@@ -105,16 +105,9 @@ describe('crypto new real surface', () => {
 });
 
 describe('crypto unsupported-but-present surface throws loudly', () => {
-  it('asymmetric/engine classes are constructible names that throw', () => {
+  it('native-only classes are constructible names that throw', () => {
     const crypto = boot();
-    for (const name of [
-      'Sign',
-      'Verify',
-      'KeyObject',
-      'DiffieHellman',
-      'DiffieHellmanGroup',
-      'ECDH',
-    ]) {
+    for (const name of ['DiffieHellman', 'DiffieHellmanGroup', 'ECDH']) {
       expect(typeof crypto[name]).toBe('function');
       expect(crypto[name].name).toBe(name);
       expect(() => new crypto[name]()).toThrowError(/not implemented/i);

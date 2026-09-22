@@ -242,6 +242,25 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M83 crypto 非对称面（RSA / EC / Ed25519，差分语料驱动）
+
+**能力补齐**：`crypto` 的非对称部分此前全是 `unsupportedApi` 抛错，现在在浏览器里**真跑**：
+
+- **纯 JS ASN.1 DER 编解码**（`src/node-runtime/crypto/der.ts`）：PKCS#1 / PKCS#8 / SPKI / SEC1、PEM 读写、`INTEGER`/`OID`/`BIT STRING` 等。
+- **纯 JS 曲线数学**（`src/node-runtime/crypto/ec.ts`）：NIST **P-256/P-384/P-521**（仿射 + BigInt）与 **Ed25519**（扩展坐标）；ECDSA sign/verify（DER 与 IEEE-P1363）、Ed25519（确定性签）。
+- **密钥与签名**（`src/node-runtime/crypto/asym.ts`）：`KeyObject`（`type`/`asymmetricKeyType`/`asymmetricKeyDetails`/`export`/`equals`）、`createPrivateKey`/`createPublicKey`/`createSecretKey`、`sign`/`verify`（含 `algorithm`/`key` 两种 options 形式）、`createSign`/`createVerify`（`stream.Writable` 子类）、`generateKeyPairSync`/`generateKeyPair`（rsa/ec/ed25519）、`getCurves`、`crypto.constants` 的 RSA padding/saltLength 常量。
+- **算法**：RSA **PKCS#1 v1.5** 与 **PSS**（MGF1，saltLength 含 `DIGEST`/`MAX_SIGN` 负数语义）、SHA-1/224/256/384/512；**Ed25519 签名与 OpenSSL 逐字节一致**（确定性），RSA PKCS#1 v1.5 同样逐字节一致。
+- 为什么纯 JS：WebCrypto 只有异步 API，而 Node 的 `sign`/`generateKeyPairSync` 是同步的，所以原语自实现、异步形式只是包裹。
+
+**差分语料**（`tools/crypto-asym-probe.cjs` → `test/fixtures/crypto-asym.json`）：固定密钥（RSA/EC/Ed25519、PKCS#1/#8/SPKI/SEC1、PEM/DER）+ 真 Node 预生成的固定签名（RSA-PSS、ECDSA-DER、ECDSA-P1363）；比较 key 属性/导出 DER/签名字节/验证布尔/错误码/密钥生成往返。与真 Node v26.9.0 **逐字段一致**。
+
+**被语料/复现抓出的两个真 bug**：
+
+1. **P-384 素数写错**：常量 `p` 多了一段 `ffffffff`（长度 104 vs 96），`p` 可被 11 整除 → `pointAdd` 报 `modInverse: not invertible`。现改为 `a = p - 3` 推导，并用“G 在曲线上”自检。
+2. **`Uint8Array.prototype.slice` 在 Node `Buffer` 上是视图**（不是拷贝！）━━ Ed25519 解码器里 `sub256()` 对签名做 `slice(0,32)` 后清符号位，**直接改掉了调用者的签名字节**，导致自己的合法签名被自己拒掉（~50% 概率，取决于 R 的符号位）。修为 `Uint8Array.from(subarray(...))`，并审查所有存密钥材料的拷贝点（`parseEdPrivate`/`parseSubjectPublicKeyInfo`/`createSecretKey`）。新增回归测试。
+
+另：`crypto.constants` 不再为空（RSA padding / saltLength 常量），`generateKeyPairSync` 支持 `publicKeyEncoding`/`privateKeyEncoding`。门禁全绿：tsc 干净 · vitest **884 通过 / 2 预存 skip（84 文件）** · build worker **2324.62KB**。
+
 ### 2026-09-22 · M82 buffer 语义 + loader 注入全局遮蔽（差分语料驱动）
 
 **方法**：新增 `tools/buffer-semantics-probe.cjs` / `tools/buffer-semantics-oracle.mjs` → `test/fixtures/buffer-semantics.json`，永久回归 `test/buffer-semantics.test.ts`。

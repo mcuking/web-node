@@ -322,10 +322,11 @@ describe('crypto: randomness', () => {
 describe('crypto: unsupported surface', () => {
   it('throws a typed NotImplementedError instead of returning undefined', () => {
     const crypto = boot()('crypto');
-    // Symmetric ciphers are real now (AES, see test/cipher.test.ts), but the
-    // asymmetric / key-store / native-only surface still refuses loudly.
+    // Symmetric ciphers are real now (AES, see test/cipher.test.ts), and so are
+    // asymmetric keys/signatures (RSA/EC/Ed25519, see test/crypto-asym.test.ts),
+    // but the native-only surface still refuses loudly.
     expect(() => crypto.createCipheriv('chacha20-poly1305', 'k', 'iv')).toThrowError(/not implemented/);
-    expect(() => crypto.generateKeyPairSync('rsa')).toThrowError(/not implemented/);
-    expect(() => crypto.createSign('sha256')).toThrowError(/not implemented/);
+    expect(() => crypto.createECDH('prime256v1')).toThrowError(/not implemented/);
+    expect(() => crypto.generateKeyPairSync('x25519')).toThrowError(/not implemented/);
   });
 });
