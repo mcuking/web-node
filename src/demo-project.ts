@@ -969,6 +969,19 @@ console.log('argon2id("password"):', pwTag.toString('hex'));
 console.log('tag length         :', pwTag.length);
 console.log('');
 
+// --- MAC (milestone 90.1) ---
+// crypto.createMac is the OpenSSL provider MAC API. Here HMAC and BLAKE2b MAC
+// are computed in JS; getMacs() lists every provider Node exposes.
+console.log('-- MAC (milestone 90.1) --');
+const macCrypto = require('crypto');
+console.log('getMacs count       :', macCrypto.getMacs().length);
+const hmacTag = macCrypto.createMac('hmac', Buffer.from('key'), { digest: 'sha256' }).update('data').final();
+console.log('hmac sha256         :', hmacTag.toString('hex'));
+const b2mac = macCrypto.createMac('blake2bmac', Buffer.alloc(64, 1), { outputLength: 16 });
+b2mac.update('data');
+console.log('blake2bmac (16B)    :', b2mac.final('hex'));
+console.log('');
+
 // --- http server (milestone 3: virtual TCP) ---
 // listen(3000) binds a port inside this runtime. The ServiceWorker bridge at
 // /preview/3000/ dials it, so this URL is reachable from the browser tab.

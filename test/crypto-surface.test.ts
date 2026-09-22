@@ -121,7 +121,7 @@ describe('crypto unsupported-but-present surface throws loudly', () => {
 
   it('unsupported functions exist and throw', () => {
     const crypto = boot();
-    for (const name of ['createMac', 'getMacs', 'encapsulate', 'decapsulate', 'diffieHellman']) {
+    for (const name of ['encapsulate', 'decapsulate', 'diffieHellman']) {
       expect(typeof crypto[name]).toBe('function');
       expect(() => crypto[name]()).toThrowError(/not implemented/i);
     }

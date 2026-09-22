@@ -1,0 +1,195 @@
+{
+  "macs": [
+    "blake2bmac",
+    "blake2smac",
+    "cmac",
+    "gmac",
+    "hmac",
+    "kmac-128",
+    "kmac-256",
+    "kmac128",
+    "kmac256",
+    "poly1305",
+    "siphash"
+  ],
+  "arities": {
+    "createMac": 3,
+    "getMacs": 0
+  },
+  "hmac": {
+    "sha1": "104152c5bfdca07bc633eebd46199f0255c9f49d",
+    "sha256": "5031fe3d989c6d1537a013fa6e739da23463fdaec3b70137d828e36ace221bd0",
+    "sha384": "c5f97ad9fd1020c174d7dc02cf83c4c1bf15ee20ec555b690ad58e62da8a00ee44ccdb65cb8c80acfd127ebee568958a",
+    "sha512": "3c5953a18f7303ec653ba170ae334fafa08e3846f2efe317b87efce82376253cb52a8c31ddcde5a3a2eee183c2b34cb91f85e64ddbc325f7692b199473579c58",
+    "md5": "9d5c73ef85594d34ec4438b7c97e51d8"
+  },
+  "hmacUpperCase": "5031fe3d989c6d1537a013fa6e739da23463fdaec3b70137d828e36ace221bd0",
+  "hmacEmptyKey": "e528c4d99e6177f5841f712a143b90843299a4aa181a06501422d9ca862bd2a5",
+  "hmacMulti": "342e519ce0ad6c03a36b98eeb3f1d130db4813b9df4d1160eda488d712dc78ee",
+  "hmacBinaryData": "90f0af03b18cae1b55df0740ed667dad05164013281e22875ecaadc92e876526b1f5ed01590821886382edcecda168079c9a773bbfc7e23833e8e90e1368f8ee",
+  "blake2b": {
+    "default": "c617dd614d7103684617edb930f7c300c2d0630e48b2a1c958b5f3ba6785bb8487fcce5c62c0de9b9d91a1b3751b061d56e7318b090246e086d598e7fc3f08c4",
+    "out16": "5abfb747843a3d8e10269ad462e6d2db",
+    "out4": "fd3be3a0",
+    "key1": "f4a50ae7c412d5f1b254de40fc79989af64cf91df5f825b44345af2bcc62e48af2ce632d8d28954c42f262f9e3bad36a00ad6ae8a8669a2b7b443b9a5b290dc4",
+    "key64": "206e0caf87ad74d1878baaa5ffc8bbbcc587634d01487fac14c04ba1cb7d467d6f97d47e455997e85ed0d80616f610478d5c96ef928a8d43a316e60e42975fbe",
+    "multi": "6620c8f395c8a99af17be494a46e3d58ff24ddab78f7b3133cdfca41ff059de7810af1bb130ccfa27045b63c2987ac88"
+  },
+  "encodings": {
+    "finalHex": "e7ea21c3bcb63a4da3ad78503168d36bdca0be622382ea60a108fad4e4966679",
+    "finalBase64": "5+ohw7y2Ok2jrXhQMWjTa9ygvmIjgupgoQj61OSWZnk=",
+    "finalBuffer": {
+      "isBuffer": true,
+      "hex": "e7ea21c3bcb63a4da3ad78503168d36bdca0be622382ea60a108fad4e4966679"
+    },
+    "updateHex": "98755ce7a0d431b5d7b8ec8e343ada3bcaa4f6c44ca468cffcbaa9c273634dd7",
+    "updateLatin1": "c4e3da4a6ce003b9feb1a72f871803b16d83ca2e8411ee7cad29081235ecb146"
+  },
+  "secretKeyObject": "e7ea21c3bcb63a4da3ad78503168d36bdca0be622382ea60a108fad4e4966679",
+  "stream": {
+    "hex": "5fe6d0a198ed1bd595efc8c42a58b62bd9bfa5f19aa2e09f79b407b90fe0f514",
+    "reference": "5fe6d0a198ed1bd595efc8c42a58b62bd9bfa5f19aa2e09f79b407b90fe0f514"
+  },
+  "errors": {
+    "algorithmNumber": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"algorithm\" argument must be of type string. Received type number (1)"
+    },
+    "algorithmEmpty": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The argument 'algorithm' must be non-empty and contain no NUL bytes. Received ''"
+    },
+    "algorithmNul": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The argument 'algorithm' must be non-empty and contain no NUL bytes. Received 'hm\\x00ac'"
+    },
+    "optionsNumber": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options\" argument must be of type object. Received type number (5)"
+    },
+    "keyNumber": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"key\" argument must be an instance of ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject. Received type number (5)"
+    },
+    "keyString": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"key\" argument must be an instance of ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject. Received type string ('key')"
+    },
+    "keyPublic": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"key\" argument must be an instance of ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject. Received an instance of PublicKeyObject"
+    },
+    "unknownMac": {
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_MAC",
+      "message": "Invalid MAC: foo"
+    },
+    "digestMissing": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.digest' is required for HMAC"
+    },
+    "digestNumber": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options.digest\" property must be of type string. Received type number (5)"
+    },
+    "digestEmpty": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.digest' must be non-empty and contain no NUL bytes. Received ''"
+    },
+    "digestUnknown": {
+      "name": "Error",
+      "code": "ERR_OSSL_EVP_UNSUPPORTED",
+      "message": "error:0308010C:digital envelope routines::unsupported"
+    },
+    "ivBad": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options.iv\" property must be an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type number (5)"
+    },
+    "customizationBad": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options.customization\" property must be an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type string ('x')"
+    },
+    "saltBad": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options.salt\" property must be an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type number (5)"
+    },
+    "outputLengthBad": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"options.outputLength\" is out of range. It must be >= 0 && <= 4294967295. Received -1"
+    },
+    "blake2bDigestUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.digest' is not supported by MAC blake2bmac"
+    },
+    "blake2bKeyEmpty": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_KEY_LENGTH",
+      "message": "error:1C800069:Provider routines::invalid key length"
+    },
+    "blake2bKeyLong": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_KEY_LENGTH",
+      "message": "error:1C800069:Provider routines::invalid key length"
+    },
+    "blake2bOut0": {
+      "name": "Error",
+      "code": "ERR_OSSL_NOT_XOF_OR_INVALID_LENGTH",
+      "message": "error:1C800071:Provider routines::not xof or invalid length"
+    },
+    "blake2bOut65": {
+      "name": "Error",
+      "code": "ERR_OSSL_NOT_XOF_OR_INVALID_LENGTH",
+      "message": "error:1C800071:Provider routines::not xof or invalid length"
+    },
+    "cmacNoCipher": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.cipher' is required for CMAC"
+    },
+    "gmacNoCipher": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.cipher' is required for GMAC"
+    },
+    "updateNumber": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"data\" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received type number (5)"
+    },
+    "finalTwice": {
+      "name": "Error",
+      "code": "ERR_CRYPTO_MAC_FINALIZED",
+      "message": "MAC already finalized"
+    },
+    "updateAfterFinal": {
+      "name": "Error",
+      "code": "ERR_CRYPTO_MAC_FINALIZED",
+      "message": "MAC already finalized"
+    },
+    "badOutputEncoding": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The argument 'outputEncoding' is invalid. Received 'bogus'"
+    },
+    "badInputEncoding": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The argument 'inputEncoding' is invalid. Received 'bogus'"
+    }
+  }
+}

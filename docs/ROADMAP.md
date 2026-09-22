@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-22（基线 = M89 完成；M90 已拆为 M90.1–M90.4）
+> - **最后更新**：2026-09-22（基线 = M90.1 完成）
 
 ---
 
@@ -14,17 +14,17 @@
 
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
-| A | crypto 收尾（接续 M87） | 10 | 2 | 8 |
+| A | crypto 收尾（接续 M87） | 11 | 3 | 8 |
 | B | 语义深度（差分语料继续扩面） | 4 | 0 | 4 |
 | C | 平台无对应物的补齐（选择性） | 3 | 0 | 3 |
 | D | 运行时常量小项收尾 | 4 | 0 | 4 |
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **29** | **2** | **26**（+1 不做） |
+| **合计** | | **30** | **3** | **26**（+1 不做） |
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 89 个里程碑，剩余 26 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
-> 注：M90 于 2026-09-22 拆为 M90.1–M90.4（任务数 26 → 29）。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 90 个里程碑，剩余 26 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
+> 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
 
 ---
 
@@ -47,7 +47,7 @@
 - [ ] **M90 · `createMac` / `getMacs`**（拆为 M90.1–M90.4）
   > **2026-09-22 拆分原因**：原估计「低–中」偏乐观。实测 `crypto.getMacs()` 返回 11 项（`blake2bmac`/`blake2smac`/`cmac`/`gmac`/`hmac`/`kmac-128`/`kmac-256`/`kmac128`/`kmac256`/`poly1305`/`siphash`），`createMac(algorithm, key, options)` 每个算法各自要一套底层原语。拆成四个可独立验证的里程碑。
 
-- [ ] **M90.1 · `getMacs()` + `createMac` 前端与 HMAC / BLAKE2b MAC**
+- [x] **M90.1 · `getMacs()` + `createMac` 前端与 HMAC / BLAKE2b MAC** ✅ 2026-09-22
   - `Mac` 类（`update`/`final`，继承 `LazyTransform` 的流接口、`_transform`/`_flush`）、`createMac`、`getMacs`。
   - 选项/错误面：`options.digest` 对 HMAC 必填、`options.cipher`/`iv`/`customization`/`salt`/`outputLength`、`ERR_CRYPTO_INVALID_MAC`、`ERR_CRYPTO_MAC_FINALIZED`、`ERR_CRYPTO_MAC_UPDATE_FAILED`、input/output 编码。
   - 复用已有 `hash.ts` 的 hmac 与 `blake2b.ts`。其余算法（KMAC/CMAC/GMAC/BLAKE2s/Poly1305/SipHash）**响亮抛 `NotImplementedError`** 并记入已知偏离，直到 M90.2–M90.4 补齐。
@@ -63,6 +63,12 @@
 
 - [ ] **M90.4 · BLAKE2s MAC / Poly1305 / SipHash**
   - 需新增 BLAKE2s（32 位字）、Poly1305、SipHash-2-4。
+  - 风险：中低。
+
+- [ ] **M90.5 · 补齐 `getHashes` 面**（M90.1 发现的新缺口）
+  > **发现原因**：实现 M90.1 时发现 web-node 的 `crypto.getHashes()` 只覆盖 md5/sha1/sha224/256/384/512，而真 Node 还包含 `sha3-224/256/384/512`、`blake2b512`/`blake2s256`、`sm3`、`ripemd160`（及变体）。这也意味着 `createHmac('ripemd160')`、`createHash('sha3-256')` 目前都会响亮抛错（与 Node 不一致）。
+  - 需新增：Keccak/SHA-3（**M90.2 已内含**，可直接复用）、BLAKE2b-512 / BLAKE2s-256（M90.1/M90.4 已内含）、SM3、RIPEMD-160。
+  - 同步把新名字加入 `listHashes()`，并加 `getHashes()` 差分门禁。
   - 风险：中低。
 
 - [ ] **M91 · 后量子 KEM**
@@ -196,7 +202,7 @@
 - **构建工具**：M5 esbuild WASM · M5b rollup WASM · M5c Vite build · M5d Vite dev server · M5e HMR · M5f CSS 热更 · **M18 Vue 3 SFC 跑起来**
 - **性能/体积**：M32 worker 减重（1259→1028KB） · M41 Buffer slab 池化
 - **语义深度（差分语料）**：M79 http · M80 net · M81 fs
-- **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2
+- **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2 · M90.1 MAC（HMAC + BLAKE2b MAC）
 
 ---
 

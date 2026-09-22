@@ -244,6 +244,28 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M90.1 MAC 前端 + HMAC / BLAKE2b MAC（差分语料驱动）
+
+**改了什么**：`crypto.createMac` / `crypto.getMacs` 从响亮抛错的桩换成真实实现（第一阶段）。
+- `builtins/crypto.ts` 新增 `Mac` 类（extends 本地 `LazyTransformBase`）、`createMac`、`getMacs`，校验链逐个复刻 Node `internal/crypto/provider_mac.js`：`algorithm` 的 `validateName`（字符串/非空/无 NUL）、`options` 对象、`options.digest`/`cipher`（name）、`iv`/`customization`/`salt`（字节源）、`outputLength`（uint32）、`key`（KeyObject 限 secret，或 ArrayBuffer/view）、未知算法 → `ERR_CRYPTO_INVALID_MAC`。
+- 已支持：**HMAC**（复用 `hash.ts` 的 hmac）与 **BLAKE2b MAC**（复用 M89 新增的 keyed `blake2b.ts`，已实测与 OpenSSL blake2bmac 逐字节一致）。
+- 其余 provider（`blake2smac`/`cmac`/`gmac`/`kmac-128`/`kmac-256`/`poly1305`/`siphash`）响亮抛 `NotImplementedError`（按 M90.2–M90.4 推进）；但 `cmac`/`gmac` 缺 `options.cipher` 时仍与 Node 一致报 `The property 'options.cipher' is required for ...`。
+
+**关键语义**：
+- `getMacs()` 返回 11 项（与 Node 排序一致）；`createMac` arity = 3、`getMacs` arity = 0。
+- `Mac` 是 `Transform` 流（`write`/`end` → `data` 事件），同时有 `update`/`final`；`final('hex'|'base64'|'buffer')`。
+- `ERR_CRYPTO_MAC_FINALIZED`（`MAC already finalized`）、`ERR_CRYPTO_MAC_UPDATE_FAILED`、`outputEncoding`/`inputEncoding` 非法 → `ERR_INVALID_ARG_VALUE`。
+- HMAC 缺 digest → `The property 'options.digest' is required for HMAC`；未知 digest → `ERR_OSSL_EVP_UNSUPPORTED`；blake2bmac 传 digest → `not supported by MAC blake2bmac`；key 长度 ∉[1,64] → `ERR_OSSL_INVALID_KEY_LENGTH`；outputLength ∉[1,64] → `ERR_OSSL_NOT_XOF_OR_INVALID_LENGTH`。
+
+**为什么**：阶段 A crypto 收尾（`docs/ROADMAP.md`）。**发现并修正路线图问题**：`getMacs()` 实际暴露 11 个 provider，原估「低–中」偏乐观 → 已将 M90 拆为 M90.1–M90.4，并新增 **M90.5（补齐 `getHashes` 面）**：web-node 的 `getHashes()` 只覆盖 md5/sha1/sha224/256/384/512，缺 sha3-\*/blake2b512/blake2s256/sm3/ripemd160（因此 `createHmac('ripemd160')` 目前也会响亮抛错）；任务数 26 → 30。
+
+**验证**：
+- 差分语料 `tools/crypto-mac-probe.cjs` → `test/fixtures/crypto-mac.json`（真 Node v26.9.0 录制）：`getMacs` 列表、HMAC×5 digest、BLAKE2b MAC×6 组、编解码、secret KeyObject、流接口、28 个错误 —— `test/crypto-mac.test.ts` 内跑同程序，**0 diff**。
+- 门禁：`tsc` 干净 · vitest **934 passed / 2 skipped（91 files）** · build worker **2384.29 KB**（`dist/assets/index-BfWupA7d.js`）。
+- demo 新增 M90.1 演示段，跑通。
+
+**涉及文件**：`src/node-runtime/builtins/crypto.ts`、`src/demo-project.ts`、`test/crypto-mac.test.ts`（新增）、`test/fixtures/crypto-mac.json`（新增）、`tools/crypto-mac-probe.cjs`（新增）、`tools/crypto-mac-oracle.mjs`（新增）、`test/crypto-surface.test.ts`、`docs/ROADMAP.md`。
+
 ### 2026-09-22 · M89 Argon2（差分语料驱动）
 
 **改了什么**：`crypto.argon2(Sync)` 从响亮抛错的桩换成真实实现。新增两个纯 JS 模块：

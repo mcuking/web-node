@@ -59,6 +59,7 @@ import {
   toUnsignedBigInt,
 } from '../crypto/primes';
 import { ARGON2_D, ARGON2_I, ARGON2_ID, argon2 as computeArgon2, type Argon2Params } from '../crypto/argon2';
+import { blake2b } from '../crypto/blake2b';
 
 /**
  * `crypto` — the subset tooling actually calls in a browser tab.
@@ -191,7 +192,7 @@ export const cryptoSpec: BuiltinSpec = {
     sign: 4, verify: 5, privateEncrypt: 2, privateDecrypt: 2, publicEncrypt: 2, publicDecrypt: 2,
     generateKey: 3, generateKeySync: 2, generateKeyPair: 3, generateKeyPairSync: 2,
     generatePrime: 3, generatePrimeSync: 1, checkPrime: 1, checkPrimeSync: 1,
-    argon2: 3, argon2Sync: 2, createMac: 3, encapsulate: 2, decapsulate: 3, setFips: 1,
+    argon2: 3, argon2Sync: 2, createMac: 3, getMacs: 0, encapsulate: 2, decapsulate: 3, setFips: 1,
   },
   init: (ctx: BuiltinInitContext) => {
     const webcrypto = (globalThis as { crypto?: Crypto }).crypto;
@@ -873,8 +874,6 @@ export const cryptoSpec: BuiltinSpec = {
     };
     const unsupportedApis = {
       diffieHellman: unsupportedApi('diffieHellman'),
-      createMac: unsupportedApi('createMac'),
-      getMacs: unsupportedApi('getMacs'),
       encapsulate: unsupportedApi('encapsulate'),
       decapsulate: unsupportedApi('decapsulate'),
     };
@@ -1211,6 +1210,271 @@ export const cryptoSpec: BuiltinSpec = {
       queueMicrotask(() => (callback as (e: Error | null, out: Uint8Array) => void)(null, buffer));
     };
 
+    // -- MAC (OpenSSL provider MACs) -----------------------------------------
+    //
+    // `crypto.createMac` / `crypto.getMacs`. Node routes these to OpenSSL's
+    // provider MACs; a page has none, so HMAC and BLAKE2b MAC are computed here
+    // in JS and the remaining providers raise NotImplementedError until their
+    // milestones land (M90.2-M90.4). Validation mirrors
+    // `internal/crypto/provider_mac.js` so the error surface is identical.
+
+    const MAC_NAMES = [
+      'blake2bmac', 'blake2smac', 'cmac', 'gmac', 'hmac',
+      'kmac-128', 'kmac-256', 'kmac128', 'kmac256', 'poly1305', 'siphash',
+    ];
+    const macAliases = new Map<string, string>([
+      ['blake2bmac', 'blake2bmac'],
+      ['blake2smac', 'blake2smac'],
+      ['cmac', 'cmac'],
+      ['gmac', 'gmac'],
+      ['hmac', 'hmac'],
+      ['kmac-128', 'kmac-128'],
+      ['kmac-256', 'kmac-256'],
+      ['kmac128', 'kmac-128'],
+      ['kmac256', 'kmac-256'],
+      ['poly1305', 'poly1305'],
+      ['siphash', 'siphash'],
+    ]);
+
+    const getMacs = (): string[] => MAC_NAMES.slice();
+
+    const BUFFER_ENCODINGS = new Map<string, string>([
+      ['utf8', 'utf8'], ['utf-8', 'utf8'],
+      ['hex', 'hex'],
+      ['base64', 'base64'], ['base64url', 'base64url'],
+      ['latin1', 'latin1'], ['binary', 'latin1'],
+      ['ascii', 'ascii'],
+      ['ucs2', 'utf16le'], ['ucs-2', 'utf16le'], ['utf16le', 'utf16le'], ['utf-16le', 'utf16le'],
+    ]);
+    const normalizeBufferEncoding = (encoding: string): string | undefined =>
+      BUFFER_ENCODINGS.get(encoding.toLowerCase());
+
+    const inspectMacString = (value: string): string => {
+      let out = "'";
+      for (const ch of value) {
+        const code = ch.codePointAt(0)!;
+        if (ch === "'" || ch === '\\') out += '\\' + ch;
+        else if (code < 0x20 || code === 0x7f) out += '\\x' + code.toString(16).padStart(2, '0');
+        else out += ch;
+      }
+      return out + "'";
+    };
+
+    const validateMacName = (value: unknown, name: string, word: string): string => {
+      if (typeof value !== 'string') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "${name}" ${word} must be of type string. Received ${describe(value)}`);
+      }
+      if (value.length === 0 || value.includes('\0')) {
+        throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The ${word} '${name}' must be non-empty and contain no NUL bytes. Received ${inspectMacString(value)}`);
+      }
+      return value;
+    };
+
+    const normalizeMacBytes = (value: unknown, name: string): Uint8Array => {
+      if (!ArrayBuffer.isView(value) && !isRawBytes(value)) {
+        throw coded(
+          'TypeError',
+          'ERR_INVALID_ARG_TYPE',
+          `The "${name}" property must be an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received ${describe(value)}`,
+        );
+      }
+      return toBytes(value);
+    };
+
+    const normalizeMacKey = (key: unknown): Uint8Array => {
+      if (key instanceof KeyObject) {
+        const type = (key as AsymKeyObject).type;
+        if (type !== 'secret') {
+          const name = type === 'public' ? 'PublicKeyObject' : 'PrivateKeyObject';
+          throw coded(
+            'TypeError',
+            'ERR_INVALID_ARG_TYPE',
+            `The "key" argument must be an instance of ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject. Received an instance of ${name}`,
+          );
+        }
+        return (key as unknown as { export(): Uint8Array }).export();
+      }
+      if (!ArrayBuffer.isView(key) && !isRawBytes(key)) {
+        throw coded(
+          'TypeError',
+          'ERR_INVALID_ARG_TYPE',
+          `The "key" argument must be an instance of ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject. Received ${describe(key)}`,
+        );
+      }
+      return toBytes(key);
+    };
+
+    type MacAlgorithm =
+      | 'blake2bmac' | 'blake2smac' | 'cmac' | 'gmac' | 'hmac'
+      | 'kmac-128' | 'kmac-256' | 'poly1305' | 'siphash';
+
+    class Mac extends LazyTransformBase {
+      #algorithm: MacAlgorithm;
+      #key: Uint8Array;
+      #digest: HashAlgo | undefined;
+      #outputLength: number;
+      #chunks: Uint8Array[] = [];
+      #total = 0;
+      #finalized = false;
+
+      constructor(algorithm: unknown, key: unknown, options?: unknown) {
+        super(options as Record<string, unknown> | undefined);
+        const name = validateMacName(algorithm, 'algorithm', 'argument');
+        let digest: string | undefined;
+        let cipher: string | undefined;
+        let outputLength: number | undefined;
+        if (options !== undefined) {
+          validateObjectArg(options, 'options');
+          const opts = options as Record<string, unknown>;
+          if (opts.digest !== undefined) digest = validateMacName(opts.digest, 'options.digest', 'property');
+          if (opts.cipher !== undefined) cipher = validateMacName(opts.cipher, 'options.cipher', 'property');
+          if (opts.iv !== undefined) normalizeMacBytes(opts.iv, 'options.iv');
+          if (opts.customization !== undefined) normalizeMacBytes(opts.customization, 'options.customization');
+          if (opts.salt !== undefined) normalizeMacBytes(opts.salt, 'options.salt');
+          if (opts.outputLength !== undefined) {
+            outputLength = validateIntegerBounds(opts.outputLength, 'options.outputLength', 0, MAX_UINT32);
+          }
+        }
+        const keyBytes = normalizeMacKey(key);
+        const canonical = macAliases.get(name.toLowerCase()) as MacAlgorithm | undefined;
+        if (canonical === undefined) {
+          throw coded('TypeError', 'ERR_CRYPTO_INVALID_MAC', `Invalid MAC: ${name}`);
+        }
+
+        this.#algorithm = canonical;
+        this.#key = keyBytes;
+        this.#digest = undefined;
+        this.#outputLength = outputLength ?? 0;
+
+        if (canonical === 'hmac') {
+          if (digest === undefined) {
+            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.digest' is required for HMAC");
+          }
+          const algo = resolveHash(digest);
+          if (!algo) {
+            throw coded('Error', 'ERR_OSSL_EVP_UNSUPPORTED', 'error:0308010C:digital envelope routines::unsupported');
+          }
+          this.#digest = algo;
+        } else if (canonical === 'blake2bmac') {
+          if (digest !== undefined) {
+            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.digest' is not supported by MAC blake2bmac");
+          }
+          if (keyBytes.length < 1 || keyBytes.length > 64) {
+            throw coded('Error', 'ERR_OSSL_INVALID_KEY_LENGTH', 'error:1C800069:Provider routines::invalid key length');
+          }
+          const outLen = outputLength === undefined ? 64 : outputLength;
+          if (outLen < 1 || outLen > 64) {
+            throw coded('Error', 'ERR_OSSL_NOT_XOF_OR_INVALID_LENGTH', 'error:1C800071:Provider routines::not xof or invalid length');
+          }
+          this.#outputLength = outLen;
+        } else if (canonical === 'cmac') {
+          if (cipher === undefined) {
+            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.cipher' is required for CMAC");
+          }
+          throw notImplemented('api', 'crypto.createMac (CMAC)');
+        } else if (canonical === 'gmac') {
+          if (cipher === undefined) {
+            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.cipher' is required for GMAC");
+          }
+          throw notImplemented('api', 'crypto.createMac (GMAC)');
+        } else {
+          throw notImplemented('api', `crypto.createMac (${canonical})`);
+        }
+      }
+
+      #compute(): Uint8Array {
+        const data = concatBytes(this.#chunks, this.#total);
+        if (this.#algorithm === 'blake2bmac') {
+          return blake2b(data, this.#outputLength, this.#key);
+        }
+        return hmac(this.#digest!, this.#key, data);
+      }
+
+      update(data: unknown, encoding?: string): this {
+        if (this.#finalized) throw coded('Error', 'ERR_CRYPTO_MAC_FINALIZED', 'MAC already finalized');
+        let bytes: Uint8Array;
+        if (typeof data === 'string') {
+          bytes = bytesFromString(data, normalizeMacInputEncoding(encoding));
+        } else if (ArrayBuffer.isView(data)) {
+          bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        } else {
+          throw coded(
+            'TypeError',
+            'ERR_INVALID_ARG_TYPE',
+            `The "data" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received ${describe(data)}`,
+          );
+        }
+        this.#chunks.push(bytes);
+        this.#total += bytes.length;
+        return this;
+      }
+
+      final(outputEncoding?: string): unknown {
+        if (this.#finalized) throw coded('Error', 'ERR_CRYPTO_MAC_FINALIZED', 'MAC already finalized');
+        this.#finalized = true;
+        const result = asBuffer(this.#compute());
+        const target = normalizeMacOutputEncoding(outputEncoding);
+        if (target === 'buffer') return result;
+        return encodeOutput(result, target);
+      }
+
+      _transform(chunk: unknown, _encoding: string, callback: (err?: Error | null) => void): void {
+        if (this.#finalized) {
+          callback(coded('Error', 'ERR_CRYPTO_MAC_FINALIZED', 'MAC already finalized'));
+          return;
+        }
+        try {
+          this.update(chunk);
+          callback();
+        } catch (error) {
+          callback(error as Error);
+        }
+      }
+
+      _flush(callback: (err?: Error | null) => void): void {
+        if (this.#finalized) {
+          callback(coded('Error', 'ERR_CRYPTO_MAC_FINALIZED', 'MAC already finalized'));
+          return;
+        }
+        try {
+          const result = this.final();
+          if ((result as Uint8Array).length !== 0) this.push(result);
+        } catch (error) {
+          callback(error as Error);
+          return;
+        }
+        callback();
+      }
+    }
+
+    function normalizeMacOutputEncoding(outputEncoding: unknown): string {
+      if (outputEncoding === undefined) return 'buffer';
+      if (typeof outputEncoding !== 'string') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "outputEncoding" argument must be of type string. Received ${describe(outputEncoding)}`);
+      }
+      if (outputEncoding.toLowerCase() === 'buffer') return 'buffer';
+      const normalized = normalizeBufferEncoding(outputEncoding);
+      if (normalized === undefined) {
+        throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The argument 'outputEncoding' is invalid. Received ${inspectMacString(outputEncoding)}`);
+      }
+      return normalized;
+    }
+
+    function normalizeMacInputEncoding(inputEncoding: unknown): string | undefined {
+      if (inputEncoding === undefined) return undefined;
+      if (typeof inputEncoding !== 'string') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "inputEncoding" argument must be of type string. Received ${describe(inputEncoding)}`);
+      }
+      const normalized = normalizeBufferEncoding(inputEncoding);
+      if (normalized === undefined) {
+        throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The argument 'inputEncoding' is invalid. Received ${inspectMacString(inputEncoding)}`);
+      }
+      return normalized;
+    }
+
+    const createMac = (algorithm: unknown, key: unknown, options?: unknown): Mac =>
+      new Mac(algorithm, key, options);
+
     // -- asymmetric keys and signatures --------------------------------------
     //
     // Implemented synchronously in `../crypto/asym` (ASN.1 + curve maths), so
@@ -1500,6 +1764,8 @@ export const cryptoSpec: BuiltinSpec = {
       checkPrimeSync,
       argon2,
       argon2Sync,
+      createMac,
+      getMacs,
       getFips,
       setFips,
       createCipheriv,
