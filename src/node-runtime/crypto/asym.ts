@@ -10,6 +10,7 @@
  * Ed25519: PKCS#1, PKCS#8, SPKI and SEC1, PEM and DER. Signatures cover
  * RSA (PKCS#1 v1.5 and PSS), ECDSA (DER and IEEE P1363) and Ed25519.
  */
+import { outputBytes } from './byte-out';
 import {
   bigIntToBytes,
   bytesToBigInt,
@@ -367,6 +368,10 @@ export class KeyObject {
   equals(other: unknown): boolean {
     if (!(other instanceof KeyObject)) return false;
     if (this.type !== other.type) return false;
+    // Secret keys compare by raw bytes (Node does the same in C++).
+    if (this.type === 'secret') {
+      return toHex(this.#mat().secret ?? new Uint8Array()) === toHex(other.#mat().secret ?? new Uint8Array());
+    }
     try {
       const mine = this.export({ type: this.type === 'public' ? 'spki' : 'pkcs8', format: 'der' }) as Uint8Array;
       const theirs = other.export({ type: other.type === 'public' ? 'spki' : 'pkcs8', format: 'der' }) as Uint8Array;
@@ -385,7 +390,13 @@ export class KeyObject {
     const m = this.#mat();
     if (m.type === 'secret') {
       if (!m.secret) throw new Error('secret key has no material');
-      return format === 'pem' ? pemEncode('PRIVATE KEY', m.secret) : m.secret;
+      const format = opts.format;
+      if (format === undefined || format === 'buffer') return outputBytes(this, m.secret, undefined, (bytes) => bytes) as Uint8Array;
+      if (format === 'jwk') {
+        return { kty: 'oct', k: base64Url(m.secret) } as unknown as string;
+      }
+      throw coded('TypeError', 'ERR_INVALID_ARG_VALUE',
+        `The property 'options.format' must be one of: undefined, 'buffer', 'jwk'. Received ${describe(format)}`);
     }
     const type = opts.type ?? (m.type === 'public' ? 'spki' : 'pkcs8');
     const der = exportDer(m, type);
@@ -1087,6 +1098,12 @@ function invalidArgType(name: string, expected: string, actual: unknown): Error 
 
 function invalidArgValue(name: string, value: unknown): Error {
   return coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The argument '${name}' is invalid. Received ${describe(value)}`);
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function keyTypeError(op: string): Error {

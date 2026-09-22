@@ -50,7 +50,7 @@ import {
   DiffieHellman as RawDiffieHellman,
   DiffieHellmanGroup as RawDiffieHellmanGroup,
 } from '../crypto/dh';
-import { bufferedClass } from '../crypto/byte-out';
+import { bufferedClass, kByteFactory } from '../crypto/byte-out';
 
 /**
  * `crypto` — the subset tooling actually calls in a browser tab.
@@ -193,6 +193,16 @@ export const cryptoSpec: BuiltinSpec = {
     // before `buffer` does, and there is no reason to force the order.
     const asBuffer = (bytes: Uint8Array): Uint8Array =>
       (ctx.require('buffer') as { Buffer: { from(input: Uint8Array): Uint8Array } }).Buffer.from(bytes);
+
+    // Stamp the byte factory onto a freshly built object. Every value `crypto`
+    // hands back that Node returns as a `Buffer` goes through here.
+    const withBytes = <T extends object>(value: T): T => {
+      (value as { [kByteFactory]?: unknown })[kByteFactory] = asBuffer;
+      return value;
+    };
+    const KeyObject = bufferedClass(AsymKeyObject, asBuffer, {
+      from: (key: unknown) => withBytes(AsymKeyObject.from(key)),
+    });
 
     // -- randomness -----------------------------------------------------------
 
@@ -626,6 +636,9 @@ export const cryptoSpec: BuiltinSpec = {
         const name = (value as { constructor?: { name?: string } }).constructor?.name ?? 'Object';
         return `an instance of ${name}`;
       }
+      if (typeof value === 'string') {
+        return value.includes("'") ? `type string (${JSON.stringify(value)})` : `type string ('${value}')`;
+      }
       return `type ${typeof value} (${String(value)})`;
     };
 
@@ -851,15 +864,11 @@ export const cryptoSpec: BuiltinSpec = {
       throw notImplemented('api', `crypto.${name}`);
     };
     const unsupportedApis = {
-      generateKey: unsupportedApi('generateKey'),
-      generateKeySync: unsupportedApi('generateKeySync'),
       diffieHellman: unsupportedApi('diffieHellman'),
       generatePrime: unsupportedApi('generatePrime'),
       generatePrimeSync: unsupportedApi('generatePrimeSync'),
       checkPrime: unsupportedApi('checkPrime'),
       checkPrimeSync: unsupportedApi('checkPrimeSync'),
-      getFips: unsupportedApi('getFips'),
-      setFips: unsupportedApi('setFips'),
       argon2: unsupportedApi('argon2'),
       argon2Sync: unsupportedApi('argon2Sync'),
       createMac: unsupportedApi('createMac'),
@@ -867,6 +876,68 @@ export const cryptoSpec: BuiltinSpec = {
       encapsulate: unsupportedApi('encapsulate'),
       decapsulate: unsupportedApi('decapsulate'),
     };
+
+    // -- symmetric key generation ------------------------------------------
+    //
+    // `generateKey`/`generateKeySync` only know `'hmac'` and `'aes'` — Node
+    // rejects every other type — and both hand back a `secret` KeyObject.
+
+    const inspectArg = (value: unknown): string => {
+      if (typeof value === 'string') return `'${value}'`;
+      if (value === null) return 'null';
+      if (value === undefined) return 'undefined';
+      if (typeof value === 'object') return describe(value);
+      return String(value);
+    };
+
+    const secretKeyLength = (type: unknown, options: unknown): number => {
+      if (typeof type !== 'string') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "type" argument must be of type string. Received ${describe(type)}`);
+      }
+      if (options === null || typeof options !== 'object') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "options" argument must be of type object. Received ${describe(options)}`);
+      }
+      const length = (options as { length?: unknown }).length;
+      if (type === 'hmac') {
+        if (typeof length !== 'number') {
+          throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "options.length" property must be of type number. Received ${describe(length)}`);
+        }
+        if (!Number.isInteger(length) || length < 8 || length > 2 ** 31 - 1) {
+          throw coded('RangeError', 'ERR_OUT_OF_RANGE', `The value of "options.length" is out of range. It must be >= 8 && <= ${2 ** 31 - 1}. Received ${length}`);
+        }
+        return length;
+      }
+      if (type === 'aes') {
+        if (length !== 128 && length !== 192 && length !== 256) {
+          throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The property 'options.length' must be one of: 128, 192, 256. Received ${inspectArg(length)}`);
+        }
+        return length;
+      }
+      throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The argument 'type' must be a supported key type. Received '${type}'`);
+    };
+
+    const generateKeySync = (type: unknown, options: unknown): AsymKeyObject => {
+      const length = secretKeyLength(type, options);
+      return createSecretKey(randomBytes(Math.floor(length / 8)) as Uint8Array);
+    };
+
+    const generateKey = (type: unknown, options: unknown, callback?: unknown): void => {
+      let cb = callback;
+      let opts = options;
+      if (typeof options === 'function') {
+        cb = options;
+        opts = undefined;
+      }
+      if (typeof cb !== 'function') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "callback" argument must be of type function. Received ${describe(cb)}`);
+      }
+      const key = generateKeySync(type, opts);
+      queueMicrotask(() => (cb as (error: Error | null, key: unknown) => void)(null, key));
+    };
+
+    // FIPS is a build-time property of Node's OpenSSL; here it is simply off.
+    const getFips = (): number => 0;
+    const setFips = (_value: unknown): void => {};
 
     // -- asymmetric keys and signatures --------------------------------------
     //
@@ -884,10 +955,10 @@ export const cryptoSpec: BuiltinSpec = {
         key,
         toBytes(signature, undefined),
       );
-    const createPrivateKey = (key: unknown): AsymKeyObject => asymCreatePrivateKey(key);
-    const createPublicKey = (key: unknown): AsymKeyObject => asymCreatePublicKey(key);
+    const createPrivateKey = (key: unknown): AsymKeyObject => withBytes(asymCreatePrivateKey(key));
+    const createPublicKey = (key: unknown): AsymKeyObject => withBytes(asymCreatePublicKey(key));
     const createSecretKey = (key: unknown, encoding?: unknown): AsymKeyObject =>
-      asymCreateSecretKey(key, encoding);
+      withBytes(asymCreateSecretKey(key, encoding));
     const generateKeyPairSync = (type: string, options?: GenerateKeyPairOptions): unknown =>
       asymGenerateKeyPairSync(type, options ?? {});
     const generateKeyPair = (type: string, options: unknown, callback?: unknown): void => {
@@ -1034,7 +1105,7 @@ export const cryptoSpec: BuiltinSpec = {
       },
     );
 
-    const KeyObject = AsymKeyObject;
+    // `KeyObject` is the buffered proxy declared near the top of `init`.
 
     const X509Certificate = namedClass(
       'X509Certificate',
@@ -1158,6 +1229,10 @@ export const cryptoSpec: BuiltinSpec = {
       createDiffieHellman,
       createDiffieHellmanGroup,
       getDiffieHellman,
+      generateKey,
+      generateKeySync,
+      getFips,
+      setFips,
       createCipheriv,
       createDecipheriv,
       getCiphers: listCiphers,

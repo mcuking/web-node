@@ -242,6 +242,20 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M86 对称密钥生成 + FIPS 开关（差分语料驱动）
+
+**实现**：`crypto.generateKeySync(type, options)` / `crypto.generateKey(type, options, callback)`（仅 `'hmac'` 与 `'aes'`，与 Node 一致），`crypto.getFips()`/`setFips()`。
+
+**语义对齐**：
+- `hmac` 的 `length` 为位数（`validateInteger(length, 'options.length', 8, 2**31-1)`），字节数 = `length >> 3`（100→12、257→32）；`aes` 的 `length` 必须为 128/192/256。
+- 错误形状逐字对齐（`ERR_INVALID_ARG_TYPE`/`ERR_INVALID_ARG_VALUE`/`ERR_OUT_OF_RANGE`，含 `Received type string ('256')` 的引号形式与 aes 分支的 `Received '128'` 形式）；异步形式缺 callback → `The "callback" argument must be of type function.`。
+- **顺带修两个历史 bug**（此次差分才暴露）：① `KeyObject.export()` 对 **secret** key 默认返回 PEM（应为裸字节 Buffer），`{format:'jwk'}` 返回裸 Uint8Array（应为 `{kty:'oct',k}`），非法 format 报文也对不上（应为 `must be one of: undefined, 'buffer', 'jwk'`）；② `KeyObject.equals()` 对 secret key 走 DER 比较导致永远 false（应比字节）。
+- 新增 `bufferedClass(Base, factory, overrides?)` 的 `overrides` 支持，并把 `KeyObject` 也接上字节工厂（含 `KeyObject.from`），使 `createPrivateKey`/`createPublicKey`/`createSecretKey`/`new KeyObject()` 的 `export()` 返回运行时 `Buffer`。
+
+**已知偏离**：本机 Node 构建的 `setFips(true)` 会真正启用 FIPS（`getFips()` 变 1）；web-node 无此能力，`setFips` 为 no-op、`getFips` 恒为 0（已在 DEVLOG 记录）。
+
+**验证**：新差分语料 `tools/crypto-keygen-probe.cjs` → `test/fixtures/crypto-keygen.json` 逐字段 0 diff。门禁全绿：tsc 干净 · vitest **904 通过 / 2 预存 skip（87 文件）** · build worker **2346.66KB**。
+
 ### 2026-09-22 · M85 Diffie-Hellman（MODP 组 + 显式素数，差分语料驱动）
 
 **实现**（`src/node-runtime/crypto/dh.ts`、`src/node-runtime/crypto/modp.ts`）：`createDiffieHellman`（两种重载）、`getDiffieHellman`/`createDiffieHellmanGroup`（Node 中同一函数对象）、`DiffieHellman`、`DiffieHellmanGroup`（纯 JS 大数模幂）。

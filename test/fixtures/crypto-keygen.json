@@ -1,0 +1,126 @@
+{
+  "sync_hmac_256": {
+    "type": "secret",
+    "size": 32,
+    "len": 32,
+    "jwkKty": "oct",
+    "isBuffer": true
+  },
+  "sync_hmac_100": {
+    "type": "secret",
+    "size": 12,
+    "len": 12,
+    "jwkKty": "oct",
+    "isBuffer": true
+  },
+  "sync_hmac_257": {
+    "type": "secret",
+    "size": 32,
+    "len": 32,
+    "jwkKty": "oct",
+    "isBuffer": true
+  },
+  "sync_hmac_1000": {
+    "type": "secret",
+    "size": 125,
+    "len": 125,
+    "jwkKty": "oct",
+    "isBuffer": true
+  },
+  "sync_aes_128": {
+    "type": "secret",
+    "size": 16,
+    "len": 16,
+    "jwkKty": "oct",
+    "isBuffer": true
+  },
+  "sync_aes_192": {
+    "type": "secret",
+    "size": 24,
+    "len": 24,
+    "jwkKty": "oct",
+    "isBuffer": true
+  },
+  "sync_aes_256": {
+    "type": "secret",
+    "size": 32,
+    "len": 32,
+    "jwkKty": "oct",
+    "isBuffer": true
+  },
+  "roundtrip": true,
+  "errors": {
+    "typeNumber": {
+      "ctor": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"type\" argument must be of type string. Received type number (5)"
+    },
+    "optionsNull": {
+      "ctor": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options\" argument must be of type object. Received null"
+    },
+    "optionsMissing": {
+      "ctor": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options\" argument must be of type object. Received undefined"
+    },
+    "lenMissing": {
+      "ctor": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options.length\" property must be of type number. Received undefined"
+    },
+    "lenStringHmac": {
+      "ctor": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options.length\" property must be of type number. Received type string ('256')"
+    },
+    "lenTooSmall": {
+      "ctor": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"options.length\" is out of range. It must be >= 8 && <= 2147483647. Received 1"
+    },
+    "lenAesString": {
+      "ctor": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.length' must be one of: 128, 192, 256. Received '128'"
+    },
+    "lenAesBad": {
+      "ctor": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.length' must be one of: 128, 192, 256. Received 129"
+    },
+    "badTypeRsa": {
+      "ctor": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The argument 'type' must be a supported key type. Received 'rsa'"
+    },
+    "badTypeDes": {
+      "ctor": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The argument 'type' must be a supported key type. Received 'des'"
+    },
+    "asyncNoCb": {
+      "ctor": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"callback\" argument must be of type function. Received undefined"
+    },
+    "asyncBadType": {
+      "ctor": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"type\" argument must be of type string. Received null"
+    }
+  },
+  "arities": {
+    "generateKey": 3,
+    "generateKeySync": 2,
+    "getFips": 0,
+    "setFips": 1
+  },
+  "asyncOk": {
+    "type": "secret",
+    "size": 32
+  },
+  "getFips": 0,
+  "setFipsReturn": "undefined"
+}

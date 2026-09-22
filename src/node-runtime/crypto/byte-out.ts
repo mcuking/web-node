@@ -36,6 +36,7 @@ export function outputBytes(
 export function bufferedClass<T extends abstract new (...args: never[]) => object>(
   Base: T,
   factory: ByteFactory,
+  overrides?: Record<string | symbol, unknown>,
 ): T {
   const Wrapped = new Proxy(Base, {
     construct(target, args, newTarget) {
@@ -47,6 +48,9 @@ export function bufferedClass<T extends abstract new (...args: never[]) => objec
       // The per-wrapper factory lives on the proxy, not the shared target, so
       // `X.convertKey()` can pick it up without leaking across runtimes.
       if (property === kByteFactory) return factory;
+      if (overrides && Object.prototype.hasOwnProperty.call(overrides, property)) {
+        return overrides[property as string];
+      }
       return Reflect.get(target, property, receiver);
     },
   });
