@@ -58,6 +58,7 @@ import {
   primeBitLength,
   toUnsignedBigInt,
 } from '../crypto/primes';
+import { ARGON2_D, ARGON2_I, ARGON2_ID, argon2 as computeArgon2, type Argon2Params } from '../crypto/argon2';
 
 /**
  * `crypto` — the subset tooling actually calls in a browser tab.
@@ -872,8 +873,6 @@ export const cryptoSpec: BuiltinSpec = {
     };
     const unsupportedApis = {
       diffieHellman: unsupportedApi('diffieHellman'),
-      argon2: unsupportedApi('argon2'),
-      argon2Sync: unsupportedApi('argon2Sync'),
       createMac: unsupportedApi('createMac'),
       getMacs: unsupportedApi('getMacs'),
       encapsulate: unsupportedApi('encapsulate'),
@@ -953,7 +952,7 @@ export const cryptoSpec: BuiltinSpec = {
 
     const validateInt32 = (value: unknown, name: string, min: number): number => {
       if (typeof value !== 'number') {
-        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "${name}" argument must be of type number. Received ${describe(value)}`);
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "${name}" ${argWord(name)} must be of type number. Received ${describe(value)}`);
       }
       if (!Number.isInteger(value)) {
         throw coded('RangeError', 'ERR_OUT_OF_RANGE', `The value of "${name}" is out of range. It must be an integer. Received ${value}`);
@@ -966,7 +965,7 @@ export const cryptoSpec: BuiltinSpec = {
 
     const validateObjectArg = (value: unknown, name: string): void => {
       if (value === null || typeof value !== 'object') {
-        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "${name}" argument must be of type object. Received ${describe(value)}`);
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "${name}" ${argWord(name)} must be of type object. Received ${describe(value)}`);
       }
     };
 
@@ -1101,6 +1100,115 @@ export const cryptoSpec: BuiltinSpec = {
       validateInt32(checks, 'options.checks', 0);
       const result = isPrime(value);
       queueMicrotask(() => (cb as (e: Error | null, isPrimeResult: boolean) => void)(null, result));
+    };
+
+    // -- Argon2 -------------------------------------------------------------
+    //
+    // `../crypto/argon2` implements RFC 9106; the validation below mirrors
+    // Node's `internal/crypto/argon2.js` `check()` so the surface matches.
+
+    const MAX_UINT32 = 2 ** 32 - 1;
+    const argon2Types = new Map<string, number>([
+      ['argon2d', ARGON2_D],
+      ['argon2i', ARGON2_I],
+      ['argon2id', ARGON2_ID],
+    ]);
+
+    const validateIntegerBounds = (value: unknown, name: string, min: number, max: number): number => {
+      if (typeof value !== 'number') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "${name}" ${argWord(name)} must be of type number. Received ${describe(value)}`);
+      }
+      if (!Number.isInteger(value)) {
+        throw coded('RangeError', 'ERR_OUT_OF_RANGE', `The value of "${name}" is out of range. It must be an integer. Received ${value}`);
+      }
+      if (value < min || value > max) {
+        throw coded('RangeError', 'ERR_OUT_OF_RANGE', `The value of "${name}" is out of range. It must be >= ${min} && <= ${max}. Received ${value}`);
+      }
+      return value;
+    };
+
+    // `getArrayBufferOrView`: strings become their UTF-8 bytes.
+    const coerceBytesOrString = (value: unknown, name: string): Uint8Array => {
+      if (typeof value === 'string') return bytesFromString(value, undefined);
+      if (value instanceof Uint8Array) return value;
+      if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+      if (isRawBytes(value)) return new Uint8Array(value as ArrayBuffer);
+      throw coded(
+        'TypeError',
+        'ERR_INVALID_ARG_TYPE',
+        `The "${name}" property must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received ${describe(value)}`,
+      );
+    };
+
+    const checkArgon2 = (algorithm: unknown, parameters: unknown): Argon2Params => {
+      if (typeof algorithm !== 'string') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "algorithm" argument must be of type string. Received ${describe(algorithm)}`);
+      }
+      const type = argon2Types.get(algorithm);
+      if (type === undefined) {
+        throw coded(
+          'TypeError',
+          'ERR_INVALID_ARG_VALUE',
+          `The argument 'algorithm' must be one of: 'argon2d', 'argon2i', 'argon2id'. Received '${algorithm}'`,
+        );
+      }
+      validateObjectArg(parameters, 'parameters');
+      const params = parameters as Record<string, unknown>;
+      const { parallelism, tagLength, memory, passes } = params;
+
+      const password = coerceBytesOrString(params.message, 'parameters.message');
+      validateIntegerBounds(password.length, 'parameters.message.byteLength', 0, MAX_UINT32);
+
+      const salt = coerceBytesOrString(params.nonce, 'parameters.nonce');
+      validateIntegerBounds(salt.length, 'parameters.nonce.byteLength', 8, MAX_UINT32);
+
+      validateIntegerBounds(parallelism, 'parameters.parallelism', 1, 2 ** 24 - 1);
+      validateIntegerBounds(tagLength, 'parameters.tagLength', 4, MAX_UINT32);
+      validateIntegerBounds(memory, 'parameters.memory', 8 * (parallelism as number), MAX_UINT32);
+      validateIntegerBounds(passes, 'parameters.passes', 1, MAX_UINT32);
+
+      let secret: Uint8Array = new Uint8Array(0);
+      if (params.secret !== undefined) {
+        secret = coerceBytesOrString(params.secret, 'parameters.secret');
+        validateIntegerBounds(secret.length, 'parameters.secret.byteLength', 0, MAX_UINT32);
+      }
+
+      let associatedData: Uint8Array = new Uint8Array(0);
+      if (params.associatedData !== undefined) {
+        associatedData = coerceBytesOrString(params.associatedData, 'parameters.associatedData');
+        validateIntegerBounds(associatedData.length, 'parameters.associatedData.byteLength', 0, MAX_UINT32);
+      }
+
+      return {
+        type,
+        password,
+        salt,
+        secret,
+        associatedData,
+        parallelism: parallelism as number,
+        tagLength: tagLength as number,
+        memory: memory as number,
+        passes: passes as number,
+      };
+    };
+
+    const argon2Sync = (algorithm: unknown, parameters: unknown): Uint8Array =>
+      asBuffer(computeArgon2(checkArgon2(algorithm, parameters)));
+
+    const argon2 = (algorithm: unknown, parameters: unknown, callback?: unknown): void => {
+      const request = checkArgon2(algorithm, parameters);
+      if (typeof callback !== 'function') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "callback" argument must be of type function. Received ${describe(callback)}`);
+      }
+      let result: Uint8Array;
+      try {
+        result = computeArgon2(request);
+      } catch (error) {
+        queueMicrotask(() => (callback as (e: unknown) => void)(error));
+        return;
+      }
+      const buffer = asBuffer(result);
+      queueMicrotask(() => (callback as (e: Error | null, out: Uint8Array) => void)(null, buffer));
     };
 
     // -- asymmetric keys and signatures --------------------------------------
@@ -1390,6 +1498,8 @@ export const cryptoSpec: BuiltinSpec = {
       generatePrimeSync,
       checkPrime,
       checkPrimeSync,
+      argon2,
+      argon2Sync,
       getFips,
       setFips,
       createCipheriv,

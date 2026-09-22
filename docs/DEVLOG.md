@@ -244,6 +244,30 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M89 Argon2（差分语料驱动）
+
+**改了什么**：`crypto.argon2(Sync)` 从响亮抛错的桩换成真实实现。新增两个纯 JS 模块：
+- `src/node-runtime/crypto/blake2b.ts`——BLAKE2b（RFC 7693），64 位字用 BigInt，支持变长摘要与 keyed 参数块。
+- `src/node-runtime/crypto/argon2.ts`——Argon2（RFC 9106）：H0 / H'（`blake2b_long`）、BlaMka 压缩函数 G（先对 8 个 16 字组做列轮，再对交错行做行轮）、数据相关（d）/无关（i）/混合（id）三种索引生成（`index_alpha` 的平方映射、四段 slice、`ARGON2_SYNC_POINTS=4`、每 128 块重算地址）。
+
+`builtins/crypto.ts` 逐个复刻 Node `internal/crypto/argon2.js` 的 `check()`：algorithm 字符串+`oneOf`（`ERR_INVALID_ARG_VALUE`）、`parameters` 对象、`message`/`nonce` 的字节源（含 string→UTF-8）、`byteLength` 边界、`parallelism`（1..2^24-1）、`tagLength`（>=4）、`memory`（>= 8*parallelism）、`passes`（>=1）、可选 `secret`/`associatedData`。
+
+**关键语义**：
+- 返回 **`Buffer`**（异步经 callback 回传）；`argon2` 必传 callback，否则 `The "callback" argument must be of type function`。
+- `memory` 单位为 KiB，`segment_length = max(floor(m/(4p)), 2)`，`m' = segment_length*4*lanes`。
+- 版本固定 `0x13`（19），因此 pass>0 的块填充为 XOR 模式。
+- `ERR_INVALID_ARG_TYPE` 对**带点**名字（如 `parameters.parallelism`、`options.checks`）用 “property”措辞（已修正 primes/argon2 两处校验助手）。
+
+**为什么**：接续阶段 A crypto 收尾（`docs/ROADMAP.md` 阶段 A / M89），纯 JS 可自洽、可用 RFC 官方向量硬验证。
+
+**验证**：
+- 差分语料 `tools/crypto-argon2-probe.cjs` → `test/fixtures/crypto-argon2.json`（真 Node v26.9.0 录制）：**RFC 9106 §5 三条官方向量**（argon2d/i/id）逐字节一致；7 组参数组合、完整错误面、arity、异步形式——`test/crypto-argon2.test.ts` 内跑同程序，**0 diff**。
+- 原始件单测：BLAKE2b RFC 7693 向量、Argon2 三变体 RFC 9106 向量直测纯 JS 核心。
+- 门禁：`tsc` 干净 · vitest **930 passed / 2 skipped（90 files）** · build worker **2378.26 KB**（`dist/assets/index-C3ZoHUWF.js`）。
+- demo `src/demo-project.ts` 新增 M89 演示段（打印 RFC 9106 argon2id 向量），跑通且与真 Node 一致。
+
+**涉及文件**：`src/node-runtime/crypto/blake2b.ts`（新增）、`src/node-runtime/crypto/argon2.ts`（新增）、`src/node-runtime/builtins/crypto.ts`、`src/demo-project.ts`、`test/crypto-argon2.test.ts`（新增）、`test/fixtures/crypto-argon2.json`（新增）、`tools/crypto-argon2-probe.cjs`（新增）、`tools/crypto-argon2-oracle.mjs`（新增）、`test/crypto-surface.test.ts`、`docs/ROADMAP.md`。
+
 ### 2026-09-22 · M88 素数生成与素性检验（差分语料驱动）
 
 **改了什么**：`crypto.generatePrime(Sync)` / `checkPrime(Sync)` 从响亮抛错的桩换成真实实现。新增 `src/node-runtime/crypto/primes.ts`（纯 JS：小素数试除 + Miller-Rabin，前 13 个素数作基在 n < 3.3e24 下确定；n 更大用前 64 个素数作基；`modPow` 用 BigInt 模幂）。`builtins/crypto.ts` 里逐个复刻 Node `internal/crypto/random.js` 的校验与 `crypto_random.cc` 的 `AdditionalConfig`：`size` 的 `validateInt32(>=1)`、`options` 对象校验、`safe`/`bigint` 布尔、`add`/`rem` 的 bigint/字节源转换与负值范围错、`add` 位数超 `size` → `ERR_OUT_OF_RANGE('invalid options.add')`、`add <= rem` → `('invalid options.rem')`。

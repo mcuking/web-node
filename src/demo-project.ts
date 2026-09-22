@@ -941,6 +941,34 @@ const primeCongruent = primeCrypto.generatePrimeSync(96, { add: 30n, rem: 11n, b
 console.log('p congruent 11 mod30:', primeCongruent % 30n === 11n);
 console.log('');
 
+// --- Argon2 password hashing (milestone 89) ---
+// crypto.argon2Sync runs RFC 9106 in pure JS (BLAKE2b + the BlaMka compression
+// function). The first vector below is RFC 9106 section 5.3 and matches Node
+// byte for byte.
+console.log('-- Argon2 (milestone 89) --');
+const rfcTag = primeCrypto.argon2Sync('argon2id', {
+  message: new Uint8Array(32).fill(1),
+  nonce: new Uint8Array(16).fill(2),
+  secret: new Uint8Array(8).fill(3),
+  associatedData: new Uint8Array(12).fill(4),
+  parallelism: 4,
+  tagLength: 32,
+  memory: 32,
+  passes: 3,
+});
+console.log('RFC 9106 argon2id   :', rfcTag.toString('hex'));
+const pwTag = primeCrypto.argon2Sync('argon2id', {
+  message: 'password',
+  nonce: 'somesalt',
+  parallelism: 1,
+  tagLength: 32,
+  memory: 64,
+  passes: 2,
+});
+console.log('argon2id("password"):', pwTag.toString('hex'));
+console.log('tag length         :', pwTag.length);
+console.log('');
+
 // --- http server (milestone 3: virtual TCP) ---
 // listen(3000) binds a port inside this runtime. The ServiceWorker bridge at
 // /preview/3000/ dials it, so this URL is reachable from the browser tab.

@@ -88,6 +88,7 @@ out.errors = {
   checkOptsNull: err(() => crypto.checkPrimeSync(97n, null)),
   checkNegChecks: err(() => crypto.checkPrimeSync(97n, { checks: -1 })),
   checkFloatChecks: err(() => crypto.checkPrimeSync(97n, { checks: 1.5 })),
+  checkStringChecks: err(() => crypto.checkPrimeSync(97n, { checks: 'x' })),
   checkAsyncNoCb: err(() => crypto.checkPrime(97n)),
 };
 
