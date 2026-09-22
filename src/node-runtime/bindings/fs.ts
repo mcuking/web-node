@@ -857,11 +857,12 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     appendFileSync: (path: string, data: Uint8Array) => vfs.appendFile(path, data),
     readdirSync: (path: string, _encoding?: unknown, withFileTypes?: boolean) =>
       vfs.readdir(path, { withFileTypes: !!withFileTypes }),
-    mkdirSync: (path: string, opts?: { recursive?: boolean; mode?: number }) => vfs.mkdir(path, opts ?? {}),
+    mkdirSync: (path: string, mode?: number, recursive?: boolean) =>
+      vfs.mkdir(path, { recursive: !!recursive, mode }),
     rmdirSync: (path: string, opts?: { recursive?: boolean }) => vfs.rm(path, { recursive: opts?.recursive }),
     unlinkSync: (path: string) => vfs.rm(path),
     renameSync: (from: string, to: string) => vfs.rename(from, to),
-    copyFileSync: (from: string, to: string) => vfs.copyFile(from, to),
+    copyFileSync: (from: string, to: string, mode?: number) => vfs.copyFile(from, to, mode),
     chmodSync: (path: string, mode: number) => vfs.chmod(path, mode),
     accessSync: (path: string) => {
       if (!vfs.exists(path)) throw new VfsError('ENOENT', 'access', path);
@@ -877,7 +878,13 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     fsyncSync: () => undefined,
     fdatasyncSync: () => undefined,
     realpathSync: (path: string) => vfs.resolve(path),
-    rmSync: (path: string, opts?: { recursive?: boolean; force?: boolean }) => vfs.rm(path, opts ?? {}),
+    // `lib/fs.js` calls this positionally: (path, maxRetries, recursive,
+    // retryDelay). `validateRmOptionsSync` has already applied `force`/EISDIR
+    // logic before we get here, so a missing path is a no-op (as in native Rimraf).
+    rmSync: (path: string, _maxRetries?: number, recursive?: boolean, _retryDelay?: number) => {
+      if (!vfs.exists(path)) return;
+      vfs.rm(path, { recursive: !!recursive });
+    },
 
     // ---- async / promise surface (`internal/fs/promises` drives these) ----
     //
@@ -939,8 +946,8 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
       wrap(() => {
         if (!vfs.exists(path)) throw new VfsError('ENOENT', 'access', path);
       }, token),
-    copyFile: (src: string, dest: string, _flags: number, token?: unknown) =>
-      wrap(() => vfs.copyFile(src, dest), token),
+    copyFile: (src: string, dest: string, mode: number, token?: unknown) =>
+      wrap(() => vfs.copyFile(src, dest, mode), token),
     rename: (oldPath: string, newPath: string, token?: unknown) =>
       wrap(() => vfs.rename(oldPath, newPath), token),
     unlink: (path: string, token?: unknown) => wrap(() => vfs.rm(path), token),

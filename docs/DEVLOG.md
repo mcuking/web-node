@@ -236,11 +236,24 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 11. ~~**`zlib`**~~ ✅ **已处理（2026-09-21，M45）**：deflate/gzip 的流式与一次性异步形式跑在平台 `CompressionStream`/`DecompressionStream` 上（默认选项字节级对齐真 Node v26.9.0），`crc32`/`constants`/`codes` 齐备，`stream/web` 的 `CompressionStream`/`DecompressionStream` 同步解锁。仍缺（有意，平台无对应面）：同步形式（`gzipSync` 等）、`level`/`windowBits`/`memLevel`/`strategy`/`dictionary` 等编码参数、`flush()`/`params()`、brotli/zstd/zip——均显式抛 `NotImplementedError`。若日后确实需要同步压缩/自定义 level，得自己写一份纯 JS deflate（代价大，优先级低）。
 10b. ~~**补 `internal/util/inspect` 等 shim 的保真度**~~ ✅ **已解决（2026-09-21，M42）**：`types` binding 的 `isGeneratorFunction`/`isAsyncFunction` 修正（`async function*` 两者皆为真，`util.inspect` 因此输出 `[AsyncGeneratorFunction: x]`）；`icu.getStringWidth` 用真列宽重写。剩：`getPromiseDetails`（恒 pending）/`getProxyDetails`（恒 undefined）/Map/Set 迭代器预览 仍为近似（V8 不同步暴露内部状态）。
 10c. ~~**`process` 表面补齐（M43）**~~ ✅ **已解决（2026-09-21，M43）**：逐键对照真 Node v26.9.0，补齐 `getBuiltinModule`/`getActiveResourcesInfo`/`loadEnvFile`/未捕获异常捕获回调三件套/`reallyExit`/`openStdin`/`ref`/`unref`/`debugPort`/`domain`/`report`，移除已删的 `noDeprecation`/`throwDeprecation`/`traceDeprecation`；顺带修了「timer/nextTick 回调抛出绕过 `process._fatalException`」的真 bug，并把 `VfsError` 改成 Node `UVException` 的消息形状。剩：`_*` 内部面与 Unix 原生（`dlopen`/`execve`/`seteuid` 等）/`moduleLoadList` 仍不存在（不面向用户代码）。
-12. ~~**扫描器原型/静态/arity 差分**~~ ✅ **已清零（2026-09-22，M75–M78）**：全 67 个内建模块的导出函数 `length`、类原型（含继承链）成员、类静态成员与常量的差分已全部收掉。下一步的优先级转为**语义深度**（同一表面下让真调用更接近真 Node）：采用**差分语料**（同一观测程序在真 Node 与 web-node 各跑一遍，JSON 必须逐字段相等）。**M79 已用此法把 `http` 语义对齐**（80 个观测点全等）、**M80 把 `net` 对齐**（连接/事件序列/默认值全等，见变更记录）；后续候选：`net` 连接生命周期与超时、`fs` 错误形状、`crypto` 非对称面、`module.registerHooks` 等。
+12. ~~**扫描器原型/静态/arity 差分**~~ ✅ **已清零（2026-09-22，M75–M78）**：全 67 个内建模块的导出函数 `length`、类原型（含继承链）成员、类静态成员与常量的差分已全部收掉。下一步的优先级转为**语义深度**（同一表面下让真调用更接近真 Node）：采用**差分语料**（同一观测程序在真 Node 与 web-node 各跑一遍，JSON 必须逐字段相等）。**M79 已用此法把 `http` 语义对齐**（80 个观测点全等）、**M80 把 `net` 对齐**（连接/事件序列/默认值全等）、**M81 把 `fs` 对齐**（错误形状/Stats/递归删、可选 surface 全等，见变更记录）；后续候选：`net` 连接生命周期与超时、`fs` 错误形状、`crypto` 非对称面、`module.registerHooks` 等。
 
 ---
 
 ## 变更记录
+
+### 2026-09-22 · M81 fs 语义深度（差分语料驱动）
+
+**方法**：同 M79/M80。新增 `tools/fs-semantics-probe.cjs`（只用公开 API，将临时目录名规范化后比较）、`tools/fs-semantics-oracle.mjs` → `test/fixtures/fs-semantics.json`、永久回归 `test/fs-semantics.test.ts`。
+
+**修什么（全部由语料抓出）**
+
+- **`fs.rmSync(dir, {recursive:true})` 报 `ENOTEMPTY`**：vendored `lib/fs.js` 以**位置参数**调 `binding.rmSync(path, maxRetries, recursive, retryDelay)`，而我们的 binding 写的是 `(path, opts)` → `recursive` 永远是 `undefined`，递归删目录失败。改为位置参数签名，并让缺失路径成为 no-op（`validateRmOptionsSync` 已在前置处理 `force`/`EISDIR`）。
+- **`fs.mkdirSync(path, {recursive:true})` 返回值不对**：Node 返回**本次真正创建的第一个目录**（全链已存在则 `undefined`），旧实现总是 `undefined`。`MemoryVfs.mkdir` 现在返回 `firstCreated` 并沿 `binding.mkdir` 传回。
+- **`fs.copyFileSync` 忽略 mode**：`COPYFILE_EXCL`(1) 不生效（目标已存在也不报错）。binding 改为传 `mode`，`MemoryVfs.copyFile` 在 `mode & 1` 且目标存在时抛 `EEXIST`。
+- 顺带修正 `binding.mkdirSync`/`mkdir` 的签名对齐。
+
+**验证**：差分语料（constants、Stats/Dirent 形状、错误 code/syscall/errno/message、fd API、promises、realpath、可选 surface…）**逐字段与真 Node v26.9.0 一致**；`test/fs-semantics.test.ts` 另加 2 个单测。门禁全绿：tsc 干净 · vitest **870 通过 / 2 预存 skip（81 文件）** · build worker **2297.88KB**。
 
 ### 2026-09-22 · M80 net 语义深度（差分语料驱动）
 

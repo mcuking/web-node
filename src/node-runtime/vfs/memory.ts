@@ -202,20 +202,23 @@ export class MemoryVfs implements Vfs {
     this.writeFile(path, data, { flag: 'a' });
   }
 
-  mkdir(path: string, opts: MkdirOptions = {}): void {
+  mkdir(path: string, opts: MkdirOptions = {}): string | undefined {
     const abs = this.resolve(path);
     if (abs === '/') {
-      if (opts.recursive) return;
+      if (opts.recursive) return undefined;
       throw new VfsError('EEXIST', 'mkdir', path);
     }
     if (this.#entries.has(abs)) {
-      if (opts.recursive && this.#entries.get(abs)!.type === 'dir') return;
+      if (opts.recursive && this.#entries.get(abs)!.type === 'dir') return undefined;
       throw new VfsError('EEXIST', 'mkdir', path);
     }
 
     if (opts.recursive) {
       const parts = p.segments(abs);
       let cur = '';
+      // Node returns the *first* directory the recursive mkdir had to create,
+      // or `undefined` when the whole chain already existed.
+      let firstCreated: string | undefined;
       for (const part of parts) {
         cur += '/' + part;
         const ex = this.#entries.get(cur);
@@ -224,9 +227,10 @@ export class MemoryVfs implements Vfs {
           continue;
         }
         this.#entries.set(cur, this.#makeDir());
+        firstCreated ??= cur;
       }
       this.#touch(abs, 'create');
-      return;
+      return firstCreated;
     }
 
     const [dir] = this.#parent(abs);
@@ -313,7 +317,11 @@ export class MemoryVfs implements Vfs {
     this.#touch(dst, 'create');
   }
 
-  copyFile(from: string, to: string): void {
+  copyFile(from: string, to: string, mode = 0): void {
+    // `COPYFILE_EXCL` (1): fail if the destination already exists.
+    if ((mode & 1) !== 0 && this.exists(to)) {
+      throw new VfsError('EEXIST', 'copyfile', to);
+    }
     const data = this.readFile(from);
     this.writeFile(to, data);
   }

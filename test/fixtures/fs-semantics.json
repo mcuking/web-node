@@ -1,0 +1,138 @@
+{
+  "constants": {
+    "F_OK": 0,
+    "R_OK": 4,
+    "W_OK": 2,
+    "X_OK": 1,
+    "COPYFILE_EXCL": 1,
+    "O_RDWR": 2,
+    "O_CREAT": 512
+  },
+  "mkdirReturnsUndefined": false,
+  "readUtf8": "hello world",
+  "readIsBuffer": true,
+  "readByteLength": 11,
+  "writeReturnsUndefined": true,
+  "statInstanceOfStats": true,
+  "statIsFile": [
+    true,
+    false,
+    false
+  ],
+  "statSize": 11,
+  "statModes": {
+    "number": "number",
+    "hasIsBlockDevice": "function"
+  },
+  "statKeys": [
+    "atimeMs",
+    "birthtimeMs",
+    "blksize",
+    "blocks",
+    "ctimeMs",
+    "dev",
+    "gid",
+    "ino",
+    "mode",
+    "mtimeMs",
+    "nlink",
+    "rdev",
+    "size",
+    "uid"
+  ],
+  "statProtoKeys": [
+    "_checkModeProperty",
+    "atime",
+    "atimeInstant",
+    "birthtime",
+    "birthtimeInstant",
+    "constructor",
+    "ctime",
+    "ctimeInstant",
+    "mtime",
+    "mtimeInstant"
+  ],
+  "bigintSize": "bigint",
+  "lstatIsFile": true,
+  "dirStat": [
+    true,
+    false
+  ],
+  "readdirSorted": [
+    "a.txt",
+    "b.txt",
+    "sub"
+  ],
+  "direntInstance": true,
+  "direntFields": [
+    [
+      "a.txt",
+      true,
+      false
+    ],
+    [
+      "b.txt",
+      true,
+      false
+    ],
+    [
+      "sub",
+      false,
+      true
+    ]
+  ],
+  "exists": [
+    true,
+    false
+  ],
+  "afterAppend": "hello world!",
+  "copyContent": "hello world!",
+  "copyExclError": "EEXIST",
+  "renamedExists": [
+    false,
+    true
+  ],
+  "realpathOk": true,
+  "realpathNativeType": "function",
+  "errENOENT": {
+    "code": "ENOENT",
+    "syscall": "open",
+    "errno": -2,
+    "message": "ENOENT: no such file or directory, open '<d>/missing.txt'",
+    "name": "Error"
+  },
+  "errENOENTPath": "ENOENT",
+  "errEISDIR": "EISDIR",
+  "errENOTDIR": "ENOTDIR",
+  "errEEXIST": "EEXIST",
+  "errEACCESShape": true,
+  "fdRead": [
+    5,
+    "hello"
+  ],
+  "fdCloseReturns": true,
+  "accessOk": true,
+  "accessError": "ENOENT",
+  "rmGone": false,
+  "promisesRead": "hello world!",
+  "promisesStatIsStats": true,
+  "promisesReaddir": [
+    "a.txt",
+    "b.txt",
+    "moved.txt"
+  ],
+  "promisesErrorShape": {
+    "code": "ENOENT",
+    "syscall": "open",
+    "message": "ENOENT: no such file or directory, open '<d>/missing.txt'"
+  },
+  "surface": [
+    "watch:function",
+    "createReadStream:function",
+    "createWriteStream:function",
+    "watchFile:function",
+    "unwatchFile:function",
+    "opendirSync:function",
+    "globSync:function"
+  ]
+}

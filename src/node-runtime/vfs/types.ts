@@ -288,11 +288,11 @@ export interface Vfs {
 
   exists(path: string): boolean;
   stat(path: string): Stat;
-  mkdir(path: string, opts?: MkdirOptions): void;
+  mkdir(path: string, opts?: MkdirOptions): string | undefined;
   readdir(path: string, opts?: ReaddirOptions): Dirent[];
   rm(path: string, opts?: { recursive?: boolean; force?: boolean }): void;
   rename(from: string, to: string): void;
-  copyFile(from: string, to: string): void;
+  copyFile(from: string, to: string, mode?: number): void;
   chmod(path: string, mode: number): void;
 
   /** Resolve a (possibly relative) path against the current working directory. */
