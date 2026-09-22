@@ -57,6 +57,15 @@ import {
   modpGroupPrivateBits,
   modpGroupPrivateBitsForParams,
 } from './modp';
+import {
+  isMlKemParam,
+  mlKemCiphertextLength,
+  mlKemDecapsulate,
+  mlKemEncapsulate,
+  mlKemExpandSeed,
+  mlKemPublicKeyLength,
+  type MlKemParam,
+} from './mlkem';
 
 // --- OIDs -------------------------------------------------------------------
 
@@ -65,6 +74,20 @@ const OID_EC = '2a8648ce3d0201';
 const OID_ED25519 = '2b6570';
 /** `dhKeyAgreement` (1.2.840.113549.1.3.1), the OID OpenSSL tags DH with. */
 const OID_DH = '2a864886f70d010301';
+/** `id-alg-ml-kem-512|768|1024` (2.16.840.1.101.3.4.4.1..3), the FIPS 203 OIDs. */
+const OID_ML_KEM_512 = '608648016503040401';
+const OID_ML_KEM_768 = '608648016503040402';
+const OID_ML_KEM_1024 = '608648016503040403';
+const ML_KEM_OID_TO_PARAM: Record<string, MlKemParam> = {
+  [OID_ML_KEM_512]: 'ml-kem-512',
+  [OID_ML_KEM_768]: 'ml-kem-768',
+  [OID_ML_KEM_1024]: 'ml-kem-1024',
+};
+const ML_KEM_PARAM_TO_OID: Record<MlKemParam, string> = {
+  'ml-kem-512': '2.16.840.1.101.3.4.4.1',
+  'ml-kem-768': '2.16.840.1.101.3.4.4.2',
+  'ml-kem-1024': '2.16.840.1.101.3.4.4.3',
+};
 
 // --- random -----------------------------------------------------------------
 
@@ -101,7 +124,7 @@ function bitLength(value: bigint): number {
 // --- key material -----------------------------------------------------------
 
 export type KeyType = 'private' | 'public' | 'secret';
-export type AsymType = 'rsa' | 'ec' | 'ed25519' | 'dh';
+export type AsymType = 'rsa' | 'ec' | 'ed25519' | 'dh' | MlKemParam;
 
 export interface RsaMaterial {
   n: bigint;
@@ -137,6 +160,16 @@ export interface DhMaterial {
   privateKey?: bigint;
 }
 
+export interface MlKemMaterial {
+  param: MlKemParam;
+  /** 64-byte FIPS 203 seed `d || z`; private keys only. */
+  seed?: Uint8Array;
+  /** Encapsulation key (`ek`); always present. */
+  publicKey: Uint8Array;
+  /** Expanded decapsulation key (`dk`); private keys only. */
+  privateKey?: Uint8Array;
+}
+
 export interface KeyMaterial {
   type: KeyType;
   asym?: AsymType;
@@ -144,6 +177,7 @@ export interface KeyMaterial {
   ec?: EcMaterial;
   ed?: EdMaterial;
   dh?: DhMaterial;
+  mlkem?: MlKemMaterial;
   /** Raw bytes for `type: 'secret'`. */
   secret?: Uint8Array;
 }
@@ -216,6 +250,40 @@ function parseDhParams(node: DerNode | undefined): { prime: bigint; generator: b
   return { prime: derInt(seq[0]), generator: derInt(seq[1]) };
 }
 
+/**
+ * PKCS#8 stores the ML-KEM private key as its 64-byte FIPS 203 seed `d || z`,
+ * wrapped in a nested OCTET STRING (OpenSSL's `ML-KEM` seed encoding). Expand
+ * it into the encapsulation key and the decapsulation key.
+ */
+function parseMlKemPrivate(inner: Uint8Array, param: MlKemParam): MlKemMaterial {
+  let node: DerNode | undefined;
+  try {
+    node = derParse(inner);
+  } catch {
+    node = undefined;
+  }
+  const ekLength = mlKemPublicKeyLength(param);
+  const vectorBytes = ekLength - 32;
+
+  // The seed form is a `[0]` IMPLICIT OCTET STRING (tag 0x80) holding `d || z`;
+  // some encoders use a plain OCTET STRING instead.
+  if (node && (node.tag === 0x80 || node.tag === 0x04) && node.content.length === 64) {
+    const seed = Uint8Array.from(node.content);
+    const { ek, dk } = mlKemExpandSeed(seed, param);
+    return { param, seed, publicKey: ek, privateKey: dk };
+  }
+  // The expanded form is `[1]` (tag 0x81): dkPKE || ek || H(ek) || z.
+  if (node && node.tag === 0x81) {
+    const dk = Uint8Array.from(node.content);
+    const publicKey = dk.subarray(vectorBytes, vectorBytes + ekLength);
+    return { param, publicKey: Uint8Array.from(publicKey), privateKey: dk };
+  }
+  // Fallback: interpret the bytes as a raw seed.
+  const seed = Uint8Array.from(node ? node.content : inner);
+  const { ek, dk } = mlKemExpandSeed(seed, param);
+  return { param, seed, publicKey: ek, privateKey: dk };
+}
+
 function parsePrivateKeyInfo(der: Uint8Array): KeyMaterial {
   const seq = expectSeq(derParse(der));
   const algId = expectSeq(seq[1]);
@@ -230,6 +298,9 @@ function parsePrivateKeyInfo(der: Uint8Array): KeyMaterial {
   if (oid === OID_DH) {
     const params = parseDhParams(algId[1]);
     return { type: 'private', asym: 'dh', dh: { ...params, privateKey: derInt(derParse(inner)) } };
+  }
+  if (ML_KEM_OID_TO_PARAM[oid]) {
+    return { type: 'private', asym: ML_KEM_OID_TO_PARAM[oid], mlkem: parseMlKemPrivate(inner, ML_KEM_OID_TO_PARAM[oid]) };
   }
   throw new Error(`unsupported private key algorithm ${oid}`);
 }
@@ -252,6 +323,9 @@ function parseSubjectPublicKeyInfo(der: Uint8Array): KeyMaterial {
   if (oid === OID_DH) {
     const params = parseDhParams(algId[1]);
     return { type: 'public', asym: 'dh', dh: { ...params, publicKey: derInt(derParse(bits)) } };
+  }
+  if (ML_KEM_OID_TO_PARAM[oid]) {
+    return { type: 'public', asym: ML_KEM_OID_TO_PARAM[oid], mlkem: { param: ML_KEM_OID_TO_PARAM[oid], publicKey: Uint8Array.from(bits) } };
   }
   throw new Error(`unsupported public key algorithm ${oid}`);
 }
@@ -352,6 +426,24 @@ function encodePrivateKeyInfo(m: KeyMaterial): Uint8Array {
       derOctet(derIntValue(m.dh.privateKey)),
     );
   }
+  if (m.mlkem) {
+    if (m.mlkem.seed) {
+      return derSeq(
+        derIntValue(0n),
+        derSeq(derOid(ML_KEM_PARAM_TO_OID[m.mlkem.param])),
+        // PKCS#8 stores the seed as a `[0]` IMPLICIT OCTET STRING (`80 <len> ...`).
+        derOctet(derEncode(0x80, m.mlkem.seed)),
+      );
+    }
+    if (m.mlkem.privateKey) {
+      return derSeq(
+        derIntValue(0n),
+        derSeq(derOid(ML_KEM_PARAM_TO_OID[m.mlkem.param])),
+        // `[1]` IMPLICIT OCTET STRING holds the expanded decapsulation key.
+        derOctet(derEncode(0x81, m.mlkem.privateKey)),
+      );
+    }
+  }
   throw new Error('key: cannot encode private key');
 }
 
@@ -373,6 +465,9 @@ function encodeSubjectPublicKeyInfo(m: KeyMaterial): Uint8Array {
       derSeq(derOid(oidDotted(OID_DH)), derSeq(derIntValue(m.dh.prime), derIntValue(m.dh.generator))),
       derBitString(derIntValue(m.dh.publicKey)),
     );
+  }
+  if (m.mlkem) {
+    return derSeq(derSeq(derOid(ML_KEM_PARAM_TO_OID[m.mlkem.param])), derBitString(m.mlkem.publicKey));
   }
   throw new Error('key: cannot encode public key');
 }
@@ -422,6 +517,7 @@ export class KeyObject {
     if (m.asym === 'ec' && m.ec) return { namedCurve: m.ec.curve.nodeName };
     if (m.asym === 'ed25519') return {};
     if (m.asym === 'dh') return {};
+    if (m.mlkem) return {};
     return undefined;
   }
 
@@ -461,7 +557,7 @@ export class KeyObject {
     const type = opts.type ?? (m.type === 'public' ? 'spki' : 'pkcs8');
     if (format === 'jwk') return exportJwk(m) as unknown as string;
     const der = exportDer(m, type);
-    if (format === 'der') return der;
+    if (format === 'der') return outputBytes(this, der, undefined, (bytes) => bytes) as Uint8Array;
     if (format === 'pem') {
       const label =
         type === 'spki' ? 'PUBLIC KEY' : type === 'pkcs1' ? (m.type === 'public' ? 'RSA PUBLIC KEY' : 'RSA PRIVATE KEY') : type === 'sec1' ? 'EC PRIVATE KEY' : 'PRIVATE KEY';
@@ -638,6 +734,9 @@ export function createPublicKey(input: unknown): KeyObject {
     if (m.asym === 'dh' && m.dh && m.dh.privateKey !== undefined) {
       const publicKey = m.dh.publicKey ?? modPow(m.dh.generator, m.dh.privateKey, m.dh.prime);
       return makeKeyObject({ type: 'public', asym: 'dh', dh: { prime: m.dh.prime, generator: m.dh.generator, publicKey } });
+    }
+    if (m.mlkem) {
+      return makeKeyObject({ type: 'public', asym: m.mlkem.param, mlkem: { param: m.mlkem.param, publicKey: m.mlkem.publicKey } });
     }
     throw new Error('key: cannot derive public key');
   }
@@ -1071,6 +1170,74 @@ export function publicDecrypt(key: unknown, buffer: Uint8Array): Uint8Array {
   return emePkcs1Decode(em);
 }
 
+// --- ML-KEM encapsulation (FIPS 203) ----------------------------------------
+
+const KEM_KEY_TYPE_LIST =
+  'of type string or an instance of ArrayBuffer, Buffer, TypedArray, DataView, KeyObject, or CryptoKey';
+
+function isRawBuffer(value: unknown): boolean {
+  return value instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer);
+}
+
+/**
+ * `encapsulate` accepts a public or private key, so reduce any input to the
+ * ML-KEM material whose encapsulation key it carries. Non-KEM key types are
+ * refused loudly rather than producing a bogus shared secret.
+ */
+function encapsulateMaterial(key: unknown): MlKemMaterial {
+  if (key instanceof KeyObject) {
+    const m = keyMaterialOf(key);
+    if (m.type === 'secret') {
+      throw coded('TypeError', 'ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE', `Invalid key object type ${m.type}, expected private or public.`);
+    }
+    if (!m.mlkem) throw notImplementedError('api', 'crypto.encapsulate');
+    return m.mlkem;
+  }
+  if (typeof key !== 'string' && !(key instanceof Uint8Array) && !ArrayBuffer.isView(key) && !isRawBuffer(key) && (typeof key !== 'object' || key === null)) {
+    throw invalidArgType('key', KEM_KEY_TYPE_LIST, key);
+  }
+  let material: KeyMaterial;
+  try {
+    material = keyMaterialOf(createPublicKey(key));
+  } catch {
+    material = keyMaterialOf(createPrivateKey(key));
+  }
+  if (!material.mlkem) throw notImplementedError('api', 'crypto.encapsulate');
+  return material.mlkem;
+}
+
+/** Private-only counterpart for `decapsulate`. */
+function decapsulateMaterial(key: unknown): MlKemMaterial {
+  if (key instanceof KeyObject) {
+    const m = keyMaterialOf(key);
+    if (m.type !== 'private') {
+      throw coded('TypeError', 'ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE', `Invalid key object type ${m.type}, expected private.`);
+    }
+    if (!m.mlkem) throw notImplementedError('api', 'crypto.decapsulate');
+    return m.mlkem;
+  }
+  if (typeof key !== 'string' && !(key instanceof Uint8Array) && !ArrayBuffer.isView(key) && !isRawBuffer(key) && (typeof key !== 'object' || key === null)) {
+    throw invalidArgType('key', KEM_KEY_TYPE_LIST, key);
+  }
+  const material = keyMaterialOf(createPrivateKey(key));
+  if (!material.mlkem) throw notImplementedError('api', 'crypto.decapsulate');
+  return material.mlkem;
+}
+
+export function encapsulate(key: unknown): { sharedKey: Uint8Array; ciphertext: Uint8Array } {
+  const m = encapsulateMaterial(key);
+  return mlKemEncapsulate(m.publicKey, m.param, randomBytes);
+}
+
+export function decapsulate(key: unknown, ciphertext: Uint8Array): Uint8Array {
+  const m = decapsulateMaterial(key);
+  if (ciphertext.length !== mlKemCiphertextLength(m.param)) {
+    throw coded('Error', 'ERR_CRYPTO_OPERATION_FAILED', 'Decapsulation failed');
+  }
+  if (!m.privateKey) throw notImplementedError('api', 'crypto.decapsulate');
+  return mlKemDecapsulate(m.privateKey, ciphertext, m.param);
+}
+
 // --- key generation ---------------------------------------------------------
 
 // Trial division by the primes below this bound rejects the vast majority of
@@ -1221,6 +1388,14 @@ function generateMaterial(type: string, options: GenerateKeyPairOptions): { priv
     return {
       private: { type: 'private', asym: 'dh', dh: { ...dh, publicKey, privateKey } },
       public: { type: 'public', asym: 'dh', dh: { ...dh, publicKey } },
+    };
+  }
+  if (isMlKemParam(type)) {
+    const seed = randomBytes(64);
+    const { ek, dk } = mlKemExpandSeed(seed, type);
+    return {
+      private: { type: 'private', asym: type, mlkem: { param: type, seed, publicKey: ek, privateKey: dk } },
+      public: { type: 'public', asym: type, mlkem: { param: type, publicKey: ek } },
     };
   }
   throw notImplementedError('crypto', `generateKeyPair type ${type}`);

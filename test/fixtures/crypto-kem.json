@@ -1,0 +1,143 @@
+{
+  "surface": {
+    "encapsulate": "function",
+    "encapsulateLength": 2,
+    "decapsulate": "function",
+    "decapsulateLength": 3
+  },
+  "params": {
+    "ml-kem-512": {
+      "pubType": "public",
+      "pubAsym": "ml-kem-512",
+      "privType": "private",
+      "privAsym": "ml-kem-512",
+      "pubDetails": {},
+      "spkiRoundTrip": true,
+      "pkcs8RoundTrip": true,
+      "pubPemHead": "-----BEGIN PUBLIC KEY-----",
+      "privPemHead": "-----BEGIN PRIVATE KEY-----",
+      "derivedFromPrivate": true,
+      "decapsulateEmbeddedCt": "dfe81e4e1324aa8fa797021789a3d89c9bace23572e12598ec48475464c1c50c",
+      "decapsulatePemPrivate": "dfe81e4e1324aa8fa797021789a3d89c9bace23572e12598ec48475464c1c50c",
+      "ssLen": 32,
+      "ctLen": 768,
+      "ssIsBuffer": true,
+      "ctIsBuffer": true,
+      "roundTrip": true,
+      "encapFromPem": 768,
+      "encapFromPrivate": 768
+    },
+    "ml-kem-768": {
+      "pubType": "public",
+      "pubAsym": "ml-kem-768",
+      "privType": "private",
+      "privAsym": "ml-kem-768",
+      "pubDetails": {},
+      "spkiRoundTrip": true,
+      "pkcs8RoundTrip": true,
+      "pubPemHead": "-----BEGIN PUBLIC KEY-----",
+      "privPemHead": "-----BEGIN PRIVATE KEY-----",
+      "derivedFromPrivate": true,
+      "decapsulateEmbeddedCt": "7a2b64c98f06c6c74fb40a9dc507078d48e6500ae0a5a229c7039ea6d3f74b19",
+      "decapsulatePemPrivate": "7a2b64c98f06c6c74fb40a9dc507078d48e6500ae0a5a229c7039ea6d3f74b19",
+      "ssLen": 32,
+      "ctLen": 1088,
+      "ssIsBuffer": true,
+      "ctIsBuffer": true,
+      "roundTrip": true,
+      "encapFromPem": 1088,
+      "encapFromPrivate": 1088
+    },
+    "ml-kem-1024": {
+      "pubType": "public",
+      "pubAsym": "ml-kem-1024",
+      "privType": "private",
+      "privAsym": "ml-kem-1024",
+      "pubDetails": {},
+      "spkiRoundTrip": true,
+      "pkcs8RoundTrip": true,
+      "pubPemHead": "-----BEGIN PUBLIC KEY-----",
+      "privPemHead": "-----BEGIN PRIVATE KEY-----",
+      "derivedFromPrivate": true,
+      "decapsulateEmbeddedCt": "f14191441ce4f6225a22de75bd6acd9d920195b3b1b81b4f8152af6ee0b6ff58",
+      "decapsulatePemPrivate": "f14191441ce4f6225a22de75bd6acd9d920195b3b1b81b4f8152af6ee0b6ff58",
+      "ssLen": 32,
+      "ctLen": 1568,
+      "ssIsBuffer": true,
+      "ctIsBuffer": true,
+      "roundTrip": true,
+      "encapFromPem": 1568,
+      "encapFromPrivate": 1568
+    }
+  },
+  "errors": {
+    "encapNoArg": {
+      "err": {
+        "name": "TypeError",
+        "code": "ERR_INVALID_ARG_TYPE",
+        "message": "The \"key\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, DataView, KeyObject, or CryptoKey. Received undefined"
+      }
+    },
+    "encapNumber": {
+      "err": {
+        "name": "TypeError",
+        "code": "ERR_INVALID_ARG_TYPE",
+        "message": "The \"key\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, DataView, KeyObject, or CryptoKey. Received type number (42)"
+      }
+    },
+    "encapSecret": {
+      "err": {
+        "name": "TypeError",
+        "code": "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE",
+        "message": "Invalid key object type secret, expected private or public."
+      }
+    },
+    "encapBadCb": {
+      "err": {
+        "name": "TypeError",
+        "code": "ERR_INVALID_ARG_TYPE",
+        "message": "The \"callback\" argument must be of type function. Received type string ('x')"
+      }
+    },
+    "decapNoCt": {
+      "err": {
+        "name": "TypeError",
+        "code": "ERR_INVALID_ARG_TYPE",
+        "message": "The \"ciphertext\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received undefined"
+      }
+    },
+    "decapNumberCt": {
+      "err": {
+        "name": "TypeError",
+        "code": "ERR_INVALID_ARG_TYPE",
+        "message": "The \"ciphertext\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type number (42)"
+      }
+    },
+    "decapPublic": {
+      "err": {
+        "name": "TypeError",
+        "code": "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE",
+        "message": "Invalid key object type public, expected private."
+      }
+    },
+    "decapBadLen": {
+      "err": {
+        "name": "Error",
+        "code": "ERR_CRYPTO_OPERATION_FAILED",
+        "message": "Decapsulation failed"
+      }
+    },
+    "decapBadCb": {
+      "err": {
+        "name": "TypeError",
+        "code": "ERR_INVALID_ARG_TYPE",
+        "message": "The \"callback\" argument must be of type function. Received type string ('x')"
+      }
+    }
+  },
+  "asyncEncap": {
+    "ssLen": 32,
+    "ctLen": 1088
+  },
+  "asyncDecap": true
+}

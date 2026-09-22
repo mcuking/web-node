@@ -36,6 +36,8 @@ import {
   createPrivateKey as asymCreatePrivateKey,
   createPublicKey as asymCreatePublicKey,
   createSecretKey as asymCreateSecretKey,
+  decapsulate as asymDecapsulate,
+  encapsulate as asymEncapsulate,
   generateKeyPairSync as asymGenerateKeyPairSync,
   listCurves,
   parseSignAlgorithm,
@@ -921,18 +923,52 @@ export const cryptoSpec: BuiltinSpec = {
       new Decipheriv(algorithm, key, iv, options) as unknown as Record<string, unknown>;
     const getCipherInfo = (nameOrNid: string | number) => lookupCipherInfo(nameOrNid);
 
-    // -- explicitly unsupported ----------------------------------------------
+    // -- ML-KEM encapsulation (FIPS 203) -------------------------------------
     //
-    // These need real crypto primitives (ciphers, signatures, asymmetric keys,
-    // primes) or a native key store. They throw `NotImplementedError` rather
-    // than returning `undefined`, so a caller that reaches one finds out.
+    // `encapsulate` is generic over KEM algorithms in Node, but ML-KEM is the
+    // only KEM this runtime implements; any other key type throws loudly rather
+    // than producing a bogus shared secret. Both accept an optional callback,
+    // in which case the operation is asynchronous.
+    const invalidCallback = (value: unknown): Error =>
+      coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "callback" argument must be of type function. Received ${describe(value)}`);
 
-    const unsupportedApi = (name: string): (() => never) => () => {
-      throw notImplemented('api', `crypto.${name}`);
+    const encapsulate = function encapsulate(key: unknown, callback?: unknown): unknown {
+      if (callback !== undefined && typeof callback !== 'function') throw invalidCallback(callback);
+      const run = () => {
+        const { sharedKey, ciphertext } = asymEncapsulate(key);
+        return { sharedKey: asBuffer(sharedKey), ciphertext: asBuffer(ciphertext) };
+      };
+      if (typeof callback === 'function') {
+        try {
+          const result = run();
+          queueMicrotask(() => (callback as (e: Error | null, r?: unknown) => void)(null, result));
+        } catch (error) {
+          queueMicrotask(() => (callback as (e: Error | null, r?: unknown) => void)(error as Error));
+        }
+        return undefined;
+      }
+      return run();
     };
-    const unsupportedApis = {
-      encapsulate: unsupportedApi('encapsulate'),
-      decapsulate: unsupportedApi('decapsulate'),
+
+    const decapsulate = function decapsulate(key: unknown, ciphertext: unknown, callback?: unknown): unknown {
+      if (callback !== undefined && typeof callback !== 'function') throw invalidCallback(callback);
+      const bytes = ((): Uint8Array => {
+        if (typeof ciphertext === 'string' || ciphertext instanceof Uint8Array || ArrayBuffer.isView(ciphertext) || ciphertext instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && ciphertext instanceof SharedArrayBuffer)) {
+          return toBytes(ciphertext);
+        }
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "ciphertext" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received ${describe(ciphertext)}`);
+      })();
+      const run = () => asBuffer(asymDecapsulate(key, bytes));
+      if (typeof callback === 'function') {
+        try {
+          const result = run();
+          queueMicrotask(() => (callback as (e: Error | null, r?: unknown) => void)(null, result));
+        } catch (error) {
+          queueMicrotask(() => (callback as (e: Error | null, r?: unknown) => void)(error as Error));
+        }
+        return undefined;
+      }
+      return run();
     };
 
     // -- symmetric key generation ------------------------------------------
@@ -1999,7 +2035,8 @@ export const cryptoSpec: BuiltinSpec = {
         RSA_PSS_SALTLEN_AUTO: RSA_PSS_SALTLEN_MAX_SIGN,
         RSA_PSS_SALTLEN_MAX,
       },
-      ...unsupportedApis,
+      encapsulate,
+      decapsulate,
       default: { createHash, createHmac, randomBytes, randomUUID, webcrypto },
     };
     // Node keeps `prng`/`pseudoRandomBytes`/`rng` as non-enumerable, lazily

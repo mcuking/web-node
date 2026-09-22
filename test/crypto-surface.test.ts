@@ -123,11 +123,14 @@ describe('crypto unsupported-but-present surface throws loudly', () => {
     expect(() => new crypto.X509Certificate()).toThrowError(/must be of type string/);
   });
 
-  it('unsupported functions exist and throw', () => {
+  it('ML-KEM encapsulation is wired as real functions', () => {
     const crypto = boot();
-    for (const name of ['encapsulate', 'decapsulate']) {
-      expect(typeof crypto[name]).toBe('function');
-      expect(() => crypto[name]()).toThrowError(/not implemented/i);
-    }
+    // `encapsulate`/`decapsulate` back ML-KEM (FIPS 203); their Node arities are
+    // observable and both take an optional trailing callback.
+    expect(typeof crypto.encapsulate).toBe('function');
+    expect(crypto.encapsulate.length).toBe(2);
+    expect(typeof crypto.decapsulate).toBe('function');
+    expect(crypto.decapsulate.length).toBe(3);
+    expect(() => crypto.encapsulate()).toThrowError(/The "key" argument must be of type/);
   });
 });

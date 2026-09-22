@@ -764,6 +764,19 @@ console.log('bad spkac   : ' + crypto.Certificate.verifySpkac('not-a-spkac'));
 console.log('empty spkac : ' + JSON.stringify(crypto.Certificate.exportChallenge('')));
 console.log('');
 
+// --- ML-KEM encapsulation (milestone 91) ---
+// crypto.encapsulate / crypto.decapsulate are the FIPS 203 (ML-KEM) KEM. The
+// ml-kem-512/768/1024 key types generate here and encapsulate/decapsulate
+// round-trip to the same 32-byte shared secret.
+console.log('-- ML-KEM encapsulation (milestone 91) --');
+const mlkem = crypto.generateKeyPairSync('ml-kem-768');
+console.log('ml-kem type : ' + mlkem.publicKey.asymmetricKeyType);
+const encapsulated = crypto.encapsulate(mlkem.publicKey);
+const decapsulated = crypto.decapsulate(mlkem.privateKey, encapsulated.ciphertext);
+console.log('shared match: ' + decapsulated.equals(encapsulated.sharedKey));
+console.log('key lengths : ' + encapsulated.sharedKey.length + ' / ' + encapsulated.ciphertext.length);
+console.log('');
+
 // --- url (milestone 53) ---
 // url is Node's real lib/url.js now: the legacy Url/parse/format/resolve API
 // next to the WHATWG classes, and pathToFileURL/fileURLToPath. The WHATWG side

@@ -244,6 +244,39 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M91 ML-KEM（FIPS 203）后量子 KEM
+
+**改了什么**：新增 `src/node-runtime/crypto/mlkem.ts`（纯 JS 实现的 ML-KEM），接入 `crypto.encapsulate` / `crypto.decapsulate` 以及 `ml-kem-512/768/1024` 密钥类型。阶段 A crypto 收尾。
+
+**ML-KEM 是什么**：FIPS 203 的后量子 KEM，是 IND-CPA 的 K-PKE（公钥加密）套一层 Fujisaki–Okamoto 变换。全部基于 runtime 自带的 Keccak（SHA3/SHAKE），**无外部依赖**：
+
+- **NTT**（Z_3329[X]/(X^256+1)）：正变换 Cooley–Tukey（Algorithm 9）、逆变换 Gentleman–Sande（Algorithm 10）；**twiddle 因子全部由 `ζ = 17` 在加载时推导**（`zetas[i] = 17^BitRev7(i)`、乘法用 `17^(2·BitRev7(i)+1)`），不手抄常量表——避免转录错误。
+- **采样**：`SampleNTT`（SHAKE128 上做拒绝采样，取 12-bit 值 < 3329），`SamplePolyCBD_η`（SHAKE256 上取字节位）。
+- **编码**：`ByteEncode/Decode_d`（小端 bit 打包，d ∈ {1,4,5,10,11,12}）、`Compress_d`/`Decompress_d`。
+- **K-PKE**：KeyGen/Encrypt/Decrypt；ML-KEM 层：`KeyGen_internal(d,z)`、`Encaps_internal(ek,m)`、`Decaps_internal(dk,c)`；隐式拒绝（重加密比对失败则返回 `J(z‖c)`）。
+- 参数：512 = (k=2,η1=3,η2=2,du=10,dv=4)、768 = (3,2,2,10,4)、1024 = (4,2,2,11,5)。
+
+**密钥类型**（`asym.ts`）：
+- `AsymType` 扩 `'ml-kem-512' | 'ml-kem-768' | 'ml-kem-1024'`；`KeyMaterial.mlkem`（存 `param`、`seed`、`publicKey`(ek)、`privateKey`(dk)）。
+- **PKCS#8**：`SEQUENCE { INTEGER 0, AlgorithmIdentifier, OCTET STRING { [0] IMPLICIT OCTET STRING(64字节 seed) } }`。关键点：**seed 包在 `[0]`（tag `0x80`）里，不是普通 `0x04`**——解出 `80 40 <64>`，解析要按 `0x80`/`0x04` 处理；输出也要回写成 `80 40`。同时支持 `[1]`（tag `0x81`）的展开形式。
+- **SPKI**：`SEQUENCE { AlgorithmIdentifier, BIT STRING(0x00 ‖ ek) }`，OID `2.16.840.1.101.3.4.4.{1,2,3}`。
+- `createPublicKey(privateKeyObject)` 可由 seed 派生 ek；`asymmetricKeyDetails` 为 `{}`。
+- `generateKeyPairSync('ml-kem-*')`：随机 `d|z`（各 32 字节）→ 展开。
+
+**`encapsulate` / `decapsulate`**（`builtins/crypto.ts`）：签名与 Node 一致——`encapsulate(key[, callback])`（arity 2，收 public **或** private）、`decapsulate(key, ciphertext[, callback])`（arity 3，仅 private），带 callback 时异步。错误面与 Node 逐字对齐：`ERR_INVALID_ARG_TYPE`（key/ciphertext/callback 三类，含完整类型列表文案）、`ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE`（secret→“expected private or public”、public 解密封→“expected private”）、`ERR_CRYPTO_OPERATION_FAILED: Decapsulation failed`（密文长度不符）。
+
+**顺带修复**：`KeyObject.export({ format: 'der' })` 之前返回裸 `Uint8Array`，现已按其他字节出口的约定包装成 `Buffer`（对齐真 Node；之前只有 `export` 的 der 路径漏了这一步）。
+
+**已知偏离**（写在这里，不隐藏）：`encapsulate`/`decapsulate` 只支持 ML-KEM；其他密钥类型（如 RSA）在本 runtime 响亮抛 `NotImplementedError`，而 OpenSSL 3.5 的 `EVP_PKEY_encapsulate` 对 RSA 也能返回东西。按项目“只按实际情况声称支持、不编造”的约定处理。
+
+**验证（差分 0 diff）**：
+- `tools/crypto-mlkem-oracle.mjs` 用真 Node 生成密钥/种子/密文/共享密钥，`test/crypto-mlkem.test.ts` 验证：从 seed 派生的 ek 与 SPKI 尾字节逐字节相同；用 ML-KEM 解真 Node 的密文得到同一共享密钥；自封装回环；篡改密文 → 隐式拒绝（密钥变但长度 32）。
+- `tools/crypto-kem-probe.cjs`（`tools/crypto-kem-gen.mjs` 生成，内嵌真 Node 向量）在真 Node 与 web-node 内各跑一遭，逐字段等于 `test/fixtures/crypto-kem.json`。覆盖：三种参数集的 spki/pkcs8 round-trip、从私钥派生公钥、PEM 头部、解内嵌密文、PEM 私钥解封、封装长度/Buffer、回环、从 PEM/私钥封装、异步 callback，以及 9 类错误面。**首次修正后 0 diff**。
+
+**门禁**：`tsc` 干净 · vitest **973 passed / 2 skipped（106 文件）** · build worker **2466.50 kB**。demo 新增 ML-KEM 小段，输出对齐真 Node。
+
+**为什么**：阶段 A crypto 最后一项，按 `docs/ROADMAP.md` 顺序（原标注“优先级最低、可砍”，但既已排在末位且可低成本实现，就完成它）。
+
 ### 2026-09-22 · M94 `crypto.Certificate`（SPKAC）
 
 **改了什么**：新增 `src/node-runtime/crypto/spkac.ts`，把此前「响亮抛错的桁」换成真实现。
