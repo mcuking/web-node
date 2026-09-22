@@ -244,6 +244,18 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M90.7 SM3 + RIPEMD-160
+
+**改了什么**：两个新的纯 JS 摘要实现，并注册进 `hash.ts` 的 `DEFS`：
+- `crypto/sm3.ts`（GB/T 32905-2016）：64 字节块、256 位摘要，FF/GG/P0/P1 与消息扩展按规范实现。
+- `crypto/ripemd160.ts`（ISO/IEC 10118-3）：64 字节块、160 位摘要，双平行线 80 轮 + 五套轮函数/常量/消息序列/循环移位表（小端输出）。
+- 注册：`sm3`（别名 `RSA-SM3`/`sm3WithRSAEncryption`）、`ripemd160`（别名 `ripemd`/`ripemd-160`/`rmd160`/`RSA-RIPEMD160`/`ripemd160WithRSA`）。
+
+**验证**：差分语料 `test/fixtures/crypto-hashes.json` 扩到 **31 个名/长度组合**（新增 sm3/RSA-SM3/ripemd160/ripemd-160/rmd160/RSA-RIPEMD160），`test/crypto-hashes.test.ts` **0 diff**；单测加了 SM3/RIPEMD-160/BLAKE2b-512 的官方向量。`getHashes()` 52 → **58**。
+- 门禁：`tsc` 干净 · vitest **948 passed / 2 skipped（93 文件）** · build worker **2401.70 kB**。
+
+**涉及文件**：`src/node-runtime/crypto/sm3.ts`（新增）、`src/node-runtime/crypto/ripemd160.ts`（新增）、`src/node-runtime/crypto/hash.ts`、`test/crypto-hashes.test.ts`、`tools/crypto-hashes-probe.cjs`、`test/fixtures/crypto-hashes.json`、`docs/ROADMAP.md`。
+
 ### 2026-09-22 · M90.6 注册 BLAKE2b-512 / BLAKE2s-256
 
 **改了什么**：`crypto/hash.ts` 的 `DEFS` 新增两项，复用 M90.1/M90.4 的 `blake2b.ts`/`blake2s.ts`（无 key/salt/personal 的普通摘要形式）：`blake2b512`（别名 `blake2b-512`，block 128）与 `blake2s256`（别名 `blake2s-256`，block 64）。

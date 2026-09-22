@@ -167,6 +167,48 @@
     "binary": "5fdeb59f681d975f52c8e69c5502e02a12a3afcc5836ba58f42784c439228781",
     "long": "6c16417bd4454df5dd4a565147e3a0e7045a42bb3f7d696d5124fed4e5654576"
   },
+  "sm3": {
+    "empty": "1ab21d8355cfa17f8e61194831e81a8f22bec8c728fefb747ed035eb5082aa2b",
+    "abc": "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0",
+    "pangram": "5fdfe814b8573ca021983970fc79b2218c9570369b4859684e2e4c3fc76cb8ea",
+    "binary": "59d171dbfd251d5a4cd77d6ba2b7109b7d64a4cd7fa8182beb100a016fa3ac44",
+    "long": "62f73bcca554582740d7c10edb0082ac2ce025acf6a5833a8ea0dc7e4ca097af"
+  },
+  "RSA-SM3": {
+    "empty": "1ab21d8355cfa17f8e61194831e81a8f22bec8c728fefb747ed035eb5082aa2b",
+    "abc": "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0",
+    "pangram": "5fdfe814b8573ca021983970fc79b2218c9570369b4859684e2e4c3fc76cb8ea",
+    "binary": "59d171dbfd251d5a4cd77d6ba2b7109b7d64a4cd7fa8182beb100a016fa3ac44",
+    "long": "62f73bcca554582740d7c10edb0082ac2ce025acf6a5833a8ea0dc7e4ca097af"
+  },
+  "ripemd160": {
+    "empty": "9c1185a5c5e9fc54612808977ee8f548b2258d31",
+    "abc": "8eb208f7e05d987a9b044a8e98c6b087f15a0bfc",
+    "pangram": "37f332f68db77bd9d7edd4969571ad671cf9dd3b",
+    "binary": "9c4fa072db2c871a5635e37f791e93ab45049676",
+    "long": "84ce190d94d78bbbd148f684b10872345f260d3a"
+  },
+  "ripemd-160": {
+    "empty": "9c1185a5c5e9fc54612808977ee8f548b2258d31",
+    "abc": "8eb208f7e05d987a9b044a8e98c6b087f15a0bfc",
+    "pangram": "37f332f68db77bd9d7edd4969571ad671cf9dd3b",
+    "binary": "9c4fa072db2c871a5635e37f791e93ab45049676",
+    "long": "84ce190d94d78bbbd148f684b10872345f260d3a"
+  },
+  "rmd160": {
+    "empty": "9c1185a5c5e9fc54612808977ee8f548b2258d31",
+    "abc": "8eb208f7e05d987a9b044a8e98c6b087f15a0bfc",
+    "pangram": "37f332f68db77bd9d7edd4969571ad671cf9dd3b",
+    "binary": "9c4fa072db2c871a5635e37f791e93ab45049676",
+    "long": "84ce190d94d78bbbd148f684b10872345f260d3a"
+  },
+  "RSA-RIPEMD160": {
+    "empty": "9c1185a5c5e9fc54612808977ee8f548b2258d31",
+    "abc": "8eb208f7e05d987a9b044a8e98c6b087f15a0bfc",
+    "pangram": "37f332f68db77bd9d7edd4969571ad671cf9dd3b",
+    "binary": "9c4fa072db2c871a5635e37f791e93ab45049676",
+    "long": "84ce190d94d78bbbd148f684b10872345f260d3a"
+  },
   "errors": {
     "sha3OutputLength": {
       "name": "Error",

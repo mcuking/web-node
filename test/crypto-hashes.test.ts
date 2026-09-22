@@ -91,4 +91,20 @@ describe('crypto.createHash digests unit surface', () => {
     expect(crypto.createHash('id-rsassa-pkcs1-v1_5-with-sha3-256').update('abc').digest('hex')).toBe(expected);
     expect(hex(fromHex(expected))).toBe(expected);
   });
+
+  it('computes SM3, RIPEMD-160 and BLAKE2 vectors', () => {
+    const crypto = boot();
+    expect(crypto.createHash('sm3').update('abc').digest('hex')).toBe(
+      '66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0',
+    );
+    expect(crypto.createHash('ripemd160').update('').digest('hex')).toBe(
+      '9c1185a5c5e9fc54612808977ee8f548b2258d31',
+    );
+    expect(crypto.createHash('rmd160').update('abc').digest('hex')).toBe(
+      '8eb208f7e05d987a9b044a8e98c6b087f15a0bfc',
+    );
+    expect(crypto.createHash('blake2b512').update('abc').digest('hex')).toBe(
+      'ba80a53f981c4d0d6a2797b69f12f6e94c212f14685ac4b74b12bb6fdbffa2d17d87c5392aab792dc252d5de4533cc9518d38aa8dbf1925ab92386edd4009923',
+    );
+  });
 });

@@ -30,6 +30,8 @@ import {
 } from './keccak';
 import { blake2b } from './blake2b';
 import { blake2s } from './blake2s';
+import { sm3 } from './sm3';
+import { ripemd160 } from './ripemd160';
 
 export type DigestFn = (bytes: Uint8Array, outputLength?: number) => Uint8Array;
 
@@ -356,6 +358,9 @@ const DEFS: AlgoDef[] = [
   // BLAKE2 (unkeyed digests; BLAKE2b block 128, BLAKE2s block 64).
   { name: 'blake2b512', blockSize: 128, digestSize: 64, hash: (b) => blake2b(b, 64), aliases: ['blake2b-512'] },
   { name: 'blake2s256', blockSize: 64, digestSize: 32, hash: (b) => blake2s(b, 32), aliases: ['blake2s-256'] },
+  // SM3 and RIPEMD-160.
+  { name: 'sm3', blockSize: 64, digestSize: 32, hash: sm3, aliases: ['RSA-SM3', 'sm3WithRSAEncryption'] },
+  { name: 'ripemd160', blockSize: 64, digestSize: 20, hash: ripemd160, aliases: ['ripemd', 'ripemd-160', 'rmd160', 'RSA-RIPEMD160', 'ripemd160WithRSA'] },
 ];
 
 /** Collapse an OpenSSL digest spelling to a bare, alphanumeric tag. */
