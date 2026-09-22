@@ -8,6 +8,7 @@ Run Node.js source code in the browser — a WebContainer-style runtime.
 
 - **Live demo**: <https://mcuking.github.io/web-node/> (install deps, run the
   demo project, hit **⚡ Vite build** — all inside the tab)
+- **Roadmap / task list**: [`docs/ROADMAP.md`](docs/ROADMAP.md) ← **fixed, numbered, checkbox list of what is left**
 - **Dev log / progress / next steps**: [`docs/DEVLOG.md`](docs/DEVLOG.md) ← **append an entry after every change**
 - Design doc: [`docs/superpowers/specs/2026-09-17-web-node-design.md`](docs/superpowers/specs/2026-09-17-web-node-design.md)
 - Upstream sources: local checkout of Node.js (v26.9.1-dev, `v26.9.0-1-g7a3437d`), vendored via `tools/`
@@ -122,7 +123,7 @@ src/
 public/sw.js      ServiceWorker: /preview/<port>/ → virtual network
 vendor/node-lib/  Real files copied from the Node.js sources (with MANIFEST.json)
 tools/            Dependency scan / vendoring tools
-docs/             Design doc + dev log
+docs/             Design doc + roadmap + dev log
 test/             Vitest unit / integration tests
 ```
 
