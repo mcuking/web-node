@@ -91,12 +91,124 @@ export const processSpec: BuiltinSpec = {
     const errorsCodes = (): Record<string, new (...args: unknown[]) => Error> =>
       (ctx.require('internal/errors') as { codes: Record<string, new (...args: unknown[]) => Error> }).codes;
 
+    /**
+     * `process.env` is an exotic object in Node (`src/node_env_var.cc`): writes
+     * coerce with `String(value)`, only configurable/writable/enumerable data
+     * descriptors are accepted, symbol keys pass through, and the prototype is
+     * `Object.prototype`. Mirror that over the binding's plain record.
+     */
+    function createEnvProxy(target: Record<string, string>): Record<string, string> {
+      return new Proxy(target, {
+        get(t, prop) {
+          return typeof prop === 'symbol'
+            ? (t as unknown as Record<symbol, unknown>)[prop]
+            : (t as Record<string, string>)[prop];
+        },
+        set(t, prop, value) {
+          if (typeof prop === 'symbol') {
+            (t as unknown as Record<symbol, unknown>)[prop] = value;
+            return true;
+          }
+          // Node coerces with ToString (a template literal), so a *symbol*
+          // value throws rather than becoming 'Symbol(x)'.
+          (t as Record<string, string>)[prop] = `${value as string}`;
+          return true;
+        },
+        has(t, prop) {
+          return typeof prop === 'symbol'
+            ? prop in t
+            : Object.prototype.hasOwnProperty.call(t, prop);
+        },
+        deleteProperty(t, prop) {
+          delete (t as Record<string, string>)[prop as string];
+          return true;
+        },
+        defineProperty(t, prop, desc) {
+          if (desc.configurable === false || desc.writable === false || desc.enumerable === false) {
+            throw new TypeError(
+              "'process.env' only accepts a configurable, writable, and enumerable data descriptor",
+            );
+          }
+          return Reflect.defineProperty(t, prop, desc);
+        },
+        getPrototypeOf() {
+          return Object.prototype;
+        },
+      });
+    }
+
+    /**
+     * `process.finalization` — a direct port of
+     * `internal/process/finalization.js`: run a callback when the process exits
+     * (or drops the ref), using `WeakRef` + `FinalizationRegistry`.
+     */
+    function createFinalization(proc: {
+      on: (event: string, fn: () => void) => void;
+      removeListener: (event: string, fn: () => void) => void;
+    }): Record<string, (a: unknown, b?: unknown) => void> {
+      let registry: FinalizationRegistry<unknown> | null = null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const refs: Record<string, Set<any>> = { exit: new Set(), beforeExit: new Set() };
+      const functions: Record<string, () => void> = { exit: onExit, beforeExit: onBeforeExit };
+      function install(event: string): void {
+        if (refs[event].size > 0) return;
+        proc.on(event, functions[event]);
+      }
+      function uninstall(event: string): void {
+        if (refs[event].size > 0) return;
+        proc.removeListener(event, functions[event]);
+        if (refs.exit.size === 0 && refs.beforeExit.size === 0) registry = null;
+      }
+      function onExit(): void {
+        callRefsToFree('exit');
+      }
+      function onBeforeExit(): void {
+        callRefsToFree('beforeExit');
+      }
+      function callRefsToFree(event: string): void {
+        for (const ref of refs[event]) {
+          const obj = ref.deref();
+          if (obj !== undefined) ref.fn(obj, event);
+        }
+        refs[event].clear();
+      }
+      function clear(ref: unknown): void {
+        for (const event of ['exit', 'beforeExit']) {
+          if (refs[event].delete(ref)) uninstall(event);
+        }
+      }
+      function registerRef(event: string, obj: unknown, fn: unknown): void {
+        install(event);
+        const ref = new WeakRef(obj as object);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (ref as any).fn = fn;
+        registry ||= new FinalizationRegistry(clear);
+        registry.register(obj as object, ref);
+        refs[event].add(ref);
+      }
+      return {
+        register: (obj, fn) => registerRef('exit', obj, fn),
+        registerBeforeExit: (obj, fn) => registerRef('beforeExit', obj, fn),
+        unregister: (obj) => {
+          if (!registry) return;
+          registry.unregister(obj as object);
+          for (const event of ['exit', 'beforeExit']) {
+            for (const ref of refs[event]) {
+              const held = ref.deref();
+              if (!held || held === obj) refs[event].delete(ref);
+            }
+            uninstall(event);
+          }
+        },
+      };
+    }
+
     class Process extends (EventEmitter as new () => object) {
       argv = ['/bin/node', ...binding.argv];
       argv0 = 'node';
       execArgv: string[] = [];
       execPath = binding.execPath;
-      env = binding.env;
+      env = createEnvProxy(binding.env);
       version = 'v26.9.1';
       versions = {
         node: '26.9.1',
@@ -259,6 +371,109 @@ export const processSpec: BuiltinSpec = {
         throw new Error('unreachable');
       };
       openStdin = (): unknown => this.stdin;
+
+      // --- internals ----------------------------------------------------------
+      /** `process._rawDebug(...)` — format the arguments and write to stderr. */
+      _rawDebug = (...args: unknown[]): void => {
+        const { format } = ctx.require('util') as { format: (...a: unknown[]) => string };
+        binding.writeStderr(`${format(...args)}\n`);
+      };
+
+      /**
+       * `process._fatalException(err)` — Node's last-resort dispatcher. Returns
+       * whether a handler claimed the error, routing it exactly like the async
+       * dispatcher: capture callback, then `uncaughtException` listeners, then
+       * auxiliary callbacks.
+       */
+      _fatalException = (err: unknown, _fromPromise?: boolean): boolean => {
+        const state = binding.uncaughtCapture;
+        const self = this as unknown as {
+          listenerCount: (event: string) => number;
+          emit: (event: string, ...args: unknown[]) => boolean;
+        };
+        if (state.captureFn !== null) {
+          state.captureFn(err);
+          return true;
+        }
+        if (self.listenerCount('uncaughtException') > 0) {
+          self.emit('uncaughtException', err);
+          return true;
+        }
+        if (state.auxiliaryCallbacks.length > 0) {
+          for (const cb of state.auxiliaryCallbacks) cb(err);
+          return true;
+        }
+        return false;
+      };
+
+      /**
+       * `process._preload_modules` / `process.moduleLoadList`. On Node these are
+       * populated by `--require` and by C++'s module registry; we preload nothing
+       * and do not keep Node's binding log, so both stay empty (the truth for
+       * preload; a documented gap for the load log).
+       */
+      _preload_modules: string[] = [];
+      moduleLoadList: string[] = [];
+
+      /**
+       * Handle/request enumeration and tick draining are C++-side in Node. We do
+       * not track handle objects or expose a synchronous tick drain, so these
+       * throw rather than report a fabricated list. `getActiveResourcesInfo()` is
+       * the public, truthful alternative for the active-handle question.
+       */
+      _getActiveHandles = (): never => {
+        throw notImplemented('api', 'process._getActiveHandles');
+      };
+      _getActiveRequests = (): never => {
+        throw notImplemented('api', 'process._getActiveRequests');
+      };
+      _tickCallback = (): never => {
+        throw notImplemented('api', 'process._tickCallback');
+      };
+
+      /** `process.finalization` — run callbacks on exit / GC (experimental). */
+      finalization = createFinalization(this as unknown as {
+        on: (event: string, fn: () => void) => void;
+        removeListener: (event: string, fn: () => void) => void;
+      });
+
+      // Native-only process control: each exists on Node and either performs a
+      // syscall or tears down the Inspector/diagnostic machinery. A browser tab
+      // has no such surface, so they are present (feature detection works) and
+      // throw loudly when actually called.
+      _kill = (): never => {
+        throw notImplemented('api', 'process._kill');
+      };
+      _debugProcess = (): never => {
+        throw notImplemented('api', 'process._debugProcess');
+      };
+      _debugEnd = (): never => {
+        throw notImplemented('api', 'process._debugEnd');
+      };
+      _startProfilerIdleNotifier = (): never => {
+        throw notImplemented('api', 'process._startProfilerIdleNotifier');
+      };
+      _stopProfilerIdleNotifier = (): never => {
+        throw notImplemented('api', 'process._stopProfilerIdleNotifier');
+      };
+      dlopen = (): never => {
+        throw notImplemented('api', 'process.dlopen');
+      };
+      execve = (): never => {
+        throw notImplemented('api', 'process.execve');
+      };
+      initgroups = (): never => {
+        throw notImplemented('api', 'process.initgroups');
+      };
+      setegid = (): never => {
+        throw notImplemented('api', 'process.setegid');
+      };
+      seteuid = (): never => {
+        throw notImplemented('api', 'process.seteuid');
+      };
+      setgroups = (): never => {
+        throw notImplemented('api', 'process.setgroups');
+      };
       /**
        * `process.report` — the diagnostic-report surface. The data properties
        * are real (and `reportOnUncaughtException` is read/written by the
