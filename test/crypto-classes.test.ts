@@ -65,9 +65,12 @@ describe('crypto stub classes', () => {
     }
     // KeyObject is real now: its constructor validates `type` like Node.
     expect(() => new crypto.KeyObject()).toThrowError(/The argument 'type' is invalid/);
-    for (const cls of ['X509Certificate', 'DiffieHellman', 'ECDH']) {
+    for (const cls of ['X509Certificate', 'DiffieHellman']) {
       expect(() => new crypto[cls]()).toThrowError(/not implemented/i);
     }
+    // ECDH is real: it needs a curve name, and validates it.
+    expect(() => new crypto.ECDH('nope')).toThrowError(/Invalid EC curve name/);
+    expect(new crypto.ECDH('prime256v1').getPublicKey).toBeTypeOf('function');
     expect(typeof crypto.KeyObject.from).toBe('function');
     expect(typeof crypto.ECDH.convertKey).toBe('function');
   });

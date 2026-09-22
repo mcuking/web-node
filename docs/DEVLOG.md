@@ -242,6 +242,19 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M84 非对称加解密 + ECDH（差分语料驱动）
+
+**RSA 加解密**（`src/node-runtime/crypto/asym.ts`）：
+- `publicEncrypt`/`privateDecrypt`：**OAEP**（默认，支持 `oaepHash`/`oaepLabel`）与 **PKCS#1 v1.5**（含非零随机 PS、PS 长度 ≥ 8 校验）；`RSA_NO_PADDING` 直通。
+- `privateEncrypt`/`publicDecrypt`：EME-PKCS1-v1_5 原始私钥/公钥运算对。
+- 解密失败按 Node 报错形状：`ERR_OSSL_RSA_PKCS_DECODING_ERROR`。
+
+**ECDH 密钥协商**（`src/node-runtime/crypto/ecdh.ts`）：`createECDH`/`ECDH` 类（`generateKeys`/`computeSecret`/`get|setPrivateKey`/`get|setPublicKey`）与 `ECDH.convertKey`；支持未压缩与压缩（0x02/0x03）SEC1 点编码（`ec.ts` 新增 `decodePublicKey`/`encodePublicKey`，NIST 素数均 ≡ 3 mod 4，用 `y^((p+1)/4)` 开方）。共享密钥为 x 坐标补齐到域长。
+
+**与 Node 的细节对齐（被语料/探测抓出）**：`createECDH` **只接受 OpenSSL 曲线名**（`prime256v1` 可以、`P-256` 报 `ERR_CRYPTO_INVALID_CURVE`），与 `generateKeyPairSync('ec',{namedCurve})` 的宽容别名不同；且 v26 的 `crypto.ECDH` **没有 `getCurves` 静态方法**（已不暴露）。
+
+**验证**：新差分语料 `tools/crypto-enc-probe.cjs` → `test/fixtures/crypto-enc.json`（固定密钥 + 真 Node 预生成 OAEP/PKCS1 密文与 ECDH 共享密钥），逐字段一致（0 diff）。门禁全绿：tsc 干净 · vitest **891 通过 / 2 预存 skip（85 文件）** · build worker **2330.50KB**。
+
 ### 2026-09-22 · M83 crypto 非对称面（RSA / EC / Ed25519，差分语料驱动）
 
 **能力补齐**：`crypto` 的非对称部分此前全是 `unsupportedApi` 抛错，现在在浏览器里**真跑**：

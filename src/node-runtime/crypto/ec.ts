@@ -213,6 +213,36 @@ export function decodePoint(bytes: Uint8Array, curve: Curve): Point {
   return point;
 }
 
+/**
+ * Decode an uncompressed (0x04) or compressed (0x02/0x03) SEC1 public point.
+ * These NIST primes are all 3 mod 4, so the square root is `y^((p+1)/4)`.
+ */
+export function decodePublicKey(bytes: Uint8Array, curve: Curve): Point {
+  const bl = curve.byteLength;
+  if (bytes.length === 1 + 2 * bl && bytes[0] === 0x04) return decodePoint(bytes, curve);
+  if (bytes.length === 1 + bl && (bytes[0] === 0x02 || bytes[0] === 0x03)) {
+    const x = bytesToBigInt(bytes.subarray(1));
+    const { p, a, b } = curve;
+    const rhs = mod(x * x * x + a * x + b, p);
+    let y = modPow(rhs, (p + 1n) / 4n, p);
+    if (mod(y * y, p) !== rhs) throw new Error('ec: point is not on the curve');
+    if (Number(y & 1n) !== (bytes[0] & 1)) y = mod(p - y, p);
+    const point = { x, y };
+    if (!isOnCurve(point, curve)) throw new Error('ec: point is not on the curve');
+    return point;
+  }
+  throw new Error('ec: unsupported point encoding');
+}
+
+/** Compressed SEC1 encoding: 0x02/0x03 || X (parity of Y in the tag). */
+export function encodePublicKey(point: Point, curve: Curve, compressed: boolean): Uint8Array {
+  if (!compressed) return encodePoint(point, curve);
+  const out = new Uint8Array(1 + curve.byteLength);
+  out[0] = Number(point.y & 1n) === 0 ? 0x02 : 0x03;
+  out.set(coordToBytes(point.x, curve), 1);
+  return out;
+}
+
 // --- ECDSA ------------------------------------------------------------------
 
 /** bits2int: take the leftmost `bitlen(n)` bits of the digest. */

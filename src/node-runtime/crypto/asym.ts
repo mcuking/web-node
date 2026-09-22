@@ -790,6 +790,134 @@ export function verify(algorithm: unknown, data: Uint8Array, key: unknown, signa
   throw new Error('crypto.verify: unsupported key');
 }
 
+// --- RSA encryption ---------------------------------------------------------
+
+function rsaDecodeError(): Error {
+  return coded('Error', 'ERR_OSSL_RSA_PKCS_DECODING_ERROR', 'error:0200009F:rsa routines::pkcs decoding error');
+}
+
+function oaepEncode(hash: string, message: Uint8Array, k: number, label: Uint8Array): Uint8Array {
+  const hLen = digestFor(hash, new Uint8Array(0)).length;
+  if (message.length > k - 2 * hLen - 2) throw new Error('RSA: data too large for key size');
+  const lHash = digestFor(hash, label);
+  const ps = new Uint8Array(k - message.length - 2 * hLen - 2);
+  const db = concat([lHash, ps, Uint8Array.of(1), message]);
+  const seed = randomBytes(hLen);
+  const dbMask = mgf1(hash, seed, k - hLen - 1);
+  const maskedDB = xorBytes(db, dbMask);
+  const seedMask = mgf1(hash, maskedDB, hLen);
+  const maskedSeed = xorBytes(seed, seedMask);
+  return concat([Uint8Array.of(0), maskedSeed, maskedDB]);
+}
+
+function oaepDecode(hash: string, em: Uint8Array, k: number, label: Uint8Array): Uint8Array {
+  const hLen = digestFor(hash, new Uint8Array(0)).length;
+  if (em.length !== k || em[0] !== 0) throw rsaDecodeError();
+  const maskedSeed = em.subarray(1, 1 + hLen);
+  const maskedDB = em.subarray(1 + hLen);
+  const seedMask = mgf1(hash, maskedDB, hLen);
+  const seed = xorBytes(maskedSeed, seedMask);
+  const dbMask = mgf1(hash, seed, k - hLen - 1);
+  const db = xorBytes(maskedDB, dbMask);
+  if (toHex(db.subarray(0, hLen)) !== toHex(digestFor(hash, label))) throw rsaDecodeError();
+  let index = hLen;
+  while (index < db.length && db[index] === 0) index++;
+  if (index >= db.length || db[index] !== 1) throw rsaDecodeError();
+  return db.subarray(index + 1);
+}
+
+/** EME-PKCS1-v1_5 encryption block: 0x00 0x02 || PS (non-zero) || 0x00 || M. */
+function emePkcs1Encode(message: Uint8Array, k: number): Uint8Array {
+  if (message.length > k - 11) throw new Error('RSA: data too large for key size');
+  const ps = new Uint8Array(k - message.length - 3);
+  for (let i = 0; i < ps.length; i++) {
+    let byte = 0;
+    while (byte === 0) byte = randomBytes(1)[0];
+    ps[i] = byte;
+  }
+  return concat([Uint8Array.of(0, 2), ps, Uint8Array.of(0), message]);
+}
+
+function emePkcs1Decode(em: Uint8Array): Uint8Array {
+  if (em.length < 11 || em[0] !== 0 || em[1] !== 2) throw rsaDecodeError();
+  let index = 2;
+  while (index < em.length && em[index] !== 0) index++;
+  if (index >= em.length || index < 10) throw rsaDecodeError();
+  return em.subarray(index + 1);
+}
+
+export interface EncryptOptions {
+  key?: unknown;
+  padding?: number;
+  oaepHash?: string;
+  oaepLabel?: Uint8Array;
+}
+
+function normalizeEncryptArgs(key: unknown, options?: EncryptOptions): EncryptOptions {
+  if (key && typeof key === 'object' && !(key instanceof KeyObject) && 'key' in (key as object)) {
+    return key as EncryptOptions;
+  }
+  return { ...(options ?? {}), key };
+}
+
+function rsaEncryptBlock(m: RsaMaterial, padding: number, data: Uint8Array, oaepHash: string, oaepLabel: Uint8Array): Uint8Array {
+  const k = modulusByteLength(m);
+  let em: Uint8Array;
+  if (padding === RSA_PKCS1_OAEP_PADDING) em = oaepEncode(oaepHash, data, k, oaepLabel);
+  else if (padding === RSA_PKCS1_PADDING) em = emePkcs1Encode(data, k);
+  else if (padding === RSA_NO_PADDING) {
+    if (data.length !== k) throw new Error('RSA: data length must equal the modulus size for RSA_NO_PADDING');
+    em = data;
+  } else throw invalidArgValue('padding', padding);
+  return bigIntToBytes(rsaPublicOp(m, bytesToBigInt(em)), k);
+}
+
+function rsaDecryptBlock(m: RsaMaterial, padding: number, data: Uint8Array, oaepHash: string, oaepLabel: Uint8Array): Uint8Array {
+  const k = modulusByteLength(m);
+  if (data.length !== k) throw rsaDecodeError();
+  const em = bigIntToBytes(rsaPrivateOp(m, bytesToBigInt(data)), k);
+  if (padding === RSA_PKCS1_OAEP_PADDING) return oaepDecode(oaepHash, em, k, oaepLabel);
+  if (padding === RSA_PKCS1_PADDING) return emePkcs1Decode(em);
+  if (padding === RSA_NO_PADDING) return em;
+  throw invalidArgValue('padding', padding);
+}
+
+export function publicEncrypt(key: unknown, buffer: Uint8Array, options?: EncryptOptions): Uint8Array {
+  const args = normalizeEncryptArgs(key, options);
+  const k = resolveKey(args.key, 'public');
+  const m = keyMaterialOf(k);
+  if (m.asym !== 'rsa' || !m.rsa) throw keyTypeError('publicEncrypt');
+  return rsaEncryptBlock(m.rsa, args.padding ?? RSA_PKCS1_OAEP_PADDING, buffer, args.oaepHash ?? 'sha1', args.oaepLabel ?? new Uint8Array(0));
+}
+
+export function privateDecrypt(key: unknown, buffer: Uint8Array, options?: EncryptOptions): Uint8Array {
+  const args = normalizeEncryptArgs(key, options);
+  const k = resolveKey(args.key, 'private');
+  const m = keyMaterialOf(k);
+  if (m.asym !== 'rsa' || !m.rsa) throw keyTypeError('privateDecrypt');
+  return rsaDecryptBlock(m.rsa, args.padding ?? RSA_PKCS1_OAEP_PADDING, buffer, args.oaepHash ?? 'sha1', args.oaepLabel ?? new Uint8Array(0));
+}
+
+/** `privateEncrypt` / `publicDecrypt` are the inverse pair used for raw signing. */
+export function privateEncrypt(key: unknown, buffer: Uint8Array): Uint8Array {
+  const k = resolveKey(key, 'private');
+  const m = keyMaterialOf(k);
+  if (m.asym !== 'rsa' || !m.rsa) throw keyTypeError('privateEncrypt');
+  const length = modulusByteLength(m.rsa);
+  const em = emePkcs1Encode(buffer, length);
+  return bigIntToBytes(rsaPrivateOp(m.rsa, bytesToBigInt(em)), length);
+}
+
+export function publicDecrypt(key: unknown, buffer: Uint8Array): Uint8Array {
+  const k = resolveKey(key, 'public');
+  const m = keyMaterialOf(k);
+  if (m.asym !== 'rsa' || !m.rsa) throw keyTypeError('publicDecrypt');
+  const length = modulusByteLength(m.rsa);
+  if (buffer.length !== length) throw rsaDecodeError();
+  const em = bigIntToBytes(rsaPublicOp(m.rsa, bytesToBigInt(buffer)), length);
+  return emePkcs1Decode(em);
+}
+
 // --- key generation ---------------------------------------------------------
 
 // Trial division by the primes below this bound rejects the vast majority of

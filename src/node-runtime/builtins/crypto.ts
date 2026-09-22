@@ -35,11 +35,17 @@ import {
   generateKeyPairSync as asymGenerateKeyPairSync,
   listCurves,
   parseSignAlgorithm,
+  privateDecrypt as asymPrivateDecrypt,
+  privateEncrypt as asymPrivateEncrypt,
+  publicDecrypt as asymPublicDecrypt,
+  publicEncrypt as asymPublicEncrypt,
   sign as asymSign,
   verify as asymVerify,
+  type EncryptOptions,
   type GenerateKeyPairOptions,
   type SignAlgorithm,
 } from '../crypto/asym';
+import { ECDH, createECDH as asymCreateECDH } from '../crypto/ecdh';
 
 /**
  * `crypto` — the subset tooling actually calls in a browser tab.
@@ -846,17 +852,12 @@ export const cryptoSpec: BuiltinSpec = {
       getDiffieHellman: unsupportedApi('getDiffieHellman'),
       createDiffieHellmanGroup: unsupportedApi('createDiffieHellmanGroup'),
       diffieHellman: unsupportedApi('diffieHellman'),
-      publicEncrypt: unsupportedApi('publicEncrypt'),
-      publicDecrypt: unsupportedApi('publicDecrypt'),
-      privateEncrypt: unsupportedApi('privateEncrypt'),
-      privateDecrypt: unsupportedApi('privateDecrypt'),
       generatePrime: unsupportedApi('generatePrime'),
       generatePrimeSync: unsupportedApi('generatePrimeSync'),
       checkPrime: unsupportedApi('checkPrime'),
       checkPrimeSync: unsupportedApi('checkPrimeSync'),
       getFips: unsupportedApi('getFips'),
       setFips: unsupportedApi('setFips'),
-      createECDH: unsupportedApi('createECDH'),
       argon2: unsupportedApi('argon2'),
       argon2Sync: unsupportedApi('argon2Sync'),
       createMac: unsupportedApi('createMac'),
@@ -900,6 +901,18 @@ export const cryptoSpec: BuiltinSpec = {
       return result as unknown as void;
     };
     const getCurves = (): string[] => listCurves();
+
+    // -- asymmetric encryption and key agreement ----------------------------
+
+    const publicEncrypt = (key: unknown, buffer: unknown, options?: EncryptOptions): Uint8Array =>
+      asBuffer(asymPublicEncrypt(key, toBytes(buffer), options));
+    const privateDecrypt = (key: unknown, buffer: unknown, options?: EncryptOptions): Uint8Array =>
+      asBuffer(asymPrivateDecrypt(key, toBytes(buffer), options));
+    const privateEncrypt = (key: unknown, buffer: unknown): Uint8Array =>
+      asBuffer(asymPrivateEncrypt(key, toBytes(buffer)));
+    const publicDecrypt = (key: unknown, buffer: unknown): Uint8Array =>
+      asBuffer(asymPublicDecrypt(key, toBytes(buffer)));
+    const createECDH = (curve: unknown): ECDH => asymCreateECDH(curve);
 
     // Asymmetric-key / engine / X.509 classes. Node exposes them as real
     // classes with a rich prototype; we have no backend, so each stays present
@@ -1062,20 +1075,7 @@ export const cryptoSpec: BuiltinSpec = {
       'computeSecret', 'generateKeys', 'getGenerator', 'getPrime', 'getPrivateKey', 'getPublicKey',
     ]);
 
-    const ECDH = namedClass(
-      'ECDH',
-      class {
-        constructor() {
-          throw notImplemented('api', 'crypto.ECDH');
-        }
-        static convertKey(): never {
-          throw notImplemented('api', 'crypto.ECDH.convertKey');
-        }
-      },
-    );
-    defineStubs(ECDH.prototype, [
-      'computeSecret', 'generateKeys', 'getPrivateKey', 'getPublicKey', 'setPrivateKey', 'setPublicKey',
-    ]);
+    // `ECDH` is the real class from `../crypto/ecdh` (see the import above).
 
     // `Certificate` is a legacy class with the same three methods as statics.
     const Certificate = namedClass(
@@ -1162,6 +1162,11 @@ export const cryptoSpec: BuiltinSpec = {
       generateKeyPair,
       generateKeyPairSync,
       getCurves,
+      publicEncrypt,
+      privateDecrypt,
+      privateEncrypt,
+      publicDecrypt,
+      createECDH,
       createCipheriv,
       createDecipheriv,
       getCiphers: listCiphers,
