@@ -39,6 +39,12 @@ export interface BuiltinSpec {
    * implementation uses rest parameters. See `alignArity`.
    */
   arity?: Record<string, number>;
+  /**
+   * Post-materialization hook: augment or replace a module's exports once it is
+   * built (used for surfaces Node injects at runtime, e.g. the inspector
+   * console methods). Return the exports to expose.
+   */
+  postInit?: (exports: Record<string, unknown>, ctx: BuiltinInitContext) => Record<string, unknown>;
   /** Marks provenance for docs/UI. */
   origin: 'node-source' | 'web-node';
 }

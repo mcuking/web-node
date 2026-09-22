@@ -2,6 +2,7 @@ import type { BuiltinSpec, BuiltinInitContext } from './types';
 import type { VirtualSocket } from '../net/network';
 import type { VirtualNetwork } from '../net/network';
 import { createAddressTypes, type AddressTypes, type NetAddressErrorCodes } from '../net/socket-address';
+import { notImplemented } from '../errors';
 
 /**
  * `net` builtin — a TS equivalent implementation over the virtual network.
@@ -16,7 +17,7 @@ export const netSpec: BuiltinSpec = {
   id: 'net',
   aliases: ['node:net'],
   origin: 'web-node',
-  arity: { Server: 2, Socket: 1, Stream: 1, connect: 0, createConnection: 0, createServer: 2 },
+  arity: { Server: 2, Socket: 1, Stream: 1, connect: 0, createConnection: 0, createServer: 2, _createServerHandle: 5, _normalizeArgs: 1 },
   deps: ['events'],
   init: (ctx: BuiltinInitContext) => {
     const { EventEmitter } = ctx.require('events') as { EventEmitter: new () => EmitterLike };
@@ -33,46 +34,191 @@ export const netSpec: BuiltinSpec = {
       removeListener(name: string, fn: (...a: never[]) => void): unknown;
     }
 
+    /** The slice of `stream.Duplex` the Socket surface reads. */
+    interface StreamLike extends EmitterLike {
+      readonly readable: boolean;
+      readonly writable: boolean;
+      readonly writableLength: number;
+      readonly writableFinished: boolean;
+      end(cb?: () => void): void;
+      destroy(error?: Error): void;
+    }
+
     const kAttached = Symbol('web-node.socket.side');
 
-    class Socket extends (Duplex as new (opts?: unknown) => EmitterLike) {
+    class Socket extends (Duplex as new (opts?: unknown) => StreamLike) {
       connecting = false;
-      pending = false;
-      readyState = 'closed';
-      remoteAddress = '127.0.0.1';
-      remoteFamily = 'IPv4';
-      remotePort = 0;
-      localAddress = '127.0.0.1';
-      localPort = 0;
-      bytesRead = 0;
-      bytesWritten = 0;
-      bufferSize = 0;
       timeout = 0;
 
       #vsock: VirtualSocket | null = null;
       #encoding: string | null = null;
+      #peername: { address?: string; family?: string; port?: number } | undefined;
+      #sockname: { address?: string; family?: string; port?: number } | undefined;
+      #bytesRead = 0;
+      #bytesWritten = 0;
+      #setTOS: number | undefined;
 
       constructor() {
         super({ allowHalfOpen: true });
+      }
+
+      // --- Node's prototype accessors (lib/net.js) --------------------------
+      /** @internal — the virtual socket stands in for the native handle. */
+      get _handle(): VirtualSocket | null {
+        return this.#vsock;
+      }
+      set _handle(handle: VirtualSocket | null) {
+        this.#vsock = handle;
+      }
+
+      /** @internal */
+      get _connecting(): boolean {
+        return this.connecting;
+      }
+
+      get pending(): boolean {
+        return !this.#vsock || this.connecting;
+      }
+
+      get readyState(): string {
+        if (this.connecting) return 'opening';
+        if (this.readable && this.writable) return 'open';
+        if (this.readable && !this.writable) return 'readOnly';
+        if (!this.readable && this.writable) return 'writeOnly';
+        return 'closed';
+      }
+
+      get bufferSize(): number | undefined {
+        if (this.#vsock) return this.writableLength;
+        return undefined;
+      }
+
+      get bytesRead(): number {
+        return this.#bytesRead;
+      }
+
+      get bytesWritten(): number {
+        return this.#bytesWritten;
+      }
+
+      /** @internal — Node returns the handle's dispatched count. */
+      get _bytesDispatched(): number {
+        return this.#bytesWritten;
+      }
+
+      get remoteAddress(): string | undefined {
+        return this._getpeername().address;
+      }
+      get remoteFamily(): string | undefined {
+        return this._getpeername().family;
+      }
+      get remotePort(): number | undefined {
+        return this._getpeername().port;
+      }
+      get localAddress(): string | undefined {
+        return this._getsockname().address;
+      }
+      get localPort(): number | undefined {
+        return this._getsockname().port;
+      }
+      get localFamily(): string | undefined {
+        return this._getsockname().family;
+      }
+
+      /** @internal */
+      _getpeername(): { address?: string; family?: string; port?: number } {
+        return this.#peername ?? {};
+      }
+
+      /** @internal */
+      _getsockname(): { address?: string; family?: string; port?: number } {
+        return this.#sockname ?? {};
+      }
+
+      /** @internal — the timer is owned by the host; nothing to unreference. */
+      _unrefTimer(): void {}
+
+      /** @internal */
+      _onTimeout(): void {
+        this.emit('timeout');
+      }
+
+      getTypeOfService(): number {
+        return this.#setTOS ?? 0;
+      }
+
+      setTypeOfService(tos: unknown): this {
+        if (typeof tos !== 'number' || Number.isNaN(tos)) {
+          throw new TypeError('The "tos" argument must be of type number');
+        }
+        if (!Number.isInteger(tos) || tos < 0 || tos > 255) {
+          throw new RangeError(
+            `The value of "tos" is out of range. It must be >= 0 and <= 255. Received ${tos}`,
+          );
+        }
+        this.#setTOS = tos;
+        return this;
+      }
+
+      resetAndDestroy(): this {
+        if (!this.#vsock) {
+          this.destroy(Object.assign(new Error('Socket is closed'), { code: 'ERR_SOCKET_CLOSED' }));
+        } else if (this.connecting) {
+          this.once('connect' as never, () => this._reset());
+        } else {
+          this._reset();
+        }
+        return this;
+      }
+
+      /** @internal */
+      _reset(): void {
+        this.destroy();
+      }
+
+      destroySoon(): void {
+        if (this.writable) this.end();
+        if (this.writableFinished) this.destroy();
+        else this.once('finish' as never, () => this.destroy());
+      }
+
+      /** @internal — the low-level write path Node's `_write` funnels into. */
+      _writeGeneric(
+        writev: boolean,
+        data: unknown,
+        _encoding: string,
+        cb: (err?: Error | null) => void,
+      ): void {
+        const vsock = this.#vsock;
+        if (!vsock) {
+          cb(Object.assign(new Error('This socket has been ended by the other party'), { code: 'EPIPE' }));
+          return;
+        }
+        const chunks = writev ? (data as Uint8Array[]) : [data as Uint8Array];
+        for (const chunk of chunks) {
+          const bytes = toBytes(chunk);
+          this.#bytesWritten += bytes.byteLength;
+          vsock.write(bytes);
+        }
+        cb();
       }
 
       /** @internal */
       _attach(vsock: VirtualSocket, side: 'client' | 'server'): void {
         this.#vsock = vsock;
         (this as unknown as Record<symbol, unknown>)[kAttached] = side;
-        this.remotePort = vsock.remotePort;
-        this.localPort = vsock.localPort;
-        this.readyState = 'open';
+        this.#peername = { address: '127.0.0.1', family: 'IPv4', port: vsock.remotePort };
+        this.#sockname = { address: '127.0.0.1', family: 'IPv4', port: vsock.localPort };
         vsock.onData((chunk) => {
-          this.bytesRead += chunk.byteLength;
+          this.#bytesRead += chunk.byteLength;
           this.emit('data', this.#encoding ? new TextDecoder(this.#encoding).decode(chunk) : toBuffer(ctx, chunk));
         });
         vsock.onEnd(() => {
-          this.readyState = 'readOnly';
+          // `readyState` is derived from the live stream flags (as in Node).
           this.emit('end');
         });
         vsock.onClose(() => {
-          this.readyState = 'closed';
+          // Nothing to do: `readyState` follows `readable`/`writable`.
         });
         vsock.onError((err) => this.emit('error', err));
       }
@@ -84,13 +230,11 @@ export const netSpec: BuiltinSpec = {
           host = undefined;
         }
         this.connecting = true;
-        this.readyState = 'opening';
         let vsock: VirtualSocket;
         try {
           vsock = network.dial(port);
         } catch (err) {
           this.connecting = false;
-          this.readyState = 'closed';
           ctx.binding.nextTick(() => this.emit('error', err as Error));
           return this;
         }
@@ -111,28 +255,18 @@ export const netSpec: BuiltinSpec = {
       }
 
       /** @internal */
-      _write(chunk: Uint8Array, _enc: string, cb: (err?: Error | null) => void): void {
-        const vsock = this.#vsock;
-        if (!vsock) {
-          cb(Object.assign(new Error('This socket has been ended by the other party'), { code: 'EPIPE' }));
-          return;
-        }
-        const bytes = toBytes(chunk);
-        this.bytesWritten += bytes.byteLength;
-        vsock.write(bytes);
-        cb();
+      _write(chunk: Uint8Array, enc: string, cb: (err?: Error | null) => void): void {
+        this._writeGeneric(false, chunk, enc, cb);
       }
 
       /** @internal */
       _final(cb: (err?: Error | null) => void): void {
-        this.readyState = 'readOnly';
         this.#vsock?.end();
         cb();
       }
 
       /** @internal */
       _destroy(err: Error | null, cb: (err?: Error | null) => void): void {
-        this.readyState = 'closed';
         this.#vsock?.destroy(err ?? undefined);
         cb(err);
       }
@@ -159,13 +293,12 @@ export const netSpec: BuiltinSpec = {
       unref(): this {
         return this;
       }
-      address(): { address: string; family: string; port: number } {
-        return { address: this.localAddress, family: 'IPv4', port: this.localPort };
+      address(): { address?: string; family?: string; port?: number } {
+        return this._getsockname();
       }
     }
 
     class Server extends (EventEmitter as new () => EmitterLike) {
-      listening = false;
       maxConnections = Infinity;
       connections = 0;
       /** @internal — live sockets, so http.Server can close them by policy. */
@@ -173,6 +306,7 @@ export const netSpec: BuiltinSpec = {
 
       #port = 0;
       #host = '127.0.0.1';
+      #listening = false;
 
       constructor(connectionListener?: (socket: Socket) => void) {
         super();
@@ -198,27 +332,14 @@ export const netSpec: BuiltinSpec = {
         }
 
         if (port === 0) port = pickEphemeralPort(network);
-        this.#port = port;
-        this.#host = host;
 
         try {
-          network.listen(port, (vsock) => {
-            this.connections++;
-            const socket = new Socket();
-            this._sockets.add(socket);
-            socket.once('close' as never, () => {
-              this.connections--;
-              this._sockets.delete(socket);
-            });
-            socket._attach(vsock, 'server');
-            this.emit('connection', socket);
-          });
+          this._listen2(host, port, undefined, undefined, undefined, undefined);
         } catch (err) {
           ctx.binding.nextTick(() => this.emit('error', err as Error));
           return this;
         }
 
-        this.listening = true;
         ctx.binding.nextTick(() => {
           this.emit('listening');
           if (typeof cb === 'function') cb();
@@ -226,9 +347,58 @@ export const netSpec: BuiltinSpec = {
         return this;
       }
 
+      /**
+       * @internal — Node binds and tunes the native handle here. We open the
+       * matching virtual port instead, which is all the surface requires.
+       */
+      _listen2(
+        address: string,
+        port: number,
+        _addressType?: unknown,
+        _backlog?: unknown,
+        _fd?: unknown,
+        _flags?: unknown,
+      ): void {
+        this.#host = address;
+        this.#port = port;
+        network.listen(port, (vsock) => {
+          this.connections++;
+          const socket = new Socket();
+          this._sockets.add(socket);
+          socket.once('close' as never, () => {
+            this.connections--;
+            this._sockets.delete(socket);
+          });
+          socket._attach(vsock, 'server');
+          this.emit('connection', socket);
+        });
+        this.#listening = true;
+      }
+
+      /** @internal — cluster workers are unavailable here. */
+      _setupWorker(): never {
+        throw notImplemented(
+          'api',
+          'net.Server._setupWorker',
+          'Cluster workers are not available in web-node.',
+        );
+      }
+
+      /** @internal — Node emits 'close' once the last connection drains. */
+      _emitCloseIfDrained(): void {
+        if (this.#listening || this.connections > 0) return;
+        ctx.binding.nextTick(() => {
+          if (!this.#listening && this.connections === 0) this.emit('close');
+        });
+      }
+
+      get listening(): boolean {
+        return this.#listening;
+      }
+
       close(cb?: (err?: Error) => void): this {
-        if (this.listening) network.unlisten(this.#port);
-        this.listening = false;
+        if (this.#listening) network.unlisten(this.#port);
+        this.#listening = false;
         ctx.binding.nextTick(() => {
           this.emit('close');
           if (typeof cb === 'function') cb();
@@ -250,6 +420,65 @@ export const netSpec: BuiltinSpec = {
       getConnections(cb: (err: Error | null, count: number) => void): void {
         ctx.binding.nextTick(() => cb(null, this.connections));
       }
+    }
+
+    /**
+     * `net.BoundSocket` — Node's owned, pre-bound socket wrapper. Binding a real
+     * address needs the OS network stack, which a page does not have, so the
+     * class exists with its full member surface but refuses to construct.
+     */
+    class BoundSocket {
+      constructor() {
+        throw notImplemented(
+          'api',
+          'net.BoundSocket',
+          'Binding a real address needs the OS network stack, which is not available in web-node.',
+        );
+      }
+      address(): never {
+        throw notImplemented('api', 'net.BoundSocket.address', 'net.BoundSocket is unavailable in web-node.');
+      }
+      close(): never {
+        throw notImplemented('api', 'net.BoundSocket.close', 'net.BoundSocket is unavailable in web-node.');
+      }
+      get fd(): never {
+        throw notImplemented('api', 'net.BoundSocket.fd', 'net.BoundSocket is unavailable in web-node.');
+      }
+      get isPipe(): never {
+        throw notImplemented('api', 'net.BoundSocket.isPipe', 'net.BoundSocket is unavailable in web-node.');
+      }
+    }
+
+    /**
+     * Node's `normalizeArgs`: an (options | path | port[, host][, cb]) argument
+     * list becomes `[options, cb]`.
+     */
+    function normalizeArgs(
+      args: readonly unknown[],
+    ): [Record<string, unknown>, ((...a: unknown[]) => void) | null] {
+      if (args.length === 0) return [{}, null];
+      const arg0 = args[0];
+      let options: Record<string, unknown> = {};
+      if (typeof arg0 === 'object' && arg0 !== null) {
+        options = arg0 as Record<string, unknown>;
+      } else if (typeof arg0 === 'string' && Number.isNaN(Number(arg0))) {
+        options.path = arg0;
+      } else {
+        options.port = arg0;
+        if (args.length > 1 && typeof args[1] === 'string') options.host = args[1];
+      }
+      const cb = args[args.length - 1];
+      if (typeof cb !== 'function') return [options, null];
+      return [options, cb as (...a: unknown[]) => void];
+    }
+
+    /** `net._createServerHandle` — binds a native server handle (no OS here). */
+    function createServerHandle(): never {
+      throw notImplemented(
+        'api',
+        'net._createServerHandle',
+        'A server handle needs the OS network stack, which is not available in web-node.',
+      );
     }
 
     function pickEphemeralPort(network: VirtualNetwork): number {
@@ -308,6 +537,9 @@ export const netSpec: BuiltinSpec = {
       Socket,
       /** Legacy alias: `net.Stream === net.Socket`. */
       Stream: Socket,
+      BoundSocket,
+      _createServerHandle: createServerHandle,
+      _normalizeArgs: normalizeArgs,
       get SocketAddress() {
         return addressTypes().SocketAddress;
       },

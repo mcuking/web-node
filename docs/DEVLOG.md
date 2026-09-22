@@ -213,10 +213,10 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
    - ~~**callback `fs`（真 `lib/fs.js`）换真源**~~ ✅ **已处理（2026-09-21，M51）**：真 `lib/fs.js`（4083 行）+ `internal/fs/read/context.js` + `internal/fs/cp/cp-sync.js` + `internal/streams/fast-utf8-stream.js`（MANIFEST 142 → 146）；`fs` binding 补 `readFileUtf8`/`writeFileUtf8`/`handleToFd`/`cpSyncCheckPaths`/`cpSyncCopyDir`/`cpSyncOverrideFile`/`CpDirJob`/`StatWatcher`/`kFsStatsFieldsNumber`；`fs_event_wrap.FSEvent` 从抛错换成 **VFS 投影**（订阅 `Vfs.subscribe`），`fs.watch`/`fs.promises.watch` 因此走真 watchers 代码；`readSync`/`writeSync` 把 `position === -1` 按“当前位置”处理；`internal/fs/streams.js` 顶层回环不进 vendor，另写 `builtins/fs-streams.ts`（VFS 原生读写流）。剩：**M52 已把真 `internal/fs/streams.js` vendor 进来**（见下），手写 shim 已删。
    - ~~**`internal/fs/streams.js` 真源**~~ ✅ **已处理（2026-09-21，M52）**：真 `fs.ReadStream`/`fs.WriteStream` 换真源码（MANIFEST 146 → 147，删 `builtins/fs-streams.ts`）。惰性加载（`createReadStream`/`createWriteStream` 时才 `require`），那时 `fs` 已完整，顶层 `require('fs')` 回环自然解除。
    - **`url` 换真源码**：✅ **已处理（2026-09-21，M53）**：真 `lib/url.js` 已 vendor（MANIFEST 147 → 148），`internal/url` 改成宿主 URL 桥（`pathToFileURL`/`fileURLToPath`/`domainToASCII` 等自实现），补 `url`/`url_pattern`/`encoding_binding` binding；手写 `builtins/url.ts` 已删。剩：URL 解析本身仍是**宿主**的（Node 那半是 native Ada），边角行为以宿主为准并已在 DEVLOG 记录。
-   - **`v8` 换真源码**：✅ **已处理（2026-09-21，M54）**：真 `lib/v8.js` 已 vendor（MANIFEST 148 → 151），`serdes` binding 用 JS 实现 V8 线格式（版本 15）并对 115 条差分语料逐字节对齐真 Node v26.9.0；堆与 profiler 面一律抛 `ERR_WEB_NODE_NOT_IMPLEMENTED`。剩：数组 elements kind 的“历史状态”、`Proxy` 识别、异常对象的 clone 错误文案是**已记录的近似**；`hasInspector: false` 使 `takeCoverage`/`stopCoverage` 不存在。
+   - **`v8` 换真源码**：✅ **已处理（2026-09-21，M54）**：真 `lib/v8.js` 已 vendor（MANIFEST 148 → 151），`serdes` binding 用 JS 实现 V8 线格式（版本 15）并对 115 条差分语料逐字节对齐真 Node v26.9.0；堆与 profiler 面一律抛 `ERR_WEB_NODE_NOT_IMPLEMENTED`。剩：数组 elements kind 的“历史状态”、`Proxy` 识别、异常对象的 clone 错误文案是**已记录的近似**；~~`hasInspector: false` 使 `takeCoverage`/`stopCoverage` 不存在~~ ✅ **已解决（M75）**：改为存在但响亮抛（对齐出厂带 inspector 的 Node）。
    - **`tty` 换真源码**：✅ **已处理（2026-09-21，M55）**：真 `lib/tty.js` + `lib/internal/tty.js` 已 vendor（MANIFEST 151 → 153），`tty_wrap` binding 让 `isatty` 与颜色深度成为真实现，`ReadStream`/`WriteStream` 构造即抛（标签页没有 TTY 句柄）。
    - **`vm` 换真源码**：✅ **已处理（2026-09-21，M56）**：真 `lib/vm.js` + `lib/internal/vm.js` 已 vendor（MANIFEST 153 → 155），`contextify` binding 把上下文/`Script`/`compileFunction` 落实为单 realm 内的 `with`-scope 语义，59 条差分语料与真 Node v26.9.0 逐条一致。`unsupported` 现在只剩 **`tls`**。
-   - **下一步（M75）候选**：扫描器剩余差分——`module`(22：`SourceMap`/`_load`/`_findPath`/`registerHooks`/`stripTypeScriptTypes`…)、`tls`(12：`TLSSocket`/`Server` 原型保真)、`net`(7：`Socket` 的 `readyState`/`bytesWritten`/`localAddress` 等成员)、`http`(5：`OutgoingMessage`/`ServerResponse` 的 header 方法与 getter)、`console`(5：`context`/`createTask`/`profile`…)、`child_process`(2)。可先做便宜的（console/child_process/net 成员）。
+   - **下一步（M75）候选**：扫描器剩余差分——`module`(22：`SourceMap`/`_load`/`_findPath`/`registerHooks`/`stripTypeScriptTypes`…)、`tls`(12：`TLSSocket`/`Server` 原型保真)、`http`(4：`OutgoingMessage`/`ServerResponse` 的 header 方法与 getter)、`https`(2)。~~`net`(7)、`console`(5)、`child_process`(2)、`zlib`~~ ✅ **已解决（2026-09-22，M75）**：见上条。
    - ~~**`internal/fs/glob`**~~ ✅ **已处理（2026-09-21，M33）**：真 `internal/fs/glob.js` + 随包 `internal/deps/minimatch/index`；`path.matchesGlob`、`fs.glob`/`globSync`、`fs.promises.glob` 上线。剩：`internal/fs/utils` 仍是只含 `DirentFromStats` 的 shim（真文件是 fs 基座）；`withFileTypes` 的 `Dirent.parentPath` 与我们自研 readdir 的形状一致（绝对值 vs Node 按传入路径）已对齐。
    - ~~**`stream/iter` + `stream/consumers`**~~ ✅ **已处理（2026-09-21，M38）**：真 `lib/stream/iter.js` + `lib/stream/consumers.js` + 整个 `internal/streams/iter/*`（12 文件）。`internal/streams/iter/transform.js` 不在内（它顶层 `internalBinding('zlib')`；M45 的 builtin `zlib` 不能代替 native 绑定，故仍未支持）。
    - **`internal/perf/*` 的直方图半边**：⚠️ 部分过时——M35 已把 `perf_hooks` 换成真源码；仅 `createHistogram`/`importHistogram`/`monitorEventLoopDelay` 仍抛错（真 `internal/histogram` 背后是 native hdr_histogram + 一整套统计检验，JS 移植代价大、优先级低）。
@@ -240,6 +240,22 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-22 · M75 扫描器剩余差分第一批：console / child_process / zlib / v8 / net(+tty)
+
+**目标**：扁平化原型链扫描器点出的「公开模块表面」剩余差分，先做便宜的那几块（`console`、`child_process`、`zlib`、`v8`、`net`/`tty`）。
+
+**改了什么**
+
+1. **`console` 的 inspector 扩展**：Node 在 bootstrap 时由 `internal/util/inspector.wrapConsole()` 把 V8 的 `context`/`createTask`/`profile`/`profileEnd`/`timeStamp` graft 到全局 console 上。我们无 inspector，改为在模块物化后经新的 **`BuiltinSpec.postInit` 钩子**装入（`builtins/console-extras.ts`）：`context(name)` 返回**非 Console 实例**的绑定命名空间（自带 `log`/`dirXml`…、无 `context`/`createTask`），`createTask(name)` 返回 `{ run }`（`run` 真执行函数），三个 profile/timeStamp 为 no-op；参数校验文案与 V8 逐字一致（`"First argument must be a non-empty string."` / `"First argument must be a function."`），`createTask`/`run` 的 `length` 都对齐 0。
+2. **`child_process`**：补 `_forkChild(fd, serializationMode)`（无 OS IPC 通道 → 响亮抛，`length` 2）与 `ChildProcess.prototype.spawn`（真启动由宿主驱动 → 响亮抛，`length` 1）。
+3. **`zlib`**：把 `ZlibBase` 的原型面补到真编解码类上——`_closed`（真状态）、`reset`、`flush(kind, cb)`（只支持 full flush / `Z_NO_FLUSH`，其余响亮抛）、`close(cb)`（结束并 `destroy`，回调在 `close`/`error` 上触发）、`params`（平台 codec 无对应面 → 响亮抛）、`_processChunk`（同步路径 → 响亮抛）；三个 Zip 类（`ZipBuffer`/`ZipEntry`/`ZipFile`）按 Node 补齐完整成员/静态面（全部响亮抛，无归档后端）。另修一个 spec 笔误（`ZipEntry`/`ZipFile` 的 arity 从 1 改 0）。
+4. **`v8`**：`takeCoverage`/`stopCoverage` 改为**存在但响亮抛**（对齐出厂带 inspector 的 Node v26.9.0）——同样经 `postInit` 装入，`hasInspector:false` 不再让它们凭空消失。
+5. **`net`**：`net.Socket` 把 `pending`/`readyState`/`bufferSize`/`bytesRead`/`bytesWritten`/`local*`/`remote*` 从**实例自有字段改成原型访问器**（`readyState` 按 Node 由 `connecting`/`readable`/`writable` 派生），补 `_handle`/`_connecting`/`_bytesDispatched`/`_getpeername`/`_getsockname`/`_onTimeout`/`_reset`/`_unrefTimer`/`_writeGeneric`/`destroySoon`/`resetAndDestroy`/`get|setTypeOfService`；`net.Server` 的 `listening` 改原型访问器、把绑定逻辑抽到 `_listen2`，补 `_setupWorker`（cluster 不可用 → 抛）/`_emitCloseIfDrained`；新增 `net.BoundSocket`（要真 OS 绑定 → 构造即抛）、`net._normalizeArgs`（真实现）、`net._createServerHandle`（抛）。
+
+**验证**：`test/stub-fidelity.test.ts` 扩 8 例、`test/v8.test.ts` 更新 takeCoverage 期望。扫描器差分：`net` 7→0（连带 `tty` 4→0，tty 流即 net.Socket）、`console` 5→0、`child_process` 2→0、`zlib`/`v8` 清零。门禁全绿：`npm run typecheck` 干净 · `npx vitest run` **851 通过 / 2 预存 skip（78 文件）** · `npm run build` 绿（worker **2278.24KB**）。
+
+> 剩余差分（下一批）：`module`(22)、`tls`(12)、`http`(4)、`https`(2)。
 
 ### 2026-09-22 · M74 crypto 流类改真 Transform（LazyTransform）
 

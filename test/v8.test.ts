@@ -56,13 +56,17 @@ describe('v8 is the vendored Node source', () => {
       'startupSnapshot',
       'GCProfiler',
       'isStringOneByteRepresentation',
+      'takeCoverage',
+      'stopCoverage',
     ]) {
       expect(v8, key).toHaveProperty(key);
     }
-    // With `config.hasInspector === false`, exactly as in a Node built without
-    // the inspector, the coverage helpers are absent rather than stubbed.
-    expect(v8.takeCoverage).toBeUndefined();
-    expect(v8.stopCoverage).toBeUndefined();
+    // A stock Node build ships with the inspector, so the coverage helpers are
+    // present. web-node has no inspector profiler, so the calls throw loudly.
+    expect(typeof v8.takeCoverage).toBe('function');
+    expect(typeof v8.stopCoverage).toBe('function');
+    expect(() => v8.takeCoverage()).toThrowError(/not implemented/i);
+    expect(() => v8.stopCoverage()).toThrowError(/not implemented/i);
   });
 
   it('serializes the primitive tags byte-for-byte', () => {

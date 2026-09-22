@@ -1,4 +1,25 @@
 import type { BuiltinSpec } from './types';
+import { installConsoleExtensions } from './console-extras';
+import { notImplemented } from '../errors';
+
+/**
+ * `v8.takeCoverage`/`stopCoverage` come from the native `profiler` binding,
+ * which `lib/v8.js` only reads when `config.hasInspector` is true. We report
+ * `hasInspector: false`, so they would be absent — but the surface is still
+ * observable in Node, so install loud-throwing stubs to keep it honest.
+ */
+function installV8Coverage(exports: Record<string, unknown>): Record<string, unknown> {
+  const lose = (name: string) => (): never => {
+    throw notImplemented(
+      'api',
+      `v8.${name}`,
+      'Collecting code coverage needs V8\'s inspector profiler, which is not exposed to page JavaScript.',
+    );
+  };
+  if (typeof exports.takeCoverage !== 'function') exports.takeCoverage = lose('takeCoverage');
+  if (typeof exports.stopCoverage !== 'function') exports.stopCoverage = lose('stopCoverage');
+  return exports;
+}
 
 /**
  * Builtins backed by real Node.js source (see tools/vendor.mjs).
@@ -1223,6 +1244,7 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     vendorPath: 'console.js',
     origin: 'node-source',
     arity: { assert: 0, dir: 0, table: 0 },
+    postInit: installConsoleExtensions,
     deps: ['internal/console/global'],
   },
   {
@@ -1708,6 +1730,7 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     vendorPath: 'v8.js',
     origin: 'node-source',
     arity: { queryObjects: 1 },
+    postInit: installV8Coverage,
     // `v8.serialize`/`deserialize` and the `Serializer`/`Deserializer` classes
     // are the real thing, running on the `serdes` binding (V8's wire format in
     // JS). `internal/heap_utils` is our shim: heap snapshots and

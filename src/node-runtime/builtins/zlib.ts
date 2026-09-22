@@ -286,6 +286,7 @@ function requirePlatform(compress: boolean, mode: number): FormatCtor {
 type BufferCtor = {
   from(input: string | ArrayBuffer | ArrayBufferView): Uint8Array;
   concat(list: readonly Uint8Array[], totalLength?: number): Uint8Array;
+  alloc(size: number): Uint8Array;
 };
 
 // --- the stream --------------------------------------------------------------
@@ -327,6 +328,7 @@ function makeZlibClass(
     #nread = 0;
     #maxOutputLength: number;
     #buffer: BufferCtor;
+    #closed = false;
 
     constructor(opts?: StreamOpts) {
       super(opts as Record<string, unknown> | undefined);
@@ -467,6 +469,7 @@ function makeZlibClass(
       const reader = this.#reader;
       this.#writer = undefined;
       this.#reader = undefined;
+      this.#closed = true;
       try {
         // Tear the host codec down so its machinery stops holding onto memory.
         if (writer) void Promise.resolve(writer.abort?.(error ?? undefined)).catch(() => {});
@@ -475,6 +478,89 @@ function makeZlibClass(
         /* the stream is going away regardless */
       }
       callback(error ?? this.#failure ?? null);
+    }
+
+    // --- Zlib base surface (Node's internal/zlib.js `ZlibBase`) -------------
+    /** `!this._handle` in Node; here, `true` once destroyed. */
+    get _closed(): boolean {
+      return this.#closed;
+    }
+
+    /** Node asserts the handle is still open, then resets the codec state. */
+    reset(): undefined {
+      if (this.#closed) throw new Error('zlib binding closed');
+      return undefined;
+    }
+
+    /**
+     * Node writes a special flush-carrying zero-length buffer through the
+     * transform. The platform codec has no partial flush, so only the default
+     * full flush (and `Z_NO_FLUSH`) is honoured; anything else refuses loudly.
+     */
+    flush(kind?: unknown, callback?: unknown): undefined {
+      const stream = this as unknown as {
+        write(chunk: Uint8Array, encoding: string, cb?: (e?: Error) => void): boolean;
+        once(event: string, fn: (...a: unknown[]) => void): void;
+        readonly writableFinished: boolean;
+        readonly writableEnded: boolean;
+      };
+      const finishFlush = constants.Z_FINISH;
+      const noFlush = constants.Z_NO_FLUSH;
+      if (typeof kind === 'function' || (kind === undefined && !callback)) {
+        callback = kind;
+        kind = finishFlush;
+      }
+      const k = kind === undefined ? finishFlush : kind;
+      if (k !== finishFlush && k !== noFlush) {
+        throw notImplemented(
+          'api',
+          'zlib flush(kind)',
+          'The platform codec exposes no partial flush; only the full flush is supported.',
+        );
+      }
+      const cb = typeof callback === 'function' ? (callback as (e?: Error) => void) : undefined;
+      if (stream.writableFinished) {
+        if (cb) queueMicrotask(() => cb());
+      } else if (stream.writableEnded) {
+        if (cb) stream.once('end', cb as (...a: unknown[]) => void);
+      } else {
+        stream.write(this.#buffer.alloc(0), '', cb);
+      }
+      return undefined;
+    }
+
+    /** Node: `finished(this, callback); this.destroy();`. */
+    close(callback?: unknown): void {
+      const cb = typeof callback === 'function' ? (callback as (e?: Error) => void) : undefined;
+      if (cb) {
+        const stream = this as unknown as {
+          once(event: string, fn: (...a: unknown[]) => void): void;
+        };
+        let done = false;
+        stream.once('close', () => {
+          if (!done) {
+            done = true;
+            cb();
+          }
+        });
+        stream.once('error', (err: unknown) => {
+          if (!done) {
+            done = true;
+            cb(err as Error);
+          }
+        });
+      }
+      (this as unknown as { destroy(): void }).destroy();
+    }
+
+    /** Adjusting codec parameters mid-stream has no platform counterpart. */
+    params(_level?: unknown, _strategy?: unknown, _callback?: unknown): never {
+      throw notImplemented('api', 'zlib params()', 'Adjusting codec parameters mid-stream is not supported.');
+    }
+
+    /** Legacy synchronous codec path; our codec is asynchronous only. */
+    _processChunk(_chunk?: unknown, _flushFlag?: unknown, _cb?: unknown): never {
+      throw notImplemented('api', 'zlib _processChunk()', 'The platform codec is asynchronous.');
     }
 
   }
@@ -518,7 +604,7 @@ export const zlibSpec: BuiltinSpec = {
   origin: 'web-node',
   arity: {
     BrotliCompress: 1, BrotliDecompress: 1, ZstdCompress: 1, ZstdDecompress: 1,
-    ZipBuffer: 1, ZipEntry: 1, ZipFile: 1,
+    ZipBuffer: 1, ZipEntry: 0, ZipFile: 0,
     brotliCompress: 3, brotliCompressSync: 2, brotliDecompress: 3, brotliDecompressSync: 2,
     createBrotliCompress: 1, createBrotliDecompress: 1,
     zstdCompress: 3, zstdCompressSync: 2, zstdDecompress: 3, zstdDecompressSync: 2,
@@ -616,13 +702,96 @@ export const zlibSpec: BuiltinSpec = {
           throw notImplemented('api', `zlib ${name}`, why);
         }
       };
+      if (base) defineZlibBaseSurface(cls.prototype, why);
       Object.defineProperty(cls, 'name', { value: name, configurable: true });
       return cls as unknown as new (opts?: StreamOpts) => never;
+    };
+
+    /**
+     * The `ZlibBase` members Node's codec classes carry
+     * (`internal/zlib.js`). For stub classes (no instance can exist) each entry
+     * point throws the same way; only the shape matters for feature detection.
+     */
+    const defineZlibBaseSurface = (proto: object, why: string): void => {
+      const lose = (member: string) => (): never => {
+        throw notImplemented('api', `zlib ${member}`, why);
+      };
+      for (const member of ['_flush', '_processChunk', 'close', 'flush', 'params', 'reset']) {
+        Object.defineProperty(proto, member, {
+          value: lose(member),
+          writable: true,
+          configurable: true,
+        });
+      }
+      Object.defineProperty(proto, '_closed', {
+        get: (): never => {
+          throw notImplemented('api', 'zlib _closed', why);
+        },
+        configurable: true,
+      });
     };
     const NO_BROTLI = 'The host ships no brotli codec.';
     const NO_ZSTD = 'The host ships no zstd codec.';
     const NO_ZIP = 'Zip archive support is not implemented.';
 
+    // Zip archive classes: native-only in Node. We expose the full member
+    // surface (methods + accessors + statics) so feature detection matches, but
+    // every entry point throws — there is no archive backend.
+    const defineZipSurface = (
+      ctor: unknown,
+      methods: readonly string[],
+      accessors: readonly string[],
+      statics: readonly string[],
+    ): void => {
+      const proto = (ctor as { prototype: object }).prototype;
+      for (const member of methods) {
+        Object.defineProperty(proto, member, {
+          value: (): never => {
+            throw notImplemented('api', `zlib Zip ${member}`, NO_ZIP);
+          },
+          writable: true,
+          configurable: true,
+        });
+      }
+      for (const member of accessors) {
+        Object.defineProperty(proto, member, {
+          get: (): never => {
+            throw notImplemented('api', `zlib Zip ${member}`, NO_ZIP);
+          },
+          configurable: true,
+        });
+      }
+      for (const member of statics) {
+        Object.defineProperty(ctor, member, {
+          value: (): never => {
+            throw notImplemented('api', `zlib Zip ${member}`, NO_ZIP);
+          },
+          writable: true,
+          configurable: true,
+        });
+      }
+    };
+    const ZipBuffer = loseClass('ZipBuffer', NO_ZIP);
+    const ZipEntry = loseClass('ZipEntry', NO_ZIP);
+    const ZipFile = loseClass('ZipFile', NO_ZIP);
+    defineZipSurface(
+      ZipBuffer,
+      ['add', 'addEntry', 'addSync', 'clear', 'delete', 'entries', 'forEach', 'get', 'has', 'keys', 'toBuffer', 'toBufferSync', 'values'],
+      ['comment', 'size', 'writable'],
+      [],
+    );
+    defineZipSurface(
+      ZipEntry,
+      ['contentIterator', 'contentSync', 'isDirectory', 'isFile', 'isSymlink'],
+      ['comment', 'compressed', 'compressedSize', 'content', 'crc32', 'flags', 'method', 'mode', 'modified', 'name', 'nameBuffer', 'rawContent', 'size'],
+      ['create', 'createStream', 'createSymlink', 'createSync', 'read'],
+    );
+    defineZipSurface(
+      ZipFile,
+      ['add', 'addEntry', 'addEntrySync', 'addSync', 'close', 'closeSync', 'compact', 'compactSync', 'delete', 'deleteSync', 'entries', 'entriesSync', 'forEach', 'forEachSync', 'get', 'getSync', 'has', 'keys', 'size', 'stream', 'values', 'valuesSync'],
+      ['comment', 'writable'],
+      ['open', 'openSync'],
+    );
     return {
       constants,
       codes,
@@ -677,9 +846,9 @@ export const zlibSpec: BuiltinSpec = {
       zipFiles: lose('zipFiles', NO_ZIP),
       getMaxZipContentSize: lose('getMaxZipContentSize', NO_ZIP),
       setMaxZipContentSize: lose('setMaxZipContentSize', NO_ZIP),
-      ZipBuffer: loseClass('ZipBuffer', NO_ZIP),
-      ZipEntry: loseClass('ZipEntry', NO_ZIP),
-      ZipFile: loseClass('ZipFile', NO_ZIP),
+      ZipBuffer,
+      ZipEntry,
+      ZipFile,
     };
   },
 };

@@ -162,6 +162,7 @@ export class Realm {
     }
 
     if (rec.spec.arity) alignArity(rec.exports, rec.spec.arity);
+    if (rec.spec.postInit) rec.exports = rec.spec.postInit(rec.exports, this.#ctx);
 
     rec.state = 'loaded';
     return rec.exports;

@@ -242,6 +242,20 @@ export const childProcessSpec: BuiltinSpec = {
         return this.#handle.kill(signal);
       }
 
+      /**
+       * `ChildProcess#spawn(options)` — Node's internal launcher. Our spawning is
+       * driven by the host from the constructor, so this entry point has no work
+       * to do; it exists for surface fidelity and refuses loudly rather than
+       * pretending to launch something.
+       */
+      spawn(_options?: unknown): never {
+        throw notImplemented(
+          'api',
+          'child_process.ChildProcess.spawn',
+          'spawning is driven by the host from spawn()/fork()',
+        );
+      }
+
       disconnect(): void {
         const ipc = this.#handle?.ipc;
         if (!ipc) {
@@ -679,6 +693,19 @@ export const childProcessSpec: BuiltinSpec = {
       };
     }
 
+    /**
+     * `_forkChild(fd, serializationMode)` — Node's forked-child IPC bootstrap.
+     * web-node has no OS fd/IPC channel to adopt, so it is present for surface
+     * fidelity but refuses loudly.
+     */
+    const _forkChild = (_fd?: unknown, _serializationMode?: unknown): never => {
+      throw notImplemented(
+        'api',
+        'child_process._forkChild',
+        'there is no OS IPC channel to adopt in web-node',
+      );
+    };
+
     return {
       spawn,
       exec,
@@ -688,6 +715,7 @@ export const childProcessSpec: BuiltinSpec = {
       execSync,
       execFileSync,
       ChildProcess,
+      _forkChild,
     };
   },
 };
