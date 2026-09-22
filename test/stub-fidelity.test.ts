@@ -470,6 +470,77 @@ describe('module surface', () => {
   });
 });
 
+describe('tls surface', () => {
+  it('builds the class hierarchy on net.Server / net.Socket', () => {
+    const { req } = boot();
+    const tls = req('tls');
+    const net = req('net');
+    expect(tls.Server.prototype instanceof net.Server).toBe(true);
+    expect(tls.TLSSocket.prototype instanceof net.Socket).toBe(true);
+    expect(tls.SecureContext.length).toBe(4);
+    expect(tls.Server.length).toBe(2);
+    expect(tls.TLSSocket.length).toBe(2);
+
+    for (const m of [
+      'getCipher',
+      'getProtocol',
+      'getPeerCertificate',
+      'getSession',
+      'setServername',
+      'setSession',
+      'disableRenegotiation',
+      'exportKeyingMaterial',
+      'isSessionReused',
+      'renegotiate',
+    ]) {
+      expect(m in tls.TLSSocket.prototype).toBe(true);
+    }
+
+    expect(() => new tls.TLSSocket()).toThrowError(/not implemented/i);
+    expect(() => new tls.SecureContext()).toThrowError(/not implemented/i);
+  });
+
+  it('Server records TLS config and keeps a ticket-key store', () => {
+    const { req } = boot();
+    const tls = req('tls');
+    const server = tls.createServer();
+    expect(server instanceof tls.Server).toBe(true);
+    expect(server.getTicketKeys().byteLength).toBe(48);
+    const keys = new Uint8Array(48).fill(3);
+    server.setTicketKeys(keys);
+    expect(server.getTicketKeys()).toBe(keys);
+    expect(server._getServerData()).toEqual({ ticketKeys: '03'.repeat(48) });
+    server._setServerData({ ticketKeys: '0b'.repeat(48) });
+    expect(server.getTicketKeys()[0]).toBe(0x0b);
+    server.addContext('example.com', { ca: 'x' });
+    expect(() => server.addContext('', {})).toThrowError(/servername/i);
+    server.setSecureContext({ key: 'k', cert: 'c' });
+    expect(server.key).toBe('k');
+    expect(server.cert).toBe('c');
+  });
+
+  it('convertALPNProtocols encodes; engine-backed calls throw', () => {
+    const tls = boot().req('tls');
+    expect(tls.convertALPNProtocols.length).toBe(2);
+    const out: Record<string, unknown> = {};
+    expect(tls.convertALPNProtocols(['h2'], out)).toBeUndefined();
+    expect(Array.from(out.ALPNProtocols as Uint8Array)).toEqual([2, 0x68, 0x32]);
+    expect(() => tls.convertALPNProtocols([''], {})).toThrowError(/non-empty string/);
+
+    for (const call of [
+      () => tls.getCiphers(),
+      () => tls.getCACertificates(),
+      () => tls.getCertificateCompressionAlgorithms(),
+      () => tls.checkServerIdentity('h', {}),
+      () => tls.createSecureContext({}),
+      () => tls.connect(),
+      () => tls.setDefaultCACertificates([]),
+    ]) {
+      expect(call).toThrowError(/not implemented/i);
+    }
+  });
+});
+
 describe('net.Socket / net.Server prototype fidelity', () => {
   it('Socket carries Node\'s accessors and internal methods', () => {
     const net = boot().req('net');

@@ -33,7 +33,7 @@ function throwingFn(moduleName: string, prop: string): (...args: unknown[]) => n
  * throwing function there is truthy, which would make it unwrap `.default` and
  * hand callers a stub instead of the namespace object.
  */
-function unsupported(moduleName: string, provided: Record<string, unknown> = {}): Record<string, unknown> {
+export function unsupported(moduleName: string, provided: Record<string, unknown> = {}): Record<string, unknown> {
   const isInteropKey = (prop: string): boolean =>
     prop === '__esModule' || prop === 'default' || prop === 'then';
   return new Proxy(provided, {
@@ -51,11 +51,4 @@ function unsupported(moduleName: string, provided: Record<string, unknown> = {})
   });
 }
 
-export const unsupportedSpecs: BuiltinSpec[] = [
-  {
-    id: 'tls',
-    aliases: ['node:tls'],
-    origin: 'web-node',
-    init: () => unsupported('tls'),
-  },
-];
+export const unsupportedSpecs: BuiltinSpec[] = [];

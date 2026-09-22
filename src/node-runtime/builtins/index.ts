@@ -31,6 +31,7 @@ import { moduleSpec } from './module';
 import { netSpec } from './net';
 import { httpSpec } from './http';
 import { httpsSpec } from './https';
+import { tlsSpec } from './tls';
 import { childProcessSpec } from './child_process';
 
 /** Every builtin the runtime knows about, in dependency-friendly order. */
@@ -74,6 +75,7 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   workerThreadsSpec,
   httpSpec,
   httpsSpec,
+  tlsSpec,
   // milestone 7: the controlled spawn surface
   childProcessSpec,
 ];
