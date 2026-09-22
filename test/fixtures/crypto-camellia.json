@@ -1,0 +1,216 @@
+{
+  "info": {
+    "camellia-128-ecb": {
+      "mode": "ecb",
+      "name": "camellia-128-ecb",
+      "nid": 754,
+      "keyLength": 16,
+      "blockSize": 16
+    },
+    "camellia-128-cbc": {
+      "mode": "cbc",
+      "name": "camellia-128-cbc",
+      "nid": 751,
+      "keyLength": 16,
+      "blockSize": 16,
+      "ivLength": 16
+    },
+    "camellia-128-cfb": {
+      "mode": "cfb",
+      "name": "camellia-128-cfb",
+      "nid": 757,
+      "keyLength": 16,
+      "blockSize": 1,
+      "ivLength": 16
+    },
+    "camellia-128-ofb": {
+      "mode": "ofb",
+      "name": "camellia-128-ofb",
+      "nid": 766,
+      "keyLength": 16,
+      "blockSize": 1,
+      "ivLength": 16
+    },
+    "camellia-128-ctr": {
+      "mode": "ctr",
+      "name": "camellia-128-ctr",
+      "nid": 963,
+      "keyLength": 16,
+      "blockSize": 1,
+      "ivLength": 16
+    },
+    "camellia128": {
+      "mode": "cbc",
+      "name": "camellia-128-cbc",
+      "nid": 751,
+      "keyLength": 16,
+      "blockSize": 16,
+      "ivLength": 16
+    },
+    "camellia-192-ecb": {
+      "mode": "ecb",
+      "name": "camellia-192-ecb",
+      "nid": 755,
+      "keyLength": 24,
+      "blockSize": 16
+    },
+    "camellia-192-cbc": {
+      "mode": "cbc",
+      "name": "camellia-192-cbc",
+      "nid": 752,
+      "keyLength": 24,
+      "blockSize": 16,
+      "ivLength": 16
+    },
+    "camellia-192-cfb": {
+      "mode": "cfb",
+      "name": "camellia-192-cfb",
+      "nid": 758,
+      "keyLength": 24,
+      "blockSize": 1,
+      "ivLength": 16
+    },
+    "camellia-192-ofb": {
+      "mode": "ofb",
+      "name": "camellia-192-ofb",
+      "nid": 767,
+      "keyLength": 24,
+      "blockSize": 1,
+      "ivLength": 16
+    },
+    "camellia-192-ctr": {
+      "mode": "ctr",
+      "name": "camellia-192-ctr",
+      "nid": 967,
+      "keyLength": 24,
+      "blockSize": 1,
+      "ivLength": 16
+    },
+    "camellia192": {
+      "mode": "cbc",
+      "name": "camellia-192-cbc",
+      "nid": 752,
+      "keyLength": 24,
+      "blockSize": 16,
+      "ivLength": 16
+    },
+    "camellia-256-ecb": {
+      "mode": "ecb",
+      "name": "camellia-256-ecb",
+      "nid": 756,
+      "keyLength": 32,
+      "blockSize": 16
+    },
+    "camellia-256-cbc": {
+      "mode": "cbc",
+      "name": "camellia-256-cbc",
+      "nid": 753,
+      "keyLength": 32,
+      "blockSize": 16,
+      "ivLength": 16
+    },
+    "camellia-256-cfb": {
+      "mode": "cfb",
+      "name": "camellia-256-cfb",
+      "nid": 759,
+      "keyLength": 32,
+      "blockSize": 1,
+      "ivLength": 16
+    },
+    "camellia-256-ofb": {
+      "mode": "ofb",
+      "name": "camellia-256-ofb",
+      "nid": 768,
+      "keyLength": 32,
+      "blockSize": 1,
+      "ivLength": 16
+    },
+    "camellia-256-ctr": {
+      "mode": "ctr",
+      "name": "camellia-256-ctr",
+      "nid": 971,
+      "keyLength": 32,
+      "blockSize": 1,
+      "ivLength": 16
+    },
+    "camellia256": {
+      "mode": "cbc",
+      "name": "camellia-256-cbc",
+      "nid": 753,
+      "keyLength": 32,
+      "blockSize": 16,
+      "ivLength": 16
+    }
+  },
+  "modes": {
+    "camellia-128-ecb": "5bfc1dd9c304b46e2febb17ccc39c0841f5b7d6c021037dfab75d5c1675e076206adf69db3fcae972cfbf7e49b799450|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-128-cbc": "0d071dd1eee71df9b203c5d81468b98cc5f9aa25d5c6149395827007e1a8c2d5d8d9ee560b48d6c421ad3fa7d3753f76|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-128-cfb": "ed6fefda26346a6f661890a23d9d333a26b534aea8fed81421529c59ddd9396f|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-128-ofb": "ed6fefda26346a6f661890a23d9d333a8bf0cd9a916631e6fd6fdd0489562104|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-128-ctr": "ed6fefda26346a6f661890a23d9d333aceba47cd9d7470a370ac4fba53e41ded|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-192-ecb": "8ed0fd890914145750c29abcb399fd2af2306a7ffd5b977a2dc0a7fefa53b8d8d8f39511313dad07e76dcb860b43cff7|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-192-cbc": "82a874db12d4820f8bfdc2d332272d56a4eb5f7290485b8ee598625ac7d0c11481c8a93f35fa7c12e9933e8b8f2a329a|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-192-cfb": "9cd77aa2bf8e2006bfce1b241d6d18a6e2d18cfed241b41c9acb3e2e81cb662d|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-192-ofb": "9cd77aa2bf8e2006bfce1b241d6d18a678d00342288db3ee121ba5fa47a83375|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-192-ctr": "9cd77aa2bf8e2006bfce1b241d6d18a622643da7469aa5919402c0b23ccf2dcd|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-256-ecb": "8ed0fd890914145750c29abcb399fd2af2306a7ffd5b977a2dc0a7fefa53b8d8d8f39511313dad07e76dcb860b43cff7|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-256-cbc": "82a874db12d4820f8bfdc2d332272d56a4eb5f7290485b8ee598625ac7d0c11481c8a93f35fa7c12e9933e8b8f2a329a|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-256-cfb": "9cd77aa2bf8e2006bfce1b241d6d18a6e2d18cfed241b41c9acb3e2e81cb662d|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-256-ofb": "9cd77aa2bf8e2006bfce1b241d6d18a678d00342288db3ee121ba5fa47a83375|1111111111111111111111111111111122222222222222222222222222222222",
+    "camellia-256-ctr": "9cd77aa2bf8e2006bfce1b241d6d18a622643da7469aa5919402c0b23ccf2dcd|1111111111111111111111111111111122222222222222222222222222222222"
+  },
+  "streaming": "0d071dd1eee71df9b203c5d81468b98cc5f9aa25d5c6149395827007e1a8c2d5d8d9ee560b48d6c421ad3fa7d3753f76|true",
+  "noPad": "82a874db12d4820f8bfdc2d332272d56a4eb5f7290485b8ee598625ac7d0c114",
+  "cmac": {
+    "128": "4a60e07e9108ba42037f27c383d5b2df",
+    "192": "206f404cfac9eb76cf06ab30c531a645",
+    "256": "206f404cfac9eb76cf06ab30c531a645",
+    "block": "1c337b7b42972579b08476c9467f36d9",
+    "empty": "857ebdbf5da9e55e8138ca9cca9102da"
+  },
+  "err": {
+    "badKeyLen": {
+      "ok": false,
+      "name": "RangeError",
+      "code": "ERR_CRYPTO_INVALID_KEYLEN",
+      "message": "Invalid key length"
+    },
+    "badIvLen": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "ecbWithIv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "ecbNoIv": false,
+    "unknown": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_UNKNOWN_CIPHER",
+      "message": "Unknown cipher"
+    },
+    "wrongKeyLen": {
+      "ok": false,
+      "name": "RangeError",
+      "code": "ERR_CRYPTO_INVALID_KEYLEN",
+      "message": "Invalid key length"
+    },
+    "cmacWrongKeyLen": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_OSSL_EVP_INVALID_KEY_LENGTH",
+      "message": "error:03000082:digital envelope routines::invalid key length"
+    },
+    "cmacEcb": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_MODE",
+      "message": "error:1C80007D:Provider routines::invalid mode"
+    }
+  }
+}

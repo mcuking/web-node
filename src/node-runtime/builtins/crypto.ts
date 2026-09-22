@@ -12,11 +12,10 @@ import {
   type ScryptOptions,
 } from '../crypto/hash';
 import {
-  aesCmac,
   aesGmac,
   cipherTagLengthIsValid,
+  cmacForCipher,
   createCipher,
-  desCmac,
   getCipherInfo as lookupCipherInfo,
   isKnownCipherName,
   listCiphers,
@@ -1363,7 +1362,7 @@ export const cryptoSpec: BuiltinSpec = {
       #chunks: Uint8Array[] = [];
       #total = 0;
       #finalized = false;
-      #cmacIsDes = false;
+      #cmacSpec: CipherSpec | undefined = undefined;
 
       constructor(algorithm: unknown, key: unknown, options?: unknown) {
         super(options as Record<string, unknown> | undefined);
@@ -1495,7 +1494,7 @@ export const cryptoSpec: BuiltinSpec = {
           if (keyBytes.length !== spec.keyLength) {
             throw coded('Error', 'ERR_OSSL_EVP_INVALID_KEY_LENGTH', 'error:03000082:digital envelope routines::invalid key length');
           }
-          this.#cmacIsDes = spec.family === 'des';
+          this.#cmacSpec = spec;
           this.#outputLength = spec.blockSize;
         } else if (canonical === 'gmac') {
           const spec = selectCipher('gcm');
@@ -1536,7 +1535,7 @@ export const cryptoSpec: BuiltinSpec = {
           return kmac(bits, this.#key, data, this.#outputLength, this.#customization);
         }
         if (this.#algorithm === 'cmac') {
-          return this.#cmacIsDes ? desCmac(this.#key, data) : aesCmac(this.#key, data);
+          return cmacForCipher(this.#cmacSpec!, this.#key, data);
         }
         if (this.#algorithm === 'gmac') return aesGmac(this.#key, this.#iv, data);
         if (this.#algorithm === 'poly1305') return poly1305(this.#key, data);

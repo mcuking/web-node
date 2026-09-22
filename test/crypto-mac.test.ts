@@ -126,8 +126,12 @@ describe('crypto.createMac unit surface', () => {
     expect(
       crypto.createMac('cmac', new Uint8Array(24).fill(1), { cipher: 'des-ede3-cbc' }).update('data').final('hex'),
     ).toBe('c3edd74ff210864d');
+    // Camellia CMAC is real too (see test/crypto-camellia.test.ts); a 16-byte tag.
+    expect(
+      crypto.createMac('cmac', new Uint8Array(16).fill(1), { cipher: 'camellia-128-cbc' }).update('data').final('hex'),
+    ).toBe('db7871c299307e017b90417133beb481');
     // Ciphers still outside this runtime stay loud.
-    expect(() => crypto.createMac('cmac', new Uint8Array(16).fill(1), { cipher: 'camellia-128-cbc' })).toThrowError(
+    expect(() => crypto.createMac('cmac', new Uint8Array(16).fill(1), { cipher: 'aria-128-cbc' })).toThrowError(
       /not implemented/i,
     );
   });

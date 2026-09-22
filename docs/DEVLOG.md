@@ -244,6 +244,22 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M93.4a Camellia
+
+**改了什么**：新增 `src/node-runtime/crypto/camellia.ts`——按 RFC 3713 用 BigInt 实现的 128 位分组密码（128/192/256 位密钥）。密钥编排（KL/KR/KA/KB、Sigma1–6）与 Feistel 数据路径（18/24 轮 + 每 6 轮一次 FL/FLINV）基本按规范逐行写；S 盒 `s2 = s1<<<1`、`s3 = s1<<<7`、`s4 = s1[x<<<1]` 由 `s1` 推导。解密复用同一数据路径，只把子密钥逆序。
+
+把 AES 风格的模式驱动 `Cipheriv` 泛化：新增 `BlockCipher` 接口（`encryptBlock`/`decryptBlock`），构造函数增加可选的块密码参数（默认 `AesKey`）。Camellia 因此直接复用 ECB/CBC/CFB/OFB/CTR 与 PKCS#7 全部逻辑，而不需重写一套模式代码。
+
+接入 `camellia-{128,192,256}` 的 ecb/cbc/cfb/ofb/ctr，加上 `camellia128/192/256`（CBC 别名）。CMAC 改为按 cipher 分派：新增 `cmacForCipher(spec, key, data)`，依 `spec.family` 选择 `aesCmac`/`desCmac`/`camelliaCmac`，于是 `createMac('cmac', key, { cipher: 'camellia-128-cbc' })` 可用（16 字节 tag）。
+
+**关键坑**：128 位密钥的 `k1..k18` **不是**连续的半字对——按 RFC，`k9 = (KA<<<45)>>64`，而 `k10 = (KL<<<60)&MASK64`（跳过了 `KA<<<45` 的低半字与 `KL<<<60` 的高半字）。初版用 `halves(X, n)` 成对生成，密文全错；改用显式 `hi()/lo()` 逐项列出后与官方向量一致。192/256 位的 `k1..k24` 则是连续半字对。
+
+**验证（差分 0 diff）**：`tools/crypto-camellia-probe.cjs` 在真 Node 与 web-node 内各跑一遭，逐字段等于 `test/fixtures/crypto-camellia.json`。覆盖：RFC 3713 三条官方向量、15 个（bits×mode）组合的密文 + 回环、流式 update 与一次性等价、setAutoPadding(false)、CMAC（128/192/256/块对齐/空）、以及错误面（`ERR_CRYPTO_INVALID_KEYLEN`、`ERR_CRYPTO_INVALID_IV`、`ERR_CRYPTO_UNKNOWN_CIPHER`、`ERR_OSSL_EVP_INVALID_KEY_LENGTH`、`ERR_OSSL_INVALID_MODE`）。
+
+**门禁**：`tsc` 干净 · vitest **958 passed / 2 skipped（100 文件）** · build worker **2430.89 kB**。demo 新增 Camellia 示例，输出对齐真 Node。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md` 的 M93.4 拆分顺序（M93.4a Camellia → M93.4b ARIA/SM4 → M93.4c OCB/wrap → M93.4d SIV/XTS）。
+
 ### 2026-09-22 · M93.3 AES-CCM
 
 **改了什么**：新增 `src/node-runtime/crypto/ccm.ts`——SP 800-38C 的 CBC-MAC + 计数器模式 AEAD，包含 B0/A0 构造、AAD 的长度前缀（< 0xff00 用 2 字节，否则 0xfffe/0xffff 变长编码）、payload 块的零填充切分。CBC-MAC 覆盖 B0 ‖ AAD 块 ‖ payload 块，最后一节与 A0 的 AES 加密结果异或后截断到 tag 长度。

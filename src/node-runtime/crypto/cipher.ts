@@ -7,11 +7,16 @@
  * is therefore implemented here directly against FIPS-197 and NIST SP 800-38A/D,
  * and checked byte-for-byte against Node's OpenSSL output in `test/cipher.test.ts`.
  *
- * Everything OpenSSL exposes but this module does not implement (Camellia, ARIA,
- * SM4, DES/3DES, ChaCha20-Poly1305, CCM, OCB, SIV, XTS, the key-wrap modes, …) is
- * still a *known* cipher name, so it is rejected with a typed
- * `NotImplementedError` rather than being mislabelled unknown; a name OpenSSL
- * does not know raises `ERR_CRYPTO_UNKNOWN_CIPHER`, exactly like Node.
+ * This module hosts the AES implementation plus the shared 128-bit mode driver
+ * (`Cipheriv`) and the CMAC/GMAC constructions. Sibling modules supply the other
+ * primitives: `des.ts`, `chacha20.ts`, `ccm.ts`, `camellia.ts` (and, later,
+ * ARIA / SM4 / the key-wrap modes).
+ *
+ * Everything OpenSSL exposes but this runtime does not implement (ARIA, SM4, OCB,
+ * SIV, XTS, the key-wrap modes, …) is still a *known* cipher name, so it is
+ * rejected with a typed `NotImplementedError` rather than being mislabelled
+ * unknown; a name OpenSSL does not know raises `ERR_CRYPTO_UNKNOWN_CIPHER`,
+ * exactly like Node.
  */
 
 // --- GCM (NIST SP 800-38D) --------------------------------------------------
@@ -89,11 +94,18 @@ function inc32(counter: Uint8Array): void {
 // --- the cipher surface ------------------------------------------------------
 
 import { AesKey } from './aes';
+import { Camellia } from './camellia';
 import { AesCcm } from './ccm';
 import { ChaCha20Cipher, ChaCha20Poly1305, isValidTagLength, type SyncCipher } from './chacha20';
 import { DesCipher, DesEde, type DesMode } from './des';
 
 export type { SyncCipher };
+
+/** The 128-bit block-cipher surface the AES-style mode driver consumes. */
+export interface BlockCipher {
+  encryptBlock(block: Uint8Array): void;
+  decryptBlock(block: Uint8Array): void;
+}
 
 export type CipherMode =
   | 'ecb'
@@ -121,7 +133,7 @@ export interface CipherSpec {
   /** Required IV length, or `null` for ECB (no IV). */
   ivLength: number | null;
   /** Which implementation backs the spec (defaults to AES). */
-  family?: 'aes' | 'des';
+  family?: 'aes' | 'des' | 'camellia' | 'aria' | 'sm4';
   /** GCM keys this spec under this alias (used to key the lookup table). */
   alias?: true;
 }
@@ -197,6 +209,30 @@ const SPECS: CipherSpec[] = [];
     const infoName = `id-aes${keyLength * 8}-ccm`;
     SPECS.push({ name, infoName, mode: 'ccm', nid, keyLength, blockSize: 1, ivLength: 12 });
     SPECS.push({ name: infoName, infoName, mode: 'ccm', nid, keyLength, blockSize: 1, ivLength: 12, alias: true });
+  }
+  // Camellia (RFC 3713). Same 128-bit block and mode set; the bare `camellia128`
+  // aliases mean CBC.
+  const camellia: Array<[number, number[]]> = [
+    [16, [754, 751, 757, 766, 963]],
+    [24, [755, 752, 758, 767, 967]],
+    [32, [756, 753, 759, 768, 971]],
+  ];
+  for (const [keyLength, nids] of camellia) {
+    const bits = keyLength * 8;
+    modes.forEach((m, index) => {
+      SPECS.push({
+        name: `camellia-${bits}-${m.mode}`,
+        infoName: `camellia-${bits}-${m.mode}`,
+        mode: m.mode,
+        nid: nids[index],
+        keyLength,
+        blockSize: m.blockSize,
+        ivLength: m.ivLength,
+        family: 'camellia',
+      });
+    });
+    const cbc = SPECS.find((s) => s.name === `camellia-${bits}-cbc`)!;
+    SPECS.push({ ...cbc, name: `camellia${bits}`, alias: true });
   }
 }
 
@@ -306,6 +342,7 @@ export function createCipher(
   }
   if (spec.mode === 'ccm') return new AesCcm(key, iv as Uint8Array, encrypt, authTagLength, plaintextLength);
   if (spec.family === 'des') return new DesCipher(spec.mode as DesMode, key, iv, encrypt);
+  if (spec.family === 'camellia') return new Cipheriv(spec, key, iv, encrypt, authTagLength, new Camellia(key));
   return new Cipheriv(spec, key, iv, encrypt, authTagLength);
 }
 
@@ -326,7 +363,7 @@ function pkcs7Pad(data: Uint8Array): Uint8Array {
 export class Cipheriv {
   readonly spec: CipherSpec;
   readonly encrypt: boolean;
-  #aes: AesKey;
+  #block: BlockCipher;
   #iv: Uint8Array;
   #autoPadding = true;
   #finalized = false;
@@ -350,10 +387,10 @@ export class Cipheriv {
   #authTag: Uint8Array | null = null;
   #expectedTag: Uint8Array | null = null;
 
-  constructor(spec: CipherSpec, key: Uint8Array, iv: Uint8Array | null, encrypt: boolean, authTagLength = 16) {
+  constructor(spec: CipherSpec, key: Uint8Array, iv: Uint8Array | null, encrypt: boolean, authTagLength = 16, block?: BlockCipher) {
     this.spec = spec;
     this.encrypt = encrypt;
-    this.#aes = new AesKey(key);
+    this.#block = block ?? new AesKey(key);
     this.#iv = iv ? iv.slice() : new Uint8Array(0);
     this.#tagLength = authTagLength;
     this.#chain = new Uint8Array(16);
@@ -378,9 +415,9 @@ export class Cipheriv {
       case 'gcm': {
         // H = E(K, 0^128)
         const h = new Uint8Array(16);
-        this.#aes.encryptBlock(h);
+        this.#block.encryptBlock(h);
         this.#ghash = new Ghash(h);
-        this.#gcmJ0 = computeJ0(this.#aes, this.#iv);
+        this.#gcmJ0 = computeJ0(this.#block, this.#iv);
         this.#counter.set(this.#gcmJ0);
         inc32(this.#counter);
         break;
@@ -391,30 +428,30 @@ export class Cipheriv {
   }
 
   #encryptInto(block: Uint8Array): void {
-    if (this.encrypt || this.spec.mode === 'gcm') this.#aes.encryptBlock(block);
-    else this.#aes.decryptBlock(block);
+    if (this.encrypt || this.spec.mode === 'gcm') this.#block.encryptBlock(block);
+    else this.#block.decryptBlock(block);
   }
 
   #generateKeystream(): void {
     switch (this.spec.mode) {
       case 'ctr':
         this.#keystream.set(this.#counter);
-        this.#aes.encryptBlock(this.#keystream);
+        this.#block.encryptBlock(this.#keystream);
         incCounter128(this.#counter);
         break;
       case 'gcm':
         this.#keystream.set(this.#counter);
-        this.#aes.encryptBlock(this.#keystream);
+        this.#block.encryptBlock(this.#keystream);
         inc32(this.#counter);
         break;
       case 'ofb':
         this.#keystream.set(this.#register);
-        this.#aes.encryptBlock(this.#keystream);
+        this.#block.encryptBlock(this.#keystream);
         this.#register.set(this.#keystream);
         break;
       case 'cfb':
         this.#keystream.set(this.#register);
-        this.#aes.encryptBlock(this.#keystream);
+        this.#block.encryptBlock(this.#keystream);
         break;
     }
     this.#keystreamPos = 0;
@@ -453,11 +490,11 @@ export class Cipheriv {
     for (let offset = 0; offset < input.length; offset += 16) {
       if (this.spec.mode === 'cbc' && this.encrypt) {
         for (let i = 0; i < 16; i++) block[i] = input[offset + i] ^ this.#chain[i];
-        this.#aes.encryptBlock(block);
+        this.#block.encryptBlock(block);
         this.#chain.set(block);
       } else if (this.spec.mode === 'cbc') {
         block.set(input.subarray(offset, offset + 16));
-        this.#aes.decryptBlock(block);
+        this.#block.decryptBlock(block);
         for (let i = 0; i < 16; i++) block[i] ^= this.#chain[i];
         this.#chain.set(input.subarray(offset, offset + 16));
       } else {
@@ -528,7 +565,7 @@ export class Cipheriv {
     this.#ghash.update(lengths);
     const s = this.#ghash.digest();
     const mask = this.#gcmJ0.slice();
-    this.#aes.encryptBlock(mask);
+    this.#block.encryptBlock(mask);
     const tag = new Uint8Array(16);
     for (let i = 0; i < 16; i++) tag[i] = s[i] ^ mask[i];
     if (this.encrypt) {
@@ -593,7 +630,7 @@ export class Cipheriv {
 
 // --- small helpers -----------------------------------------------------------
 
-function computeJ0(aes: AesKey, iv: Uint8Array): Uint8Array {
+function computeJ0(block: BlockCipher, iv: Uint8Array): Uint8Array {
   const j0 = new Uint8Array(16);
   if (iv.length === 12) {
     j0.set(iv, 0);
@@ -604,7 +641,7 @@ function computeJ0(aes: AesKey, iv: Uint8Array): Uint8Array {
   padded.set(iv, 0);
   writeUint64(padded, padded.length - 8, iv.length * 8);
   const h = new Uint8Array(16);
-  aes.encryptBlock(h);
+  block.encryptBlock(h);
   const ghash = new Ghash(h);
   ghash.update(padded);
   return ghash.digest();
@@ -681,6 +718,22 @@ export function aesCmac(key: Uint8Array, data: Uint8Array): Uint8Array {
 export function desCmac(key: Uint8Array, data: Uint8Array): Uint8Array {
   const ede = new DesEde(key);
   return cmacCore((block) => ede.encrypt(block), 8, 0x1b, data);
+}
+
+/** CMAC whose block cipher is Camellia; the usual 16-byte tag. */
+export function camelliaCmac(key: Uint8Array, data: Uint8Array): Uint8Array {
+  const camellia = new Camellia(key);
+  return cmacCore((block) => {
+    camellia.encryptBlock(block);
+    return block;
+  }, 16, 0x87, data);
+}
+
+/** Dispatches CMAC to the block cipher named by `spec`. */
+export function cmacForCipher(spec: CipherSpec, key: Uint8Array, data: Uint8Array): Uint8Array {
+  if (spec.family === 'des') return desCmac(key, data);
+  if (spec.family === 'camellia') return camelliaCmac(key, data);
+  return aesCmac(key, data);
 }
 
 /** AES-GMAC (NIST SP 800-38D): the GCM tag of `data` used as associated data. */
