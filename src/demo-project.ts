@@ -913,9 +913,9 @@ const certPem = [
   'D28VLxZR1iZXsoBG1RsVUnaNkRIzIbIowbK5/M2VYco56zXzCWAQ2L5QYmFfu+Ad',
   'ng==',
   '-----END CERTIFICATE-----',
-].join('\n');
+].join('\\n');
 const leafCert = new (require('crypto').X509Certificate)(certPem);
-console.log('subject   :', leafCert.subject.split('\n').join(' / '));
+console.log('subject   :', leafCert.subject.split('\\n').join(' / '));
 console.log('serial    :', leafCert.serialNumber);
 console.log('sha256 fp :', leafCert.fingerprint256);
 console.log('SAN       :', leafCert.subjectAltName);
