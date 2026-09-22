@@ -310,6 +310,9 @@ export class NodeRuntime {
           loader.resolve(id, options?.paths?.[0] ?? p.dirname(from), 'require'),
       }),
     );
+    // `module.registerHooks` and the loader-owned `findSourceMap`/
+    // `findPackageJSON`/`Module._*` internals reach the loader through here.
+    this.realm.setUserLoader(this.loader);
 
     this.process = this.realm.require('process') as Record<string, unknown>;
     // Node seeds `NODE_DEBUG` handling from `internal/process/pre_execution.js`

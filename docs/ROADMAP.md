@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-22（基线 = M96 完成；`fs` 错误形状逐字对齐，**阶段 B 2/4**）
+> - **最后更新**：2026-09-22（基线 = M97 完成；`module` 同步 loader hooks / SourceMap / findPackageJSON 逐字对齐，**阶段 B 3/5**）
 
 ---
 
@@ -15,16 +15,17 @@
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
 | A | crypto 收尾（接续 M87） | 22 | 20 | 2 |
-| B | 语义深度（差分语料继续扩面） | 4 | 2 | 2 |
+| B | 语义深度（差分语料继续扩面） | 5 | 3 | 2 |
 | C | 平台无对应物的补齐（选择性） | 3 | 0 | 3 |
 | D | 运行时常量小项收尾 | 4 | 0 | 4 |
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **41** | **24** | **16**（+1 不做） |
+| **合计** | | **42** | **25** | **17**（+1 不做） |
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 111 个里程碑，剩余 16 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 112 个里程碑，剩余 17 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.4（26 → 30），同日晚 M90.5 又拆为 M90.5–M90.9（30 → 34）。
+> 注：M97 于 2026-09-22 拆出 M97.1（`stripTypeScriptTypes` 需要真 TS 解析器 / amaro wasm，代价大）（41 → 42）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
 
 ---
@@ -193,9 +194,15 @@
   - 把剩余 ENOENT/EACCES/EISDIR/ENOTDIR 等路径的错误码、`syscall`、`path`、`errno` 逐字对齐真 Node（VFS 层）。
   - 差分探针 `tools/fs-errors-probe.cjs`（51 个观测）在真 Node 与 web-node 各跑一遍，**0 diff**；错误对象本身也对齐（`constructor.name` = `Error`/`SystemError`、自有属性集、`name` 在原型上）。
 
-- [ ] **M97 · `module` 语义**
-  - `registerHooks`（同步 loader hooks）、`stripTypeScriptTypes`（需 TS transform）、`SourceMap` 的注册/查找语义、`_load`/`_findPath` 的 loader 面。
-  - 现状：`module.ts` 里这些是响亮抛错或返回 `undefined`；按需落地。
+- [x] **M97 · `module` 同步 loader 语义（hooks / SourceMap / findPackageJSON / 内部 loader 面）** ✅ 2026-09-22
+  - `registerHooks`（同步 loader hooks：resolve/load 链、`next` 委托、`shortCircuit` 契约、`deregister`）、`SourceMap` 的注册/查找语义（`findSourceMap` + `setSourceMapsSupport`/`getSourceMapsSupport`）、`findPackageJSON`、`_load`/`_findPath`/`_readPackage`/`_stat`/`_preloadModules` 的 loader 面。
+  - 差分探针 `tools/module-hooks-probe.cjs`（35 个观测）在真 Node/web-node 各跑一遍，**0 diff**。
+  - `stripTypeScriptTypes` 拆到 **M97.1**（需真 TS 解析器）。
+
+- [ ] **M97.1 · `stripTypeScriptTypes`（TS transform）**
+  - 真 Node 的 strip-only 模式把类型语法**按位替换成空格**（保列），需一个真 TS 解析器才能知道每个类型跨度的边界（`b as X`、泛型、`interface`/`type` 整声明删除、`import type` 等）。
+  - 选项：vendor `amaro`（SWC wasm，`deps/amaro/dist/index.js` ≈ 3.8MB raw / 1.4MB gzip，会把 worker 从 2.47MB → 6.3MB），或自研有界的 strip-only 扫描器（风险高）。
+  - 现状：仍响亮抛 `notImplemented`；未定取舍前不落地。
 
 - [ ] **M98 · `http`/`https` 报文级差分**
   - 请求/响应全流程（keep-alive、pipeline、chunked、trailer 已在 M69 部分覆盖）的端到端差分；`https` 无 TLS 加密但语义对齐。

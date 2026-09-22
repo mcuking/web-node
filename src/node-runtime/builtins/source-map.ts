@@ -229,9 +229,22 @@ function decodeVLQ(iter: StringCharIterator): number {
   return -result | (1 << 31);
 }
 
+/** Node's `Received …` suffix in `ERR_INVALID_ARG_TYPE` messages. */
+function receivedType(value: unknown): string {
+  if (value === undefined) return 'undefined';
+  if (value === null) return 'null';
+  const t = typeof value;
+  if (t === 'string') return `type string ('${String(value)}')`;
+  if (t === 'number' || t === 'boolean' || t === 'bigint') return `type ${t} (${String(value)})`;
+  return `type ${t}`;
+}
+
 function cloneSourceMapV3(payload: unknown): Record<string, unknown> {
   if (payload === null || typeof payload !== 'object') {
-    throw new TypeError('The "payload" argument must be of type object');
+    throw Object.assign(
+      new TypeError(`The "payload" argument must be of type object. Received ${receivedType(payload)}`),
+      { code: 'ERR_INVALID_ARG_TYPE' },
+    );
   }
   const clone = { ...(payload as Record<string, unknown>) };
   for (const key of Object.keys(clone)) {

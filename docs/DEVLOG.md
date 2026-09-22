@@ -244,6 +244,35 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M97 `module` 同步 loader 语义（hooks / SourceMap / findPackageJSON / 内部 loader 面）
+
+**改了什么**：把 `module` 的四块 loader 面从「响亮抛错 / 返回 `undefined`」落成真实现：
+
+**① 同步 loader hooks（`module.registerHooks`）—— 本里程碑主体**
+- 新增 `src/node-runtime/loader/hooks.ts`（`ModuleHooksRegistry` + `ModuleResolveContext`/`ModuleLoadContext` + CJS 路径 ↔ `file://` URL 互转），逐条对齐 `lib/internal/modules/customization_hooks.js` 的 `buildHooks`/`wrapHook`：
+  - **链式语义**：每个 hook 收到 `(arg0, context, next)`；调 `next(spec, ctx)` 委托、或返回带 `shortCircuit: true` 的结果接管。**若返回结果却未置 `shortCircuit: true`，报 `ERR_INVALID_RETURN_PROPERTY_VALUE`**（文案 `Expected true to be returned for the "shortCircuit" from the "resolve" hook but got undefined.`/`… type boolean (false).`）。
+  - **上下文合并**：链上共享同一个 `mergedContext`（`Object.assign`），与 Node 的 `ModuleResolveContext`（`parentURL`/`importAttributes`/`conditions`）字段一致；CJS 下 conditions = `require,node,node-addons,module-sync`。
+  - **返回值形状**：`resolve` 必须给字符串 `url`（否则同样报错）；`registerHooks` 返回 `Object.freeze` 对象，**`Object.keys` 恰为 `['resolve','load']`**（`deregister` 用不可枚举的 `defineProperty` 定义，与 Node 的 getter 一致），并挂 `Symbol.dispose`。
+  - **参数校验**：`registerHooks()` 无参 → V8 解构报错 `Cannot destructure property 'resolve' of 'hooks' as it is undefined.`（无 `code`）；`{resolve: 3}` → `The "hooks.resolve" property must be of type function. Received type number (3)`（注意是 **property**）。
+  - loader 侧：`#hooks.hasAny` 才走 hook 路径；默认 resolve 步 = 本 loader 的 `resolve`，默认 load 步 = 读 VFS（含 `#formatOf`）；`load` hook 可给 `source`/`format` 覆盖（`format: 'module'` 强制走 ESM 变换，`'json'` 直接 `JSON.parse`）。
+
+**② SourceMap 注册 / 查找**
+- loader 新增 `#sourceMaps` 注册表 + `#maybeCacheSourceMap`（对齐 `source_map_cache.js`：`sourceMappingURL`/`sourceURL` 魔法注释、`lineLengths`（含 U+2028/2029）、`data:application/json[;base64]` 解码、`sourcesToAbsolute` 把源改成 `file://` URL、`node_modules` 门禁），模块加载时自动登记。
+- `findSourceMap(sourceURL)`：非字符串/`node:` → `undefined`；无协议前缀先转 `file://`；命中才 `new SourceMap(data, {lineLengths})`（惰性、缓存）。
+- `setSourceMapsSupport(enabled, options)`：**`nodeModules`/`generatedCode` 默认 `false`（不是 `enabled`）**，修正了旧实现对两者默认值的错误；非 boolean → `The "enabled" argument must be of type boolean. Received type string ('x')`。
+- `SourceMap` 构造器缺参文案补齐 `Received undefined`（`ERR_INVALID_ARG_TYPE`）。
+
+**③ `findPackageJSON`**：相对/绝对 specifier → 目录后向上找；bare → 沿祖先 `node_modules/<pkg>` 找包目录再向上找 `package.json`；找不到报 `ERR_MODULE_NOT_FOUND`（`Cannot find package 'x' imported from <base>`）；无 specifier 报 `ERR_MISSING_ARGS`。
+
+**④ 内部 loader 面**：`_findPath`（→ `resolve`，失败 `false`）、`_load`（→ `require`）、`_readPackage`（`{type,exists,pjsonPath}`）、`_stat`（文件 `0` / 目录 `1` / 缺失 `-2`）、`_preloadModules`、`_resolveLookupPaths`（相对 → `['.']`）均接到真 loader / VFS。
+
+**验证**：`tools/module-hooks-probe.cjs`（35 个观测，`tools/module-hooks-oracle.mjs` 录成 `test/fixtures/module-hooks.json`）在真 Node 与 web-node **逐字段 0 diff**。
+**门禁**：`tsc` 干净 · vitest **976 passed / 2 skipped（107/109 文件）** · build worker **2478.15 kB**。
+**拆分**：`stripTypeScriptTypes` 拆为 **M97.1**（真 Node strip-only 模式按位替换类型为空格，需真 TS 解析器；vendor `amaro` 的 wasm 会把 worker 从 2.47MB 抬到 ≈6.3MB，未定取舍前保持响亮抛错）。
+**已知偏离**：web-node 没有 Node 的 `relativeResolveCache` 快路径（已缓存模块在真 Node 会跳过 resolve hooks，web-node 仍会跑）——差分探针用全新 request 规避此路径差异；`_stat`/`_findPath` 等内部面基于 VFS，不追求与真 FS 磁盘行为逐字节相同。
+
+**为什么**：阶段 B 第三项；loader hooks 是打包器/测试框架最依赖的扩展点，差分方法同上。
+
 ### 2026-09-22 · M96 `fs` 错误形状补全
 
 **改了什么**：把 `fs` 各失败路径抛出的错误与真 Node 逐字段对齐——`code`、`syscall`、`errno`、`path`、`dest`、`message`、`name`，以及错误对象自身的形态（`constructor.name` 与自有属性集）。新增差分探针 `tools/fs-errors-probe.cjs`（51 个观测，用 `tools/fs-errors-oracle.mjs` 录成 `test/fixtures/fs-errors.json`），真 Node 与 web-node 各跑一遍 **0 diff**。

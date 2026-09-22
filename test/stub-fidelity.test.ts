@@ -404,19 +404,18 @@ describe('module surface', () => {
 
     expect(() => M._compile()).toThrowError(/not implemented/i);
     expect(() => M.load()).toThrowError(/not implemented/i);
-    for (const call of [
-      () => mod._load('x', null, false),
-      () => mod._preloadModules(['x']),
-      () => mod._readPackage('x'),
-      () => mod._stat('/x'),
-      () => mod._findPath('x', ['/'], false),
-      () => mod.runMain(),
-      () => mod.registerHooks({}),
-      () => mod.stripTypeScriptTypes('const a: number = 1'),
-      () => mod.findPackageJSON('/project'),
-    ]) {
+    // Still unimplemented: `runMain` and the TypeScript transform.
+    for (const call of [() => mod.runMain(), () => mod.stripTypeScriptTypes('const a: number = 1')]) {
       expect(call).toThrowError(/not implemented/i);
     }
+    // Loader-backed statics now delegate to the web-node loader.
+    expect(mod._stat('/x')).toBe(-2);
+    expect(mod._findPath('x', ['/'], false)).toBe(false);
+    expect(mod._readPackage('/x')).toMatchObject({ type: 'none', exists: false });
+    expect(typeof mod.registerHooks({}).deregister).toBe('function');
+    // Requiring a missing request reports MODULE_NOT_FOUND, not a stub error.
+    expect(() => mod._load('x', null, false)).toThrowError(/Cannot find module/);
+    expect(() => mod.findPackageJSON('/project')).toThrowError(/Cannot find package/);
     expect(Array.isArray(mod._resolveLookupPaths('x', {}))).toBe(true);
     expect(mod._initPaths()).toBeUndefined();
     expect(mod.globalPaths).toEqual([]);

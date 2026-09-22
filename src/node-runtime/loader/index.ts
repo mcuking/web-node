@@ -5,6 +5,14 @@ import { transformEsmToCjs, EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING } f
 import { codeMask } from './code-mask';
 import { notImplemented } from '../errors';
 import { compileTagged } from '../vm';
+import {
+  ModuleHooksRegistry,
+  ModuleResolveContext,
+  ModuleLoadContext,
+  cjsFilenameToURL,
+  urlToCjsFilename,
+} from './hooks';
+import { SourceMap } from '../builtins/source-map';
 
 const USER_CJS_PARAMS = ['exports', 'require', 'module', '__filename', '__dirname'] as const;
 const EXTENSIONS = ['', '.js', '.cjs', '.mjs', '.json'];
@@ -105,6 +113,15 @@ export function stripShebang(source: string): string {
  */
 export const EMPTY_MODULE = '\u0000web-node:empty';
 
+/** A source map registered for a loaded module (`internal/source_map/source_map_cache`). */
+interface SourceMapEntry {
+  filename: string;
+  sourceMapURL: string;
+  lineLengths: number[];
+  data: Record<string, unknown> | null;
+  sourceMap?: SourceMap;
+}
+
 interface PackageJson {
   name?: string;
   main?: string;
@@ -137,6 +154,12 @@ export class ModuleLoader {
   #realm: Realm;
   #vfs: Vfs;
   #cache = new Map<string, UserModule>();
+  /** Synchronous loader hooks registered via `module.registerHooks`. */
+  #hooks = new ModuleHooksRegistry();
+  /** Source maps registered at load time, keyed by `file://` URL. */
+  #sourceMaps = new Map<string, SourceMapEntry>();
+  /** `module.setSourceMapsSupport` state (read back by `getSourceMapsSupport`). */
+  #sourceMapsSupport = { enabled: false, nodeModules: false, generatedCode: false };
   /** Extra names injected into every user module's scope (a sandbox global). */
   #globals: Record<string, unknown>;
   #aliases: Record<string, string>;
@@ -528,10 +551,217 @@ export class ModuleLoader {
     if (request.startsWith('node:')) {
       throw notImplemented('module', request, 'Only whitelisted core modules are exposed.');
     }
-    const fromDir = p.dirname(fromFile);
-    const resolved = this.resolve(request, fromDir, condition);
-    return this.loadModule(resolved);
+    if (!this.#hooks.hasAny) {
+      const fromDir = p.dirname(fromFile);
+      const resolved = this.resolve(request, fromDir, condition);
+      return this.loadModule(resolved);
+    }
+    return this.#requireThroughHooks(fromFile, request, condition);
   };
+
+  /**
+   * `require` with the synchronous `module.registerHooks` chains in play. The
+   * default steps are the loader's own resolution/reading, so a hook that defers
+   * (`next(...)`) sees exactly what plain `require` would have done.
+   */
+  #requireThroughHooks(fromFile: string, request: string, condition: Condition): unknown {
+    const fromDir = p.dirname(fromFile);
+    const conditions =
+      condition === 'import'
+        ? ['import', 'node', 'node-addons', 'module-sync']
+        : ['require', 'node', 'node-addons', 'module-sync'];
+    const resolveCtx = new ModuleResolveContext(cjsFilenameToURL(fromFile), undefined, conditions);
+    const resolved = this.#hooks.resolveWithHooks(request, resolveCtx, (spec) => {
+      const abs = this.resolve(spec, fromDir, condition);
+      return { url: cjsFilenameToURL(abs) };
+    });
+    const url = resolved.url;
+    // A resolve hook may point at a builtin (`node:fs`).
+    if (url.startsWith('node:')) {
+      const bare = url.slice('node:'.length);
+      if (this.#realm.hasBuiltin(bare)) return this.#realm.require(bare);
+    }
+    const absPath = urlToCjsFilename(url);
+
+    const loadCtx = new ModuleLoadContext(resolved.format, undefined, conditions);
+    let usedHookSource = false;
+    const loaded = this.#hooks.loadWithHooks(url, loadCtx, (u) => {
+      const file = urlToCjsFilename(u);
+      return { source: new TextDecoder().decode(this.#vfs.readFile(file)), format: this.#formatOf(file) };
+    });
+    if (loaded !== undefined && loaded.source !== undefined) usedHookSource = true;
+
+    const format = loaded?.format ?? resolved.format ?? this.#formatOf(absPath);
+    if (format === 'json' && usedHookSource) {
+      const text = typeof loaded.source === 'string' ? loaded.source : new TextDecoder().decode(loaded.source as ArrayBufferView);
+      const exports = JSON.parse(text);
+      return exports;
+    }
+    const sourceOverride =
+      usedHookSource && typeof loaded.source === 'string' ? loaded.source : undefined;
+    return this.loadModule(absPath, sourceOverride, format === 'module');
+  }
+
+  /** Best-effort module format for a VFS path (used by the load-hook default step). */
+  #formatOf(absPath: string): string {
+    if (absPath.endsWith('.json')) return 'json';
+    if (absPath.endsWith('.mjs')) return 'module';
+    if (absPath.endsWith('.cjs')) return 'commonjs';
+    return this.#isPackageEsm(absPath) ? 'module' : 'commonjs';
+  }
+
+  /** Register synchronous loader hooks (`module.registerHooks`). */
+  registerHooks(hooks: Parameters<ModuleHooksRegistry['registerHooks']>[0]): {
+    resolve?: unknown;
+    load?: unknown;
+    deregister: () => void;
+  } {
+    return this.#hooks.registerHooks(hooks);
+  }
+
+  get sourceMapsSupport(): { enabled: boolean; nodeModules: boolean; generatedCode: boolean } {
+    return { ...this.#sourceMapsSupport };
+  }
+
+  /** `module.setSourceMapsSupport(enabled, options)`. */
+  setSourceMapsSupport(enabled: boolean, options: { nodeModules?: boolean; generatedCode?: boolean } = {}): void {
+    if (typeof enabled !== 'boolean') {
+      throw Object.assign(new TypeError(`The "enabled" argument must be of type boolean. Received type ${typeof enabled} ('${String(enabled)}')`), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    }
+    const nodeModules = options.nodeModules ?? false;
+    const generatedCode = options.generatedCode ?? false;
+    this.#sourceMapsSupport = { enabled, nodeModules, generatedCode };
+  }
+
+  /** `module.findSourceMap(sourceURL)`. Never throws (Node contract). */
+  findSourceMap(sourceURL: unknown): SourceMap | undefined {
+    if (typeof sourceURL !== 'string') return undefined;
+    if (sourceURL.startsWith('node:')) return undefined;
+    if (!this.#sourceMapsSupport.nodeModules && isUnderNodeModules(sourceURL)) return undefined;
+    let key = sourceURL;
+    if (!/^\w+:\/\//.test(key)) key = cjsFilenameToURL(p.resolve(this.#vfs.cwd, key));
+    const entry = this.#sourceMaps.get(key);
+    if (!entry || entry.data === null) return undefined;
+    entry.sourceMap ??= new SourceMap(entry.data, { lineLengths: entry.lineLengths });
+    return entry.sourceMap;
+  }
+
+  /**
+   * Register the inline source map of a module just loaded, mirroring
+   * `internal/source_map/source_map_cache#maybeCacheSourceMap`. Only runs when
+   * source maps are enabled for this runtime.
+   */
+  #maybeCacheSourceMap(filename: string, content: string): void {
+    if (!this.#sourceMapsSupport.enabled) return;
+    const sourceURL = lastMagicComment(kSourceURLMagicComment, content);
+    const sourceMapURL = lastMagicComment(kSourceMappingURLMagicComment, content);
+    if (typeof sourceMapURL !== 'string') return;
+    const fileUrl = cjsFilenameToURL(filename);
+    if (!this.#sourceMapsSupport.nodeModules && isUnderNodeModules(fileUrl)) return;
+    const data = sourceMapFromDataUrl(fileUrl, sourceMapURL);
+    const entry: SourceMapEntry = {
+      filename: fileUrl,
+      sourceMapURL,
+      lineLengths: lineLengths(content),
+      data,
+    };
+    this.#sourceMaps.set(fileUrl, entry);
+    if (sourceURL) this.#sourceMaps.set(cjsFilenameToURL(sourceURL), entry);
+  }
+
+  /**
+   * `module.findPackageJSON(specifier, base)` — resolve a package specifier to
+   * its `package.json`. Returns the path, or throws like Node when the package
+   * cannot be found.
+   */
+  findPackageJSON(specifier: string, base?: string | URL): string {
+    if (specifier === undefined) {
+      throw Object.assign(new TypeError('The "specifier" argument must be specified'), { code: 'ERR_MISSING_ARGS' });
+    }
+    const bare = specifier.replace(/^node:/, '');
+    // Resolve `bare` to a directory, then walk up to the nearest package.json.
+    const fromDir = typeof base === 'string' ? p.dirname(base) : this.#vfs.cwd;
+    let dir: string | null = null;
+    if (bare.startsWith('.') || p.isAbsolute(bare)) {
+      const abs = p.resolve(fromDir, bare);
+      dir = this.#vfs.exists(abs) && this.#vfs.stat(abs).type === 'dir' ? abs : p.dirname(abs);
+    } else {
+      const pkgName = bare.startsWith('@') ? bare.split('/').slice(0, 2).join('/') : bare.split('/')[0];
+      for (const nmDir of walkUpNodeModules(fromDir)) {
+        const candidate = p.join(nmDir, pkgName);
+        if (this.#vfs.exists(candidate) && this.#vfs.stat(candidate).type === 'dir') {
+          dir = candidate;
+          break;
+        }
+      }
+    }
+    if (dir === null) {
+      throw Object.assign(new Error(`Cannot find package '${bare}' imported from ${typeof base === 'string' ? base : 'data:'}`), {
+        code: 'ERR_MODULE_NOT_FOUND',
+      });
+    }
+    // Walk up until a package.json is found (or the tree ends).
+    let cur = dir;
+    for (;;) {
+      const candidate = p.join(cur, 'package.json');
+      if (this.#vfs.exists(candidate) && this.#vfs.stat(candidate).type === 'file') return candidate;
+      const parent = p.dirname(cur);
+      if (parent === cur || cur === '/') break;
+      cur = parent;
+    }
+    throw Object.assign(new Error(`Cannot find package '${bare}' imported from ${typeof base === 'string' ? base : 'data:'}`), {
+      code: 'ERR_MODULE_NOT_FOUND',
+    });
+  }
+
+  /** `Module._findPath` — resolve `request` against `paths`, or `false`. */
+  findPath(request: string, paths?: string[], isMain?: boolean): string | false {
+    const bases = paths && paths.length ? paths : [this.#vfs.cwd];
+    for (const base of bases) {
+      try {
+        return this.resolve(request.startsWith('.') ? request : request, base, 'require');
+      } catch {
+        // try the next base
+      }
+    }
+    return false;
+  }
+
+  /** `Module._load` — require a request, returning its exports. */
+  load(request: string, parent?: { filename?: string } | string, isMain?: boolean): unknown {
+    const from =
+      typeof parent === 'string' ? parent : parent?.filename ?? p.join(this.#vfs.cwd, 'index.js');
+    return this.require(from, request, 'require');
+  }
+
+  /** `Module._readPackage` — the `type`/`exists`/`pjsonPath` triple Node returns. */
+  readPackage(request: string): { type: string; exists: boolean; pjsonPath: string } {
+    const pjsonPath = p.join(request, 'package.json');
+    if (!this.#vfs.exists(pjsonPath)) return { type: 'none', exists: false, pjsonPath };
+    try {
+      const json = JSON.parse(new TextDecoder().decode(this.#vfs.readFile(pjsonPath))) as { type?: string };
+      if (json.type === 'module' || json.type === 'commonjs') {
+        return { type: json.type, exists: true, pjsonPath };
+      }
+      return { type: 'none', exists: true, pjsonPath };
+    } catch {
+      return { type: 'none', exists: true, pjsonPath };
+    }
+  }
+
+  /** `Module._stat` — `0` for a file, `1` for a directory, `-2` (ENOENT) otherwise. */
+  statModule(filename: string): number {
+    if (!this.#vfs.exists(filename)) return -2;
+    return this.#vfs.stat(filename).type === 'dir' ? 1 : 0;
+  }
+
+  /** `Module._stat` variant returning a `{ type }` record (internal Node shape). */
+  statModuleObject(filename: string): { type: string } {
+    if (!this.#vfs.exists(filename)) return { type: 'ENOENT' };
+    return { type: this.#vfs.stat(filename).type === 'dir' ? 'dir' : 'file' };
+  }
 
   /**
    * Load a module by absolute VFS path.
@@ -541,7 +771,7 @@ export class ModuleLoader {
    * else about the load (resolution root, module type, wrapper parameters) is
    * derived from the path exactly as usual.
    */
-  loadModule(absPath: string, sourceOverride?: string): unknown {
+  loadModule(absPath: string, sourceOverride?: string, forceEsm = false): unknown {
     const cached = this.#cache.get(absPath);
     if (cached && sourceOverride === undefined) return cached.exports;
 
@@ -553,7 +783,9 @@ export class ModuleLoader {
     }
 
     const source = stripShebang(sourceOverride ?? new TextDecoder().decode(this.#vfs.readFile(absPath)));
-    const isEsm = absPath.endsWith('.mjs') || (absPath.endsWith('.js') && this.#isPackageEsm(absPath));
+    const isEsm =
+      forceEsm || absPath.endsWith('.mjs') || (absPath.endsWith('.js') && this.#isPackageEsm(absPath));
+    this.#maybeCacheSourceMap(absPath, source);
 
     const mod: UserModule = { exports: {}, state: 'loading' };
     this.#cache.set(absPath, mod);
@@ -670,4 +902,108 @@ export class ModuleLoader {
   reset(): void {
     this.#cache.clear();
   }
+}
+
+/** `internal/util#isUnderNodeModules` — a path component matching `node_modules`. */
+function isUnderNodeModules(filename: string): boolean {
+  return /^(?:.*)[\\/]node_modules[\\/]/.test(filename);
+}
+
+/** `node_modules` directories walked up from `fromDir`, nearest first. */
+function walkUpNodeModules(fromDir: string): string[] {
+  const parts = p.segments(fromDir);
+  const dirs: string[] = [];
+  for (let i = parts.length; i >= 0; i--) {
+    dirs.push('/' + parts.slice(0, i).concat('node_modules').join('/'));
+  }
+  return dirs;
+}
+
+/** Last `//# sourceURL=`-style magic comment in `content`, if any. */
+function lastMagicComment(re: RegExp, content: string): string | undefined {
+  let match: RegExpExecArray | null;
+  let value: string | undefined;
+  re.lastIndex = 0;
+  while ((match = re.exec(content)) !== null) {
+    value = match[1];
+    if (match.index === re.lastIndex) re.lastIndex++;
+  }
+  return value;
+}
+
+const kSourceMappingURLMagicComment = /\/[*/]#\s+sourceMappingURL=([^\s]+)/g;
+const kSourceURLMagicComment = /\/[*/]#\s+sourceURL=([^\s]+)/g;
+
+/** `internal/source_map/source_map_cache#lineLengths`. */
+function lineLengths(content: string): number[] {
+  if (/[\u2028\u2029]/.test(content)) return lineLengthsWithUnicodeTerminators(content);
+  const output: number[] = [];
+  let lineStart = 0;
+  let lineEnd: number;
+  while ((lineEnd = content.indexOf('\n', lineStart)) !== -1) {
+    output.push(lineEnd - lineStart);
+    lineStart = lineEnd + 1;
+  }
+  output.push(content.length - lineStart);
+  return output;
+}
+
+function lineLengthsWithUnicodeTerminators(content: string): number[] {
+  const output: number[] = [];
+  let lineLength = 0;
+  for (let i = 0; i < content.length; i++, lineLength++) {
+    const codePoint = content.codePointAt(i) as number;
+    if (codePoint === 10 || codePoint === 0x2028 || codePoint === 0x2029) {
+      output.push(lineLength);
+      lineLength = -1;
+    }
+  }
+  output.push(lineLength);
+  return output;
+}
+
+/**
+ * `internal/source_map/source_map_cache#sourceMapFromDataUrl` — decode an inline
+ * `data:application/json[;base64],…` source map and absolutize its `sources`.
+ */
+function sourceMapFromDataUrl(sourceURL: string, sourceMapURL: string): Record<string, unknown> | null {
+  if (!sourceMapURL.startsWith('data:')) return null;
+  const body = sourceMapURL.slice('data:'.length);
+  const comma = body.indexOf(',');
+  if (comma < 0) return null;
+  const format = body.slice(0, comma);
+  const data = body.slice(comma + 1);
+  const splitFormat = format.split(';');
+  const contentType = splitFormat[0];
+  const base64 = splitFormat[splitFormat.length - 1] === 'base64';
+  if (contentType !== 'application/json') return null;
+  try {
+    const decoded = base64 ? decodeBase64(data) : decodeURIComponent(data);
+    const parsed = JSON.parse(decoded) as Record<string, unknown>;
+    return sourcesToAbsolute(sourceURL, parsed);
+  } catch {
+    return null;
+  }
+}
+
+function decodeBase64(data: string): string {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+/** `internal/source_map/source_map_cache#sourcesToAbsolute`. */
+function sourcesToAbsolute(baseURL: string, data: Record<string, unknown>): Record<string, unknown> {
+  const sources = data.sources as string[] | undefined;
+  if (Array.isArray(sources)) {
+    const sourceRoot = (data.sourceRoot as string | undefined) ?? '';
+    data.sources = sources.map((source) => {
+      const joined = sourceRoot + source;
+      if (p.isAbsolute(joined)) return cjsFilenameToURL(joined);
+      return new URL(joined, baseURL).href;
+    });
+  }
+  data.sourceRoot = '';
+  return data;
 }

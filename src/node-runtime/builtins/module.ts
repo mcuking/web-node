@@ -48,7 +48,7 @@ export const moduleSpec: BuiltinSpec = {
       (ctx as unknown as { userRequire?: UserRequireFn }).userRequire;
 
     /** Node's `SourceMap` support flags (`setSourceMapsSupport`/`getSourceMapsSupport`). */
-    const sourceMapsSupport = { enabled: false, nodeModules: false, generatedCode: false };
+    const userLoader = (ctx as unknown as { userLoader?: import('./types').UserLoader }).userLoader;
 
     class Module {
       id: string;
@@ -163,50 +163,37 @@ export const moduleSpec: BuiltinSpec = {
       static _pathCache = new Map<string, string>();
 
       /** @internal — the web-node loader owns path resolution. */
-      static _findPath = (_request: string, _paths?: unknown, _isMain?: unknown): never => {
-        throw notImplemented(
-          'api',
-          'module.Module._findPath',
-          'Path resolution is owned by the web-node loader.',
-        );
+      static _findPath = (request: string, paths?: string[], isMain?: boolean): string | false => {
+        if (userLoader) return userLoader.findPath(request, paths, isMain);
+        throw notImplemented('api', 'module.Module._findPath', 'Path resolution is owned by the web-node loader.');
       };
       /** @internal — global search paths are fixed to `[]` here. */
       static _initPaths = (): void => {
         Module.globalPaths = [];
       };
       /** @internal — the web-node loader owns module loading. */
-      static _load = (_request: string, _parent?: unknown, _isMain?: unknown): never => {
-        throw notImplemented(
-          'api',
-          'module.Module._load',
-          'Module loading is owned by the web-node loader.',
-        );
+      static _load = (request: string, parent?: unknown, isMain?: boolean): unknown => {
+        if (userLoader) return userLoader.load(request, parent, isMain);
+        throw notImplemented('api', 'module.Module._load', 'Module loading is owned by the web-node loader.');
       };
       /** @internal — builtins preload through `require` in the loader. */
-      static _preloadModules = (_requests?: unknown): never => {
-        throw notImplemented(
-          'api',
-          'module.Module._preloadModules',
-          'Preloading is owned by the web-node loader.',
-        );
+      static _preloadModules = (requests?: string[]): void => {
+        for (const request of requests ?? []) {
+          const load = loader();
+          if (load) load('/index.js', request);
+        }
       };
       /** @internal — package.json reading needs the loader's resolver. */
-      static _readPackage = (_request?: unknown): never => {
-        throw notImplemented(
-          'api',
-          'module.Module._readPackage',
-          'Package.json reading is owned by the web-node loader.',
-        );
+      static _readPackage = (request: string): unknown => {
+        if (userLoader) return userLoader.readPackage(request);
+        throw notImplemented('api', 'module.Module._readPackage', 'Package.json reading is owned by the web-node loader.');
       };
-      static _resolveLookupPaths = (_request: string, _parent?: unknown): string[] =>
-        Module.globalPaths.slice();
+      static _resolveLookupPaths = (request: string, _parent?: unknown): string[] =>
+        request.startsWith('.') ? ['.'] : Module.globalPaths.slice();
       /** @internal — the web-node loader owns fs stats. */
-      static _stat = (_filename?: unknown): never => {
-        throw notImplemented(
-          'api',
-          'module.Module._stat',
-          'Filesystem stats are owned by the web-node loader.',
-        );
+      static _stat = (filename: string): number => {
+        if (userLoader) return userLoader.statModule(filename);
+        throw notImplemented('api', 'module.Module._stat', 'Filesystem stats are owned by the web-node loader.');
       };
 
       /** `module.runMain()` — re-run the entry point (bootstrap-only). */
@@ -218,7 +205,8 @@ export const moduleSpec: BuiltinSpec = {
         );
       };
       /** `module.registerHooks(hooks)` — synchronous loader hooks. */
-      static registerHooks = (_hooks?: unknown): never => {
+      static registerHooks = (hooks?: unknown): unknown => {
+        if (userLoader) return userLoader.registerHooks(hooks);
         throw notImplemented(
           'api',
           'module.Module.registerHooks',
@@ -234,7 +222,8 @@ export const moduleSpec: BuiltinSpec = {
         );
       };
       /** `module.findPackageJSON(packageJsonPath, base)` — needs the loader. */
-      static findPackageJSON = (_packageJsonPath?: unknown, ..._rest: unknown[]): never => {
+      static findPackageJSON = (specifier: string, base?: string | URL): string => {
+        if (userLoader) return userLoader.findPackageJSON(specifier, base);
         throw notImplemented(
           'api',
           'module.Module.findPackageJSON',
@@ -242,23 +231,23 @@ export const moduleSpec: BuiltinSpec = {
         );
       };
 
-      /** `module.findSourceMap(path)` — no source maps are registered here. */
-      static findSourceMap = (_path?: unknown, ..._rest: unknown[]): undefined => undefined;
+      /** `module.findSourceMap(path)` — the map registered when the module loaded. */
+      static findSourceMap = (sourceURL?: unknown): unknown => {
+        if (userLoader) return userLoader.findSourceMap(sourceURL);
+        return undefined;
+      };
       /** `module.getSourceMapsSupport()` — reflects `setSourceMapsSupport`. */
-      static getSourceMapsSupport = (): { enabled: boolean; nodeModules: boolean; generatedCode: boolean } => ({
-        enabled: sourceMapsSupport.enabled,
-        nodeModules: sourceMapsSupport.nodeModules,
-        generatedCode: sourceMapsSupport.generatedCode,
-      });
+      static getSourceMapsSupport = (): { enabled: boolean; nodeModules: boolean; generatedCode: boolean } =>
+        userLoader ? userLoader.sourceMapsSupport : { enabled: false, nodeModules: false, generatedCode: false };
       /** `module.setSourceMapsSupport(enabled, options)` — records the flags. */
-      static setSourceMapsSupport = (enabled: unknown, ...rest: unknown[]): void => {
+      static setSourceMapsSupport = (enabled: boolean, options?: { nodeModules?: boolean; generatedCode?: boolean }): void => {
+        if (userLoader) return userLoader.setSourceMapsSupport(enabled, options);
         if (typeof enabled !== 'boolean') {
-          throw new TypeError('The "enabled" argument must be of type boolean');
+          throw Object.assign(
+            new TypeError(`The "enabled" argument must be of type boolean. Received type ${typeof enabled}`),
+            { code: 'ERR_INVALID_ARG_TYPE' },
+          );
         }
-        const options = (rest[0] ?? {}) as { nodeModules?: boolean; generatedCode?: boolean };
-        sourceMapsSupport.enabled = enabled;
-        sourceMapsSupport.nodeModules = options.nodeModules ?? enabled;
-        sourceMapsSupport.generatedCode = options.generatedCode ?? enabled;
       };
 
       /** `module.getCompileCacheDir()` — the cache is never enabled here. */

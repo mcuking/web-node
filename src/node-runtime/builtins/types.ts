@@ -14,6 +14,25 @@ export interface BuiltinInitContext {
   builtinModuleIds: string[];
   /** Set by the module loader so `module.createRequire` can resolve user files. */
   userRequire?: UserRequireFn;
+  /** Set by the module loader so `module` can drive the sync loader hooks. */
+  userLoader?: UserLoader;
+}
+
+/**
+ * The slice of `ModuleLoader` that the `module` builtin drives: the synchronous
+ * loader hooks plus the loader-owned `findSourceMap`/`findPackageJSON`/internals.
+ * Declared structurally to avoid a `builtins → loader` import cycle.
+ */
+export interface UserLoader {
+  registerHooks(hooks: unknown): unknown;
+  findSourceMap(sourceURL: unknown): unknown;
+  findPackageJSON(specifier: string, base?: string | URL): string;
+  findPath(request: string, paths?: string[], isMain?: boolean): string | false;
+  load(request: string, parent?: unknown, isMain?: boolean): unknown;
+  readPackage(request: string): unknown;
+  statModule(filename: string): number;
+  setSourceMapsSupport(enabled: boolean, options?: { nodeModules?: boolean; generatedCode?: boolean }): void;
+  readonly sourceMapsSupport: { enabled: boolean; nodeModules: boolean; generatedCode: boolean };
 }
 
 /** `require` facade the loader hands to `module.createRequire`, with `resolve`. */

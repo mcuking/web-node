@@ -1,0 +1,184 @@
+{
+  "retKeys": [
+    "resolve",
+    "load"
+  ],
+  "deregisterType": "function",
+  "a": {
+    "hello": "world"
+  },
+  "sawResolveForA": true,
+  "sawLoadForA": true,
+  "resolveConditions": "require,node,node-addons,module-sync",
+  "patched": {
+    "which": "patched"
+  },
+  "unpatched": {
+    "which": "plain"
+  },
+  "missingShortCircuit": {
+    "ok": false,
+    "code": "ERR_INVALID_RETURN_PROPERTY_VALUE",
+    "name": "TypeError",
+    "msg": "Expected true to be returned for the \"shortCircuit\" from the \"resolve\" hook but got undefined."
+  },
+  "noArg": {
+    "ok": false,
+    "code": null,
+    "name": "TypeError",
+    "msg": "Cannot destructure property 'resolve' of 'hooks' as it is undefined."
+  },
+  "badResolve": {
+    "ok": false,
+    "code": "ERR_INVALID_ARG_TYPE",
+    "name": "TypeError",
+    "msg": "The \"hooks.resolve\" property must be of type function. Received type number (3)"
+  },
+  "fpjDep": {
+    "ok": true,
+    "value": "<d>/node_modules/dep/package.json"
+  },
+  "fpjDepSub": {
+    "ok": true,
+    "value": "<d>/node_modules/dep/package.json"
+  },
+  "fpjMissing": {
+    "ok": false,
+    "code": "ERR_MODULE_NOT_FOUND",
+    "name": "Error",
+    "msg": "Cannot find package 'nope' imported from <d>/x.js"
+  },
+  "fpjNoSpec": {
+    "ok": false,
+    "code": "ERR_MISSING_ARGS",
+    "name": "TypeError",
+    "msg": "The \"specifier\" argument must be specified"
+  },
+  "nodeModulePaths": {
+    "ok": true,
+    "value": [
+      "/a/b/c/node_modules",
+      "/a/b/node_modules",
+      "/a/node_modules",
+      "/node_modules"
+    ]
+  },
+  "findPathRel": {
+    "ok": true,
+    "value": "<d>/node_modules/dep/index.js"
+  },
+  "findPathMissing": {
+    "ok": true,
+    "value": false
+  },
+  "statFile": {
+    "ok": true,
+    "value": 0
+  },
+  "statDir": {
+    "ok": true,
+    "value": 1
+  },
+  "statMissing": {
+    "ok": true,
+    "value": -2
+  },
+  "resolveLookupPathsRel": {
+    "ok": true,
+    "value": [
+      "."
+    ]
+  },
+  "readPackage": {
+    "ok": true,
+    "value": {
+      "type": "none",
+      "exists": false,
+      "pjsonPath": "<d>/node_modules/dep/index.js/package.json"
+    }
+  },
+  "constants": {
+    "ok": true,
+    "value": {
+      "compileCacheStatus": {
+        "FAILED": 0,
+        "ENABLED": 1,
+        "ALREADY_ENABLED": 2,
+        "DISABLED": 3
+      }
+    }
+  },
+  "SourceMapName": "SourceMap",
+  "SourceMapLength": 1,
+  "defaultSupport": {
+    "ok": true,
+    "value": {
+      "enabled": false,
+      "nodeModules": false,
+      "generatedCode": false
+    }
+  },
+  "setNonBool": {
+    "ok": false,
+    "code": "ERR_INVALID_ARG_TYPE",
+    "name": "TypeError",
+    "msg": "The \"enabled\" argument must be of type boolean. Received type string ('x')"
+  },
+  "newSourceMapNoArg": {
+    "ok": false,
+    "code": "ERR_INVALID_ARG_TYPE",
+    "name": "TypeError",
+    "msg": "The \"payload\" argument must be of type object. Received undefined"
+  },
+  "supportAfterSet": {
+    "ok": true,
+    "value": {
+      "enabled": true,
+      "nodeModules": false,
+      "generatedCode": false
+    }
+  },
+  "sm": {
+    "ctor": "SourceMap",
+    "ownKeys": [],
+    "payloadKeys": [
+      "version",
+      "file",
+      "sourceRoot",
+      "sources",
+      "sourcesContent",
+      "names",
+      "mappings"
+    ],
+    "lineLengthsLen": 4,
+    "entry": {
+      "generatedLine": 0,
+      "generatedColumn": 0,
+      "originalSource": "file://<d>/sm.ts",
+      "originalLine": 0,
+      "originalColumn": 0
+    },
+    "origin": {
+      "fileName": "file://<d>/sm.ts",
+      "lineNumber": 3,
+      "columnNumber": 1
+    }
+  },
+  "findMissing": {
+    "ok": true
+  },
+  "findNonString": {
+    "ok": true
+  },
+  "findBuiltin": {
+    "ok": true
+  },
+  "supportAfterUnset": {
+    "ok": true,
+    "value": {
+      "enabled": false,
+      "nodeModules": false,
+      "generatedCode": false
+    }
+  }
+}
