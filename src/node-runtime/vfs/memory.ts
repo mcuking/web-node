@@ -128,10 +128,59 @@ export class MemoryVfs implements Vfs {
   }
 
   stat(path: string): Stat {
+    return this.#statWith(path, 'stat');
+  }
+
+  lstat(path: string): Stat {
+    // No symlinks exist in the VFS, so lstat is stat with a different syscall
+    // name — which is exactly the observable difference Node exposes.
+    return this.#statWith(path, 'lstat');
+  }
+
+  /**
+   * Shared `stat`/`lstat` lookup. When the entry is missing Node distinguishes a
+   * genuinely absent path (`ENOENT`) from one whose ancestor is a non-directory
+   * (`ENOTDIR`): traversing `file/child` fails with `ENOTDIR` because `file`
+   * cannot be descended into.
+   */
+  #statWith(path: string, syscall: string): Stat {
     const abs = this.resolve(path);
+    return this.#toStat(this.#entryOrThrow(abs, path, syscall));
+  }
+
+  /**
+   * Look up an entry, or throw the error Node's syscall would: `ENOENT` when it
+   * is genuinely absent, `ENOTDIR` when an ancestor is a regular file.
+   */
+  #entryOrThrow(abs: string, path: string, syscall: string): Entry {
     const e = this.#entries.get(abs);
-    if (!e) throw new VfsError('ENOENT', 'stat', path);
-    return this.#toStat(e);
+    if (e) return e;
+    if (this.#ancestorFile(abs) !== undefined) throw new VfsError('ENOTDIR', syscall, path);
+    throw new VfsError('ENOENT', syscall, path);
+  }
+
+  /** The nearest ancestor of `abs` (excluding itself) that is a regular file. */
+  #ancestorFile(abs: string): string | undefined {
+    let cur = p.dirname(abs);
+    while (cur !== '/' && cur !== '.') {
+      const e = this.#entries.get(cur);
+      if (e && e.type !== 'dir') return cur;
+      const parent = p.dirname(cur);
+      if (parent === cur) break;
+      cur = parent;
+    }
+    return undefined;
+  }
+
+  /** `fs.realpath`: resolve the path and verify it exists (syscall `lstat`). */
+  realpath(input: PathLike): string {
+    const abs = this.resolve(input);
+    const e = this.#entries.get(abs);
+    if (!e) {
+      if (this.#ancestorFile(abs) !== undefined) throw new VfsError('ENOTDIR', 'lstat', abs);
+      throw new VfsError('ENOENT', 'lstat', abs);
+    }
+    return abs;
   }
 
   #toStat(e: Entry): Stat {
@@ -156,8 +205,7 @@ export class MemoryVfs implements Vfs {
 
   readFile(path: string): Uint8Array {
     const abs = this.resolve(path);
-    const e = this.#entries.get(abs);
-    if (!e) throw new VfsError('ENOENT', 'open', path);
+    const e = this.#entryOrThrow(abs, path, 'open');
     if (e.type === 'dir') throw new VfsError('EISDIR', 'read', path);
     return e.data.slice();
   }
@@ -242,7 +290,10 @@ export class MemoryVfs implements Vfs {
   readdir(path: string, opts: ReaddirOptions = {}): Dirent[] {
     const abs = this.resolve(path);
     const e = this.#entries.get(abs);
-    if (!e) throw new VfsError('ENOENT', 'scandir', path);
+    if (!e) {
+      if (this.#ancestorFile(abs) !== undefined) throw new VfsError('ENOTDIR', 'scandir', path);
+      throw new VfsError('ENOENT', 'scandir', path);
+    }
     if (e.type !== 'dir') throw new VfsError('ENOTDIR', 'scandir', path);
 
     const prefix = abs === '/' ? '/' : abs + '/';
@@ -270,16 +321,19 @@ export class MemoryVfs implements Vfs {
     return out;
   }
 
-  rm(path: string, opts: { recursive?: boolean; force?: boolean } = {}): void {
+  rm(path: string, opts: { recursive?: boolean; force?: boolean; syscall?: 'unlink' | 'rmdir' | 'lstat' } = {}): void {
     const abs = this.resolve(path);
     const e = this.#entries.get(abs);
     if (!e) {
       if (opts.force) return;
-      throw new VfsError('ENOENT', 'unlink', path);
+      // `fs.rm` probes with lstat, `unlink`/`rmdir` report themselves.
+      throw new VfsError('ENOENT', opts.syscall ?? 'unlink', path);
     }
     if (abs === '/') throw new VfsError('EBUSY', 'unlink', path);
 
     if (e.type === 'dir') {
+      // `unlink` never removes a directory (libuv reports EPERM on macOS).
+      if (opts.syscall === 'unlink' && !opts.recursive) throw new VfsError('EPERM', 'unlink', path);
       const prefix = abs + '/';
       const children = [...this.#entries.keys()].filter((k) => k.startsWith(prefix));
       if (children.length > 0) {
@@ -288,6 +342,8 @@ export class MemoryVfs implements Vfs {
       }
       this.#entries.delete(abs);
     } else {
+      // `rmdir` requires a directory; a regular file yields ENOTDIR.
+      if (opts.syscall === 'rmdir') throw new VfsError('ENOTDIR', 'rmdir', path);
       this.#entries.delete(abs);
     }
     this.#touch(abs, 'delete');
@@ -297,9 +353,14 @@ export class MemoryVfs implements Vfs {
     const src = this.resolve(from);
     const dst = this.resolve(to);
     const e = this.#entries.get(src);
-    if (!e) throw new VfsError('ENOENT', 'rename', from);
+    if (!e) {
+      if (this.#ancestorFile(src) !== undefined) throw new VfsError('ENOTDIR', 'rename', from, undefined, to);
+      throw new VfsError('ENOENT', 'rename', from, undefined, to);
+    }
     const [dstDir] = this.#parent(dst);
-    this.#requireDir(dstDir, 'rename', to);
+    const dstDirEntry = this.#entries.get(dstDir);
+    if (!dstDirEntry) throw new VfsError('ENOENT', 'rename', from, undefined, to);
+    if (dstDirEntry.type !== 'dir') throw new VfsError('ENOTDIR', 'rename', from, undefined, to);
     this.#entries.delete(src);
     this.#entries.set(dst, e);
     if (e.type === 'dir') {
@@ -318,18 +379,24 @@ export class MemoryVfs implements Vfs {
   }
 
   copyFile(from: string, to: string, mode = 0): void {
+    const src = this.resolve(from);
+    const srcE = this.#entries.get(src);
+    if (!srcE) {
+      if (this.#ancestorFile(src) !== undefined) throw new VfsError('ENOTDIR', 'copyfile', from, undefined, to);
+      throw new VfsError('ENOENT', 'copyfile', from, undefined, to);
+    }
+    // libuv's `copyfile(2)` on macOS reports ENOTSUP for a directory source.
+    if (srcE.type === 'dir') throw new VfsError('ENOTSUP', 'copyfile', from, undefined, to);
     // `COPYFILE_EXCL` (1): fail if the destination already exists.
     if ((mode & 1) !== 0 && this.exists(to)) {
-      throw new VfsError('EEXIST', 'copyfile', to);
+      throw new VfsError('EEXIST', 'copyfile', from, undefined, to);
     }
-    const data = this.readFile(from);
-    this.writeFile(to, data);
+    this.writeFile(to, srcE.data.slice());
   }
 
   chmod(path: string, mode: number): void {
     const abs = this.resolve(path);
-    const e = this.#entries.get(abs);
-    if (!e) throw new VfsError('ENOENT', 'chmod', path);
+    const e = this.#entryOrThrow(abs, path, 'chmod');
     e.mode = mode & 0o777;
     this.#touch(abs, 'change');
   }

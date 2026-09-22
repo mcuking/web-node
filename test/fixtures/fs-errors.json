@@ -1,0 +1,370 @@
+{
+  "readFileENOENT": {
+    "code": "ENOENT",
+    "syscall": "open",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, open '<d>/missing.txt'"
+  },
+  "readFileENOENTUtf8": {
+    "code": "ENOENT",
+    "syscall": "open",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, open '<d>/missing.txt'"
+  },
+  "readFileEISDIR": {
+    "code": "EISDIR",
+    "syscall": "read",
+    "errno": -21,
+    "name": "Error",
+    "message": "EISDIR: illegal operation on a directory, read"
+  },
+  "readFileEISDIRUtf8": {
+    "code": "EISDIR",
+    "syscall": "read",
+    "errno": -21,
+    "name": "Error",
+    "message": "EISDIR: illegal operation on a directory, read"
+  },
+  "readFileFdEISDIR": {
+    "code": "EISDIR",
+    "syscall": "read",
+    "errno": -21,
+    "name": "Error",
+    "message": "EISDIR: illegal operation on a directory, read"
+  },
+  "openENOENT": {
+    "code": "ENOENT",
+    "syscall": "open",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, open '<d>/missing.txt'"
+  },
+  "openEACCES": "no-throw",
+  "statENOENT": {
+    "code": "ENOENT",
+    "syscall": "stat",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, stat '<d>/missing.txt'"
+  },
+  "lstatENOENT": {
+    "code": "ENOENT",
+    "syscall": "lstat",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, lstat '<d>/missing.txt'"
+  },
+  "statNestedENOTDIR": {
+    "code": "ENOTDIR",
+    "syscall": "stat",
+    "errno": -20,
+    "name": "Error",
+    "path": "<d>/a.txt/nested",
+    "message": "ENOTDIR: not a directory, stat '<d>/a.txt/nested'"
+  },
+  "accessENOENT": {
+    "code": "ENOENT",
+    "syscall": "access",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, access '<d>/missing.txt'"
+  },
+  "realpathENOENT": {
+    "code": "ENOENT",
+    "syscall": "lstat",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, lstat '<d>/missing.txt'"
+  },
+  "readlinkENOENT": {
+    "code": "ENOENT",
+    "syscall": "readlink",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, readlink '<d>/missing.txt'"
+  },
+  "readdirENOTDIR": {
+    "code": "ENOTDIR",
+    "syscall": "scandir",
+    "errno": -20,
+    "name": "Error",
+    "path": "<d>/a.txt",
+    "message": "ENOTDIR: not a directory, scandir '<d>/a.txt'"
+  },
+  "readdirENOENT": {
+    "code": "ENOENT",
+    "syscall": "scandir",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, scandir '<d>/missing.txt'"
+  },
+  "opendirENOTDIR": {
+    "code": "ENOTDIR",
+    "syscall": "opendir",
+    "errno": -20,
+    "name": "Error",
+    "message": "ENOTDIR: not a directory, opendir"
+  },
+  "opendirENOENT": {
+    "code": "ENOENT",
+    "syscall": "opendir",
+    "errno": -2,
+    "name": "Error",
+    "message": "ENOENT: no such file or directory, opendir"
+  },
+  "mkdirEEXIST": {
+    "code": "EEXIST",
+    "syscall": "mkdir",
+    "errno": -17,
+    "name": "Error",
+    "path": "<d>/sub",
+    "message": "EEXIST: file already exists, mkdir '<d>/sub'"
+  },
+  "mkdirENOTDIR": {
+    "code": "ENOTDIR",
+    "syscall": "mkdir",
+    "errno": -20,
+    "name": "Error",
+    "path": "<d>/a.txt/x",
+    "message": "ENOTDIR: not a directory, mkdir '<d>/a.txt/x'"
+  },
+  "mkdirRecursiveOverFile": {
+    "code": "EEXIST",
+    "syscall": "mkdir",
+    "errno": -17,
+    "name": "Error",
+    "path": "<d>/a.txt",
+    "message": "EEXIST: file already exists, mkdir '<d>/a.txt'"
+  },
+  "rmdirENOENT": {
+    "code": "ENOENT",
+    "syscall": "rmdir",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, rmdir '<d>/missing.txt'"
+  },
+  "rmdirENOTDIR": {
+    "code": "ENOTDIR",
+    "syscall": "rmdir",
+    "errno": -20,
+    "name": "Error",
+    "path": "<d>/a.txt",
+    "message": "ENOTDIR: not a directory, rmdir '<d>/a.txt'"
+  },
+  "rmdirNotEmpty": {
+    "code": "ENOTEMPTY",
+    "syscall": "rmdir",
+    "errno": -66,
+    "name": "Error",
+    "path": "<d>/sub",
+    "message": "ENOTEMPTY: directory not empty, rmdir '<d>/sub'"
+  },
+  "unlinkENOENT": {
+    "code": "ENOENT",
+    "syscall": "unlink",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, unlink '<d>/missing.txt'"
+  },
+  "unlinkEISDIR": {
+    "code": "EPERM",
+    "syscall": "unlink",
+    "errno": -1,
+    "name": "Error",
+    "path": "<d>/sub",
+    "message": "EPERM: operation not permitted, unlink '<d>/sub'"
+  },
+  "rmENOENT": {
+    "code": "ENOENT",
+    "syscall": "lstat",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, lstat '<d>/missing.txt'"
+  },
+  "rmDirNoRecursive": {
+    "code": "ERR_FS_EISDIR",
+    "syscall": "rm",
+    "errno": 21,
+    "name": "SystemError",
+    "path": "<d>/sub",
+    "message": "Path is a directory: rm returned EISDIR (is a directory) <d>/sub"
+  },
+  "renameENOENT": {
+    "code": "ENOENT",
+    "syscall": "rename",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "dest": "<d>/x",
+    "message": "ENOENT: no such file or directory, rename '<d>/missing.txt' -> '<d>/x'"
+  },
+  "renameENOTDIR": {
+    "code": "ENOTDIR",
+    "syscall": "rename",
+    "errno": -20,
+    "name": "Error",
+    "path": "<d>/a.txt/y",
+    "dest": "<d>/z",
+    "message": "ENOTDIR: not a directory, rename '<d>/a.txt/y' -> '<d>/z'"
+  },
+  "copyENOENT": {
+    "code": "ENOENT",
+    "syscall": "copyfile",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "dest": "<d>/c",
+    "message": "ENOENT: no such file or directory, copyfile '<d>/missing.txt' -> '<d>/c'"
+  },
+  "copyEISDIR": {
+    "code": "ENOTSUP",
+    "syscall": "copyfile",
+    "errno": -45,
+    "name": "Error",
+    "path": "<d>/sub",
+    "dest": "<d>/c",
+    "message": "ENOTSUP: operation not supported on socket, copyfile '<d>/sub' -> '<d>/c'"
+  },
+  "copyExclEEXIST": {
+    "code": "EEXIST",
+    "syscall": "copyfile",
+    "errno": -17,
+    "name": "Error",
+    "path": "<d>/a.txt",
+    "dest": "<d>/dup",
+    "message": "EEXIST: file already exists, copyfile '<d>/a.txt' -> '<d>/dup'"
+  },
+  "appendEISDIR": {
+    "code": "EISDIR",
+    "syscall": "open",
+    "errno": -21,
+    "name": "Error",
+    "path": "<d>/sub",
+    "message": "EISDIR: illegal operation on a directory, open '<d>/sub'"
+  },
+  "chmodENOENT": {
+    "code": "ENOENT",
+    "syscall": "chmod",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, chmod '<d>/missing.txt'"
+  },
+  "chownENOENT": {
+    "code": "ENOENT",
+    "syscall": "chown",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, chown '<d>/missing.txt'"
+  },
+  "truncateENOENT": {
+    "code": "ENOENT",
+    "syscall": "open",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, open '<d>/missing.txt'"
+  },
+  "utimesENOENT": {
+    "code": "ENOENT",
+    "syscall": "utime",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, utime '<d>/missing.txt'"
+  },
+  "linkENOENT": {
+    "code": "ENOENT",
+    "syscall": "link",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "dest": "<d>/lnk",
+    "message": "ENOENT: no such file or directory, link '<d>/missing.txt' -> '<d>/lnk'"
+  },
+  "symlinkENOTDIR": {
+    "code": "ENOTDIR",
+    "syscall": "symlink",
+    "errno": -20,
+    "name": "Error",
+    "path": "t",
+    "dest": "<d>/a.txt/s",
+    "message": "ENOTDIR: not a directory, symlink 't' -> '<d>/a.txt/s'"
+  },
+  "errIsError": true,
+  "errCtor": "Error",
+  "errName": "Error",
+  "errOwnProps": [
+    "code",
+    "errno",
+    "message",
+    "path",
+    "syscall"
+  ],
+  "sysErrIsError": true,
+  "sysErrCtor": "SystemError",
+  "sysErrOwnProps": [
+    "code",
+    "errno",
+    "info",
+    "message",
+    "name",
+    "path",
+    "syscall"
+  ],
+  "pReadEISDIR": {
+    "code": "EISDIR",
+    "syscall": "read",
+    "errno": -21,
+    "name": "Error",
+    "path": "<d>/sub",
+    "message": "EISDIR: illegal operation on a directory, read '<d>/sub'"
+  },
+  "pReadENOENT": {
+    "code": "ENOENT",
+    "syscall": "open",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, open '<d>/missing.txt'"
+  },
+  "pReaddirENOTDIR": {
+    "code": "ENOTDIR",
+    "syscall": "scandir",
+    "errno": -20,
+    "name": "Error",
+    "path": "<d>/a.txt",
+    "message": "ENOTDIR: not a directory, scandir '<d>/a.txt'"
+  },
+  "pMkdirEEXIST": {
+    "code": "EEXIST",
+    "syscall": "mkdir",
+    "errno": -17,
+    "name": "Error",
+    "path": "<d>/sub",
+    "message": "EEXIST: file already exists, mkdir '<d>/sub'"
+  },
+  "pRmENOENT": {
+    "code": "ENOENT",
+    "syscall": "lstat",
+    "errno": -2,
+    "name": "Error",
+    "path": "<d>/missing.txt",
+    "message": "ENOENT: no such file or directory, lstat '<d>/missing.txt'"
+  }
+}

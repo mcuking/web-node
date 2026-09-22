@@ -742,6 +742,10 @@ function makeSystemErrorWithCode(key: string): new (ctx: Record<string, unknown>
       super(key, ctx);
     }
   }
+  // `SystemError`-based errors are instances of `SystemError` in real Node, so
+  // the generated subclass reports that as its class name (`err.constructor`
+  // is `SystemError`); the base class above stays exported under its own name.
+  Object.defineProperty(NodeSystemError, 'name', { value: 'SystemError' });
   // `E(code, msg, SystemError, HideStackFramesError)` (`ERR_FS_EISDIR`,
   // `ERR_SYSTEM_ERROR`) exposes the hide-stack-frames companion on the class;
   // `os.js` reaches for `ERR_SYSTEM_ERROR.HideStackFramesError`. As with the

@@ -79,8 +79,22 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     return toStat(vfs.stat(path));
   }
 
+  /**
+   * Node's *read* errors carry no `path`: `uv_fs_read` runs on an fd, so the
+   * error context has no path (unlike `open`/`stat`). The VFS conflates
+   * open+read in `readFile`, so the sync read call sites drop the path here.
+   */
+  function asReadError(err: unknown): never {
+    if (err instanceof VfsError && err.code === 'EISDIR') throw new VfsError('EISDIR', 'read');
+    throw err as Error;
+  }
+
   function readFileSync(path: string): Uint8Array {
-    return vfs.readFile(path);
+    try {
+      return vfs.readFile(path);
+    } catch (err) {
+      return asReadError(err);
+    }
   }
 
   function writeFileSync(path: string, data: Uint8Array, flag = 'w'): void {
@@ -114,7 +128,12 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     if (fd === 0) return 0; // stdin: EOF in the browser
     const entry = fds.get(fd);
     if (!entry) throw new VfsError('EBADF', 'read', String(fd));
-    const data = vfs.readFile(entry.path);
+    let data: Uint8Array;
+    try {
+      data = vfs.readFile(entry.path);
+    } catch (err) {
+      return asReadError(err);
+    }
     // `-1` means "current position" to `src/node_file.cc` (the readFile context
     // passes it); treat it like `null`.
     const atCurrent = position === null || position === -1;
@@ -579,12 +598,16 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
    * `fs.readFileSync(path, 'utf8')` takes. Synchronous, returns a string.
    */
   function readFileUtf8(pathOrFd: string | number, _flags?: number): string {
-    if (typeof pathOrFd === 'number') {
-      const entry = fds.get(pathOrFd);
-      if (!entry) throw new VfsError('EBADF', 'read', String(pathOrFd));
-      return new TextDecoder().decode(vfs.readFile(entry.path));
+    try {
+      if (typeof pathOrFd === 'number') {
+        const entry = fds.get(pathOrFd);
+        if (!entry) throw new VfsError('EBADF', 'read', String(pathOrFd));
+        return new TextDecoder().decode(vfs.readFile(entry.path));
+      }
+      return new TextDecoder().decode(vfs.readFile(pathOrFd));
+    } catch (err) {
+      return asReadError(err);
     }
-    return new TextDecoder().decode(vfs.readFile(pathOrFd));
   }
 
   /**
@@ -845,7 +868,7 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     readSync,
     writeSync,
     statSync,
-    lstatSync: statSync,
+    lstatSync: (path: string) => toStat(vfs.lstat(path)),
     fstatSync: (fd: number) => {
       const entry = fds.get(fd);
       if (!entry) throw new VfsError('EBADF', 'fstat', String(fd));
@@ -859,8 +882,8 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
       vfs.readdir(path, { withFileTypes: !!withFileTypes }),
     mkdirSync: (path: string, mode?: number, recursive?: boolean) =>
       vfs.mkdir(path, { recursive: !!recursive, mode }),
-    rmdirSync: (path: string, opts?: { recursive?: boolean }) => vfs.rm(path, { recursive: opts?.recursive }),
-    unlinkSync: (path: string) => vfs.rm(path),
+    rmdirSync: (path: string, opts?: { recursive?: boolean }) => vfs.rm(path, { recursive: opts?.recursive, syscall: 'rmdir' }),
+    unlinkSync: (path: string) => vfs.rm(path, { syscall: 'unlink' }),
     renameSync: (from: string, to: string) => vfs.rename(from, to),
     copyFileSync: (from: string, to: string, mode?: number) => vfs.copyFile(from, to, mode),
     chmodSync: (path: string, mode: number) => vfs.chmod(path, mode),
@@ -877,7 +900,7 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     },
     fsyncSync: () => undefined,
     fdatasyncSync: () => undefined,
-    realpathSync: (path: string) => vfs.resolve(path),
+    realpathSync: (path: string) => vfs.realpath(path),
     // `lib/fs.js` calls this positionally: (path, maxRetries, recursive,
     // retryDelay). `validateRmOptionsSync` has already applied `force`/EISDIR
     // logic before we get here, so a missing path is a no-op (as in native Rimraf).
@@ -932,7 +955,7 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     lstat: (path: string, bigint: boolean, token?: unknown, throwIfNoEntry?: boolean) =>
       wrap(() => {
         try {
-          return statSlots(vfs.stat(path), !!bigint);
+          return statSlots(vfs.lstat(path), !!bigint);
         } catch (err) {
           if (throwIfNoEntry === false && isEnoent(err)) return undefined;
           throw err;
@@ -950,15 +973,15 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
       wrap(() => vfs.copyFile(src, dest, mode), token),
     rename: (oldPath: string, newPath: string, token?: unknown) =>
       wrap(() => vfs.rename(oldPath, newPath), token),
-    unlink: (path: string, token?: unknown) => wrap(() => vfs.rm(path), token),
-    rmdir: (path: string, token?: unknown) => wrap(() => vfs.rm(path), token),
+    unlink: (path: string, token?: unknown) => wrap(() => vfs.rm(path, { syscall: 'unlink' }), token),
+    rmdir: (path: string, token?: unknown) => wrap(() => vfs.rm(path, { syscall: 'rmdir' }), token),
     mkdir: (path: string, mode: number | undefined, recursive: boolean, token?: unknown) =>
       wrap(() => vfs.mkdir(path, { recursive: !!recursive, mode }), token),
     readdir: (path: string, _encoding: unknown, withFileTypes: boolean, token?: unknown) =>
       wrap(() => readdirShape(path, !!withFileTypes), token),
     mkdtemp: (prefix: string, _encoding: unknown, token?: unknown) => wrap(() => mkdtempSync(prefix), token),
     realpath: (path: string, encoding: unknown, token?: unknown) =>
-      wrap(() => encodeResult(vfs.resolve(path), encoding), token),
+      wrap(() => encodeResult(vfs.realpath(path), encoding), token),
     openFileHandle: (path: string, flags: number, mode: number, token?: unknown) =>
       wrap(() => new FileHandleBinding(openSync(path, flagsToMode(flags), mode)), token),
     ftruncate: (fd: number, len: number, token?: unknown) => wrap(() => ftruncateFd(fd, len), token),
@@ -976,19 +999,41 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     // The VFS has no ownership model, so the chown family and timestamp setters
     // succeed as no-ops (matching how a real permission-less FS behaves).
     fchown: (_fd: number, _uid: number, _gid: number, token?: unknown) => wrap(() => undefined, token),
-    chown: (_path: string, _uid: number, _gid: number, token?: unknown) => wrap(() => undefined, token),
-    lchown: (_path: string, _uid: number, _gid: number, token?: unknown) => wrap(() => undefined, token),
-    utimes: (_path: string, _atime: number, _mtime: number, token?: unknown) => wrap(() => undefined, token),
+    chown: (path: string, _uid: number, _gid: number, token?: unknown) =>
+      wrap(() => {
+        if (!vfs.exists(path)) throw new VfsError('ENOENT', 'chown', path);
+      }, token),
+    lchown: (path: string, _uid: number, _gid: number, token?: unknown) =>
+      wrap(() => {
+        if (!vfs.exists(path)) throw new VfsError('ENOENT', 'lchown', path);
+      }, token),
+    utimes: (path: string, _atime: number, _mtime: number, token?: unknown) =>
+      wrap(() => {
+        if (!vfs.exists(path)) throw new VfsError('ENOENT', 'utime', path);
+      }, token),
     futimes: (_fd: number, _atime: number, _mtime: number, token?: unknown) => wrap(() => undefined, token),
-    lutimes: (_path: string, _atime: number, _mtime: number, token?: unknown) => wrap(() => undefined, token),
-    // No symlinks in the VFS: fail loudly instead of pretending.
-    symlink: (_target: string, _path: string, _type: number, _token?: unknown) => {
-      throw new VfsError('ENOSYS', 'symlink', String(_path));
+    lutimes: (path: string, _atime: number, _mtime: number, token?: unknown) =>
+      wrap(() => {
+        if (!vfs.exists(path)) throw new VfsError('ENOENT', 'lutime', path);
+      }, token),
+    // No symlink support: reproduce the two ways these calls fail on a real FS
+    // (missing parent, parent is a file) so error handling matches, then fail
+    // loudly rather than silently pretending the link was created.
+    symlink: (target: string, path: string, _type: number, _token?: unknown) => {
+      const abs = vfs.resolve(path);
+      const parent = abs.slice(0, abs.lastIndexOf('/')) || '/';
+      if (!vfs.exists(parent)) throw new VfsError('ENOENT', 'symlink', target, undefined, path);
+      if (vfs.stat(parent).type !== 'dir') {
+        throw new VfsError('ENOTDIR', 'symlink', target, undefined, path);
+      }
+      throw new VfsError('ENOSYS', 'symlink', path);
     },
-    link: (_existing: string, _path: string, _token?: unknown) => {
-      throw new VfsError('ENOSYS', 'link', String(_path));
+    link: (existing: string, path: string, _token?: unknown) => {
+      if (!vfs.exists(existing)) throw new VfsError('ENOENT', 'link', existing, undefined, path);
+      throw new VfsError('ENOSYS', 'link', path);
     },
     readlink: (path: string, _encoding: unknown, _token?: unknown) => {
+      if (!vfs.exists(path)) throw new VfsError('ENOENT', 'readlink', path);
       throw new VfsError('EINVAL', 'readlink', path);
     },
 

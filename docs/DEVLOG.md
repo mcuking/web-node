@@ -244,6 +244,35 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M96 `fs` 错误形状补全
+
+**改了什么**：把 `fs` 各失败路径抛出的错误与真 Node 逐字段对齐——`code`、`syscall`、`errno`、`path`、`dest`、`message`、`name`，以及错误对象自身的形态（`constructor.name` 与自有属性集）。新增差分探针 `tools/fs-errors-probe.cjs`（51 个观测，用 `tools/fs-errors-oracle.mjs` 录成 `test/fixtures/fs-errors.json`），真 Node 与 web-node 各跑一遍 **0 diff**。
+
+**错误对象形态（最关键、影响面最广）**
+- **`VfsError` 现在伪装成普通 `Error`**：`UVException` 在真 Node 里就是 `Error` 实例，于是把类自身的 `.name` 改成 `'Error'`（`err.constructor.name === 'Error'`），并去掉构造器里 `this.name = 'Error'` 的自有属性（`name` 回到原型上，与 Node 一致）。`path`/`dest` 改用 `declare` 字段声明，避免 TS 的 `useDefineForClassFields` 把未赋值的字段 emit 成值为 `undefined` 的自有属性。
+- **`SystemError` 子类名**：`E(code, msg, SystemError)` 那批码（`ERR_FS_EISDIR` 等）生成的错误类现在也叫 `SystemError`（`err.constructor.name`），不再暴露内部的 `NodeSystemError`。
+
+**`syscall` 名（成批修正）**
+- `lstat` 绑定从 `vfs.stat` 改为 `vfs.lstat`（syscall `lstat`）——一并修好 `lstat`/`realpath`/`rm`（缺文件时 Node 用 `lstat` 探测）。
+- `rmdir`/`unlink`/`rm` 现在各报自己的 syscall（`rmdir`/`unlink`/`lstat`），不再一律 `unlink`。
+- `copyFile` 报 `copyfile`（不再透传 `readFile` 的 `open`）。
+- `utimes`/`chown` 报 `utime`/`chown`。
+
+**`path`/`dest`/`message` 与语义**
+- **`ENOTDIR`（祖先为文件）**：新增 `#ancestorFile`，当 `file/child` 这类路径的祖先是非目录时，`stat`/`readdir`/`rename`/`copyfile` 报 `ENOTDIR` 而非 `ENOENT`。
+- **`rename`/`copyFile`/`link`/`symlink` 带 `dest`**：消息形如 `syscall 'from' -> 'to'`（`VfsError` 新增 `dest` 参数）。
+- **`rmdirSync` 作用在文件上不再静默删除**（此前是一枚真 bug：`unlinkSync(dir)` 会直接删目录）——现按 Node：`rmdir` 非目录→`ENOTDIR`、`unlink` 目录→`EPERM`（macOS libuv），非空且非递归→`ENOTEMPTY`。
+- **读错误不带 `path`**：Node 的 `uv_fs_read` 错误无 path（异于 `open`/`stat`），所以同步读（`readFileSync`/`readFileUtf8`/`readSync`）里的 `EISDIR` 会丢掉 `path`（同步 `readFileSync(dir)` 与 promise `readFile(dir)` 的差异正在此）；`copyFile(dir)` 报 `ENOTSUP copyfile`（macOS `copyfile(2)`）。
+- **`opendir` 错误不带 `path`**（消息就是 `ENOENT: no such file or directory, opendir`）。
+- **`readlink` 缺文件报 `ENOENT`**（不再是 `EINVAL`）；无符号链接时非缺失路径仍 `EINVAL`。
+- **`symlink`/`link`**：先复刻真 FS 上本就失败的两种情形（父目录不存在→`ENOENT`、父路径是文件→`ENOTDIR`，均带 `dest`），再响亮抛 `ENOSYS`（VFS 无链接概念，不假装成功）。
+
+**验证**：`tools/fs-errors-probe.cjs` 覆盖读/目录/删除/改名/拷贝/元数据/链接/promise 共 51 个失败路径，真 Node 与 web-node **逐字段 0 diff**。
+**门禁**：`tsc` 干净 · vitest **975 passed / 2 skipped（106/108 文件）** · build worker **2470.16 kB**。
+**已知偏离**：`copyfile` 目录源报 `ENOTSUP`、`unlink` 目录报 `EPERM` 是 macOS/libuv 形状（夹具以 macOS Node v26.9.0 为准）；`symlink`/`link` 在参数合法时抛 `ENOSYS`。
+
+**为什么**：阶段 B 第二项；错误形状是调用者最依赖的可观测面，差分方法同上。
+
 ### 2026-09-22 · M95 `net` 连接生命周期与超时（阶段 B 开张）
 
 **改了什么**：把 `net.Socket` 的连接状态机、事件序、`setTimeout` 超时、半开连接与 `allowHalfOpen` 语义逐字对齐真 Node。新增差分探针 `tools/net-lifecycle-probe.cjs`（真 Node 与 web-node 各跑一遍，`tools/net-lifecycle-oracle.mjs` 录制成 `test/fixtures/net-lifecycle.json`），**首次修正后 0 diff**。过程中修了三个真 bug。

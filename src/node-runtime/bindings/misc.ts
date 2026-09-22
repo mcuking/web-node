@@ -599,8 +599,10 @@ export const fsDirBinding: BindingFactory = (ctx) => {
 
     constructor(path: string) {
       const target = vfs.resolve(String(path));
-      if (!vfs.exists(target)) throw new VfsError('ENOENT', 'opendir', target);
-      if (vfs.stat(target).type !== 'dir') throw new VfsError('ENOTDIR', 'opendir', target);
+      // Node's `opendir` errors carry no path: the error is raised from
+      // `uv_fs_opendir`-style context without one (`opendir` — no path quoted).
+      if (!vfs.exists(target)) throw new VfsError('ENOENT', 'opendir');
+      if (vfs.stat(target).type !== 'dir') throw new VfsError('ENOTDIR', 'opendir');
       this.#entries = vfs.readdir(target);
     }
 

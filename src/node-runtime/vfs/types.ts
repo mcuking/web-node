@@ -69,31 +69,47 @@ export class VfsError extends Error {
   code: string;
   errno: number;
   syscall: string;
-  path?: string;
+  // `declare` so the class-field emit does not create own `path`/`dest`
+  // properties holding `undefined` (Node's errors only have them when set).
+  declare path?: string;
+  declare dest?: string;
 
   /**
    * A filesystem error shaped like the one Node's `UVException` builds
-   * (`lib/internal/errors.js`): `` `${code}: ${description}, ${syscall} '${path}'` ``,
-   * with `name` left as `Error`. The description is libuv's own string
-   * (`UV_ERRNO_MAP` in `deps/uv/include/uv.h`), which is what `uv_strerror`
-   * returns for the matching errno.
+   * (`lib/internal/errors.js`): `` `${code}: ${description}, ${syscall} '${path}'` ``
+   * (or `` … ${syscall} '${path}' -> '${dest}' `` for the two-path calls),
+   * with `name` left on the prototype as `Error`.
+   *
+   * The constructors are deliberately plain `Error`s — that is exactly what
+   * `UVException` produces, so user code that does `err.constructor.name`,
+   * `err instanceof Error`, or `err.name` sees no private class. The class
+   * itself reports its own `name` as `Error` (see the footer) so even
+   * `err.constructor.name` matches.
    */
-  constructor(code: string, syscall: string, path?: string, message?: string) {
+  constructor(code: string, syscall: string, path?: string, message?: string, dest?: string) {
     // An explicit message is used verbatim (that call site owns its wording);
     // otherwise build Node's `code: description, syscall 'path'` form.
     if (message !== undefined) {
       super(message);
     } else {
       const described = `${code}: ${ERRNO_DESC[code] ?? 'unknown error'}, ${syscall}`;
-      super(path !== undefined ? `${described} '${path}'` : described);
+      const withPath = path !== undefined ? ` '${path}'` : '';
+      const withDest = dest !== undefined ? ` -> '${dest}'` : '';
+      super(`${described}${withPath}${withDest}`);
     }
-    this.name = 'Error';
     this.code = code;
     this.errno = ERRNO[code] ?? -1;
     this.syscall = syscall;
-    this.path = path;
+    // Only present when supplied, matching Node's own property set (an absent
+    // `path`/`dest` must not surface as an own property holding `undefined`).
+    if (path !== undefined) this.path = path;
+    if (dest !== undefined) this.dest = dest;
   }
 }
+
+// `UVException` errors are plain `Error`s, so this class presents itself as
+// `Error`: `err.constructor.name` is `'Error'` in real Node and must be here too.
+Object.defineProperty(VfsError, 'name', { value: 'Error' });
 
 /**
  * libuv's errno table (`UV_ERRNO_MAP` in `deps/uv/include/uv.h`), keyed by the
@@ -288,15 +304,19 @@ export interface Vfs {
 
   exists(path: string): boolean;
   stat(path: string): Stat;
+  lstat(path: string): Stat;
   mkdir(path: string, opts?: MkdirOptions): string | undefined;
   readdir(path: string, opts?: ReaddirOptions): Dirent[];
-  rm(path: string, opts?: { recursive?: boolean; force?: boolean }): void;
+  rm(path: string, opts?: { recursive?: boolean; force?: boolean; syscall?: 'unlink' | 'rmdir' | 'lstat' }): void;
   rename(from: string, to: string): void;
   copyFile(from: string, to: string, mode?: number): void;
   chmod(path: string, mode: number): void;
 
   /** Resolve a (possibly relative) path against the current working directory. */
   resolve(p: PathLike): string;
+
+  /** `fs.realpath`: resolve the path and verify it exists (syscall `lstat`). */
+  realpath(p: PathLike): string;
 
   /**
    * Observe changes to the tree. Returns an unsubscribe function.
