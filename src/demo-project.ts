@@ -989,6 +989,15 @@ console.log('cmac aes128         :', cmacTag.final('hex'));
 const gmacTag = macCrypto.createMac('gmac', Buffer.alloc(16, 9), { cipher: 'aes-128-gcm', iv: Buffer.alloc(12, 5) });
 gmacTag.update('data');
 console.log('gmac aes128         :', gmacTag.final('hex'));
+const b2sTag = macCrypto.createMac('blake2smac', Buffer.alloc(16, 9));
+b2sTag.update('data');
+console.log('blake2smac          :', b2sTag.final('hex'));
+const polyTag = macCrypto.createMac('poly1305', Buffer.alloc(32, 1));
+polyTag.update('data');
+console.log('poly1305            :', polyTag.final('hex'));
+const sipTag = macCrypto.createMac('siphash', Buffer.alloc(16, 1));
+sipTag.update('data');
+console.log('siphash             :', sipTag.final('hex'));
 console.log('');
 
 // --- http server (milestone 3: virtual TCP) ---

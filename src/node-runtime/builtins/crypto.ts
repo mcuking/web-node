@@ -62,6 +62,9 @@ import {
 } from '../crypto/primes';
 import { ARGON2_D, ARGON2_I, ARGON2_ID, argon2 as computeArgon2, type Argon2Params } from '../crypto/argon2';
 import { blake2b } from '../crypto/blake2b';
+import { blake2s } from '../crypto/blake2s';
+import { poly1305 } from '../crypto/poly1305';
+import { siphash } from '../crypto/siphash';
 import { kmac } from '../crypto/keccak';
 
 /**
@@ -1316,6 +1319,7 @@ export const cryptoSpec: BuiltinSpec = {
       #key: Uint8Array;
       #digest: HashAlgo | undefined;
       #customization: Uint8Array = new Uint8Array(0);
+      #salt: Uint8Array = new Uint8Array(0);
       #iv: Uint8Array = new Uint8Array(0);
       #outputLength: number;
       #chunks: Uint8Array[] = [];
@@ -1377,6 +1381,42 @@ export const cryptoSpec: BuiltinSpec = {
         this.#digest = undefined;
         this.#outputLength = outputLength ?? 0;
 
+        // OpenSSL's provider MACs accept only a subset of the option block; the
+        // rest raise in a fixed order (digest -> cipher -> iv -> customization
+        // -> salt -> outputLength), which is what Node surfaces.
+        const allowedOptions: Record<MacAlgorithm, readonly string[]> = {
+          hmac: ['digest'],
+          blake2bmac: ['salt', 'customization', 'outputLength'],
+          blake2smac: ['salt', 'customization', 'outputLength'],
+          'kmac-128': ['customization', 'outputLength'],
+          'kmac-256': ['customization', 'outputLength'],
+          cmac: ['cipher'],
+          gmac: ['cipher', 'iv'],
+          poly1305: [],
+          siphash: ['outputLength'],
+        };
+        // `cipher` (required) and GMAC's iv are validated before the rest.
+        if (canonical === 'cmac' || canonical === 'gmac') {
+          if (cipher === undefined) {
+            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The property 'options.cipher' is required for ${canonical === 'cmac' ? 'CMAC' : 'GMAC'}`);
+          }
+        }
+        if (canonical === 'gmac' && (ivBytes === undefined || ivBytes.length === 0)) {
+          throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.iv' must be non-empty for GMAC");
+        }
+        const allowed = allowedOptions[canonical];
+        const provided: Array<[string, boolean]> = [
+          ['digest', digest !== undefined],
+          ['cipher', cipher !== undefined],
+          ['iv', ivBytes !== undefined],
+          ['customization', customBytes !== undefined],
+          ['salt', saltBytes !== undefined],
+          ['outputLength', outputLength !== undefined],
+        ];
+        for (const [option, present] of provided) {
+          if (present && !allowed.includes(option)) unsupportedOption(option);
+        }
+
         if (canonical === 'hmac') {
           if (digest === undefined) {
             throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.digest' is required for HMAC");
@@ -1386,53 +1426,58 @@ export const cryptoSpec: BuiltinSpec = {
             throw coded('Error', 'ERR_OSSL_EVP_UNSUPPORTED', 'error:0308010C:digital envelope routines::unsupported');
           }
           this.#digest = algo;
-        } else if (canonical === 'blake2bmac') {
-          if (digest !== undefined) unsupportedOption('digest');
-          if (keyBytes.length < 1 || keyBytes.length > 64) {
-            throw coded('Error', 'ERR_OSSL_INVALID_KEY_LENGTH', 'error:1C800069:Provider routines::invalid key length');
-          }
-          const outLen = outputLength === undefined ? 64 : outputLength;
-          if (outLen < 1 || outLen > 64) {
+        } else if (canonical === 'blake2bmac' || canonical === 'blake2smac') {
+          const maxOut = canonical === 'blake2smac' ? 32 : 64;
+          const maxSalt = canonical === 'blake2smac' ? 8 : 16;
+          const outLen = outputLength === undefined ? maxOut : outputLength;
+          if (outLen < 1 || outLen > maxOut) {
             throw coded('Error', 'ERR_OSSL_NOT_XOF_OR_INVALID_LENGTH', 'error:1C800071:Provider routines::not xof or invalid length');
           }
+          if ((customBytes?.length ?? 0) > maxSalt) {
+            throw coded('Error', 'ERR_OSSL_INVALID_CUSTOM_LENGTH', 'error:1C80006F:Provider routines::invalid custom length');
+          }
+          if ((saltBytes?.length ?? 0) > maxSalt) {
+            throw coded('Error', 'ERR_OSSL_INVALID_SALT_LENGTH', 'error:1C800070:Provider routines::invalid salt length');
+          }
+          if (keyBytes.length < 1 || keyBytes.length > maxOut) {
+            throw coded('Error', 'ERR_OSSL_INVALID_KEY_LENGTH', 'error:1C800069:Provider routines::invalid key length');
+          }
           this.#outputLength = outLen;
+          this.#salt = saltBytes ?? new Uint8Array(0);
+          this.#customization = customBytes ?? new Uint8Array(0);
         } else if (canonical === 'kmac-128' || canonical === 'kmac-256') {
-          if (digest !== undefined) unsupportedOption('digest');
           if (keyBytes.length < 4) {
             throw coded('Error', 'ERR_OSSL_INVALID_KEY_LENGTH', 'error:1C800069:Provider routines::invalid key length');
           }
           this.#outputLength = outputLength ?? (canonical === 'kmac-128' ? 32 : 64);
           this.#customization = customBytes ?? new Uint8Array(0);
         } else if (canonical === 'cmac') {
-          if (cipher === undefined) {
-            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.cipher' is required for CMAC");
-          }
-          // OpenSSL's CMAC takes no IV/customization/salt and a fixed digest.
-          if (ivBytes !== undefined) unsupportedOption('iv');
-          if (customBytes !== undefined) unsupportedOption('customization');
-          if (saltBytes !== undefined) unsupportedOption('salt');
-          if (outputLength !== undefined) unsupportedOption('outputLength');
           const keyLength = selectCipher('cbc');
           if (keyBytes.length !== keyLength) {
             throw coded('Error', 'ERR_OSSL_EVP_INVALID_KEY_LENGTH', 'error:03000082:digital envelope routines::invalid key length');
           }
           this.#outputLength = 16;
         } else if (canonical === 'gmac') {
-          if (cipher === undefined) {
-            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.cipher' is required for GMAC");
-          }
-          if (ivBytes === undefined || ivBytes.length === 0) {
-            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.iv' must be non-empty for GMAC");
-          }
-          if (customBytes !== undefined) unsupportedOption('customization');
-          if (saltBytes !== undefined) unsupportedOption('salt');
-          if (outputLength !== undefined) unsupportedOption('outputLength');
           const keyLength = selectCipher('gcm');
           if (keyBytes.length !== keyLength) {
             throw coded('Error', 'ERR_OSSL_INVALID_KEY_LENGTH', 'error:1C800069:Provider routines::invalid key length');
           }
-          this.#iv = ivBytes;
+          this.#iv = ivBytes!;
           this.#outputLength = 16;
+        } else if (canonical === 'poly1305') {
+          if (keyBytes.length !== 32) {
+            throw coded('Error', 'ERR_OSSL_INVALID_KEY_LENGTH', 'error:1C800069:Provider routines::invalid key length');
+          }
+          this.#outputLength = 16;
+        } else if (canonical === 'siphash') {
+          if (outputLength === 0) {
+            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.outputLength' was not honored by MAC siphash");
+          }
+          const outLen = outputLength === undefined ? 16 : outputLength;
+          if ((outLen !== 8 && outLen !== 16) || keyBytes.length !== 16) {
+            throw coded('Error', 'ERR_CRYPTO_OPERATION_FAILED', 'Failed to initialize MAC');
+          }
+          this.#outputLength = outLen;
         } else {
           throw notImplemented('api', `crypto.createMac (${canonical})`);
         }
@@ -1441,7 +1486,10 @@ export const cryptoSpec: BuiltinSpec = {
       #compute(): Uint8Array {
         const data = concatBytes(this.#chunks, this.#total);
         if (this.#algorithm === 'blake2bmac') {
-          return blake2b(data, this.#outputLength, this.#key);
+          return blake2b(data, this.#outputLength, this.#key, this.#salt, this.#customization);
+        }
+        if (this.#algorithm === 'blake2smac') {
+          return blake2s(data, this.#outputLength, this.#key, this.#salt, this.#customization);
         }
         if (this.#algorithm === 'kmac-128' || this.#algorithm === 'kmac-256') {
           const bits = this.#algorithm === 'kmac-128' ? 128 : 256;
@@ -1449,6 +1497,8 @@ export const cryptoSpec: BuiltinSpec = {
         }
         if (this.#algorithm === 'cmac') return aesCmac(this.#key, data);
         if (this.#algorithm === 'gmac') return aesGmac(this.#key, this.#iv, data);
+        if (this.#algorithm === 'poly1305') return poly1305(this.#key, data);
+        if (this.#algorithm === 'siphash') return siphash(data, this.#key, this.#outputLength);
         return hmac(this.#digest!, this.#key, data);
       }
 

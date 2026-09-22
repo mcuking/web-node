@@ -103,9 +103,25 @@ describe('crypto.createMac unit surface', () => {
     expect(g.final('hex')).toBe('c1ca454c2e1863efde9bca32ded11efd');
   });
 
-  it('raises NotImplementedError for the providers still pending', () => {
+  it('computes BLAKE2s MAC, Poly1305 and SipHash', () => {
     const crypto = boot();
-    expect(() => crypto.createMac('poly1305', new Uint8Array(32).fill(1))).toThrowError(/not implemented/i);
+    expect(crypto.createMac('blake2smac', new Uint8Array(16).fill(1)).update('data').final('hex')).toBe(
+      '289d018434fd9a3e835589a2d43103c258aa01aa22aeaf7e51ff26540b3bfbe2',
+    );
+    const fromHex = (h: string) => Uint8Array.from(h.match(/../g)!.map((b) => parseInt(b, 16)));
+    const poly = crypto.createMac(
+      'poly1305',
+      fromHex('85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b'),
+    );
+    poly.update('Cryptographic Forum Research Group');
+    expect(poly.final('hex')).toBe('a8061dc1305136c6c22b8baf0c0127a9');
+    expect(crypto.createMac('siphash', new Uint8Array(16).fill(3)).update('data').final('hex')).toBe(
+      '191598004cb3dde007c7ac79f3801896',
+    );
+  });
+
+  it('raises NotImplementedError for non-AES CMAC ciphers', () => {
+    const crypto = boot();
     // Non-AES CMAC ciphers are correct in Node but outside the AES-only runtime.
     expect(() => crypto.createMac('cmac', new Uint8Array(24).fill(1), { cipher: 'des-ede3-cbc' })).toThrowError(
       /not implemented/i,

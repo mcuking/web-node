@@ -33,7 +33,11 @@
     "out4": "fd3be3a0",
     "key1": "f4a50ae7c412d5f1b254de40fc79989af64cf91df5f825b44345af2bcc62e48af2ce632d8d28954c42f262f9e3bad36a00ad6ae8a8669a2b7b443b9a5b290dc4",
     "key64": "206e0caf87ad74d1878baaa5ffc8bbbcc587634d01487fac14c04ba1cb7d467d6f97d47e455997e85ed0d80616f610478d5c96ef928a8d43a316e60e42975fbe",
-    "multi": "6620c8f395c8a99af17be494a46e3d58ff24ddab78f7b3133cdfca41ff059de7810af1bb130ccfa27045b63c2987ac88"
+    "multi": "6620c8f395c8a99af17be494a46e3d58ff24ddab78f7b3133cdfca41ff059de7810af1bb130ccfa27045b63c2987ac88",
+    "salt8": "960a63ce1a3e6a78e2311479f3b91db09a23b1365c7007477b14c895ae2b3f31e6c271cfd637f01429257d4a4742f2f73968a583dcae22860f37d37b09b4f69f",
+    "salt16": "528cce59b2c3c331ec58d965d91ecab39d5be7dfc5708e96aeb11cab819df1955b789bed72dbac923f3703ab5706de2efa3a0c8f70a995e1aa4108872e347b28",
+    "custom16": "23938a2691340c926248da69f29f73a7f78d8bb157fd4c1fbbf1553116e4555a0d681f45a3308614f93b190d5c7f366d52e2876cf96c487ff2e20d0f6228d9cd",
+    "saltCustom": "865885b7f8ec862629e0700b6c927944ab3311ffcaae340350cff37535c654d4097736a428d23dcf58e152dd86e699cac30c67dc797d2a260d35dc7cea4b5c0a"
   },
   "kmac": {
     "128-default": "a3a9ba84076e6ad8539519ae5f200970442d9369f9e114a7f025489f19b3052d",
@@ -85,6 +89,30 @@
     "iv16": "0d97f828342fe3147abe1f9f40192c72",
     "upper": "c1ca454c2e1863efde9bca32ded11efd",
     "keyobj": "c1ca454c2e1863efde9bca32ded11efd"
+  },
+  "blake2s": {
+    "default": "289d018434fd9a3e835589a2d43103c258aa01aa22aeaf7e51ff26540b3bfbe2",
+    "out16": "60b0c8c602e55cfc30f75519f68d9996",
+    "out4": "8b8e79ec",
+    "key32": "36d91f7e75f3aecc8bb7f2f44c41fd015bdb9f5fa0b59b399940ec5dc57c6af3",
+    "salt8": "3ef1e2887feeda150c08f31bfa743be249e019302836fe678f9b9aa7efe2c7bd",
+    "custom8": "0bfcf5ab29d2bb75f4913f78fc332a94b5faf17f5721cf21248bd56a0cd50be7",
+    "saltCustom": "5186f9c908685b9a6e85649a61f6b5f74cbfd5c8ffa4760805ff0d5952162201"
+  },
+  "poly1305": {
+    "rfc": "a8061dc1305136c6c22b8baf0c0127a9",
+    "empty": "02020202020202020202020202020202",
+    "data": "d1a6ec3b737852787078527870785278",
+    "blocks": "b2056e8b7d86f4766db6c5487fa4f00f",
+    "keyobj": "d1a6ec3b737852787078527870785278"
+  },
+  "siphash": {
+    "empty": "1e6bad937e501d5d2f98a14a4c2412b8",
+    "data": "191598004cb3dde007c7ac79f3801896",
+    "seq": "33a24ab8b1089a8dc108621a26a0dfea",
+    "std": "a3817f04ba25a8e66df67214c7550293",
+    "out8": "b0c7a6e1f940e082",
+    "keyobj": "191598004cb3dde007c7ac79f3801896"
   },
   "encodings": {
     "finalHex": "e7ea21c3bcb63a4da3ad78503168d36bdca0be622382ea60a108fad4e4966679",
@@ -321,6 +349,141 @@
       "name": "Error",
       "code": "ERR_OSSL_INVALID_KEY_LENGTH",
       "message": "error:1C800069:Provider routines::invalid key length"
+    },
+    "blake2sOut0": {
+      "name": "Error",
+      "code": "ERR_OSSL_NOT_XOF_OR_INVALID_LENGTH",
+      "message": "error:1C800071:Provider routines::not xof or invalid length"
+    },
+    "blake2sOut33": {
+      "name": "Error",
+      "code": "ERR_OSSL_NOT_XOF_OR_INVALID_LENGTH",
+      "message": "error:1C800071:Provider routines::not xof or invalid length"
+    },
+    "blake2sKeyEmpty": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_KEY_LENGTH",
+      "message": "error:1C800069:Provider routines::invalid key length"
+    },
+    "blake2sKey33": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_KEY_LENGTH",
+      "message": "error:1C800069:Provider routines::invalid key length"
+    },
+    "blake2sIvUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.iv' is not supported by MAC blake2smac"
+    },
+    "blake2sSalt9": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_SALT_LENGTH",
+      "message": "error:1C800070:Provider routines::invalid salt length"
+    },
+    "blake2sCustom9": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_CUSTOM_LENGTH",
+      "message": "error:1C80006F:Provider routines::invalid custom length"
+    },
+    "blake2bSalt17": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_SALT_LENGTH",
+      "message": "error:1C800070:Provider routines::invalid salt length"
+    },
+    "blake2bCustom17": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_CUSTOM_LENGTH",
+      "message": "error:1C80006F:Provider routines::invalid custom length"
+    },
+    "blake2bIvUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.iv' is not supported by MAC blake2bmac"
+    },
+    "blake2bCipherUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.cipher' is not supported by MAC blake2bmac"
+    },
+    "polyKey31": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_KEY_LENGTH",
+      "message": "error:1C800069:Provider routines::invalid key length"
+    },
+    "polyKey33": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_KEY_LENGTH",
+      "message": "error:1C800069:Provider routines::invalid key length"
+    },
+    "polyOutUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.outputLength' is not supported by MAC poly1305"
+    },
+    "polyCustomUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.customization' is not supported by MAC poly1305"
+    },
+    "polyDigestUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.digest' is not supported by MAC poly1305"
+    },
+    "siphashKey8": {
+      "name": "Error",
+      "code": "ERR_CRYPTO_OPERATION_FAILED",
+      "message": "Failed to initialize MAC"
+    },
+    "siphashKey15": {
+      "name": "Error",
+      "code": "ERR_CRYPTO_OPERATION_FAILED",
+      "message": "Failed to initialize MAC"
+    },
+    "siphashKey17": {
+      "name": "Error",
+      "code": "ERR_CRYPTO_OPERATION_FAILED",
+      "message": "Failed to initialize MAC"
+    },
+    "siphashOut4": {
+      "name": "Error",
+      "code": "ERR_CRYPTO_OPERATION_FAILED",
+      "message": "Failed to initialize MAC"
+    },
+    "siphashOut0": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.outputLength' was not honored by MAC siphash"
+    },
+    "siphashCustomUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.customization' is not supported by MAC siphash"
+    },
+    "siphashDigestUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.digest' is not supported by MAC siphash"
+    },
+    "siphashSaltUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.salt' is not supported by MAC siphash"
+    },
+    "hmacIvUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.iv' is not supported by MAC hmac"
+    },
+    "kmacSaltUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.salt' is not supported by MAC kmac128"
+    },
+    "kmacCipherUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.cipher' is not supported by MAC kmac128"
     },
     "cmacNoCipher": {
       "name": "TypeError",

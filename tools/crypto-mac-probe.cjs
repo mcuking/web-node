@@ -48,6 +48,17 @@ out.blake2b['multi'] = hex(
     .update('c', 'utf8')
     .final(),
 );
+out.blake2b['salt8'] = hex(crypto.createMac('blake2bmac', Buffer.alloc(16, 1), { salt: Buffer.alloc(8, 9) }).update('data').final());
+out.blake2b['salt16'] = hex(crypto.createMac('blake2bmac', Buffer.alloc(16, 1), { salt: Buffer.alloc(16, 9) }).update('data').final());
+out.blake2b['custom16'] = hex(
+  crypto.createMac('blake2bmac', Buffer.alloc(16, 1), { customization: Buffer.alloc(16, 9) }).update('data').final(),
+);
+out.blake2b['saltCustom'] = hex(
+  crypto
+    .createMac('blake2bmac', Buffer.alloc(16, 1), { salt: Buffer.alloc(16, 9), customization: Buffer.alloc(16, 8) })
+    .update('data')
+    .final(),
+);
 
 // -- KMAC (SP 800-185) -----------------------------------------------------
 out.kmac = {};
@@ -114,6 +125,42 @@ out.gmac = {
   iv16: hex(crypto.createMac('gmac', k16, { cipher: 'aes-128-gcm', iv: Buffer.alloc(16, 3) }).update('data').final()),
   upper: hex(crypto.createMac('gmac', k16, { cipher: 'AES-128-GCM', iv: Buffer.alloc(12, 3) }).update('data').final()),
   keyobj: hex(crypto.createMac('gmac', crypto.createSecretKey(k16), { cipher: 'aes-128-gcm', iv: Buffer.alloc(12, 3) }).update('data').final()),
+};
+
+// -- BLAKE2s MAC / Poly1305 / SipHash --------------------------------------
+out.blake2s = {
+  default: hex(crypto.createMac('blake2smac', Buffer.alloc(16, 1)).update('data').final()),
+  out16: hex(crypto.createMac('blake2smac', Buffer.alloc(16, 1), { outputLength: 16 }).update('data').final()),
+  out4: hex(crypto.createMac('blake2smac', Buffer.alloc(16, 1), { outputLength: 4 }).update('data').final()),
+  key32: hex(crypto.createMac('blake2smac', Buffer.alloc(32, 1)).update('data').final()),
+  salt8: hex(crypto.createMac('blake2smac', Buffer.alloc(16, 1), { salt: Buffer.alloc(8, 9) }).update('data').final()),
+  custom8: hex(crypto.createMac('blake2smac', Buffer.alloc(16, 1), { customization: Buffer.alloc(8, 9) }).update('data').final()),
+  saltCustom: hex(
+    crypto.createMac('blake2smac', Buffer.alloc(16, 1), { salt: Buffer.alloc(8, 9), customization: Buffer.alloc(8, 8) })
+      .update('data')
+      .final(),
+  ),
+};
+out.poly1305 = {
+  rfc: hex(
+    crypto.createMac('poly1305', Buffer.from('85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b', 'hex'))
+      .update('Cryptographic Forum Research Group')
+      .final(),
+  ),
+  empty: hex(crypto.createMac('poly1305', Buffer.alloc(32, 2)).final()),
+  data: hex(crypto.createMac('poly1305', Buffer.alloc(32, 2)).update('data').final()),
+  blocks: hex(crypto.createMac('poly1305', Buffer.alloc(32, 2)).update(Buffer.alloc(48, 5)).final()),
+  keyobj: hex(crypto.createMac('poly1305', crypto.createSecretKey(Buffer.alloc(32, 2))).update('data').final()),
+};
+out.siphash = {
+  empty: hex(crypto.createMac('siphash', Buffer.alloc(16, 3)).final()),
+  data: hex(crypto.createMac('siphash', Buffer.alloc(16, 3)).update('data').final()),
+  seq: hex(crypto.createMac('siphash', Buffer.alloc(16, 3)).update(Buffer.from([0, 1, 2, 3, 4, 5, 6, 7])).final()),
+  std: hex(
+    crypto.createMac('siphash', Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex')).update(Buffer.alloc(0)).final(),
+  ),
+  out8: hex(crypto.createMac('siphash', Buffer.alloc(16, 3), { outputLength: 8 }).update('data').final()),
+  keyobj: hex(crypto.createMac('siphash', crypto.createSecretKey(Buffer.alloc(16, 3))).update('data').final()),
 };
 
 // -- output / input encodings ----------------------------------------------
@@ -196,6 +243,33 @@ streamMac.on('end', () => {
     gmacUnknownCipher: err(() => crypto.createMac('gmac', k16, { cipher: 'aes-999-gcm', iv: Buffer.alloc(12, 3) })),
     gmacCbcMode: err(() => crypto.createMac('gmac', k16, { cipher: 'aes-128-cbc', iv: Buffer.alloc(12, 3) })),
     gmacKeyTooShort: err(() => crypto.createMac('gmac', k16, { cipher: 'aes-256-gcm', iv: Buffer.alloc(12, 3) })),
+    blake2sOut0: err(() => crypto.createMac('blake2smac', Buffer.alloc(16, 1), { outputLength: 0 }).update('d').final()),
+    blake2sOut33: err(() => crypto.createMac('blake2smac', Buffer.alloc(16, 1), { outputLength: 33 }).update('d').final()),
+    blake2sKeyEmpty: err(() => crypto.createMac('blake2smac', Buffer.alloc(0)).update('d').final()),
+    blake2sKey33: err(() => crypto.createMac('blake2smac', Buffer.alloc(33, 1)).update('d').final()),
+    blake2sIvUnsupported: err(() => crypto.createMac('blake2smac', Buffer.alloc(16, 1), { iv: Buffer.alloc(8, 1) })),
+    blake2sSalt9: err(() => crypto.createMac('blake2smac', Buffer.alloc(16, 1), { salt: Buffer.alloc(9, 1) })),
+    blake2sCustom9: err(() => crypto.createMac('blake2smac', Buffer.alloc(16, 1), { customization: Buffer.alloc(9, 1) })),
+    blake2bSalt17: err(() => crypto.createMac('blake2bmac', Buffer.alloc(16, 1), { salt: Buffer.alloc(17, 1) })),
+    blake2bCustom17: err(() => crypto.createMac('blake2bmac', Buffer.alloc(16, 1), { customization: Buffer.alloc(17, 1) })),
+    blake2bIvUnsupported: err(() => crypto.createMac('blake2bmac', Buffer.alloc(16, 1), { iv: Buffer.alloc(8, 1) })),
+    blake2bCipherUnsupported: err(() => crypto.createMac('blake2bmac', Buffer.alloc(16, 1), { cipher: 'aes-128-cbc' })),
+    polyKey31: err(() => crypto.createMac('poly1305', Buffer.alloc(31, 2)).update('d').final()),
+    polyKey33: err(() => crypto.createMac('poly1305', Buffer.alloc(33, 2)).update('d').final()),
+    polyOutUnsupported: err(() => crypto.createMac('poly1305', Buffer.alloc(32, 2), { outputLength: 8 })),
+    polyCustomUnsupported: err(() => crypto.createMac('poly1305', Buffer.alloc(32, 2), { customization: Buffer.from('x') })),
+    polyDigestUnsupported: err(() => crypto.createMac('poly1305', Buffer.alloc(32, 2), { digest: 'sha256' })),
+    siphashKey8: err(() => crypto.createMac('siphash', Buffer.alloc(8, 3)).update('d').final()),
+    siphashKey15: err(() => crypto.createMac('siphash', Buffer.alloc(15, 3)).update('d').final()),
+    siphashKey17: err(() => crypto.createMac('siphash', Buffer.alloc(17, 3)).update('d').final()),
+    siphashOut4: err(() => crypto.createMac('siphash', Buffer.alloc(16, 3), { outputLength: 4 }).update('d').final()),
+    siphashOut0: err(() => crypto.createMac('siphash', Buffer.alloc(16, 3), { outputLength: 0 }).update('d').final()),
+    siphashCustomUnsupported: err(() => crypto.createMac('siphash', Buffer.alloc(16, 3), { customization: Buffer.from('x') })),
+    siphashDigestUnsupported: err(() => crypto.createMac('siphash', Buffer.alloc(16, 3), { digest: 'sha256' })),
+    siphashSaltUnsupported: err(() => crypto.createMac('siphash', Buffer.alloc(16, 3), { salt: Buffer.alloc(8, 1) })),
+    hmacIvUnsupported: err(() => crypto.createMac('hmac', k16, { digest: 'sha256', iv: Buffer.alloc(4, 1) })),
+    kmacSaltUnsupported: err(() => crypto.createMac('kmac128', Buffer.alloc(32, 1), { salt: Buffer.alloc(4, 1) })),
+    kmacCipherUnsupported: err(() => crypto.createMac('kmac128', Buffer.alloc(32, 1), { cipher: 'aes-128-cbc' })),
     cmacNoCipher: err(() => crypto.createMac('cmac', Buffer.alloc(16, 1)).update('d').final()),
     gmacNoCipher: err(() => crypto.createMac('gmac', Buffer.alloc(16, 1)).update('d').final()),
     updateNumber: err(() => crypto.createMac('hmac', Buffer.from('k'), { digest: 'sha256' }).update(5)),

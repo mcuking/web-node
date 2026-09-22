@@ -244,6 +244,28 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M90.4 BLAKE2s MAC / Poly1305 / SipHash（顺带修正 M90.1 的 salt/customization 缺口）
+
+**改了什么**：
+- 新增三个原语模块：`crypto/blake2s.ts`（BLAKE2s，含完整参数块的 key/salt/personal）、`crypto/poly1305.ts`（RFC 8439 §2.5）、`crypto/siphash.ts`（SipHash-2-4；**匹配 OpenSSL 的默认 16 字节输出**，即 SipHash 论文的 128-bit 变体——v1 在 init、v2 在 final 各 ^= 0xee；`outputLength:8` 回到经典 64-bit 变体）。
+- `builtins/crypto.ts` 的 `Mac` 接入 `blake2smac`/`poly1305`/`siphash`，并把「哪些选项合法、其余按什么顺序报错」抽成一张表：**固定顺序 digest → cipher → iv → customization → salt → outputLength**（实测对齐）。
+
+**发现并修正真 bug（M90.1 遗留）**：BLAKE2b/BLAKE2s 的 `salt`/`customization`（即参数块里的 salt/personalization）**是支持的**，会改变摘要；M90.1 只做了字节类型校验却**丢弃了它们**（传 salt 时静默算错）。差分语料现在把这两个字段纳入正向用例；blake2b/blake2s 的 salt/personal 已接进参数块。
+
+**踩坑**：BLAKE2s 的参数块里 **salt 在字 4-5、personal 在字 6-7**（字节 16-23 / 24-31）；第一版写成了字 2-3/4-5，salt 与 personal **互换了**，被差分语料当场抳出。
+
+**关键语义（逐个实测）**：blake2s 输出/密钥 ≤ 32、salt/customization ≤ 8（超长 → `ERR_OSSL_INVALID_SALT_LENGTH` / `INVALID_CUSTOM_LENGTH`）；blake2b 同理 ≤ 64 / ≤ 16；poly1305 密钥必须 32 字节；siphash 密钥必须 16 字节、输出只能是 8 或 16（其他 → `ERR_CRYPTO_OPERATION_FAILED`；`outputLength:0` → `... was not honored by MAC siphash`）。`hmac` 只收 `digest`，`kmac` 只收 `customization`/`outputLength`。
+
+**验证**：
+- `test/fixtures/crypto-mac.json` 扩到 **78 个错误项**（含所有 provider 的选项组合）+ blake2b/blake2s 的 salt/custom 正向向量 + poly1305（RFC 8439 §2.5.2）+ siphash（含标准键的 16 字节输出）—— `test/crypto-mac.test.ts` 同程序跑，**0 diff**。
+- demo 新增 blake2smac/poly1305/siphash 演示段（值已在真 Node 核对一致）。
+- 门禁：`tsc` 干净 · vitest **942 passed / 2 skipped（92 文件）** · build worker **2395.53 kB**。
+  - 注：并发跑全套时 `test/worker.test.ts` 的 stdio 用例偶发 flake（计时敏感，单跑必过）；与本次改动无关，已记待整治。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md`。M90.1–M90.4 全部完成（`createMac`/`getMacs` 的全部 11 个 provider）。只剩 M90.5（把 sha3/blake2b512/blake2s256 接进 `getHashes` + SM3/RIPEMD-160）。
+
+**涉及文件**：`src/node-runtime/crypto/blake2s.ts`（新增）、`src/node-runtime/crypto/blake2b.ts`、`src/node-runtime/crypto/poly1305.ts`（新增）、`src/node-runtime/crypto/siphash.ts`（新增）、`src/node-runtime/builtins/crypto.ts`、`src/demo-project.ts`、`test/crypto-mac.test.ts`、`tools/crypto-mac-probe.cjs`、`test/fixtures/crypto-mac.json`、`docs/ROADMAP.md`。
+
 ### 2026-09-22 · M90.3 CMAC / GMAC（复用纯 JS AES）
 
 **改了什么**：

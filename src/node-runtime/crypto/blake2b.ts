@@ -74,9 +74,29 @@ function compress(h: bigint[], block: Uint8Array, blockOffset: number, t: bigint
 
 const EMPTY_KEY = new Uint8Array(0);
 
-export function blake2b(input: Uint8Array, outLen = 64, key: Uint8Array = EMPTY_KEY): Uint8Array {
+function word64(bytes: Uint8Array, index: number): bigint {
+  let value = 0n;
+  for (let i = 7; i >= 0; i--) value = (value << 8n) | BigInt(index + i < bytes.length ? bytes[index + i] : 0);
+  return value;
+}
+
+/**
+ * BLAKE2b with an optional key, salt (<= 16 bytes) and personalization
+ * (<= 16 bytes). The salt/personal land in words 4-7 of the parameter block.
+ */
+export function blake2b(
+  input: Uint8Array,
+  outLen = 64,
+  key: Uint8Array = EMPTY_KEY,
+  salt: Uint8Array = EMPTY_KEY,
+  personal: Uint8Array = EMPTY_KEY,
+): Uint8Array {
   const h = IV.slice();
   h[0] ^= 0x01010000n ^ (BigInt(key.length) << 8n) ^ BigInt(outLen);
+  h[4] ^= word64(salt, 0);
+  h[5] ^= word64(salt, 8);
+  h[6] ^= word64(personal, 0);
+  h[7] ^= word64(personal, 8);
 
   let offset = 0;
   let counter = 0n;
