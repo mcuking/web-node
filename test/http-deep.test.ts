@@ -105,7 +105,10 @@ describe('http.ServerResponse semantics', () => {
       res.appendHeader('X-Multi', 'b');
       res.statusMessage = 'Custom';
       res.addTrailers({ 'X-Trailer': 'yes' });
-      res.end('body');
+      // Trailers only ride a chunked body, so stream instead of `end('body')`
+      // (a known length would frame it with Content-Length, like Node).
+      res.write('bo');
+      res.end('dy');
       captured.raw = res.getRawHeaderNames();
       captured.chunked1 = res.chunkedEncoding;
     });
@@ -201,7 +204,8 @@ describe('http.ClientRequest semantics', () => {
     expect(req.path).toBe('/x');
     expect(req.maxHeadersCount).toBeNull();
     req.setHeader('X-Case', 'v');
-    expect(req.getRawHeaderNames()).toEqual(['X-Case']);
+    // Node seeds `Host` at construction, so it precedes user-set headers.
+    expect(req.getRawHeaderNames()).toEqual(['Host', 'X-Case']);
     expect(req.setNoDelay()).toBe(req);
     expect(req.setSocketKeepAlive(true, 10)).toBe(req);
     expect(req.setTimeout(5000)).toBe(req);
@@ -221,5 +225,63 @@ describe('http.ClientRequest semantics', () => {
       req.end();
     });
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+});
+
+describe('http header store / framing fidelity', () => {
+  it('validates names/values and null-prototypes the header map', async () => {
+    const http = boot();
+    const server = http.createServer((_req: any, res: any) => {
+      expect(Object.getPrototypeOf(res.getHeaders())).toBeNull();
+      expect(res.setHeader('X-One', '1')).toBe(res);
+      expect(res.getHeader('x-ONE')).toBe('1');
+      expect(res.hasHeader('X-one')).toBe(true);
+      expect(() => res.setHeader('X Bad', '1')).toThrowError(/valid HTTP token/);
+      expect(() => res.setHeader('X-Ok', 'a\nb')).toThrowError(/Invalid character/);
+      expect(() => res.setHeader('X-Ok', undefined)).toThrowError(/Invalid value/);
+      expect(res.appendHeader('X-Multi', 'a')).toBe(res);
+      res.appendHeader('X-Multi', 'b');
+      expect(res.getHeader('x-multi')).toEqual(['a', 'b']);
+      res.end('body');
+      // `end('body')` knows the length, so Node frames it, not chunks it.
+      expect(res.chunkedEncoding).toBe(false);
+      expect(() => res.writeHead(200)).toThrowError(/Cannot write headers/);
+      expect(() => res.setHeader('X-Late', '1')).toThrowError(/Cannot set headers/);
+      expect(() => res.removeHeader('X-One')).toThrowError(/Cannot remove headers/);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    const res = await new Promise<any>((resolve, reject) => {
+      http
+        .get({ port, host: '127.0.0.1' }, (r: any) => {
+          r.resume();
+          r.on('end', () => resolve(r));
+        })
+        .on('error', reject);
+    });
+    expect(res.headers['content-length']).toBe('4');
+    expect(res.headers['transfer-encoding']).toBeUndefined();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it('exposes QUERY and the outgoing-message prototype surface', () => {
+    const http = boot();
+    expect(http.METHODS).toContain('QUERY');
+    expect(http.METHODS.length).toBe(35);
+    for (const m of [
+      'setHeader',
+      'getHeader',
+      'getHeaders',
+      'getHeaderNames',
+      'getRawHeaderNames',
+      'hasHeader',
+      'removeHeader',
+      'setHeaders',
+      'appendHeader',
+      'addTrailers',
+      'flushHeaders',
+    ]) {
+      expect(m in http.OutgoingMessage.prototype).toBe(true);
+    }
   });
 });

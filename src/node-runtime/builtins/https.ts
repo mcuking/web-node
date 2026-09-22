@@ -168,8 +168,11 @@ export const httpsSpec: BuiltinSpec = {
     // did not pick one.
     const withDefaultAgent = (args: unknown[]): unknown[] => {
       const [options] = args;
-      if (options !== null && typeof options === 'object' && (options as Record<string, unknown>).agent === undefined) {
-        return [{ ...(options as Record<string, unknown>), agent: globalAgent }, ...args.slice(1)];
+      if (options !== null && typeof options === 'object') {
+        const opts = options as Record<string, unknown>;
+        const merged: Record<string, unknown> = { protocol: 'https:', _defaultPort: 443, ...opts };
+        if (opts.agent === undefined) merged.agent = globalAgent;
+        return [merged, ...args.slice(1)];
       }
       return args;
     };

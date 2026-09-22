@@ -460,6 +460,15 @@ export const httpSpec: BuiltinSpec = {
       return out;
     }
 
+    /** Byte length of a would-be body chunk (strings are UTF-8 encoded). */
+    function byteLen(data: unknown): number {
+      if (typeof data === 'string') return new TextEncoder().encode(data).byteLength;
+      if (data instanceof Uint8Array) return data.byteLength;
+      if (ArrayBuffer.isView(data)) return data.byteLength;
+      if (data instanceof ArrayBuffer) return data.byteLength;
+      return 0;
+    }
+
     function toBytes(data: unknown): Uint8Array {
       if (typeof data === 'string') return new TextEncoder().encode(data);
       if (data instanceof Uint8Array) return data;
@@ -481,12 +490,15 @@ export const httpSpec: BuiltinSpec = {
       /** @internal — the rendered head block, once stored. */
       _header = '';
 
-      #headers = new Map<string, string | string[]>();
-      #rawHeaderNames = new Map<string, string>();
-      #trailers = new Map<string, string | string[]>();
-      #rawTrailerNames = new Map<string, string>();
+      /** @internal — header store, keyed by lower-cased name (shared with subclasses). */
+      _headers = new Map<string, string | string[]>();
+      /** @internal — original-cased names for `getRawHeaderNames()`. */
+      _rawHeaderNames = new Map<string, string>();
+      /** @internal — trailer store, keyed by lower-cased name. */
+      _trailers = new Map<string, string | string[]>();
+      /** @internal — original-cased trailer names. */
+      _rawTrailerNames = new Map<string, string>();
       #socket: NetSocket | null = null;
-
       /** `message.socket` / `message.connection` — the bound transport. */
       get socket(): NetSocket | null {
         return this.#socket;
@@ -507,52 +519,67 @@ export const httpSpec: BuiltinSpec = {
       }
 
       setHeader(name: string, value: string | string[]): this {
-        if (this._header) throw new Error('Cannot set headers after they are sent to the client');
-        this.#headers.set(name.toLowerCase(), value);
-        this.#rawHeaderNames.set(name.toLowerCase(), name);
+        if (this.headersSent) {
+          throw new (errorCodes().ERR_HTTP_HEADERS_SENT)('set');
+        }
+        validateHeaderName(name);
+        validateHeaderValue(name, value);
+        this._headers.set(name.toLowerCase(), value);
+        this._rawHeaderNames.set(name.toLowerCase(), name);
         return this;
       }
       getHeader(name: string): string | string[] | undefined {
-        return this.#headers.get(name.toLowerCase());
+        return this._headers.get(name.toLowerCase());
       }
       getHeaders(): Record<string, string | string[]> {
-        return Object.fromEntries(this.#headers);
+        // Node hands back a null-prototype object here.
+        const out: Record<string, string | string[]> = Object.create(null);
+        for (const [k, v] of this._headers) out[k] = v;
+        return out;
       }
       getHeaderNames(): string[] {
-        return [...this.#headers.keys()];
+        return [...this._headers.keys()];
       }
       /** The header names exactly as they were first set (case preserved). */
       getRawHeaderNames(): string[] {
-        return [...this.#rawHeaderNames.values()];
+        return [...this._rawHeaderNames.values()];
       }
       hasHeader(name: string): boolean {
-        return this.#headers.has(name.toLowerCase());
+        return this._headers.has(name.toLowerCase());
       }
       removeHeader(name: string): void {
-        if (this._header) throw new Error('Cannot remove headers after they are sent to the client');
-        this.#headers.delete(name.toLowerCase());
-        this.#rawHeaderNames.delete(name.toLowerCase());
+        if (this.headersSent) {
+          throw new (errorCodes().ERR_HTTP_HEADERS_SENT)('remove');
+        }
+        validateHeaderName(name);
+        this._headers.delete(name.toLowerCase());
+        this._rawHeaderNames.delete(name.toLowerCase());
       }
       setHeaders(headers: Record<string, string | string[]> | Array<[string, string | string[]]>): void {
         const entries = Array.isArray(headers) ? headers : Object.entries(headers);
         for (const [name, value] of entries) this.setHeader(String(name), value);
       }
       appendHeader(name: string, value: string | string[]): this {
+        if (this.headersSent) {
+          throw new (errorCodes().ERR_HTTP_HEADERS_SENT)('append');
+        }
         const key = name.toLowerCase();
-        if (!this.#headers.has(key)) return this.setHeader(name, value);
-        const prev = this.#headers.get(key)!;
+        if (!this._headers.has(key)) return this.setHeader(name, value);
+        const prev = this._headers.get(key)!;
         const next = Array.isArray(prev)
           ? prev.concat(value as string | string[])
           : [prev as string].concat(value as string | string[]);
-        this.#headers.set(key, next as string[]);
+        this._headers.set(key, next as string[]);
         return this;
       }
       addTrailers(headers: Record<string, string | string[]> | Array<[string, string | string[]]>): void {
         const entries = Array.isArray(headers) ? headers : Object.entries(headers);
         for (const [name, value] of entries) {
+          validateHeaderName(name);
+          validateHeaderValue(name, value);
           const key = String(name).toLowerCase();
-          this.#trailers.set(key, value);
-          this.#rawTrailerNames.set(key, String(name));
+          this._trailers.set(key, value);
+          this._rawTrailerNames.set(key, String(name));
         }
       }
       setTimeout(msecs: number, cb?: () => void): this {
@@ -666,7 +693,7 @@ export const httpSpec: BuiltinSpec = {
        */
       get headers(): Record<string, string | string[]> {
         if (this.#headersObj === null) {
-          this.#headersObj = {};
+          this.#headersObj = Object.create(null) as Record<string, string | string[]>;
           const dest = this.#headersObj;
           for (let n = 0; n < this.#headersCount; n += 2) {
             this._addHeaderLine(this.rawHeaders[n], this.rawHeaders[n + 1], dest);
@@ -681,7 +708,7 @@ export const httpSpec: BuiltinSpec = {
       /** The parsed trailer map (lazily built from `rawTrailers`). */
       get trailers(): Record<string, string | string[]> {
         if (this.#trailersObj === null) {
-          this.#trailersObj = {};
+          this.#trailersObj = Object.create(null) as Record<string, string | string[]>;
           const dest = this.#trailersObj;
           for (let n = 0; n < this.#trailersCount; n += 2) {
             this._addHeaderLine(this.rawTrailers[n], this.rawTrailers[n + 1], dest);
@@ -902,11 +929,8 @@ export const httpSpec: BuiltinSpec = {
       #statusCode = 200;
       #statusMessage: string | undefined = undefined;
       #sent = false;
-      #headers = new Map<string, string | string[]>();
-      #rawHeaderNames = new Map<string, string>();
-      #trailers = new Map<string, string | string[]>();
-      #rawTrailerNames = new Map<string, string>();
       #flushed = false;
+      #contentLength: number | null = null;
       #chunked = false;
       #bodyLength = 0;
       #keepAlive = false;
@@ -931,6 +955,20 @@ export const httpSpec: BuiltinSpec = {
       /** @internal — set by the server so it can re-arm the connection. */
       _onResponseFinish: (() => void) | null = null;
 
+      /** @internal — the server's keep-alive timeout, echoed in `Keep-Alive`. */
+      _keepAliveTimeout = 0;
+
+      /**
+       * `res.end([data])` — Node records the body length up front so the head
+       * can carry an accurate `Content-Length` instead of chunking.
+       */
+      end(chunk?: unknown, encoding?: unknown, cb?: unknown): this {
+        if (!this.headersSent && chunk !== undefined && chunk !== null) {
+          this.#contentLength = byteLen(chunk);
+        }
+        return (super.end as (...a: unknown[]) => this)(chunk, encoding, cb);
+      }
+
       /** True unless the client or this response asked for `Connection: close`. */
       get shouldKeepAlive(): boolean {
         return this.#keepAlive;
@@ -953,62 +991,10 @@ export const httpSpec: BuiltinSpec = {
         this.socket = socket;
       }
 
-      setHeader(name: string, value: string | string[]): this {
-        if (this.headersSent) throw new Error('Cannot set headers after they are sent to the client');
-        this.#headers.set(name.toLowerCase(), value);
-        this.#rawHeaderNames.set(name.toLowerCase(), name);
-        return this;
-      }
-      getHeader(name: string): string | string[] | undefined {
-        return this.#headers.get(name.toLowerCase());
-      }
-      getHeaders(): Record<string, string | string[]> {
-        return Object.fromEntries(this.#headers);
-      }
-      getHeaderNames(): string[] {
-        return [...this.#headers.keys()];
-      }
-      /** The header names exactly as they were first set (case preserved). */
-      getRawHeaderNames(): string[] {
-        return [...this.#rawHeaderNames.values()];
-      }
-      hasHeader(name: string): boolean {
-        return this.#headers.has(name.toLowerCase());
-      }
-      removeHeader(name: string): void {
-        if (this.headersSent) throw new Error('Cannot remove headers after they are sent to the client');
-        this.#headers.delete(name.toLowerCase());
-        this.#rawHeaderNames.delete(name.toLowerCase());
-      }
-
-      /** `res.setHeaders(objOrPairs)` — set several headers in one call. */
-      setHeaders(headers: Record<string, string | string[]> | Array<[string, string | string[]]>): void {
-        const entries = Array.isArray(headers) ? headers : Object.entries(headers);
-        for (const [name, value] of entries) this.setHeader(String(name), value);
-      }
-
-      /** `res.appendHeader(name, value)` — append to (or create) a header. */
-      appendHeader(name: string, value: string | string[]): this {
-        const key = name.toLowerCase();
-        if (!this.#headers.has(key)) return this.setHeader(name, value);
-        const prev = this.#headers.get(key)!;
-        const next = Array.isArray(prev) ? prev.concat(value as string | string[]) : [prev as string].concat(value as string | string[]);
-        this.#headers.set(key, next as string[]);
-        return this;
-      }
-
       /**
        * `res.addTrailers(headers)` — HTTP trailers sent after a chunked body.
        * They are emitted just before the terminating chunk.
        */
-      addTrailers(headers: Record<string, string | string[]> | Array<[string, string | string[]]>): void {
-        const entries = Array.isArray(headers) ? headers : Object.entries(headers);
-        for (const [name, value] of entries) {
-          const key = String(name).toLowerCase();
-          this.#trailers.set(key, value);
-          this.#rawTrailerNames.set(key, String(name));
-        }
-      }
 
       /** `res.assignSocket(socket)` — bind an existing socket to this response. */
       assignSocket(socket: NetSocket): void {
@@ -1083,6 +1069,15 @@ export const httpSpec: BuiltinSpec = {
       }
 
       writeHead(status: number, a?: unknown, b?: unknown): this {
+        if (this.headersSent) {
+          throw new (errorCodes().ERR_HTTP_HEADERS_SENT)('write');
+        }
+        // Node coerces with `| 0` and rejects anything outside 100–999.
+        const original = status;
+        status |= 0;
+        if (status < 100 || status > 999) {
+          throw new (errorCodes().ERR_HTTP_INVALID_STATUS_CODE)(original);
+        }
         this.statusCode = status;
         if (typeof a === 'string') {
           this.statusMessage = a;
@@ -1118,10 +1113,10 @@ export const httpSpec: BuiltinSpec = {
         try {
           this.#flush();
           if (this.#chunked) {
-            if (this.#trailers.size > 0) {
+            if (this._trailers.size > 0) {
               let tail = '0\r\n';
-              for (const [key, value] of this.#trailers) {
-                const name = this.#rawTrailerNames.get(key) ?? key;
+              for (const [key, value] of this._trailers) {
+                const name = this._rawTrailerNames.get(key) ?? key;
                 if (Array.isArray(value)) for (const v of value) tail += `${name}: ${v}\r\n`;
                 else tail += `${name}: ${value}\r\n`;
               }
@@ -1147,40 +1142,68 @@ export const httpSpec: BuiltinSpec = {
         this.#sent = true;
 
         const message = this.statusMessage ?? STATUS_CODES[this.statusCode] ?? 'Unknown';
-        const lines: string[] = [`HTTP/1.1 ${this.statusCode} ${message}`];
+        let head = `HTTP/1.1 ${this.statusCode} ${message}\r\n`;
 
-        const headers = new Map(this.#headers);
-        const bodiless = this.statusCode === 204 || this.statusCode === 304 || this.statusCode === 101;
-        if (!headers.has('content-type')) headers.set('content-type', 'text/plain; charset=utf-8');
-        if (this.sendDate && !headers.has('date')) headers.set('date', new Date().toUTCString());
-        if (bodiless) {
-          headers.delete('transfer-encoding');
-        } else if (!headers.has('content-length')) {
-          // No length known up front: frame as chunked, which is exactly what
-          // lets `write()` stream instead of buffering the whole body.
-          this.#chunked = true;
-          headers.set('transfer-encoding', 'chunked');
+        // Emit user headers first, noting which framing headers they supplied
+        // (Node's `processHeader` records these in `state`).
+        let sawDate = false;
+        let sawConnection = false;
+        let sawContentLength = false;
+        let sawTransferEncoding = false;
+        let connValue = '';
+        for (const [name, value] of this._headers) {
+          if (name === 'date') sawDate = true;
+          else if (name === 'connection') {
+            sawConnection = true;
+            connValue = String(Array.isArray(value) ? value.join(',') : value).toLowerCase();
+          } else if (name === 'content-length') sawContentLength = true;
+          else if (name === 'transfer-encoding') sawTransferEncoding = true;
+          const canonical = name.replace(/(^|-)([a-z])/g, (_, p1: string, p2: string) => `${p1}${p2.toUpperCase()}`);
+          if (Array.isArray(value)) for (const v of value) head += `${canonical}: ${v}\r\n`;
+          else head += `${canonical}: ${value}\r\n`;
         }
+
+        // Date (Node adds it after the user's headers, if the user omitted it).
+        if (this.sendDate && !sawDate) head += `Date: ${new Date().toUTCString()}\r\n`;
 
         // HTTP/1.1 defaults to persistent connections; the client opts out with
         // `Connection: close` (or HTTP/1.0 without `Connection: keep-alive`).
         const reqHeaders = this.req?.headers ?? {};
-        const connHeader = headers.get('connection');
-        const connValue = String(Array.isArray(connHeader) ? connHeader.join(',') : connHeader ?? '').toLowerCase();
         const clientConn = String(reqHeaders['connection'] ?? '').toLowerCase();
         const version = this.req?.httpVersion ?? '1.1';
         const clientWantsClose =
-          connValue.includes('close') || clientConn.includes('close') || (version === '1.0' && !clientConn.includes('keep-alive'));
-        this.#keepAlive = !clientWantsClose;
-        headers.set('connection', this.#keepAlive ? 'keep-alive' : 'close');
-
-        for (const [name, value] of headers) {
-          const canonical = name.replace(/(^|-)([a-z])/g, (_, p1, p2) => `${p1}${p2.toUpperCase()}`);
-          if (Array.isArray(value)) for (const v of value) lines.push(`${canonical}: ${v}`);
-          else lines.push(`${canonical}: ${value}`);
+          clientConn.includes('close') || (version === '1.0' && !clientConn.includes('keep-alive'));
+        if (sawConnection) {
+          this.#keepAlive = !connValue.includes('close') && !clientWantsClose;
+        } else {
+          this.#keepAlive = !clientWantsClose;
+          if (this.#keepAlive) {
+            head += 'Connection: keep-alive\r\n';
+            if (this._keepAliveTimeout > 0) {
+              head += `Keep-Alive: timeout=${Math.floor(this._keepAliveTimeout / 1000)}\r\n`;
+            }
+          } else {
+            head += 'Connection: close\r\n';
+          }
         }
-        lines.push('', '');
-        this.socket?.write(new TextEncoder().encode(lines.join('\r\n')));
+
+        // Body framing: a known length wins, otherwise stream as chunked.
+        const bodiless = this.statusCode === 204 || this.statusCode === 304 || this.statusCode === 101;
+        if (bodiless) {
+          this.#chunked = false;
+        } else if (sawTransferEncoding) {
+          this.#chunked = true;
+        } else if (!sawContentLength) {
+          if (typeof this.#contentLength === 'number') {
+            head += `Content-Length: ${this.#contentLength}\r\n`;
+          } else {
+            this.#chunked = true;
+            head += 'Transfer-Encoding: chunked\r\n';
+          }
+        }
+
+        head += '\r\n';
+        this.socket?.write(new TextEncoder().encode(head));
       }
 
       /** Bytes handed to the socket (used by the ServiceWorker bridge + tests). */
@@ -1200,7 +1223,10 @@ export const httpSpec: BuiltinSpec = {
         if (this.#flushed) return false;
         this.statusCode = status;
         this.statusMessage = undefined;
-        this.#headers = new Map([['content-type', 'text/plain; charset=utf-8']]);
+        // `_fail` can also run before the handler touched a single header, so
+        // reset the shared store to a lone content-type.
+        this._headers = new Map([['content-type', 'text/plain; charset=utf-8']]);
+        this._rawHeaderNames = new Map([['content-type', 'Content-Type']]);
         this.#chunked = false;
         this.#bodyLength = 0;
         this.end('Internal Server Error');
@@ -1266,6 +1292,7 @@ export const httpSpec: BuiltinSpec = {
               request._setup(head, socket);
               const response = new ServerResponse(socket);
               response.req = request;
+              response._keepAliveTimeout = this.keepAliveTimeout;
               req = request;
               res = response;
               currentReq = request;
@@ -1457,15 +1484,16 @@ export const httpSpec: BuiltinSpec = {
       port: number;
       protocol = 'http:';
       maxHeadersCount: number | null = null;
-      headers: Record<string, string | string[]>;
       aborted = false;
       finished = false;
       reusedSocket = false;
       agent: unknown = globalAgent;
 
+      /** @internal — port used when `options.port` is absent (https overrides). */
+      _defaultPort = 80;
+
       #path = '/';
       #conn: Connection | null = null;
-      #rawHeaderNames = new Map<string, string>();
       #keepAlive = true;
       #agentKeepAlive = true;
       #chunks: Uint8Array[] = [];
@@ -1484,11 +1512,26 @@ export const httpSpec: BuiltinSpec = {
         // See ServerResponse: outgoing messages never auto-destroy on finish.
         super({ autoDestroy: false });
         const opts = normalizeOptions(options);
+        this._defaultPort = Number((opts as { _defaultPort?: number })._defaultPort ?? this._defaultPort);
+        if (typeof (opts as { protocol?: string }).protocol === 'string') {
+          this.protocol = (opts as { protocol?: string }).protocol as string;
+        }
         this.method = (opts.method ?? 'GET').toUpperCase();
         this.path = opts.path ?? '/';
         this.host = opts.hostname ?? opts.host ?? '127.0.0.1';
-        this.port = Number(opts.port ?? 80);
-        this.headers = { ...(opts.headers ?? {}) };
+        this.port = Number(opts.port ?? this._defaultPort);
+        // Seed the header store from `options.headers` (lower-cased lookup keys,
+        // original case preserved for `getRawHeaderNames()`), exactly like Node.
+        for (const [name, value] of Object.entries((opts.headers ?? {}) as Record<string, string | string[]>)) {
+          this._headers.set(name.toLowerCase(), value);
+          this._rawHeaderNames.set(name.toLowerCase(), name);
+        }
+        // Node always sends a `Host` header, derived from host + port unless the
+        // caller supplied one.
+        if (!this._headers.has('host')) {
+          const hostHeader = this.port === this._defaultPort ? this.host : `${this.host}:${this.port}`;
+          this.setHeader('Host', hostHeader);
+        }
         this.#cb = cb;
         // `agent: false` opts out of keep-alive; an Agent instance supplies its
         // own `keepAlive` preference.
@@ -1502,29 +1545,6 @@ export const httpSpec: BuiltinSpec = {
           this.agent = opts.agent;
           this.#agentKeepAlive = opts.agent.keepAlive;
         }
-      }
-
-      setHeader(name: string, value: string | string[]): this {
-        this.headers[name.toLowerCase()] = value;
-        this.#rawHeaderNames.set(name.toLowerCase(), name);
-        return this;
-      }
-      getHeader(name: string): string | string[] | undefined {
-        return this.headers[name.toLowerCase()];
-      }
-      getHeaderNames(): string[] {
-        return Object.keys(this.headers);
-      }
-      /** The header names exactly as they were first set (case preserved). */
-      getRawHeaderNames(): string[] {
-        return [...this.#rawHeaderNames.values()];
-      }
-      hasHeader(name: string): boolean {
-        return name.toLowerCase() in this.headers;
-      }
-      removeHeader(name: string): void {
-        delete this.headers[name.toLowerCase()];
-        this.#rawHeaderNames.delete(name.toLowerCase());
       }
 
       /** `request.setTimeout(msecs, cb)` — arm a socket inactivity timer. */
@@ -1557,7 +1577,7 @@ export const httpSpec: BuiltinSpec = {
 
       /** @internal — the request headers as they will be sent. */
       _renderHeaders(): Record<string, string | string[]> {
-        return { ...this.headers };
+        return { ...this.getHeaders() };
       }
       /** @internal — stage the request line + headers. */
       _implicitHeader(): void {
@@ -1609,14 +1629,18 @@ export const httpSpec: BuiltinSpec = {
 
         const body = concatAll(this.#chunks);
         const lines: string[] = [`${this.method} ${this.path} HTTP/1.1`];
-        const headers = new Map(Object.entries(this.headers).map(([k, v]) => [k.toLowerCase(), v]));
-        if (!headers.has('host')) headers.set('host', `${this.host}:${this.port}`);
+        const headers = new Map(this._headers);
         // HTTP/1.1 is persistent by default; the caller opts out via
         // `Connection: close`.
         const requested = String(headers.get('connection') ?? '').toLowerCase();
         this.#keepAlive = this.#agentKeepAlive && !requested.includes('close');
-        if (!headers.has('connection')) headers.set('connection', 'keep-alive');
-        headers.set('content-length', String(body.byteLength));
+        if (!headers.has('connection')) headers.set('connection', this.#keepAlive ? 'keep-alive' : 'close');
+        // Request framing mirrors Node's `_hasBody`/`useChunkedEncodingByDefault`:
+        // bodyless methods carry no Content-Length; the rest measure it.
+        const NO_BODY = ['GET', 'HEAD', 'DELETE', 'OPTIONS', 'TRACE', 'CONNECT'];
+        if (!headers.has('content-length') && !headers.has('transfer-encoding') && !NO_BODY.includes(this.method)) {
+          headers.set('content-length', String(body.byteLength));
+        }
         for (const [name, value] of headers) {
           const canonical = name.replace(/(^|-)([a-z])/g, (_, p1, p2) => `${p1}${p2.toUpperCase()}`);
           if (Array.isArray(value)) for (const v of value) lines.push(`${canonical}: ${v}`);
@@ -1638,7 +1662,15 @@ export const httpSpec: BuiltinSpec = {
               this.emit('response', res);
             },
             onData: (chunk) => this.#response?._pushBody(chunk),
-            onEnd: () => this.#response?._end(),
+            onEnd: () => {
+              // Node detaches the socket from the response once it is complete
+              // (so the freed socket isn't destroyed with the message).
+              const res = this.#response;
+              if (res) {
+                res.socket = null;
+                res._end();
+              }
+            },
             onTrailer: (line) => this.#response?._addTrailer(line),
             onError: (err) => this.emit('error', err),
           },
@@ -1826,7 +1858,7 @@ export const httpSpec: BuiltinSpec = {
       _connectionListener,
       STATUS_CODES,
       METHODS: [
-        'ACL','BIND','CHECKOUT','CONNECT','COPY','DELETE','GET','HEAD','LINK','LOCK','M-SEARCH','MERGE','MKACTIVITY','MKCALENDAR','MKCOL','MOVE','NOTIFY','OPTIONS','PATCH','POST','PROPFIND','PROPPATCH','PURGE','PUT','REBIND','REPORT','SEARCH','SOURCE','SUBSCRIBE','TRACE','UNBIND','UNLINK','UNLOCK','UNSUBSCRIBE',
+        'ACL','BIND','CHECKOUT','CONNECT','COPY','DELETE','GET','HEAD','LINK','LOCK','M-SEARCH','MERGE','MKACTIVITY','MKCALENDAR','MKCOL','MOVE','NOTIFY','OPTIONS','PATCH','POST','PROPFIND','PROPPATCH','PURGE','QUERY','PUT','REBIND','REPORT','SEARCH','SOURCE','SUBSCRIBE','TRACE','UNBIND','UNLINK','UNLOCK','UNSUBSCRIBE',
       ],
       createServer,
       request,

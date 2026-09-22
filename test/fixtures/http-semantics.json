@@ -1,0 +1,173 @@
+{
+  "maxHeaderSize": 16384,
+  "methodsLen": 35,
+  "methodsHasPATCH": true,
+  "statusCodesCount": 63,
+  "globalAgentInstance": true,
+  "agentDefaults": {
+    "maxSockets": null,
+    "maxFreeSockets": 256,
+    "keepAlive": false,
+    "maxTotalSockets": null
+  },
+  "globalAgentMaxSockets": null,
+  "agentGetName": "example.com:80:",
+  "agentGetNameHttps": "example.com:443:",
+  "validateHeaderNameThrows": "ERR_INVALID_HTTP_TOKEN",
+  "validateHeaderValueThrows": "ERR_INVALID_CHAR",
+  "serverResponseWriteContinueType": "function",
+  "serverResponseWriteProcessingType": "function",
+  "outgoingMessageProtoMethods": [
+    "setHeader",
+    "getHeader",
+    "getHeaders",
+    "getHeaderNames",
+    "getRawHeaderNames",
+    "hasHeader",
+    "removeHeader",
+    "setHeaders",
+    "appendHeader",
+    "addTrailers",
+    "flushHeaders"
+  ],
+  "address": {
+    "family": "IPv4",
+    "address": "127.0.0.1",
+    "isPortNumber": true
+  },
+  "serverAddressIsObject": true,
+  "server": {
+    "method": "GET",
+    "url": "/hello?x=1",
+    "httpVersion": "1.1",
+    "httpVersionMajor": 1,
+    "httpVersionMinor": 1,
+    "complete": false,
+    "headersLower": "v",
+    "rawHeadersInclude": true,
+    "connectionIsSocket": true,
+    "readable": "boolean",
+    "httpVersionIsString": "string",
+    "res_statusCodeDefault": 200,
+    "setHeaderReturnsThis": true,
+    "getHeaderCI": "1",
+    "hasHeaderCI": true,
+    "getHeaderArray": [
+      "a",
+      "b"
+    ],
+    "getHeadersProtoNull": true,
+    "getHeaderNamesBefore": [
+      "x-one",
+      "x-two"
+    ],
+    "hasHeaderAfterRemove": false,
+    "rawHeaderNamesBefore": [
+      "X-One"
+    ],
+    "headersSentBefore": false,
+    "appendHeaderReturnsThis": "object",
+    "appendHeaderValue": [
+      "a",
+      "b"
+    ],
+    "getHeaderUndefined": true,
+    "setHeaderInvalidToken": "ERR_INVALID_HTTP_TOKEN",
+    "setHeaderInvalidChar": "ERR_INVALID_CHAR",
+    "setHeaderUndefValue": "ERR_HTTP_INVALID_HEADER_VALUE",
+    "statusCodeOutOfRange": false,
+    "writeHeadInvalidStatus": "ERR_HTTP_INVALID_STATUS_CODE",
+    "writeHeadReturnsThis": true,
+    "statusCodeAfterWriteHead": 201,
+    "headersSentAfter": true,
+    "writeHeadTwice": "ERR_HTTP_HEADERS_SENT",
+    "setHeaderAfterSent": "ERR_HTTP_HEADERS_SENT",
+    "removeHeaderAfterSent": "ERR_HTTP_HEADERS_SENT",
+    "res_reqIsReq": true,
+    "req_resIsRes": false,
+    "req_setTimeoutReturnsThis": true,
+    "res_writeContinueType": "function",
+    "res_writeProcessingType": "function",
+    "req_headersDistinct": [
+      "x-a",
+      "host",
+      "connection"
+    ],
+    "req_rawHeadersIsArray": true,
+    "req_headersProtoNull": false,
+    "res_getHeaderNamesAfterWriteHead": [
+      "x-one",
+      "x-append"
+    ],
+    "res_getRawHeaderNamesAfterWriteHead": [
+      "X-One",
+      "X-Append"
+    ],
+    "writableEnded": true,
+    "finished": true,
+    "chunkedWhenStreaming": true
+  },
+  "client": {
+    "reqGetHeader": "v",
+    "reqGetHeaderCI": "v",
+    "reqHasHeader": true,
+    "reqGetHeadersLower": [
+      "x-a",
+      "host"
+    ],
+    "reqGetHeaderNames": [
+      "x-a",
+      "host"
+    ],
+    "reqSetHeaderReturnsThis": true,
+    "reqRemoveHeaderReturns": "undefined",
+    "statusCode": 201,
+    "statusMessage": "Created",
+    "httpVersion": "1.1",
+    "rawHeadersHasDate": true,
+    "complete": true,
+    "text": "body",
+    "reqPath": "/hello?x=1",
+    "reqMethod": "GET",
+    "reqProtocol": "http:",
+    "reqAborted": false,
+    "reqFinished": true,
+    "socketNotNull": true,
+    "res_reqIsReq": true,
+    "res_rawHeadersIsArray": true,
+    "res_headersDistinctKeys": [
+      "x-one",
+      "x-append",
+      "date",
+      "connection",
+      "keep-alive",
+      "transfer-encoding"
+    ],
+    "res_trailersDistinctIsObject": true,
+    "res_socketNotNull": false,
+    "req_agentHasGetName": "function",
+    "res_urlType": "string",
+    "streamTransferEncoding": "chunked",
+    "streamText": "abc",
+    "lenText": "hello",
+    "teapotStatus": 418,
+    "teapotStatusMessage": "Teapot",
+    "teapotText": "x"
+  },
+  "afterCloseListening": false,
+  "net": {
+    "isIP": [
+      4,
+      6,
+      0
+    ],
+    "isIPv4": [
+      true,
+      false
+    ],
+    "isIPv6": [
+      true,
+      false
+    ]
+  }
+}

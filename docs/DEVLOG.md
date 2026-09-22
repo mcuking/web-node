@@ -236,11 +236,35 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 11. ~~**`zlib`**~~ ✅ **已处理（2026-09-21，M45）**：deflate/gzip 的流式与一次性异步形式跑在平台 `CompressionStream`/`DecompressionStream` 上（默认选项字节级对齐真 Node v26.9.0），`crc32`/`constants`/`codes` 齐备，`stream/web` 的 `CompressionStream`/`DecompressionStream` 同步解锁。仍缺（有意，平台无对应面）：同步形式（`gzipSync` 等）、`level`/`windowBits`/`memLevel`/`strategy`/`dictionary` 等编码参数、`flush()`/`params()`、brotli/zstd/zip——均显式抛 `NotImplementedError`。若日后确实需要同步压缩/自定义 level，得自己写一份纯 JS deflate（代价大，优先级低）。
 10b. ~~**补 `internal/util/inspect` 等 shim 的保真度**~~ ✅ **已解决（2026-09-21，M42）**：`types` binding 的 `isGeneratorFunction`/`isAsyncFunction` 修正（`async function*` 两者皆为真，`util.inspect` 因此输出 `[AsyncGeneratorFunction: x]`）；`icu.getStringWidth` 用真列宽重写。剩：`getPromiseDetails`（恒 pending）/`getProxyDetails`（恒 undefined）/Map/Set 迭代器预览 仍为近似（V8 不同步暴露内部状态）。
 10c. ~~**`process` 表面补齐（M43）**~~ ✅ **已解决（2026-09-21，M43）**：逐键对照真 Node v26.9.0，补齐 `getBuiltinModule`/`getActiveResourcesInfo`/`loadEnvFile`/未捕获异常捕获回调三件套/`reallyExit`/`openStdin`/`ref`/`unref`/`debugPort`/`domain`/`report`，移除已删的 `noDeprecation`/`throwDeprecation`/`traceDeprecation`；顺带修了「timer/nextTick 回调抛出绕过 `process._fatalException`」的真 bug，并把 `VfsError` 改成 Node `UVException` 的消息形状。剩：`_*` 内部面与 Unix 原生（`dlopen`/`execve`/`seteuid` 等）/`moduleLoadList` 仍不存在（不面向用户代码）。
-12. ~~**扫描器原型/静态/arity 差分**~~ ✅ **已清零（2026-09-22，M75–M78）**：全 67 个内建模块的导出函数 `length`、类原型（含继承链）成员、类静态成员与常量的差分已全部收掉。下一步的优先级转为**语义深度**（同一表面下让真调用更接近真 Node）：候选——`http`/`net` 的真连接生命周期与超时、`fs` 的并发/错误形状、`crypto` 非对称面（需原生 OpenSSL，暂只能响亮抛）、`module` 的 `registerHooks`/`stripTypeScriptTypes`（需 amaro/loader 钩子）、以及把更多 vendored 真源（如 `internal/streams/iter/transform`）搬进来。
+12. ~~**扫描器原型/静态/arity 差分**~~ ✅ **已清零（2026-09-22，M75–M78）**：全 67 个内建模块的导出函数 `length`、类原型（含继承链）成员、类静态成员与常量的差分已全部收掉。下一步的优先级转为**语义深度**（同一表面下让真调用更接近真 Node）：采用**差分语料**（同一观测程序在真 Node 与 web-node 各跑一遍，JSON 必须逐字段相等）。**M79 已用此法把 `http` 语义对齐**（80 个观测点全等，见变更记录）；后续候选：`net` 连接生命周期与超时、`fs` 错误形状、`crypto` 非对称面、`module.registerHooks` 等。
 
 ---
 
 ## 变更记录
+
+### 2026-09-22 · M79 http 语义深度（差分语料驱动）
+
+**背景**：扫描器差分全清零后转入**语义深度**——让同一表面下的真调用与真 Node 观测等价。第一个目标选 `http`。
+
+**方法（差分语料）**：新增 `tools/http-semantics-probe.cjs` ——**只用公开 API** 的观测程序（80 个观测点：模块静态、header API、连接/框架、报错码、客户端/服务端双方）。它在真 Node 上跑出 `test/fixtures/http-semantics.json`（`tools/http-semantics-oracle.mjs` 生成，已验证两次输出一致），再在 web-node 里跑同一程序，**两个 JSON 必须逐字段相等**（新增永久回归 `test/http-semantics.test.ts`）。
+
+**修什么（全部由语料抓出）**
+
+- **`http.METHODS` 缺 `QUERY`**（34→35）。
+- **默认 `Content-Type` 不应存在**：旧 `#flush` 在用户没设时强加 `text/plain; charset=utf-8`，Node 不会。删除。
+- **响应框架按 Node `_storeHeader` 重写**：不再“headers 非空就 keep-alive / 无 content-length 就 chunked”的一把抓，而是按 Node 逻辑：先发用户头 → 补 `Date` → `Connection: keep-alive` + `Keep-Alive: timeout=N`（或 `close`）→ 框架头（`Content-Length` 优先，否则 `Transfer-Encoding: chunked`）。
+- **`Content-Length` 自动计算**：`res.end(body)` 在头未发时记录 `_contentLength`（`end()` 无体则为 `0`），与 Node 的 `write_`/`end` 一致；`res.write()` 流式则 chunked。
+- **`Keep-Alive: timeout=5`**：`Server` 把 `keepAliveTimeout` 注入响应，`#flush` 据此发出（默认 5s）。
+- **header 规范校验**：`setHeader`/`removeHeader`/`addTrailers` 现在跑 `validateHeaderName`/`validateHeaderValue`（`ERR_INVALID_HTTP_TOKEN`/`ERR_INVALID_CHAR`/`ERR_INVALID_HTTP_VALUE`）；headers 已发时抛带 `code` 的 `ERR_HTTP_HEADERS_SENT`（旧代码抛的是无 `code` 的裸 Error）。
+- **`writeHead` 校验**：状态码 `| 0` 后越界抛 `ERR_HTTP_INVALID_STATUS_CODE`；二次调用抛 `ERR_HTTP_HEADERS_SENT('write')`。新增码 `ERR_HTTP_HEADERS_SENT`/`ERR_HTTP_INVALID_STATUS_CODE`/`ERR_HTTP_CONTENT_LENGTH_MISMATCH` 进 `internal-shims.ts` 的 `ERROR_CODES`。
+- **`getHeaders()` 返回 null 原型对象**（`OutgoingMessage`/`ServerResponse`/`ClientRequest` 统一）；`IncomingMessage.headers`/`trailers` 也改为 null 原型（Node 如此，`__proto__` 才能当普通头名）。
+- **单一 header 存储**：`OutgoingMessage` 的私有 `#headers` 改为子类共享的 `_headers`（lower-case 键）；`ServerResponse`/`ClientRequest` 删掉各自那份重复实现，杜绝「`getHeaderNames` 看得到、`getHeader` 查不到」的双头账。
+- **`ClientRequest` 主机头**：构造时就设 `Host`（默认端口省略），`getRawHeaderNames()` 与 Node 一样以 `['Host', ...]` 开头。
+- **请求框架**：GET/HEAD/DELETE/OPTIONS/TRACE/CONNECT 不带 `Content-Length`（旧代码无条件加 `content-length: 0`）；有实体方法按实体长度算。
+- **`https` 默认端口 443**：`https.request` 合并 `{ protocol:'https:', _defaultPort:443 }`，`Host` 头与真 Node 一致。
+- **响应完成后 `res.socket = null`**（客户端 `IncomingMessage`），与 Node `_http_client` 一致。
+
+**验证**：差分语料 **80/80 与真 Node v26.9.0 逐字段一致**；`test/http-deep.test.ts` 增 2 例（header 存储/框架 + METHOD/prototype）、更新 2 处过时预期（Host 领先于用户头、流式才带 trailers）；门禁全绿：tsc 干净 · vitest **864 通过 / 2 预存 skip（79 文件）** · build worker **2297.73KB**。
 
 ### 2026-09-22 · M78 tls 原型/静态差分清零（扫描器差分全清零）
 
