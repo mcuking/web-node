@@ -83,3 +83,56 @@ describe('crypto stub classes', () => {
     }
   });
 });
+
+describe('crypto hash/cipher are Transform subclasses', () => {
+  it('Hash/Hmac/Cipheriv/Decipheriv extend stream.Transform', () => {
+    const { req } = boot();
+    const crypto = req('crypto');
+    const { Transform } = req('stream');
+    const { Buffer: NodeBuffer } = req('buffer');
+    const hash = crypto.createHash('sha256');
+    expect(hash).toBeInstanceOf(crypto.Hash);
+    expect(hash).toBeInstanceOf(Transform);
+    expect(typeof hash.pipe).toBe('function');
+    expect(typeof hash.read).toBe('function');
+    expect(crypto.createHmac('sha256', 'k')).toBeInstanceOf(Transform);
+    const key = NodeBuffer.alloc(16);
+    const iv = NodeBuffer.alloc(16);
+    expect(crypto.createCipheriv('aes-128-cbc', key, iv)).toBeInstanceOf(crypto.Cipheriv);
+    expect(crypto.createCipheriv('aes-128-cbc', key, iv)).toBeInstanceOf(Transform);
+    expect(crypto.createDecipheriv('aes-128-cbc', key, iv)).toBeInstanceOf(Transform);
+    // Node arity: Hash(algorithm, options), Hmac(algorithm, key, options)
+    expect(crypto.Hash.length).toBe(2);
+    expect(crypto.Hmac.length).toBe(3);
+  });
+
+  it('a hash streams like a Transform', async () => {
+    const { req } = boot();
+    const crypto = req('crypto');
+    const { Buffer: NodeBuffer } = req('buffer');
+    const hash = crypto.createHash('sha256');
+    const hex = await new Promise<string>((resolve, reject) => {
+      const chunks: Uint8Array[] = [];
+      hash.on('data', (chunk: Uint8Array) => chunks.push(chunk));
+      hash.on('end', () => resolve(NodeBuffer.concat(chunks).toString('hex')));
+      hash.on('error', reject);
+      hash.end('abc');
+    });
+    expect(hex).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  });
+
+  it('a cipher streams like a Transform', async () => {
+    const { req } = boot();
+    const crypto = req('crypto');
+    const { Buffer: NodeBuffer } = req('buffer');
+    const cipher = crypto.createCipheriv('aes-128-ecb', NodeBuffer.alloc(16), null);
+    const out = await new Promise<Uint8Array>((resolve, reject) => {
+      const chunks: Uint8Array[] = [];
+      cipher.on('data', (chunk: Uint8Array) => chunks.push(chunk));
+      cipher.on('end', () => resolve(NodeBuffer.concat(chunks)));
+      cipher.on('error', reject);
+      cipher.end(NodeBuffer.alloc(16));
+    });
+    expect(out.length).toBe(32); // 16-byte block + one full PKCS#7 padding block
+  });
+});

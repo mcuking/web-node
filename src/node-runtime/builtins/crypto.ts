@@ -278,20 +278,68 @@ export const cryptoSpec: BuiltinSpec = {
       return result;
     };
 
+    // Node's `Hash`/`Hmac`/`Cipheriv`/`Decipheriv` are `stream.Transform`
+    // subclasses (`Sign`/`Verify` are `Writable`). We mirror that so the whole
+    // stream surface — prototype members and statics — is present for feature
+    // detection; hashing/ciphering stays our own implementation.
+    interface StreamBase {
+      push(chunk: unknown): boolean;
+    }
+    const streamBases = ctx.require('stream') as {
+      Transform: new (opts?: Record<string, unknown>) => StreamBase;
+      Writable: new (opts?: Record<string, unknown>) => StreamBase;
+    };
+    const TransformBase = streamBases.Transform;
+    const WritableBase = streamBases.Writable;
+
+    // Node's crypto streams extend `LazyTransform` (internal/streams/
+    // lazy_transform.js): a Transform whose `_readableState`/`_writableState`
+    // are prototype accessors that create the stream state on first access. We
+    // reproduce it verbatim so both members live on the prototype exactly as in
+    // Node, and hashing/ciphering stays lazy.
+    const TransformCtor = TransformBase as unknown as {
+      new (opts?: unknown): StreamBase;
+      prototype: object;
+      call(thisArg: unknown, opts?: unknown): void;
+    };
+    function LazyTransform(this: { _options?: unknown }, options?: unknown): void {
+      this._options = options;
+    }
+    Object.setPrototypeOf(LazyTransform.prototype, TransformCtor.prototype);
+    Object.setPrototypeOf(LazyTransform, TransformCtor as unknown as object);
+    const makeStateGetter =
+      (name: string) =>
+      function (this: Record<string, unknown>): unknown {
+        (TransformCtor as unknown as (this: unknown, opts?: unknown) => void).call(this, this._options);
+        (this._writableState as { decodeStrings: boolean }).decodeStrings = false;
+        return this[name];
+      };
+    const makeStateSetter =
+      (name: string) =>
+      function (this: Record<string, unknown>, value: unknown): void {
+        Object.defineProperty(this, name, { value, enumerable: true, configurable: true, writable: true });
+      };
+    Object.defineProperties(LazyTransform.prototype, {
+      _readableState: { get: makeStateGetter('_readableState'), set: makeStateSetter('_readableState'), configurable: true, enumerable: true },
+      _writableState: { get: makeStateGetter('_writableState'), set: makeStateSetter('_writableState'), configurable: true, enumerable: true },
+    });
+    const LazyTransformBase = LazyTransform as unknown as new (opts?: Record<string, unknown>) => StreamBase;
+
     // -- digests --------------------------------------------------------------
 
     /**
      * `crypto.Hash` — and the class `crypto.createHash()` returns. Node
      * deprecates `new Hash(...)` but it still works, so we support both.
      */
-    class Hash {
+    class Hash extends LazyTransformBase {
       #name: string;
       #algo: HashAlgo;
       #chunks: Uint8Array[] = [];
       #total = 0;
       #finalized = false;
 
-      constructor(algorithm: unknown) {
+      constructor(algorithm: unknown, options?: unknown) {
+        super(options as Record<string, unknown> | undefined);
         if (typeof algorithm !== 'string') {
           throw coded(
             'TypeError',
@@ -325,19 +373,39 @@ export const cryptoSpec: BuiltinSpec = {
         for (const chunk of this.#chunks) clone.update(chunk);
         return clone;
       }
+
+      _transform(chunk: unknown, encoding: string, callback: (err?: Error | null) => void): void {
+        try {
+          this.update(chunk, encoding);
+          callback();
+        } catch (error) {
+          callback(error as Error);
+        }
+      }
+
+      _flush(callback: (err?: Error | null) => void): void {
+        try {
+          const digest = this.digest();
+          if (digest) this.push(digest);
+          callback();
+        } catch (error) {
+          callback(error as Error);
+        }
+      }
     }
 
     const createHash = (algorithm: string): Hash => new Hash(algorithm);
 
     /** `crypto.Hmac` — and the class `crypto.createHmac()` returns. */
-    class Hmac {
+    class Hmac extends LazyTransformBase {
       #algo: HashAlgo;
       #keyBytes: Uint8Array;
       #chunks: Uint8Array[] = [];
       #total = 0;
       #finalized = false;
 
-      constructor(algorithm: unknown, key: unknown) {
+      constructor(algorithm: unknown, key: unknown, options?: unknown) {
+        super(options as Record<string, unknown> | undefined);
         if (typeof algorithm !== 'string') {
           throw coded(
             'TypeError',
@@ -364,6 +432,25 @@ export const cryptoSpec: BuiltinSpec = {
         this.#finalized = true;
         const result = hmac(this.#algo, this.#keyBytes, concatBytes(this.#chunks, this.#total));
         return encodeOutput(asBuffer(result), encoding);
+      }
+
+      _transform(chunk: unknown, encoding: string, callback: (err?: Error | null) => void): void {
+        try {
+          this.update(chunk, encoding);
+          callback();
+        } catch (error) {
+          callback(error as Error);
+        }
+      }
+
+      _flush(callback: (err?: Error | null) => void): void {
+        try {
+          const digest = this.digest();
+          if (digest) this.push(digest);
+          callback();
+        } catch (error) {
+          callback(error as Error);
+        }
       }
     }
 
@@ -585,13 +672,14 @@ export const cryptoSpec: BuiltinSpec = {
       );
     };
 
-    const buildCipher = (
+    /** Validate cipher arguments and build the shared AES state. */
+    const createCipherState = (
       algorithm: unknown,
       key: unknown,
       iv: unknown,
       options: unknown,
       encrypt: boolean,
-    ): Record<string, unknown> => {
+    ): AesCipheriv => {
       const spec = resolveCipher(algorithm);
       if (!spec) {
         const name = `${algorithm}`;
@@ -605,54 +693,113 @@ export const cryptoSpec: BuiltinSpec = {
       const ivBytes = coerceIv(iv, spec);
       const authTagLength =
         (options as { authTagLength?: number } | undefined)?.authTagLength ?? 16;
-      const inner = new AesCipheriv(spec, keyBytes, ivBytes, encrypt, authTagLength);
-
-      const api: Record<string, unknown> = {
-        update(data: unknown, inputEncoding?: string, outputEncoding?: string) {
-          const out = inner.update(coerceCipherInput(data, inputEncoding));
-          return encodeOutput(asBuffer(out), outputEncoding);
-        },
-        final(outputEncoding?: string) {
-          return encodeOutput(asBuffer(inner.final()), outputEncoding);
-        },
-        setAutoPadding(autoPadding?: boolean) {
-          inner.setAutoPadding(autoPadding);
-          return api;
-        },
-        setAAD(aad: unknown) {
-          inner.setAAD(coerceBytes(aad, 'aad'));
-          return api;
-        },
-      };
-      if (encrypt) {
-        api.getAuthTag = () => asBuffer(inner.getAuthTag());
-      } else {
-        api.setAuthTag = (tag: unknown) => {
-          inner.setAuthTag(coerceBytes(tag, 'tag'));
-          return api;
-        };
-      }
-      return api;
+      return new AesCipheriv(spec, keyBytes, ivBytes, encrypt, authTagLength);
     };
 
-    // `crypto.Cipheriv` / `crypto.Decipheriv` are the classes the factories
-    // return; their constructors match `createCipheriv`/`createDecipheriv`
-    // (Node deprecates `new`, but it still works). The instances are objects on
-    // the class prototype, so `instanceof` behaves.
-    class Cipheriv {
+    // `crypto.Cipheriv` / `crypto.Decipheriv` are `stream.Transform` subclasses
+    // in Node; constructors match `createCipheriv`/`createDecipheriv`. The real
+    // AES state lives in a private field and the methods sit on the prototype,
+    // so `instanceof`, `.pipe()` and the whole stream surface behave.
+    class Cipheriv extends LazyTransformBase {
+      #inner: AesCipheriv;
+
       constructor(algorithm: unknown, key: unknown, iv?: unknown, options?: unknown) {
-        return Object.setPrototypeOf(
-          buildCipher(algorithm, key, iv, options, true),
-          Cipheriv.prototype,
-        ) as unknown as Cipheriv;
+        super(options as Record<string, unknown> | undefined);
+        this.#inner = createCipherState(algorithm, key, iv, options, true);
+      }
+
+      update(data: unknown, inputEncoding?: string, outputEncoding?: string): unknown {
+        return encodeOutput(asBuffer(this.#inner.update(coerceCipherInput(data, inputEncoding))), outputEncoding);
+      }
+
+      final(outputEncoding?: string): unknown {
+        return encodeOutput(asBuffer(this.#inner.final()), outputEncoding);
+      }
+
+      setAutoPadding(autoPadding?: boolean): this {
+        this.#inner.setAutoPadding(autoPadding);
+        return this;
+      }
+
+      setAAD(aad: unknown): this {
+        this.#inner.setAAD(coerceBytes(aad, 'aad'));
+        return this;
+      }
+
+      getAuthTag(): unknown {
+        return asBuffer(this.#inner.getAuthTag());
+      }
+
+      _transform(chunk: unknown, encoding: string, callback: (err?: Error | null) => void): void {
+        try {
+          const out = this.#inner.update(coerceCipherInput(chunk, encoding));
+          if (out.length) this.push(out);
+          callback();
+        } catch (error) {
+          callback(error as Error);
+        }
+      }
+
+      _flush(callback: (err?: Error | null) => void): void {
+        try {
+          const out = this.#inner.final();
+          if (out.length) this.push(out);
+          callback();
+        } catch (error) {
+          callback(error as Error);
+        }
       }
     }
-    class Decipheriv {
+
+    class Decipheriv extends LazyTransformBase {
+      #inner: AesCipheriv;
+
       constructor(algorithm: unknown, key: unknown, iv?: unknown, options?: unknown) {
-        return Object.setPrototypeOf(
-          buildCipher(algorithm, key, iv, options, false),
-          Decipheriv.prototype,
-        ) as unknown as Decipheriv;
+        super(options as Record<string, unknown> | undefined);
+        this.#inner = createCipherState(algorithm, key, iv, options, false);
+      }
+
+      update(data: unknown, inputEncoding?: string, outputEncoding?: string): unknown {
+        return encodeOutput(asBuffer(this.#inner.update(coerceCipherInput(data, inputEncoding))), outputEncoding);
+      }
+
+      final(outputEncoding?: string): unknown {
+        return encodeOutput(asBuffer(this.#inner.final()), outputEncoding);
+      }
+
+      setAutoPadding(autoPadding?: boolean): this {
+        this.#inner.setAutoPadding(autoPadding);
+        return this;
+      }
+
+      setAAD(aad: unknown): this {
+        this.#inner.setAAD(coerceBytes(aad, 'aad'));
+        return this;
+      }
+
+      setAuthTag(tag: unknown): this {
+        this.#inner.setAuthTag(coerceBytes(tag, 'tag'));
+        return this;
+      }
+
+      _transform(chunk: unknown, encoding: string, callback: (err?: Error | null) => void): void {
+        try {
+          const out = this.#inner.update(coerceCipherInput(chunk, encoding));
+          if (out.length) this.push(out);
+          callback();
+        } catch (error) {
+          callback(error as Error);
+        }
+      }
+
+      _flush(callback: (err?: Error | null) => void): void {
+        try {
+          const out = this.#inner.final();
+          if (out.length) this.push(out);
+          callback();
+        } catch (error) {
+          callback(error as Error);
+        }
       }
     }
 
@@ -712,9 +859,6 @@ export const cryptoSpec: BuiltinSpec = {
     // and shaped like Node (right base class, right members) but every entry
     // point throws a typed error instead of fabricating a result. This keeps
     // feature detection (`instanceof`, `'sign' in x`, `typeof x.foo`) honest.
-    const { Writable } = ctx.require('stream') as {
-      Writable: new (opts?: Record<string, unknown>) => object;
-    };
     const stubMethod =
       (name: string): ((...args: unknown[]) => never) =>
       () => {
@@ -746,7 +890,7 @@ export const cryptoSpec: BuiltinSpec = {
     // `Sign`/`Verify` are `stream.Writable` subclasses in Node.
     const Sign = namedClass(
       'Sign',
-      class extends (Writable as new (opts?: Record<string, unknown>) => object) {
+      class extends WritableBase {
         constructor() {
           super();
           throw notImplemented('api', 'crypto.Sign');
@@ -757,7 +901,7 @@ export const cryptoSpec: BuiltinSpec = {
 
     const Verify = namedClass(
       'Verify',
-      class extends (Writable as new (opts?: Record<string, unknown>) => object) {
+      class extends WritableBase {
         constructor() {
           super();
           throw notImplemented('api', 'crypto.Verify');

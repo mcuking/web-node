@@ -89,6 +89,7 @@
 | M71 | **未实现表面的保真**：`http.Agent extends EventEmitter`（+ `defaultMaxSockets`）；`net.SocketAddress.parse`；`dns.Resolver` 全 query 方法（loopback 真解析/其余真抛）；`zlib` Brotli/Zstd 桩类继承 `Transform` 但构造即抛 | ✅ 完成 |
 | M72 | **导出函数 arity 对齐**：新增 `alignArity`（重定义 `length`，可配）+ `BuiltinSpec.arity` 钩子，对 `crypto`/`http`/`https`/`net`/`zlib`/`dns`/`process`/`module`/`child_process`/`worker_threads`/`perf_hooks`/`v8`/`console` 逐名对齐真 Node v26.9.0 | ✅ 完成 |
 | M73 | **crypto 桩类原型保真**：`Sign`/`Verify` 改继承真 `stream.Writable`；`KeyObject`/`X509Certificate`/`DiffieHellman(Group)`/`ECDH`/`Certificate` 补齐 Node 原型/静态成员（存在但真抛）；补 `prng`/`pseudoRandomBytes`/`rng` 非枚举别名（DEP0115） | ✅ 完成 |
+| M74 | **crypto 流类改真 `Transform`**：`Hash`/`Hmac`/`Cipheriv`/`Decipheriv` 改继承忠实复刻的 `LazyTransform`（`_readableState`/`_writableState` 原型访问器 + 惰性建态）→ 继承真 `stream.Transform`；`_transform`/`_flush` 可真跑管道，crypto 扫描差分清零 | ✅ 完成 |
 | M67 | **`http` 公开表面补齐**：新建 `OutgoingMessage` 基类（`ServerResponse`/`ClientRequest` 继承）；实现 `Agent`+`globalAgent`（文档化 API）并让 `ClientRequest` 支持 `agent:false`；补 `validateHeaderName`/`validateHeaderValue`（真字符正则）、`maxHeaderSize`、`_connectionListener`、`setMaxIdleHTTPParsers`/`setGlobalProxyFromEnv` 与重导出的 `MessageEvent`/`CloseEvent`/`WebSocket` | ✅ 完成 |
 | M66 | **`crypto` 公开表面补齐**：工厂改为真类导出（`Hash`/`Hmac`/`Cipheriv`/`Decipheriv`，`instanceof` 成立）；新增 `subtle`/`randomUUIDv7`（RFC 9562）/`secureHeapUsed`/`setEngine`；把不对称/引擎类与函数（`Sign`/`Verify`/`KeyObject`/`DiffieHellman`/`ECDH`/`argon2` 等）做成**存在但响亮抛错** | ✅ 完成 |
 | M65 | **`net` 公开表面补齐**：新增 `src/node-runtime/net/socket-address.ts`（Node `block_list` 原生绑定的 TS 替身）——`SocketAddress` + `BlockList`（完整 API、glibc 级 IP 规范化输出、规则序/`check` 语义/v4-mapped 等价均按真 Node 实测复刻）；补 `net.Stream`、`get/setDefaultAutoSelectFamily*`；新增错误码 `ERR_INVALID_ADDRESS` | ✅ 完成 |
@@ -105,7 +106,7 @@
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **840 通过 / 2 预存 skip（78 files）** · `vite build` 绿（worker **2270.14KB** / index ~10.84KB / css ~4.06KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **843 通过 / 2 预存 skip（78 files）** · `vite build` 绿（worker **2271.58KB** / index ~10.84KB / css ~4.06KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -215,7 +216,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
    - **`v8` 换真源码**：✅ **已处理（2026-09-21，M54）**：真 `lib/v8.js` 已 vendor（MANIFEST 148 → 151），`serdes` binding 用 JS 实现 V8 线格式（版本 15）并对 115 条差分语料逐字节对齐真 Node v26.9.0；堆与 profiler 面一律抛 `ERR_WEB_NODE_NOT_IMPLEMENTED`。剩：数组 elements kind 的“历史状态”、`Proxy` 识别、异常对象的 clone 错误文案是**已记录的近似**；`hasInspector: false` 使 `takeCoverage`/`stopCoverage` 不存在。
    - **`tty` 换真源码**：✅ **已处理（2026-09-21，M55）**：真 `lib/tty.js` + `lib/internal/tty.js` 已 vendor（MANIFEST 151 → 153），`tty_wrap` binding 让 `isatty` 与颜色深度成为真实现，`ReadStream`/`WriteStream` 构造即抛（标签页没有 TTY 句柄）。
    - **`vm` 换真源码**：✅ **已处理（2026-09-21，M56）**：真 `lib/vm.js` + `lib/internal/vm.js` 已 vendor（MANIFEST 153 → 155），`contextify` binding 把上下文/`Script`/`compileFunction` 落实为单 realm 内的 `with`-scope 语义，59 条差分语料与真 Node v26.9.0 逐条一致。`unsupported` 现在只剩 **`tls`**。
-   - **下一步（M74）候选**：① `crypto.Hash`/`Hmac`/`Cipheriv`/`Decipheriv` 从「手写子集」改为真 `stream.Transform` 子类（与 Node 一致，管道可跑）；② 把 `internal/errors` 的差分推到**堆栈保真**（`Error.captureStackTrace`/`prepareStackTrace`）；③ 扫描器点出的 `http`/`zlib` 类原型内部成员（`_storeHeader`/`flushHeaders`/`_processChunk` 等）逐项对齐；④ `tls`（最后一块代理式纯桩，倾向保留）。
+   - **下一步（M75）候选**：扫描器剩余差分——`module`(22：`SourceMap`/`_load`/`_findPath`/`registerHooks`/`stripTypeScriptTypes`…)、`tls`(12：`TLSSocket`/`Server` 原型保真)、`net`(7：`Socket` 的 `readyState`/`bytesWritten`/`localAddress` 等成员)、`http`(5：`OutgoingMessage`/`ServerResponse` 的 header 方法与 getter)、`console`(5：`context`/`createTask`/`profile`…)、`child_process`(2)。可先做便宜的（console/child_process/net 成员）。
    - ~~**`internal/fs/glob`**~~ ✅ **已处理（2026-09-21，M33）**：真 `internal/fs/glob.js` + 随包 `internal/deps/minimatch/index`；`path.matchesGlob`、`fs.glob`/`globSync`、`fs.promises.glob` 上线。剩：`internal/fs/utils` 仍是只含 `DirentFromStats` 的 shim（真文件是 fs 基座）；`withFileTypes` 的 `Dirent.parentPath` 与我们自研 readdir 的形状一致（绝对值 vs Node 按传入路径）已对齐。
    - ~~**`stream/iter` + `stream/consumers`**~~ ✅ **已处理（2026-09-21，M38）**：真 `lib/stream/iter.js` + `lib/stream/consumers.js` + 整个 `internal/streams/iter/*`（12 文件）。`internal/streams/iter/transform.js` 不在内（它顶层 `internalBinding('zlib')`；M45 的 builtin `zlib` 不能代替 native 绑定，故仍未支持）。
    - **`internal/perf/*` 的直方图半边**：⚠️ 部分过时——M35 已把 `perf_hooks` 换成真源码；仅 `createHistogram`/`importHistogram`/`monitorEventLoopDelay` 仍抛错（真 `internal/histogram` 背后是 native hdr_histogram + 一整套统计检验，JS 移植代价大、优先级低）。
@@ -239,6 +240,21 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-22 · M74 crypto 流类改真 Transform（LazyTransform）
+
+**目标**：`crypto.Hash`/`Hmac`/`Cipheriv`/`Decipheriv` 在 Node 是 `Transform` 子类（经 `internal/streams/lazy_transform.js`）。我们之前是手写子集（方法在实例上，原型链上没有流表面），特性探测与管道行为不符。
+
+**改了什么**
+
+1. **忠实复刻 `LazyTransform`**：继承真 `stream.Transform`，把 `_readableState`/`_writableState` 做成**原型访问器**（首次访问时才 `Transform.call(this, this._options)` 建态，并设 `decodeStrings=false`）。
+2. `Hash`/`Hmac`/`Cipheriv`/`Decipheriv` 改继承 `LazyTransform`，把 AES/哈希状态放进**私有字段**、方法放回**原型**；补 `_transform`/`_flush`，于是**真能当流用**（`hash.write/end` + `'data'`/`'end'`、`cipher.pipe()` 都通）。
+3. `createCipheriv`/`createDecipheriv` 直接返回真实例；校验逻辑抽成 `createCipherState`（错误码与消息不变）。
+4. crypto spec `deps: ['stream']`。
+
+> **关键坑**：`LazyTransform` 把 `_writableState.decodeStrings` 设为 `false`，于是 `_transform` 收到的是**原始字符串（不是 Buffer）**——必须 `this.update(chunk, encoding)`，不能假 `chunk.buffer`。我第一版就因此把 digest 算成了空串哈希（`e3b0c442…`）。
+
+**验证**：`test/crypto-classes.test.ts` 扩到 7 例（含 `instanceof Transform`、hash/cipher 真管道）。扫描器 crypto 差分**清零**。门禁全绿：`tsc` 干净 · `npx vitest run` **843 通过 / 2 预存 skip（78 文件）** · `npm run build` 绿（worker **2271.58KB**）。
 
 ### 2026-09-22 · M73 crypto 桩类的原型保真
 
