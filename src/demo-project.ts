@@ -923,6 +923,24 @@ console.log('valid     :', leafCert.validFrom, '->', leafCert.validTo);
 console.log('checkHost :', leafCert.checkHost('www.example.com'), '/', leafCert.checkHost('nope.test'));
 console.log('');
 
+// --- prime generation / primality testing (milestone 88) ---
+// generatePrimeSync / checkPrimeSync sit on pure BigInt maths here; in Node
+// OpenSSL is underneath. The primality answers are exact (Miller-Rabin with a
+// deterministic base set) and { safe: true } yields a safe prime whose half is
+// prime too.
+console.log('-- primes (milestone 88) --');
+const primeCrypto = require('crypto');
+console.log('checkPrimeSync 97n  :', primeCrypto.checkPrimeSync(97n));
+console.log('checkPrimeSync 91n  :', primeCrypto.checkPrimeSync(91n));
+const prime128 = primeCrypto.generatePrimeSync(128, { bigint: true });
+console.log('generatePrimeSync128:', prime128.toString(16).slice(0, 20) + '...', '(' + prime128.toString(2).length + ' bits, prime=' + primeCrypto.checkPrimeSync(prime128) + ')');
+const primeSafe = primeCrypto.generatePrimeSync(64, { safe: true, bigint: true });
+console.log('safe prime (64 bit) :', primeSafe.toString());
+console.log('  (p-1)/2 is prime  :', primeCrypto.checkPrimeSync((primeSafe - 1n) / 2n));
+const primeCongruent = primeCrypto.generatePrimeSync(96, { add: 30n, rem: 11n, bigint: true });
+console.log('p congruent 11 mod30:', primeCongruent % 30n === 11n);
+console.log('');
+
 // --- http server (milestone 3: virtual TCP) ---
 // listen(3000) binds a port inside this runtime. The ServiceWorker bridge at
 // /preview/3000/ dials it, so this URL is reachable from the browser tab.

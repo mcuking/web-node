@@ -244,6 +244,25 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M88 素数生成与素性检验（差分语料驱动）
+
+**改了什么**：`crypto.generatePrime(Sync)` / `checkPrime(Sync)` 从响亮抛错的桩换成真实实现。新增 `src/node-runtime/crypto/primes.ts`（纯 JS：小素数试除 + Miller-Rabin，前 13 个素数作基在 n < 3.3e24 下确定；n 更大用前 64 个素数作基；`modPow` 用 BigInt 模幂）。`builtins/crypto.ts` 里逐个复刻 Node `internal/crypto/random.js` 的校验与 `crypto_random.cc` 的 `AdditionalConfig`：`size` 的 `validateInt32(>=1)`、`options` 对象校验、`safe`/`bigint` 布尔、`add`/`rem` 的 bigint/字节源转换与负值范围错、`add` 位数超 `size` → `ERR_OUT_OF_RANGE('invalid options.add')`、`add <= rem` → `('invalid options.rem')`。
+
+**关键语义**：
+- **默认返回 `ArrayBuffer`**（不是 Buffer），`{bigint:true}` 才返回 bigint；长度 = `BN_num_bytes`（即 `ceil(size/8)`）。
+- **无 `add`**：候选为奇数且**最高两位**置位（`BN_RAND_TOP_TWO`）。**有 `add`**：只置**最高一位**（`BN_RAND_TOP_ONE`，对应 `probable_prime_dh`），并满足 `p ≡ rem (mod add)`（`rem` 缺省为 1）。
+- **`checks` 被忽略**：OpenSSL 3 provider 下 Node 走 `BN_check_prime`（自行选轮数），与 `checks` 无关，故本实现也不依赖它（仍校验）。
+- **`size <= 1`**：与 Node 一致报 `ERR_OSSL_BN_BITS_TOO_SMALL`（`error:01800076:bignum routines::bits too small`）。
+
+**为什么**：接续 M83–M87 的 crypto 非对称线（见 `docs/ROADMAP.md` 阶段 A），零依赖、纯 JS 可实现且完全可差分验证。
+
+**验证**：
+- 差分语料 `tools/crypto-primes-probe.cjs` → `test/fixtures/crypto-primes.json`（真 Node v26.9.0 录制）：确定性素性答案（含 2^61-1 / 2^127-1 / 2^256-189 / 2^521-1）、完整错误面、arity、异步形式、以及随机输出的结构不变量（字节/比特长度、top 位、同余）——`test/crypto-primes.test.ts` 内跑同程序，**0 diff**。
+- 门禁：`tsc` 干净 · vitest **922 passed / 2 skipped（89 files）** · build worker **2369.58 KB**（`dist/assets/index-CyTrCQZJ.js`）。
+- demo `src/demo-project.ts` 新增 M88 演示段，跑通并打印正确结果。
+
+**涉及文件**：`src/node-runtime/crypto/primes.ts`（新增）、`src/node-runtime/builtins/crypto.ts`、`src/demo-project.ts`、`test/crypto-primes.test.ts`（新增）、`test/fixtures/crypto-primes.json`（新增）、`tools/crypto-primes-probe.cjs`（新增）、`tools/crypto-primes-oracle.mjs`（新增）、`docs/ROADMAP.md`。
+
 ### 2026-09-22 · 文档 · 新增 `docs/ROADMAP.md`（固定任务清单）
 
 **改了什么**：新建 `docs/ROADMAP.md`——把原先散在 DEVLOG「下一步」里的滚动 backlog 固化成一份**正序、可勾选、带编号**的路线图。

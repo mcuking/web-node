@@ -52,6 +52,12 @@ import {
   DiffieHellmanGroup as RawDiffieHellmanGroup,
 } from '../crypto/dh';
 import { bufferedClass, kByteFactory } from '../crypto/byte-out';
+import {
+  generatePrimeBigInt,
+  isPrime,
+  primeBitLength,
+  toUnsignedBigInt,
+} from '../crypto/primes';
 
 /**
  * `crypto` — the subset tooling actually calls in a browser tab.
@@ -866,10 +872,6 @@ export const cryptoSpec: BuiltinSpec = {
     };
     const unsupportedApis = {
       diffieHellman: unsupportedApi('diffieHellman'),
-      generatePrime: unsupportedApi('generatePrime'),
-      generatePrimeSync: unsupportedApi('generatePrimeSync'),
-      checkPrime: unsupportedApi('checkPrime'),
-      checkPrimeSync: unsupportedApi('checkPrimeSync'),
       argon2: unsupportedApi('argon2'),
       argon2Sync: unsupportedApi('argon2Sync'),
       createMac: unsupportedApi('createMac'),
@@ -939,6 +941,167 @@ export const cryptoSpec: BuiltinSpec = {
     // FIPS is a build-time property of Node's OpenSSL; here it is simply off.
     const getFips = (): number => 0;
     const setFips = (_value: unknown): void => {};
+
+    // -- prime generation and primality testing -----------------------------
+    //
+    // Backed by `../crypto/primes` (BigInt Miller-Rabin plus the candidate
+    // shapes `BN_generate_prime_ex2` produces). The validation below mirrors
+    // Node's `internal/crypto/random.js` so the error surface is identical.
+
+    const INTEGER_MAX = 2 ** 31 - 1;
+    const argWord = (name: string): string => (name.includes('.') ? 'property' : 'argument');
+
+    const validateInt32 = (value: unknown, name: string, min: number): number => {
+      if (typeof value !== 'number') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "${name}" argument must be of type number. Received ${describe(value)}`);
+      }
+      if (!Number.isInteger(value)) {
+        throw coded('RangeError', 'ERR_OUT_OF_RANGE', `The value of "${name}" is out of range. It must be an integer. Received ${value}`);
+      }
+      if (value < min || value > INTEGER_MAX) {
+        throw coded('RangeError', 'ERR_OUT_OF_RANGE', `The value of "${name}" is out of range. It must be >= ${min} && <= ${INTEGER_MAX}. Received ${value}`);
+      }
+      return value;
+    };
+
+    const validateObjectArg = (value: unknown, name: string): void => {
+      if (value === null || typeof value !== 'object') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "${name}" argument must be of type object. Received ${describe(value)}`);
+      }
+    };
+
+    const validateBooleanProp = (value: unknown, name: string): void => {
+      if (typeof value !== 'boolean') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "${name}" property must be of type boolean. Received ${describe(value)}`);
+      }
+    };
+
+    // `unsignedBigIntToBuffer` + the C++ `BignumPointer` ingest, collapsed to
+    // the resulting value: negative bigints are rejected, byte sources are read
+    // big-endian, anything else raises the Node invalid-argument error.
+    const toNonNegativeBigInt = (value: unknown, name: string): bigint => {
+      if (typeof value === 'bigint') {
+        if (value < 0n) {
+          throw coded('RangeError', 'ERR_OUT_OF_RANGE', `The value of "${name}" is out of range. It must be >= 0. Received ${value}n`);
+        }
+        return value;
+      }
+      if (!isRawBytes(value) && !ArrayBuffer.isView(value)) {
+        throw coded(
+          'TypeError',
+          'ERR_INVALID_ARG_TYPE',
+          `The "${name}" ${argWord(name)} must be of type bigint or an instance of ArrayBuffer, TypedArray, Buffer, or DataView. Received ${describe(value)}`,
+        );
+      }
+      return toUnsignedBigInt(toBytes(value));
+    };
+
+    const bigIntToArrayBuffer = (value: bigint): ArrayBuffer => {
+      const bytes: number[] = [];
+      let rest = value;
+      while (rest > 0n) {
+        bytes.unshift(Number(rest & 0xffn));
+        rest >>= 8n;
+      }
+      return Uint8Array.from(bytes).buffer;
+    };
+
+    interface PrimeRequest {
+      safe: boolean;
+      bigint: boolean;
+      add?: bigint;
+      rem?: bigint;
+    }
+
+    const parsePrimeOptions = (options: unknown): PrimeRequest => {
+      const opts = (options === undefined ? {} : options) as Record<string, unknown>;
+      validateObjectArg(opts, 'options');
+      const safe = opts.safe ?? false;
+      const bigint = opts.bigint ?? false;
+      validateBooleanProp(safe, 'options.safe');
+      validateBooleanProp(bigint, 'options.bigint');
+      const add = opts.add === undefined ? undefined : toNonNegativeBigInt(opts.add, 'options.add');
+      const rem = opts.rem === undefined ? undefined : toNonNegativeBigInt(opts.rem, 'options.rem');
+      return { safe: safe as boolean, bigint: bigint as boolean, add, rem };
+    };
+
+    // `RandomPrimeConfig::AdditionalConfig`, then OpenSSL's own guard against
+    // generating anything below two bits.
+    const runGeneratePrime = (bits: number, request: PrimeRequest): ArrayBuffer | bigint => {
+      const { safe, bigint, add, rem } = request;
+      if (add !== undefined) {
+        if (primeBitLength(add) > bits) {
+          throw coded('RangeError', 'ERR_OUT_OF_RANGE', 'invalid options.add');
+        }
+        if (rem !== undefined && add <= rem) {
+          throw coded('RangeError', 'ERR_OUT_OF_RANGE', 'invalid options.rem');
+        }
+      }
+      if (bits <= 1) {
+        // `BN_R_BITS_TOO_SMALL`, surfaced as Node surfaces it.
+        throw coded('Error', 'ERR_OSSL_BN_BITS_TOO_SMALL', 'error:01800076:bignum routines::bits too small');
+      }
+      const prime = generatePrimeBigInt(bits, { safe, add, rem });
+      return bigint ? prime : bigIntToArrayBuffer(prime);
+    };
+
+    const normalizeCandidate = (candidate: unknown): bigint =>
+      toNonNegativeBigInt(candidate, 'candidate');
+
+    const generatePrimeSync = (size: unknown, options?: unknown): ArrayBuffer | bigint => {
+      const bits = validateInt32(size, 'size', 1);
+      return runGeneratePrime(bits, parsePrimeOptions(options));
+    };
+
+    const generatePrime = (size: unknown, options?: unknown, callback?: unknown): void => {
+      const bits = validateInt32(size, 'size', 1);
+      let cb = callback;
+      let opts = options;
+      if (typeof options === 'function') {
+        cb = options;
+        opts = undefined;
+      }
+      if (typeof cb !== 'function') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "callback" argument must be of type function. Received ${describe(cb)}`);
+      }
+      const request = parsePrimeOptions(opts);
+      let result: ArrayBuffer | bigint;
+      try {
+        result = runGeneratePrime(bits, request);
+      } catch (error) {
+        queueMicrotask(() => (cb as (e: unknown) => void)(error));
+        return;
+      }
+      queueMicrotask(() => (cb as (e: Error | null, prime: unknown) => void)(null, result));
+    };
+
+    const checkPrimeSync = (candidate: unknown, options?: unknown): boolean => {
+      const value = normalizeCandidate(candidate);
+      const opts = (options === undefined ? {} : options) as Record<string, unknown>;
+      validateObjectArg(opts, 'options');
+      const checks = opts.checks ?? 0;
+      validateInt32(checks, 'options.checks', 0);
+      return isPrime(value);
+    };
+
+    const checkPrime = (candidate: unknown, options?: unknown, callback?: unknown): void => {
+      const value = normalizeCandidate(candidate);
+      let cb = callback;
+      let opts = options;
+      if (typeof options === 'function') {
+        cb = options;
+        opts = undefined;
+      }
+      if (typeof cb !== 'function') {
+        throw coded('TypeError', 'ERR_INVALID_ARG_TYPE', `The "callback" argument must be of type function. Received ${describe(cb)}`);
+      }
+      const obj = (opts === undefined ? {} : opts) as Record<string, unknown>;
+      validateObjectArg(obj, 'options');
+      const checks = obj.checks ?? 0;
+      validateInt32(checks, 'options.checks', 0);
+      const result = isPrime(value);
+      queueMicrotask(() => (cb as (e: Error | null, isPrimeResult: boolean) => void)(null, result));
+    };
 
     // -- asymmetric keys and signatures --------------------------------------
     //
@@ -1223,6 +1386,10 @@ export const cryptoSpec: BuiltinSpec = {
       getDiffieHellman,
       generateKey,
       generateKeySync,
+      generatePrime,
+      generatePrimeSync,
+      checkPrime,
+      checkPrimeSync,
       getFips,
       setFips,
       createCipheriv,

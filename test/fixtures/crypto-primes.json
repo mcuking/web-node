@@ -1,0 +1,329 @@
+{
+  "checkSync": {
+    "0": false,
+    "1": false,
+    "2": true,
+    "3": true,
+    "4": false,
+    "5": true,
+    "7": true,
+    "8": false,
+    "9": false,
+    "15": false,
+    "16": false,
+    "17": true,
+    "25": false,
+    "49": false,
+    "91": false,
+    "97": true,
+    "121": false,
+    "341": false,
+    "561": false,
+    "1105": false,
+    "1729": false,
+    "2047": false,
+    "2049": false,
+    "7919": true,
+    "65537": true,
+    "1000000007": true,
+    "1000000009": true,
+    "2147483647": true,
+    "2147483649": false,
+    "2305843009213693951": true,
+    "2305843009213693955": false,
+    "32416190071": true,
+    "32416190073": false
+  },
+  "checkBig": {
+    "p61": true,
+    "c61": false,
+    "p127": true,
+    "c127": false,
+    "p256": true,
+    "mersenne_p521": true
+  },
+  "checks": {
+    "bigChecks": true,
+    "composite": false,
+    "zero": true,
+    "undefinedOptions": true
+  },
+  "forms": {
+    "buffer": false,
+    "u8": false,
+    "ab": false,
+    "bigint": false,
+    "emptyBuf": false,
+    "oneByte": true,
+    "leadingZero": false
+  },
+  "errors": {
+    "sizeNull": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"size\" argument must be of type number. Received null"
+    },
+    "sizeNaN": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"size\" is out of range. It must be an integer. Received NaN"
+    },
+    "sizeStr": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"size\" argument must be of type number. Received type string ('8')"
+    },
+    "sizeZero": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"size\" is out of range. It must be >= 1 && <= 2147483647. Received 0"
+    },
+    "sizeNeg": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"size\" is out of range. It must be >= 1 && <= 2147483647. Received -8"
+    },
+    "sizeFloat": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"size\" is out of range. It must be an integer. Received 8.5"
+    },
+    "sizeOne": {
+      "name": "Error",
+      "code": "ERR_OSSL_BN_BITS_TOO_SMALL",
+      "message": "error:01800076:bignum routines::bits too small"
+    },
+    "optsNull": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options\" argument must be of type object. Received null"
+    },
+    "optsNumber": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options\" argument must be of type object. Received type number (5)"
+    },
+    "safeNumber": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options.safe\" property must be of type boolean. Received type number (1)"
+    },
+    "bigintNumber": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options.bigint\" property must be of type boolean. Received type number (1)"
+    },
+    "addTooBig": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "invalid options.add"
+    },
+    "remGeAdd": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "invalid options.rem"
+    },
+    "addNumber": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options.add\" property must be of type bigint or an instance of ArrayBuffer, TypedArray, Buffer, or DataView. Received type number (5)"
+    },
+    "addNegative": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"options.add\" is out of range. It must be >= 0. Received -30n"
+    },
+    "remNegative": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"options.rem\" is out of range. It must be >= 0. Received -1n"
+    },
+    "remString": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options.rem\" property must be of type bigint or an instance of ArrayBuffer, TypedArray, Buffer, or DataView. Received type string ('x')"
+    },
+    "genAsyncNoCb": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"callback\" argument must be of type function. Received undefined"
+    },
+    "checkNumber": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"candidate\" argument must be of type bigint or an instance of ArrayBuffer, TypedArray, Buffer, or DataView. Received type number (97)"
+    },
+    "checkString": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"candidate\" argument must be of type bigint or an instance of ArrayBuffer, TypedArray, Buffer, or DataView. Received type string ('97')"
+    },
+    "checkNull": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"candidate\" argument must be of type bigint or an instance of ArrayBuffer, TypedArray, Buffer, or DataView. Received null"
+    },
+    "checkNegative": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"candidate\" is out of range. It must be >= 0. Received -5n"
+    },
+    "checkOptsNumber": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options\" argument must be of type object. Received type number (5)"
+    },
+    "checkOptsNull": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"options\" argument must be of type object. Received null"
+    },
+    "checkNegChecks": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"options.checks\" is out of range. It must be >= 0 && <= 2147483647. Received -1"
+    },
+    "checkFloatChecks": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"options.checks\" is out of range. It must be an integer. Received 1.5"
+    },
+    "checkAsyncNoCb": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"callback\" argument must be of type function. Received undefined"
+    }
+  },
+  "arities": {
+    "generatePrime": 3,
+    "generatePrimeSync": 1,
+    "checkPrime": 1,
+    "checkPrimeSync": 1
+  },
+  "gen": {
+    "2": {
+      "ctor": "ArrayBuffer",
+      "isArrayBuffer": true,
+      "isBigInt": false,
+      "bytes": 1,
+      "bits": 2,
+      "topBit": true,
+      "topTwoBits": true,
+      "isPrime": true
+    },
+    "8": {
+      "ctor": "ArrayBuffer",
+      "isArrayBuffer": true,
+      "isBigInt": false,
+      "bytes": 1,
+      "bits": 8,
+      "topBit": true,
+      "topTwoBits": true,
+      "isPrime": true
+    },
+    "16": {
+      "ctor": "ArrayBuffer",
+      "isArrayBuffer": true,
+      "isBigInt": false,
+      "bytes": 2,
+      "bits": 16,
+      "topBit": true,
+      "topTwoBits": true,
+      "isPrime": true
+    },
+    "32": {
+      "ctor": "ArrayBuffer",
+      "isArrayBuffer": true,
+      "isBigInt": false,
+      "bytes": 4,
+      "bits": 32,
+      "topBit": true,
+      "topTwoBits": true,
+      "isPrime": true
+    },
+    "64": {
+      "ctor": "ArrayBuffer",
+      "isArrayBuffer": true,
+      "isBigInt": false,
+      "bytes": 8,
+      "bits": 64,
+      "topBit": true,
+      "topTwoBits": true,
+      "isPrime": true
+    },
+    "128": {
+      "ctor": "ArrayBuffer",
+      "isArrayBuffer": true,
+      "isBigInt": false,
+      "bytes": 16,
+      "bits": 128,
+      "topBit": true,
+      "topTwoBits": true,
+      "isPrime": true
+    },
+    "256": {
+      "ctor": "ArrayBuffer",
+      "isArrayBuffer": true,
+      "isBigInt": false,
+      "bytes": 32,
+      "bits": 256,
+      "topBit": true,
+      "topTwoBits": true,
+      "isPrime": true
+    },
+    "bigint": {
+      "isBigInt": true,
+      "bits": 64,
+      "isPrime": true
+    },
+    "safe": {
+      "bits": 32,
+      "isPrime": true,
+      "halfPrime": true
+    },
+    "addRem": {
+      "bits": 48,
+      "modAdd": "11",
+      "isPrime": true
+    },
+    "addBuffer": {
+      "bits": 48,
+      "modAdd": "1",
+      "isPrime": true
+    },
+    "addOnly": {
+      "modAdd": "1",
+      "isPrime": true
+    },
+    "addRemBigint": {
+      "modAdd": "11",
+      "isPrime": true
+    },
+    "remWithoutAdd": {
+      "ctor": "ArrayBuffer",
+      "isArrayBuffer": true,
+      "isBigInt": false,
+      "bytes": 2,
+      "bits": 16,
+      "topBit": true,
+      "topTwoBits": true,
+      "isPrime": true
+    },
+    "bigAdd": {
+      "bits": 128,
+      "topBit": true,
+      "modAdd": "3",
+      "isPrime": true
+    }
+  },
+  "asyncCheckSmall": {
+    "result": true
+  },
+  "asyncGen": {
+    "isBigInt": true,
+    "isPrime": true
+  },
+  "asyncCheck": {
+    "result": true
+  }
+}
