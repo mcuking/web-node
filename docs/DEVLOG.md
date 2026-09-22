@@ -244,6 +244,30 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M90.3 CMAC / GMAC（复用纯 JS AES）
+
+**改了什么**：
+- `src/node-runtime/crypto/cipher.ts` 新增两个原语：`aesCmac`（NIST SP 800-38B，子密钥 K1/K2 + CBC-MAC）与 `aesGmac`（NIST SP 800-38D，对 AAD 做 GHASH 后 XOR E(J0)）；二者直接复用文件内已有的 `AesKey`/`Ghash`/`computeJ0`。
+- `builtins/crypto.ts` 的 `Mac` 接入 `cmac`/`gmac`（新增 `#iv`）：`options.cipher` 必填；CMAC 要求 CBC 模式、key 长度必须等于 cipher 密钥长；GMAC 要求 iv 非空、GCM 模式、key 长度对齐。
+
+**校验顺序（逐个实测对齐 Node）**：
+1. `cipher` 缺失 → `The property 'options.cipher' is required for CMAC/GMAC`（优先于其他选项，也优先于 cipher 合法性）。
+2. CMAC：`iv` → `customization` → `salt` → `outputLength` 逐项报 `... is not supported by MAC cmac`。
+3. GMAC：先判 `iv` 非空（`... must be non-empty for GMAC`，**先于** cipher 合法性），再 `customization` → `salt` → `outputLength` 报不支持。
+4. 未知 cipher → `ERR_OSSL_EVP_UNSUPPORTED`；模式不对（如 cmac+aes-128-gcm、cmac+aes-128-ecb、gmac+aes-128-cbc）→ `ERR_OSSL_INVALID_MODE`。
+5. key 长度不对：CMAC → `ERR_OSSL_EVP_INVALID_KEY_LENGTH`（`error:03000082…`）；GMAC → `ERR_OSSL_INVALID_KEY_LENGTH`（`error:1C800069…`）。
+
+**已知偏离**：非 AES 的 CBC 块密码（`des-ede3-cbc`/`camellia-128-cbc`/`aria-128-gcm` …）Node 能算，web-node 响亮抛 `NotImplementedError`（本运行时的 cipher 只到 AES）。
+
+**验证**：
+- `test/fixtures/crypto-mac.json` 扩 cmac/gmac（aes-128/192/256、空消息、块对齐 16/32/64、大写 cipher、secret KeyObject、iv 7/16 字节、错误面共 51 项）—— `test/crypto-mac.test.ts` 内跑同程序，**0 diff**。
+- demo 新增 cmac/gmac 演示段（值已在真 Node 核对一致）。
+- 门禁：`tsc` 干净 · vitest 全绿（新增单元断言） · build worker 约 2.39 MB。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md`。剩 M90.4（BLAKE2s MAC / Poly1305 / SipHash）与 M90.5（getHashes）。
+
+**涉及文件**：`src/node-runtime/crypto/cipher.ts`、`src/node-runtime/builtins/crypto.ts`、`src/demo-project.ts`、`test/crypto-mac.test.ts`、`tools/crypto-mac-probe.cjs`、`test/fixtures/crypto-mac.json`、`docs/ROADMAP.md`。
+
 ### 2026-09-22 · M90.2 KMAC128 / KMAC256（Keccak / SHA-3 / cSHAKE 落地）
 
 **改了什么**：

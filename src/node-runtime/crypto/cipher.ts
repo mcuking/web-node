@@ -726,6 +726,74 @@ function incCounter128(counter: Uint8Array): void {
   }
 }
 
+// --- CMAC / GMAC -------------------------------------------------------------
+
+/** `x << 1` on a big-endian 128-bit block. */
+function shiftLeftOne(block: Uint8Array): Uint8Array {
+  const out = new Uint8Array(16);
+  let carry = 0;
+  for (let i = 15; i >= 0; i--) {
+    const b = block[i];
+    out[i] = ((b << 1) | carry) & 0xff;
+    carry = (b >> 7) & 1;
+  }
+  return out;
+}
+
+/** AES-CMAC (NIST SP 800-38B) over a single AES key. Digests are 16 bytes. */
+export function aesCmac(key: Uint8Array, data: Uint8Array): Uint8Array {
+  const aes = new AesKey(key);
+  const l = new Uint8Array(16);
+  aes.encryptBlock(l);
+  const k1 = shiftLeftOne(l);
+  if (l[0] & 0x80) k1[15] ^= 0x87;
+  const k2 = shiftLeftOne(k1);
+  if (k1[0] & 0x80) k2[15] ^= 0x87;
+
+  const blockCount = Math.max(1, Math.ceil(data.length / 16));
+  const lastComplete = data.length !== 0 && data.length % 16 === 0;
+  const chain = new Uint8Array(16);
+  const block = new Uint8Array(16);
+  for (let i = 0; i < blockCount - 1; i++) {
+    block.set(data.subarray(i * 16, i * 16 + 16));
+    for (let j = 0; j < 16; j++) block[j] ^= chain[j];
+    aes.encryptBlock(block);
+    chain.set(block);
+  }
+  const start = (blockCount - 1) * 16;
+  block.fill(0);
+  if (lastComplete) {
+    block.set(data.subarray(start, start + 16));
+    for (let j = 0; j < 16; j++) block[j] ^= k1[j];
+  } else {
+    const rem = data.length - start;
+    block.set(data.subarray(start, start + rem));
+    block[rem] = 0x80;
+    for (let j = 0; j < 16; j++) block[j] ^= k2[j];
+  }
+  for (let j = 0; j < 16; j++) block[j] ^= chain[j];
+  aes.encryptBlock(block);
+  return block;
+}
+
+/** AES-GMAC (NIST SP 800-38D): the GCM tag of `data` used as associated data. */
+export function aesGmac(key: Uint8Array, iv: Uint8Array, data: Uint8Array): Uint8Array {
+  const aes = new AesKey(key);
+  const h = new Uint8Array(16);
+  aes.encryptBlock(h);
+  const ghash = new Ghash(h);
+  ghash.update(data);
+  ghash.padBlock();
+  const lengths = new Uint8Array(16);
+  writeUint64(lengths, 0, data.length * 8);
+  ghash.update(lengths);
+  const tag = ghash.digest();
+  const mask = computeJ0(aes, iv);
+  aes.encryptBlock(mask);
+  for (let i = 0; i < 16; i++) tag[i] ^= mask[i];
+  return tag;
+}
+
 function writeUint64(target: Uint8Array, offset: number, value: number): void {
   let v = value;
   for (let i = 7; i >= 0; i--) {

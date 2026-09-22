@@ -90,8 +90,25 @@ describe('crypto.createMac unit surface', () => {
     expect(crypto.createMac('kmac256', new Uint8Array(32).fill(1)).update('data').final().length).toBe(64);
   });
 
+  it('computes CMAC / GMAC over AES', () => {
+    const crypto = boot();
+    expect(crypto.createMac('cmac', new Uint8Array(16).fill(1), { cipher: 'aes-128-cbc' }).update('data').final('hex')).toBe(
+      'f3346600cd81405c757d154341c4ee75',
+    );
+    const g = crypto.createMac('gmac', new Uint8Array(16).fill(1), {
+      cipher: 'aes-128-gcm',
+      iv: new Uint8Array(12).fill(3),
+    });
+    g.update('data');
+    expect(g.final('hex')).toBe('c1ca454c2e1863efde9bca32ded11efd');
+  });
+
   it('raises NotImplementedError for the providers still pending', () => {
     const crypto = boot();
     expect(() => crypto.createMac('poly1305', new Uint8Array(32).fill(1))).toThrowError(/not implemented/i);
+    // Non-AES CMAC ciphers are correct in Node but outside the AES-only runtime.
+    expect(() => crypto.createMac('cmac', new Uint8Array(24).fill(1), { cipher: 'des-ede3-cbc' })).toThrowError(
+      /not implemented/i,
+    );
   });
 });

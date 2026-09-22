@@ -983,6 +983,12 @@ console.log('blake2bmac (16B)    :', b2mac.final('hex'));
 const kmacTag = macCrypto.createMac('kmac256', Buffer.alloc(32, 7), { customization: Buffer.from('demo'), outputLength: 32 });
 kmacTag.update('data');
 console.log('kmac256 (32B)       :', kmacTag.final('hex'));
+const cmacTag = macCrypto.createMac('cmac', Buffer.alloc(16, 9), { cipher: 'aes-128-cbc' });
+cmacTag.update('data');
+console.log('cmac aes128         :', cmacTag.final('hex'));
+const gmacTag = macCrypto.createMac('gmac', Buffer.alloc(16, 9), { cipher: 'aes-128-gcm', iv: Buffer.alloc(12, 5) });
+gmacTag.update('data');
+console.log('gmac aes128         :', gmacTag.final('hex'));
 console.log('');
 
 // --- http server (milestone 3: virtual TCP) ---

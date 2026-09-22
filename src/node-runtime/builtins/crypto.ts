@@ -13,6 +13,8 @@ import {
 } from '../crypto/hash';
 import {
   Cipheriv as AesCipheriv,
+  aesCmac,
+  aesGmac,
   getCipherInfo as lookupCipherInfo,
   isKnownCipherName,
   listCiphers,
@@ -1314,6 +1316,7 @@ export const cryptoSpec: BuiltinSpec = {
       #key: Uint8Array;
       #digest: HashAlgo | undefined;
       #customization: Uint8Array = new Uint8Array(0);
+      #iv: Uint8Array = new Uint8Array(0);
       #outputLength: number;
       #chunks: Uint8Array[] = [];
       #total = 0;
@@ -1324,15 +1327,18 @@ export const cryptoSpec: BuiltinSpec = {
         const name = validateMacName(algorithm, 'algorithm', 'argument');
         let digest: string | undefined;
         let cipher: string | undefined;
+        let ivBytes: Uint8Array | undefined;
+        let customBytes: Uint8Array | undefined;
+        let saltBytes: Uint8Array | undefined;
         let outputLength: number | undefined;
         if (options !== undefined) {
           validateObjectArg(options, 'options');
           const opts = options as Record<string, unknown>;
           if (opts.digest !== undefined) digest = validateMacName(opts.digest, 'options.digest', 'property');
           if (opts.cipher !== undefined) cipher = validateMacName(opts.cipher, 'options.cipher', 'property');
-          if (opts.iv !== undefined) normalizeMacBytes(opts.iv, 'options.iv');
-          if (opts.customization !== undefined) this.#customization = normalizeMacBytes(opts.customization, 'options.customization');
-          if (opts.salt !== undefined) normalizeMacBytes(opts.salt, 'options.salt');
+          if (opts.iv !== undefined) ivBytes = normalizeMacBytes(opts.iv, 'options.iv');
+          if (opts.customization !== undefined) customBytes = normalizeMacBytes(opts.customization, 'options.customization');
+          if (opts.salt !== undefined) saltBytes = normalizeMacBytes(opts.salt, 'options.salt');
           if (opts.outputLength !== undefined) {
             outputLength = validateIntegerBounds(opts.outputLength, 'options.outputLength', 0, MAX_UINT32);
           }
@@ -1342,6 +1348,29 @@ export const cryptoSpec: BuiltinSpec = {
         if (canonical === undefined) {
           throw coded('TypeError', 'ERR_CRYPTO_INVALID_MAC', `Invalid MAC: ${name}`);
         }
+
+        const unsupportedOption = (option: string): never => {
+          throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The property 'options.${option}' is not supported by MAC ${name}`);
+        };
+        // Maps an OpenSSL cipher name onto a usable AES key length, reprinting
+        // the provider errors Node raises for a wrong mode or an unknown name.
+        const selectCipher = (want: 'cbc' | 'gcm'): number => {
+          const spec = resolveCipher(cipher!);
+          if (spec !== undefined) {
+            if (spec.mode !== want) {
+              throw coded('Error', 'ERR_OSSL_INVALID_MODE', 'error:1C80007D:Provider routines::invalid mode');
+            }
+            return spec.keyLength;
+          }
+          const lower = cipher!.toLowerCase();
+          if (isKnownCipherName(lower)) {
+            const rightMode = want === 'cbc' ? /-cbc(-cts)?$/.test(lower) : /-gcm$/.test(lower);
+            // Non-AES block ciphers (DES, Camellia, ARIA, ...) reach here.
+            if (rightMode) throw notImplemented('api', `crypto.createMac (${cipher})`);
+            throw coded('Error', 'ERR_OSSL_INVALID_MODE', 'error:1C80007D:Provider routines::invalid mode');
+          }
+          throw coded('Error', 'ERR_OSSL_EVP_UNSUPPORTED', 'error:0308010C:digital envelope routines::unsupported');
+        };
 
         this.#algorithm = canonical;
         this.#key = keyBytes;
@@ -1358,9 +1387,7 @@ export const cryptoSpec: BuiltinSpec = {
           }
           this.#digest = algo;
         } else if (canonical === 'blake2bmac') {
-          if (digest !== undefined) {
-            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The property 'options.digest' is not supported by MAC ${name}`);
-          }
+          if (digest !== undefined) unsupportedOption('digest');
           if (keyBytes.length < 1 || keyBytes.length > 64) {
             throw coded('Error', 'ERR_OSSL_INVALID_KEY_LENGTH', 'error:1C800069:Provider routines::invalid key length');
           }
@@ -1370,23 +1397,42 @@ export const cryptoSpec: BuiltinSpec = {
           }
           this.#outputLength = outLen;
         } else if (canonical === 'kmac-128' || canonical === 'kmac-256') {
-          if (digest !== undefined) {
-            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', `The property 'options.digest' is not supported by MAC ${name}`);
-          }
+          if (digest !== undefined) unsupportedOption('digest');
           if (keyBytes.length < 4) {
             throw coded('Error', 'ERR_OSSL_INVALID_KEY_LENGTH', 'error:1C800069:Provider routines::invalid key length');
           }
           this.#outputLength = outputLength ?? (canonical === 'kmac-128' ? 32 : 64);
+          this.#customization = customBytes ?? new Uint8Array(0);
         } else if (canonical === 'cmac') {
           if (cipher === undefined) {
             throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.cipher' is required for CMAC");
           }
-          throw notImplemented('api', 'crypto.createMac (CMAC)');
+          // OpenSSL's CMAC takes no IV/customization/salt and a fixed digest.
+          if (ivBytes !== undefined) unsupportedOption('iv');
+          if (customBytes !== undefined) unsupportedOption('customization');
+          if (saltBytes !== undefined) unsupportedOption('salt');
+          if (outputLength !== undefined) unsupportedOption('outputLength');
+          const keyLength = selectCipher('cbc');
+          if (keyBytes.length !== keyLength) {
+            throw coded('Error', 'ERR_OSSL_EVP_INVALID_KEY_LENGTH', 'error:03000082:digital envelope routines::invalid key length');
+          }
+          this.#outputLength = 16;
         } else if (canonical === 'gmac') {
           if (cipher === undefined) {
             throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.cipher' is required for GMAC");
           }
-          throw notImplemented('api', 'crypto.createMac (GMAC)');
+          if (ivBytes === undefined || ivBytes.length === 0) {
+            throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', "The property 'options.iv' must be non-empty for GMAC");
+          }
+          if (customBytes !== undefined) unsupportedOption('customization');
+          if (saltBytes !== undefined) unsupportedOption('salt');
+          if (outputLength !== undefined) unsupportedOption('outputLength');
+          const keyLength = selectCipher('gcm');
+          if (keyBytes.length !== keyLength) {
+            throw coded('Error', 'ERR_OSSL_INVALID_KEY_LENGTH', 'error:1C800069:Provider routines::invalid key length');
+          }
+          this.#iv = ivBytes;
+          this.#outputLength = 16;
         } else {
           throw notImplemented('api', `crypto.createMac (${canonical})`);
         }
@@ -1401,6 +1447,8 @@ export const cryptoSpec: BuiltinSpec = {
           const bits = this.#algorithm === 'kmac-128' ? 128 : 256;
           return kmac(bits, this.#key, data, this.#outputLength, this.#customization);
         }
+        if (this.#algorithm === 'cmac') return aesCmac(this.#key, data);
+        if (this.#algorithm === 'gmac') return aesGmac(this.#key, this.#iv, data);
         return hmac(this.#digest!, this.#key, data);
       }
 

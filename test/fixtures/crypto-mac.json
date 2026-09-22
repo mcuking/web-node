@@ -66,6 +66,26 @@
     "33": "a2c2cc6b9cc73eb1509a9e5fe2b372b892e79552d830d37c0d9e5b31c214dc14",
     "64": "ac17c817ee6ee5261ef847170a404fa8dab93f5694b5e1b186ca6e8ef7fd0828"
   },
+  "cmac": {
+    "aes128": "f3346600cd81405c757d154341c4ee75",
+    "aes128empty": "368c6ccb03939dfba7182ddb9dc3d940",
+    "aes192": "e560ca81148017011a8860155a56eacd",
+    "aes256": "37cd917227d4a1498e8a1f27d1d1c716",
+    "block16": "90afbe37ca008eca344f53a353dfb0d1",
+    "block32": "0743e0d312b4de04d7362355bded7015",
+    "block64": "329cd706ad64a24be5ff69979ce1bb89",
+    "upper": "f3346600cd81405c757d154341c4ee75",
+    "keyobj": "f3346600cd81405c757d154341c4ee75"
+  },
+  "gmac": {
+    "aes128": "c1ca454c2e1863efde9bca32ded11efd",
+    "aes128empty": "8db529e0268ece12ab0aa07e80c8195f",
+    "aes256": "68f0218a72d536f7678b8e0c52bbf16e",
+    "iv7": "67f7b79028a9a73b48eecaa1946b84d1",
+    "iv16": "0d97f828342fe3147abe1f9f40192c72",
+    "upper": "c1ca454c2e1863efde9bca32ded11efd",
+    "keyobj": "c1ca454c2e1863efde9bca32ded11efd"
+  },
   "encodings": {
     "finalHex": "e7ea21c3bcb63a4da3ad78503168d36bdca0be622382ea60a108fad4e4966679",
     "finalBase64": "5+ohw7y2Ok2jrXhQMWjTa9ygvmIjgupgoQj61OSWZnk=",
@@ -206,6 +226,101 @@
       "name": "RangeError",
       "code": "ERR_OUT_OF_RANGE",
       "message": "The value of \"options.outputLength\" is out of range. It must be >= 0 && <= 4294967295. Received -1"
+    },
+    "cmacCipherMissing": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.cipher' is required for CMAC"
+    },
+    "cmacIvUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.iv' is not supported by MAC cmac"
+    },
+    "cmacCustomUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.customization' is not supported by MAC cmac"
+    },
+    "cmacSaltUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.salt' is not supported by MAC cmac"
+    },
+    "cmacOutUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.outputLength' is not supported by MAC cmac"
+    },
+    "cmacUnknownCipher": {
+      "name": "Error",
+      "code": "ERR_OSSL_EVP_UNSUPPORTED",
+      "message": "error:0308010C:digital envelope routines::unsupported"
+    },
+    "cmacEcbMode": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_MODE",
+      "message": "error:1C80007D:Provider routines::invalid mode"
+    },
+    "cmacGcmMode": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_MODE",
+      "message": "error:1C80007D:Provider routines::invalid mode"
+    },
+    "cmacKeyTooLong": {
+      "name": "Error",
+      "code": "ERR_OSSL_EVP_INVALID_KEY_LENGTH",
+      "message": "error:03000082:digital envelope routines::invalid key length"
+    },
+    "cmacKeyEmpty": {
+      "name": "Error",
+      "code": "ERR_OSSL_EVP_INVALID_KEY_LENGTH",
+      "message": "error:03000082:digital envelope routines::invalid key length"
+    },
+    "cmacStringKey": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"key\" argument must be an instance of ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject. Received type string ('kkkkkkkkkkkkkkkk')"
+    },
+    "gmacCipherMissing": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.cipher' is required for GMAC"
+    },
+    "gmacIvMissing": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.iv' must be non-empty for GMAC"
+    },
+    "gmacIvEmpty": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.iv' must be non-empty for GMAC"
+    },
+    "gmacCustomUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.customization' is not supported by MAC gmac"
+    },
+    "gmacOutUnsupported": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_VALUE",
+      "message": "The property 'options.outputLength' is not supported by MAC gmac"
+    },
+    "gmacUnknownCipher": {
+      "name": "Error",
+      "code": "ERR_OSSL_EVP_UNSUPPORTED",
+      "message": "error:0308010C:digital envelope routines::unsupported"
+    },
+    "gmacCbcMode": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_MODE",
+      "message": "error:1C80007D:Provider routines::invalid mode"
+    },
+    "gmacKeyTooShort": {
+      "name": "Error",
+      "code": "ERR_OSSL_INVALID_KEY_LENGTH",
+      "message": "error:1C800069:Provider routines::invalid key length"
     },
     "cmacNoCipher": {
       "name": "TypeError",

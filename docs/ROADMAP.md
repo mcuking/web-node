@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-22（基线 = M90.2 完成）
+> - **最后更新**：2026-09-22（基线 = M90.3 完成）
 
 ---
 
@@ -14,16 +14,16 @@
 
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
-| A | crypto 收尾（接续 M87） | 11 | 4 | 7 |
+| A | crypto 收尾（接续 M87） | 11 | 5 | 6 |
 | B | 语义深度（差分语料继续扩面） | 4 | 0 | 4 |
 | C | 平台无对应物的补齐（选择性） | 3 | 0 | 3 |
 | D | 运行时常量小项收尾 | 4 | 0 | 4 |
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **30** | **4** | **25**（+1 不做） |
+| **合计** | | **30** | **5** | **24**（+1 不做） |
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 91 个里程碑，剩余 25 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 92 个里程碑，剩余 24 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
 
 ---
@@ -60,8 +60,11 @@
   - **踩坑**：KMAC 尾部是 `right_encode(L)`（L 为**比特**长度），不是 `right_encode(0)`（后者是 KMACXOF）；写成 0 时 sample#1 全错。
   - 风险：中。
 
-- [ ] **M90.3 · CMAC / GMAC**
-  - 复用 `cipher.ts` 的纯 JS AES（CMAC = AES-CBC-MAC 变体；GMAC = GCM 的 GHASH）。
+- [x] **M90.3 · CMAC / GMAC** ✅ 2026-09-22
+  - `cipher.ts` 新增 `aesCmac`（SP 800-38B）与 `aesGmac`（SP 800-38D）；`createMac` 接入 `cmac`/`gmac`。
+  - 语义：`options.cipher` 必填；CMAC 要求 CBC 模式（否则 `ERR_OSSL_INVALID_MODE`）、key 长度必须等于 cipher 密钥长（否则 `ERR_OSSL_EVP_INVALID_KEY_LENGTH`）；GMAC 要求 iv 非空（`The property 'options.iv' must be non-empty for GMAC`）、GCM 模式、key 长度对齐（`ERR_OSSL_INVALID_KEY_LENGTH`）；`iv`/`customization`/`salt`/`outputLength` 对 cmac 均不支持，`customization`/`salt`/`outputLength` 对 gmac 不支持（复刻 Node 的校验顺序）。
+  - **已知偏离**：非 AES 的 CBC 块密码（des-ede3-cbc / camellia-128-cbc / aria-\*-gcm …）→ 响亮抛 `NotImplementedError`（Node 能算）。
+  - 差分：`test/fixtures/crypto-mac.json` 已扩 cmac/gmac（含 keyobj / 大写 cipher / 各种错误面共 51 项）——**0 diff**。
   - 风险：中低。
 
 - [ ] **M90.4 · BLAKE2s MAC / Poly1305 / SipHash**
@@ -205,7 +208,7 @@
 - **构建工具**：M5 esbuild WASM · M5b rollup WASM · M5c Vite build · M5d Vite dev server · M5e HMR · M5f CSS 热更 · **M18 Vue 3 SFC 跑起来**
 - **性能/体积**：M32 worker 减重（1259→1028KB） · M41 Buffer slab 池化
 - **语义深度（差分语料）**：M79 http · M80 net · M81 fs
-- **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2 · M90.1 MAC（HMAC + BLAKE2b MAC） · M90.2 KMAC（Keccak/SHA-3/cSHAKE）
+- **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2 · M90.1 MAC（HMAC + BLAKE2b MAC） · M90.2 KMAC（Keccak/SHA-3/cSHAKE） · M90.3 CMAC/GMAC（AES）
 
 ---
 

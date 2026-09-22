@@ -91,6 +91,31 @@ out.kmac['sample#6'] = hex(
   crypto.createMac('kmac256', kmacK, { outputLength: 64 }).update(Buffer.concat([kmacX, kmacX, kmacX])).final(),
 );
 
+// -- CMAC / GMAC ----------------------------------------------------------
+const k16 = Buffer.alloc(16, 1);
+const k24 = Buffer.alloc(24, 2);
+const k32 = Buffer.alloc(32, 3);
+out.cmac = {
+  aes128: hex(crypto.createMac('cmac', k16, { cipher: 'aes-128-cbc' }).update('data').final()),
+  aes128empty: hex(crypto.createMac('cmac', k16, { cipher: 'aes-128-cbc' }).final()),
+  aes192: hex(crypto.createMac('cmac', k24, { cipher: 'aes-192-cbc' }).update('data').final()),
+  aes256: hex(crypto.createMac('cmac', k32, { cipher: 'aes-256-cbc' }).update('data').final()),
+  block16: hex(crypto.createMac('cmac', k16, { cipher: 'aes-128-cbc' }).update(Buffer.alloc(16, 5)).final()),
+  block32: hex(crypto.createMac('cmac', k16, { cipher: 'aes-128-cbc' }).update(Buffer.alloc(32, 5)).final()),
+  block64: hex(crypto.createMac('cmac', k16, { cipher: 'aes-128-cbc' }).update(Buffer.alloc(64, 5)).final()),
+  upper: hex(crypto.createMac('cmac', k16, { cipher: 'AES-128-CBC' }).update('data').final()),
+  keyobj: hex(crypto.createMac('cmac', crypto.createSecretKey(k16), { cipher: 'aes-128-cbc' }).update('data').final()),
+};
+out.gmac = {
+  aes128: hex(crypto.createMac('gmac', k16, { cipher: 'aes-128-gcm', iv: Buffer.alloc(12, 3) }).update('data').final()),
+  aes128empty: hex(crypto.createMac('gmac', k16, { cipher: 'aes-128-gcm', iv: Buffer.alloc(12, 3) }).final()),
+  aes256: hex(crypto.createMac('gmac', k32, { cipher: 'aes-256-gcm', iv: Buffer.alloc(12, 3) }).update('data').final()),
+  iv7: hex(crypto.createMac('gmac', k16, { cipher: 'aes-128-gcm', iv: Buffer.alloc(7, 3) }).update('data').final()),
+  iv16: hex(crypto.createMac('gmac', k16, { cipher: 'aes-128-gcm', iv: Buffer.alloc(16, 3) }).update('data').final()),
+  upper: hex(crypto.createMac('gmac', k16, { cipher: 'AES-128-GCM', iv: Buffer.alloc(12, 3) }).update('data').final()),
+  keyobj: hex(crypto.createMac('gmac', crypto.createSecretKey(k16), { cipher: 'aes-128-gcm', iv: Buffer.alloc(12, 3) }).update('data').final()),
+};
+
 // -- output / input encodings ----------------------------------------------
 out.encodings = {};
 out.encodings.finalHex = crypto.createMac('hmac', Buffer.from('k'), { digest: 'sha256' }).update('d').final('hex');
@@ -152,6 +177,25 @@ streamMac.on('end', () => {
     kmacDigestOpt: err(() => crypto.createMac('kmac128', Buffer.alloc(32, 1), { digest: 'sha256' }).update('d').final()),
     kmacCustomBad: err(() => crypto.createMac('kmac128', Buffer.alloc(32, 1), { customization: 'x' })),
     kmacOutNegative: err(() => crypto.createMac('kmac128', Buffer.alloc(32, 1), { outputLength: -1 })),
+    cmacCipherMissing: err(() => crypto.createMac('cmac', k16)),
+    cmacIvUnsupported: err(() => crypto.createMac('cmac', k16, { cipher: 'aes-128-cbc', iv: Buffer.alloc(16, 3) })),
+    cmacCustomUnsupported: err(() => crypto.createMac('cmac', k16, { cipher: 'aes-128-cbc', customization: Buffer.from('x') })),
+    cmacSaltUnsupported: err(() => crypto.createMac('cmac', k16, { cipher: 'aes-128-cbc', salt: Buffer.from('x') })),
+    cmacOutUnsupported: err(() => crypto.createMac('cmac', k16, { cipher: 'aes-128-cbc', outputLength: 8 })),
+    cmacUnknownCipher: err(() => crypto.createMac('cmac', k16, { cipher: 'aes-999-cbc' })),
+    cmacEcbMode: err(() => crypto.createMac('cmac', k16, { cipher: 'aes-128-ecb' })),
+    cmacGcmMode: err(() => crypto.createMac('cmac', k16, { cipher: 'aes-128-gcm' })),
+    cmacKeyTooLong: err(() => crypto.createMac('cmac', k32, { cipher: 'aes-128-cbc' }).update('d').final()),
+    cmacKeyEmpty: err(() => crypto.createMac('cmac', Buffer.alloc(0), { cipher: 'aes-128-cbc' })),
+    cmacStringKey: err(() => crypto.createMac('cmac', 'k'.repeat(16), { cipher: 'aes-128-cbc' })),
+    gmacCipherMissing: err(() => crypto.createMac('gmac', k16, { iv: Buffer.alloc(12, 3) })),
+    gmacIvMissing: err(() => crypto.createMac('gmac', k16, { cipher: 'aes-128-gcm' })),
+    gmacIvEmpty: err(() => crypto.createMac('gmac', k16, { cipher: 'aes-128-gcm', iv: Buffer.alloc(0) })),
+    gmacCustomUnsupported: err(() => crypto.createMac('gmac', k16, { cipher: 'aes-128-gcm', iv: Buffer.alloc(12, 3), customization: Buffer.from('x') })),
+    gmacOutUnsupported: err(() => crypto.createMac('gmac', k16, { cipher: 'aes-128-gcm', iv: Buffer.alloc(12, 3), outputLength: 8 })),
+    gmacUnknownCipher: err(() => crypto.createMac('gmac', k16, { cipher: 'aes-999-gcm', iv: Buffer.alloc(12, 3) })),
+    gmacCbcMode: err(() => crypto.createMac('gmac', k16, { cipher: 'aes-128-cbc', iv: Buffer.alloc(12, 3) })),
+    gmacKeyTooShort: err(() => crypto.createMac('gmac', k16, { cipher: 'aes-256-gcm', iv: Buffer.alloc(12, 3) })),
     cmacNoCipher: err(() => crypto.createMac('cmac', Buffer.alloc(16, 1)).update('d').final()),
     gmacNoCipher: err(() => crypto.createMac('gmac', Buffer.alloc(16, 1)).update('d').final()),
     updateNumber: err(() => crypto.createMac('hmac', Buffer.from('k'), { digest: 'sha256' }).update(5)),
