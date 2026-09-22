@@ -700,10 +700,11 @@ console.log('gcm tag     : ' + gcm.getAuthTag().toString('hex'));
 console.log('gcm ciphers : ' + crypto.getCiphers().filter(function (n) { return n.indexOf('aes-') === 0; }).length + ' aes entries');
 console.log('');
 
-// --- ChaCha20 and DES/3DES (milestone 93) ---
-// Beyond AES, the runtime also carries ChaCha20-Poly1305 (RFC 8439) and the
-// DES-EDE / DES-EDE3 family, all matching OpenSSL byte for byte.
-console.log('-- ChaCha20 / DES (milestone 93) --');
+// --- ChaCha20, DES/3DES and CCM (milestone 93) ---
+// Beyond AES, the runtime also carries ChaCha20-Poly1305 (RFC 8439), the
+// DES-EDE / DES-EDE3 family and AES-CCM (SP 800-38C), all matching OpenSSL
+// byte for byte.
+console.log('-- ChaCha20 / DES / CCM (milestone 93) --');
 const chaKey = Buffer.alloc(32, 1);
 const chaNonce = Buffer.alloc(12, 2);
 const chacha = crypto.createCipheriv('chacha20-poly1305', chaKey, chaNonce, { authTagLength: 16 });
@@ -718,6 +719,11 @@ const desCt = Buffer.concat([des.update('The quick brown fox'), des.final()]);
 console.log('des3 ct     : ' + desCt.toString('hex'));
 const desBack = crypto.createDecipheriv('des-ede3-cbc', desKey, desIv);
 console.log('des3 pt     : ' + Buffer.concat([desBack.update(desCt), desBack.final()]).toString());
+const ccm = crypto.createCipheriv('aes-128-ccm', cKey, Buffer.from('0f0e0d0c0b0a090807060504', 'hex'), { authTagLength: 16 });
+ccm.setAAD(Buffer.from('header-v1'), { plaintextLength: 11 });
+const ccmCt = Buffer.concat([ccm.update('hello world'), ccm.final()]);
+console.log('ccm ct      : ' + ccmCt.toString('hex'));
+console.log('ccm tag     : ' + ccm.getAuthTag().toString('hex'));
 console.log('');
 
 // --- url (milestone 53) ---

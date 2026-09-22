@@ -363,7 +363,8 @@ describe('cipher aliases and metadata', () => {
     expect(Array.isArray(list)).toBe(true);
     expect(list).toContain('aes-256-gcm');
     expect(list).toContain('aes-128-cbc');
-    expect(list).not.toContain('aes-128-ccm'); // known to OpenSSL, not implemented here
+    expect(list).toContain('aes-128-ccm');
+    expect(list).toContain('id-aes128-ccm');
     expect([...list].sort()).toEqual(list); // Node returns them sorted
 
     expect(crypto.getCipherInfo('aes-256-cbc')).toEqual({

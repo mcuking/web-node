@@ -1,0 +1,125 @@
+{
+  "info": {
+    "aes-128-ccm": {
+      "mode": "ccm",
+      "name": "id-aes128-ccm",
+      "nid": 896,
+      "keyLength": 16,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "aes-192-ccm": {
+      "mode": "ccm",
+      "name": "id-aes192-ccm",
+      "nid": 899,
+      "keyLength": 24,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "aes-256-ccm": {
+      "mode": "ccm",
+      "name": "id-aes256-ccm",
+      "nid": 902,
+      "keyLength": 32,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "id-aes128-ccm": {
+      "mode": "ccm",
+      "name": "id-aes128-ccm",
+      "nid": 896,
+      "keyLength": 16,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "id-aes256-ccm": {
+      "mode": "ccm",
+      "name": "id-aes256-ccm",
+      "nid": 902,
+      "keyLength": 32,
+      "blockSize": 1,
+      "ivLength": 12
+    }
+  },
+  "sp38c_ex1_ct": "e3b201a9",
+  "sp38c_ex1_tag": "9674cd22",
+  "sp38c_ex1_pt": "20212223",
+  "aes128": "397d4536d6e650bd|140e27188b2ae27768a90fcce26f2707|68656c6c6f313233",
+  "aes192": "5d8d3a08fa019a32|52b920140f84ba56f8dca59099d014e2|68656c6c6f313233",
+  "aes256": "554e081ef74e6440|b6fea0cb28dad96c2e8529de0027db30|68656c6c6f313233",
+  "noAad": "397d4536d6e650bd|f9fd761b4b38bfda5ccb1927b5d3281c|68656c6c6f313233",
+  "tags": {
+    "4": "397d4536d6e650bd|04aeca36",
+    "6": "397d4536d6e650bd|cb8f60ffe53b",
+    "8": "397d4536d6e650bd|3dd59766c4669e4a",
+    "10": "397d4536d6e650bd|3ccaa465fdc1bb13547c",
+    "12": "397d4536d6e650bd|a9a0e0e80b7573ef7648bf38",
+    "14": "397d4536d6e650bd|3646c404228fd2331ca8f5910fd6",
+    "16": "397d4536d6e650bd|140e27188b2ae27768a90fcce26f2707"
+  },
+  "nonces": {
+    "7": "a58ec89bef95c72c|4aeb9626fcd86d0a654529d6f6ebc15e",
+    "8": "3b635685b5b73af6|206affdd55151e9018be4d5ba593df7d",
+    "11": "9f76d40f646f98a5|86255c105217c3c5266a89f335359be3",
+    "12": "397d4536d6e650bd|140e27188b2ae27768a90fcce26f2707",
+    "13": "4315d939d29db40c|6f6c1fc34e21551e10863fbea25f952b"
+  },
+  "emptyPayload": "|0aa3053cd724b4e47c3d6dcb5560af10",
+  "errNoTagLength": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_AUTH_TAG",
+    "message": "authTagLength required for aes-128-ccm"
+  },
+  "errTag5": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_AUTH_TAG",
+    "message": "Invalid authentication tag length: 5"
+  },
+  "errTag18": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_AUTH_TAG",
+    "message": "Invalid authentication tag length: 18"
+  },
+  "errIv6": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_IV",
+    "message": "Invalid initialization vector"
+  },
+  "errIv14": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_IV",
+    "message": "Invalid initialization vector"
+  },
+  "errAadNoLength": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_MISSING_ARGS",
+    "message": "options.plaintextLength required for CCM mode with AAD"
+  },
+  "errShortUpdate": {
+    "ok": false,
+    "name": "Error",
+    "message": "Trying to add data in unsupported state"
+  },
+  "errLongUpdate": {
+    "ok": false,
+    "name": "Error",
+    "message": "Trying to add data in unsupported state"
+  },
+  "errBadTag": {
+    "ok": false,
+    "name": "Error",
+    "message": "Unsupported state or unable to authenticate data"
+  },
+  "errWrongKeyLen": {
+    "ok": false,
+    "name": "RangeError",
+    "code": "ERR_CRYPTO_INVALID_KEYLEN",
+    "message": "Invalid key length"
+  }
+}

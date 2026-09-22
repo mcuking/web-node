@@ -244,6 +244,25 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M93.3 AES-CCM
+
+**改了什么**：新增 `src/node-runtime/crypto/ccm.ts`——SP 800-38C 的 CBC-MAC + 计数器模式 AEAD，包含 B0/A0 构造、AAD 的长度前缀（< 0xff00 用 2 字节，否则 0xfffe/0xffff 变长编码）、payload 块的零填充切分。CBC-MAC 覆盖 B0 ‖ AAD 块 ‖ payload 块，最后一节与 A0 的 AES 加密结果异或后截断到 tag 长度。
+
+AES 块密码从 `cipher.ts` 抽到新模块 `src/node-runtime/crypto/aes.ts`（导出 `AesKey`），`cipher.ts` 与 `ccm.ts` 共用同一份实现，避开了模块循环。`CipherSpec` 增 `'ccm'` 模式，`createCipher` 工厂分发到 `AesCcm`。
+
+`createCipheriv` 接入 `aes-{128,192,256}-ccm` 及其 `id-aes*-ccm` 别名。与真 Node 对齐的语义：
+- `authTagLength` **必填**，缺失报 `TypeError ERR_CRYPTO_INVALID_AUTH_TAG: authTagLength required for aes-128-ccm`；合法值为 `{4,6,8,10,12,14,16}` 之外的报 `Invalid authentication tag length: N`。
+- nonce 长度限 `[7,13]`，否则报 `TypeError ERR_CRYPTO_INVALID_IV: Invalid initialization vector`。
+- 带 AAD 时 `plaintextLength` 必填（可在构造函数 options 或 `setAAD` 第二参给），缺失报 `TypeError ERR_MISSING_ARGS: options.plaintextLength required for CCM mode with AAD`。
+- `update` 必须**一次性**给出精确 `plaintextLength` 字节；多/少都报 `Error: Trying to add data in unsupported state`（无 `code`）。
+- 解密时 tag 不匹配报 `Error: Unsupported state or unable to authenticate data`（无 `code`）。
+
+**验证（差分 0 diff）**：`tools/crypto-ccm-probe.cjs` 在真 Node 与 web-node 内各跑一遭，逐字段等于 `test/fixtures/crypto-ccm.json`。覆盖：`getCipherInfo`、SP 800-38C 附录 C 例 1（`ct e3b201a9` / `tag 9674cd22`）、128/192/256 密钥、tag 长度 4–16、nonce 长度 7–13、空 payload、无 AAD，以及全套错误面。空 payload 一例抓出“无 payload 不加块”的偏离（初版多补了一个零块）。
+
+**门禁**：`tsc` 干净 · vitest **958 passed / 2 skipped（100 文件）** · build worker **2425.81 kB**。demo 新增 CCM 示例，执行输出与真 Node 逐字一致。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md` 的 M93 拆分顺序（M93.1 ChaCha20 → M93.2 DES/3DES → M93.3 CCM → M93.4 其余）。
+
 ### 2026-09-22 · M93.2 DES / 3DES（并让 CMAC 支持 DES）
 
 **改了什么**：新增 `src/node-runtime/crypto/des.ts`——纯 JS DES 块密码（FIPS 46-3 的 IP/FP/E/P/PC1/PC2/S 盒/移位表）加上 EDE2（16 字节 key，K3 = K1）与 EDE3（24 字节 key）。`createCipheriv` 接入 `des-ede`/`des-ede-ecb`/`des-ede-cbc`/`des-ede-cfb`/`des-ede-ofb` 与 `des-ede3`/`des-ede3-ecb`/`des-ede3-cbc`/`des-ede3-cfb`/`des-ede3-ofb`/`des3`（ECB/CBC/CFB-128/OFB，8 字节块 + PKCS#7）。`cipher.ts` 的 `CipherSpec` 增 `family`，`createCipher` 据此分发到 `DesCipher`。

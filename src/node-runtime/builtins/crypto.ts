@@ -14,9 +14,9 @@ import {
 import {
   aesCmac,
   aesGmac,
-  desCmac,
   cipherTagLengthIsValid,
   createCipher,
+  desCmac,
   getCipherInfo as lookupCipherInfo,
   isKnownCipherName,
   listCiphers,
@@ -727,8 +727,12 @@ export const cryptoSpec: BuiltinSpec = {
         return null;
       }
       if (bytes === null || bytes.length === 0) invalid();
-      // GCM accepts any positive IV length (OpenSSL derives J0); the other modes
-      // require exactly the block-sized IV.
+      // GCM accepts any positive IV length (OpenSSL derives J0), CCM 7..13, and
+      // the other modes require exactly the block-sized IV.
+      if (spec.mode === 'ccm') {
+        if ((bytes as Uint8Array).length < 7 || (bytes as Uint8Array).length > 13) invalid();
+        return bytes;
+      }
       if (spec.mode === 'gcm' ? (bytes as Uint8Array).length < 1 : (bytes as Uint8Array).length !== spec.ivLength) invalid();
       return bytes;
     };
@@ -775,12 +779,20 @@ export const cryptoSpec: BuiltinSpec = {
         throw coded('RangeError', 'ERR_CRYPTO_INVALID_KEYLEN', 'Invalid key length');
       }
       const ivBytes = coerceIv(iv, spec);
-      const authTagLength =
-        (options as { authTagLength?: number } | undefined)?.authTagLength ?? 16;
-      if (!cipherTagLengthIsValid(spec, authTagLength)) {
+      const rawOptions = (options ?? undefined) as { authTagLength?: number; plaintextLength?: number } | undefined;
+      const authTagLength = rawOptions?.authTagLength ?? 16;
+      if (spec.mode === 'ccm') {
+        // CCM has no default tag length; it must be spelled out.
+        if (rawOptions?.authTagLength === undefined) {
+          throw coded('TypeError', 'ERR_CRYPTO_INVALID_AUTH_TAG', `authTagLength required for ${spec.name}`);
+        }
+        if (!cipherTagLengthIsValid(spec, rawOptions.authTagLength)) {
+          throw coded('TypeError', 'ERR_CRYPTO_INVALID_AUTH_TAG', `Invalid authentication tag length: ${rawOptions.authTagLength}`);
+        }
+      } else if (!cipherTagLengthIsValid(spec, authTagLength)) {
         throw coded('TypeError', 'ERR_CRYPTO_INVALID_AUTH_TAG', `Invalid authentication tag length: ${authTagLength}`);
       }
-      return createCipher(spec, keyBytes, ivBytes, encrypt, authTagLength);
+      return createCipher(spec, keyBytes, ivBytes, encrypt, authTagLength, rawOptions?.plaintextLength);
     };
 
     // `crypto.Cipheriv` / `crypto.Decipheriv` are `stream.Transform` subclasses
@@ -808,8 +820,8 @@ export const cryptoSpec: BuiltinSpec = {
         return this;
       }
 
-      setAAD(aad: unknown): this {
-        this.#inner.setAAD(coerceBytes(aad, 'aad'));
+      setAAD(aad: unknown, options?: unknown): this {
+        this.#inner.setAAD(coerceBytes(aad, 'aad'), options as { plaintextLength?: number } | undefined);
         return this;
       }
 
@@ -859,8 +871,8 @@ export const cryptoSpec: BuiltinSpec = {
         return this;
       }
 
-      setAAD(aad: unknown): this {
-        this.#inner.setAAD(coerceBytes(aad, 'aad'));
+      setAAD(aad: unknown, options?: unknown): this {
+        this.#inner.setAAD(coerceBytes(aad, 'aad'), options as { plaintextLength?: number } | undefined);
         return this;
       }
 
