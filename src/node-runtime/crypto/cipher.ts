@@ -279,7 +279,11 @@ function inc32(counter: Uint8Array): void {
 
 // --- the cipher surface ------------------------------------------------------
 
-export type CipherMode = 'ecb' | 'cbc' | 'ctr' | 'cfb' | 'ofb' | 'gcm';
+import { ChaCha20Cipher, ChaCha20Poly1305, isValidTagLength, type SyncCipher } from './chacha20';
+
+export type { SyncCipher };
+
+export type CipherMode = 'ecb' | 'cbc' | 'ctr' | 'cfb' | 'ofb' | 'gcm' | 'chacha20' | 'chacha20-poly1305';
 
 export interface CipherSpec {
   /** Canonical algorithm name as accepted by `createCipheriv`. */
@@ -287,6 +291,8 @@ export interface CipherSpec {
   /** Name reported by `crypto.getCipherInfo()`. */
   infoName: string;
   mode: CipherMode;
+  /** Overrides `mode` in `getCipherInfo()` (the ChaCha modes report `stream`). */
+  infoMode?: string;
   nid: number;
   keyLength: number;
   /** Cipher block size in bytes (16 for ECB/CBC, 1 for the stream modes). */
@@ -335,6 +341,9 @@ const SPECS: CipherSpec[] = [];
     const gcm = SPECS.find((s) => s.name === `aes-${bits}-gcm`)!;
     SPECS.push({ ...gcm, name: `id-aes${bits}-gcm`, alias: true });
   }
+  // ChaCha20 and its AEAD (RFC 8439); OpenSSL reports both as mode `stream`.
+  SPECS.push({ name: 'chacha20', infoName: 'chacha20', mode: 'chacha20', infoMode: 'stream', nid: 1019, keyLength: 32, blockSize: 1, ivLength: 16 });
+  SPECS.push({ name: 'chacha20-poly1305', infoName: 'chacha20-poly1305', mode: 'chacha20-poly1305', infoMode: 'stream', nid: 1018, keyLength: 32, blockSize: 1, ivLength: 12 });
 }
 
 const LOOKUP = new Map<string, CipherSpec>(SPECS.map((s) => [s.name, s]));
@@ -391,7 +400,7 @@ export interface CipherInfo {
   name: string;
   nid: number;
   keyLength: number;
-  blockSize: number;
+  blockSize?: number;
   ivLength?: number;
 }
 
@@ -407,14 +416,39 @@ export function getCipherInfo(nameOrNid: string | number): CipherInfo | undefine
       : LOOKUP.get(`${nameOrNid}`.toLowerCase());
   if (!spec) return undefined;
   const info: CipherInfo = {
-    mode: spec.mode,
+    mode: spec.infoMode ?? spec.mode,
     name: spec.infoName,
     nid: spec.nid,
     keyLength: spec.keyLength,
-    blockSize: spec.blockSize,
   };
+  // OpenSSL reports no `blockSize` for the stream-mode ciphers (ChaCha20 and
+  // its AEAD); the block modes (ECB/CBC) and the AES stream modes do have one.
+  if (spec.infoMode !== 'stream') info.blockSize = spec.blockSize;
   if (spec.ivLength !== null) info.ivLength = spec.ivLength;
   return info;
+}
+
+/** True when `spec`'s `authTagLength` is one OpenSSL accepts at construction. */
+export function cipherTagLengthIsValid(spec: CipherSpec, length: number): boolean {
+  return isValidTagLength(spec.mode, length);
+}
+
+/**
+ * Builds the synchronous cipher for `spec`. AES modes reuse `Cipheriv`; the
+ * ChaCha20 family has its own implementations but presents the same surface.
+ */
+export function createCipher(
+  spec: CipherSpec,
+  key: Uint8Array,
+  iv: Uint8Array | null,
+  encrypt: boolean,
+  authTagLength = 16,
+): SyncCipher {
+  if (spec.mode === 'chacha20') return new ChaCha20Cipher(key, iv as Uint8Array);
+  if (spec.mode === 'chacha20-poly1305') {
+    return new ChaCha20Poly1305(key, iv as Uint8Array, encrypt, authTagLength);
+  }
+  return new Cipheriv(spec, key, iv, encrypt, authTagLength);
 }
 
 /** PKCS#7 padding: always adds 1..blockSize bytes. */
@@ -692,8 +726,7 @@ export class Cipheriv {
     if (this.spec.mode !== 'gcm' || this.encrypt) {
       throw codedError('Error', 'ERR_CRYPTO_INVALID_STATE', 'Invalid state for operation setAuthTag');
     }
-    const allowed = [4, 8, 12, 13, 14, 15, 16];
-    if (!allowed.includes(tag.length)) {
+    if (tag.length !== this.#tagLength) {
       throw codedError('TypeError', 'ERR_CRYPTO_INVALID_AUTH_TAG', `Invalid authentication tag length: ${tag.length}`);
     }
     this.#expectedTag = tag.slice();

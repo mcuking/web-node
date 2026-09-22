@@ -244,6 +244,25 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M93.1 ChaCha20 / ChaCha20-Poly1305
+
+**改了什么**：新增 `src/node-runtime/crypto/chacha20.ts`——ChaCha20 块函数（10 轮 double-round）、流式 keystream（raw `chacha20` 用 64-bit 计数器，AEAD 用 32-bit），以及 RFC 8439 §2.6–2.8 的 Poly1305 AEAD（复用 `poly1305.ts`）。
+
+两种形态只差 key 之后四个状态字的填充（对齐 OpenSSL `cipher_chacha20_hw.c`）：`chacha20` 把 16 字节 IV 原样写进 state[12..15]（低 8 字节计数器 + 高 8 字节 nonce）；`chacha20-poly1305` 用 12 字节 nonce，state[12] 从 0 开始（block 0 是 Poly1305 一次性密钥）再到 1。
+
+`createCipheriv` 接入两个名字；`crypto/cipher.ts` 新增 `SyncCipher` 接口、`createCipher` 工厂与 `cipherTagLengthIsValid`，AES 与 ChaCha 两套实现共用同一 surface。
+
+**语义修正（对齐真 Node）**：
+- `getCipherInfo` 对 stream 模式（ChaCha 两个）不再返回 `blockSize`，与 Node 一致。
+- `setAuthTag` 改为要求长度**等于** `authTagLength`（不只查白名单）；GCM 一并修正（`authTagLength:12` 时传 16 字节 tag 现在会报错）。
+- ChaCha 解密未 `setAuthTag` 时也按全零 tag 校验并报 `Unsupported state or unable to authenticate data`（无 `code`，与 Node 逐字对齐）。
+
+**验证（差分 0 diff）**：`tools/crypto-chacha-probe.cjs` 在真 Node 与 web-node 内各跑一遭，逐字节等于 `test/fixtures/crypto-chacha.json`（含 RFC 8439 §2.4.2 / §2.8.2 官方向量、跨多次 update、截断 tag、AAD、全套错误面）。
+
+**门禁**：`tsc` 干净 · vitest **955 passed / 2 skipped（95 文件）** · build worker **2413.00 kB**。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md`（M93 覆盖面大，开工前已拆为 M93.1–M93.4 并在路线图注明）。
+
 ### 2026-09-22 · M92.1 + M92.2 DH KeyObject + `crypto.diffieHellman`
 
 **改了什么（M92.1）**：给 web-node 补上 DH 类型的 `KeyObject`（此前 `AsymType` 只有 `rsa|ec|ed25519`）。`KeyMaterial` 增 `dh: { prime, generator, publicKey?, privateKey? }`；`generateKeyPairSync('dh', …)` 支持 `{ group }`、`{ prime, generator }`、`{ primeLength }`；导出/解析走 PKCS#8（内层 `dhKeyAgreement` 参数 + OCTET STRING(INTEGER x)）与 SPKI（`dhKeyAgreement` 参数 + BIT STRING(INTEGER y)），PEM 标签 `PRIVATE KEY`/`PUBLIC KEY`；`equals`/`toCryptoKey`/`createPublicKey(priv)` 相应支持。

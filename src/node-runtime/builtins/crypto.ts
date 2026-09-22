@@ -12,14 +12,16 @@ import {
   type ScryptOptions,
 } from '../crypto/hash';
 import {
-  Cipheriv as AesCipheriv,
   aesCmac,
   aesGmac,
+  cipherTagLengthIsValid,
+  createCipher,
   getCipherInfo as lookupCipherInfo,
   isKnownCipherName,
   listCiphers,
   resolveCipher,
   type CipherSpec,
+  type SyncCipher,
 } from '../crypto/cipher';
 import {
   KeyObject as AsymKeyObject,
@@ -753,14 +755,14 @@ export const cryptoSpec: BuiltinSpec = {
       );
     };
 
-    /** Validate cipher arguments and build the shared AES state. */
+    /** Validate cipher arguments and build the shared cipher state. */
     const createCipherState = (
       algorithm: unknown,
       key: unknown,
       iv: unknown,
       options: unknown,
       encrypt: boolean,
-    ): AesCipheriv => {
+    ): SyncCipher => {
       const spec = resolveCipher(algorithm);
       if (!spec) {
         const name = `${algorithm}`;
@@ -774,7 +776,10 @@ export const cryptoSpec: BuiltinSpec = {
       const ivBytes = coerceIv(iv, spec);
       const authTagLength =
         (options as { authTagLength?: number } | undefined)?.authTagLength ?? 16;
-      return new AesCipheriv(spec, keyBytes, ivBytes, encrypt, authTagLength);
+      if (!cipherTagLengthIsValid(spec, authTagLength)) {
+        throw coded('TypeError', 'ERR_CRYPTO_INVALID_AUTH_TAG', `Invalid authentication tag length: ${authTagLength}`);
+      }
+      return createCipher(spec, keyBytes, ivBytes, encrypt, authTagLength);
     };
 
     // `crypto.Cipheriv` / `crypto.Decipheriv` are `stream.Transform` subclasses
@@ -782,7 +787,7 @@ export const cryptoSpec: BuiltinSpec = {
     // AES state lives in a private field and the methods sit on the prototype,
     // so `instanceof`, `.pipe()` and the whole stream surface behave.
     class Cipheriv extends LazyTransformBase {
-      #inner: AesCipheriv;
+      #inner: SyncCipher;
 
       constructor(algorithm: unknown, key: unknown, iv?: unknown, options?: unknown) {
         super(options as Record<string, unknown> | undefined);
@@ -833,7 +838,7 @@ export const cryptoSpec: BuiltinSpec = {
     }
 
     class Decipheriv extends LazyTransformBase {
-      #inner: AesCipheriv;
+      #inner: SyncCipher;
 
       constructor(algorithm: unknown, key: unknown, iv?: unknown, options?: unknown) {
         super(options as Record<string, unknown> | undefined);

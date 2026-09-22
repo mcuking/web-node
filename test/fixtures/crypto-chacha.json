@@ -1,0 +1,111 @@
+{
+  "infoChacha20": {
+    "mode": "stream",
+    "name": "chacha20",
+    "nid": 1019,
+    "keyLength": 32,
+    "ivLength": 16
+  },
+  "infoPoly": {
+    "mode": "stream",
+    "name": "chacha20-poly1305",
+    "nid": 1018,
+    "keyLength": 32,
+    "ivLength": 12
+  },
+  "infoByNid": {
+    "mode": "stream",
+    "name": "chacha20-poly1305",
+    "nid": 1018,
+    "keyLength": 32,
+    "ivLength": 12
+  },
+  "hasCipherNames": [
+    "chacha20",
+    "chacha20-poly1305"
+  ],
+  "rfc8439_2_4_2_first64": "224f51f3401bd9e12fde276fb8631ded8c131f823d2c06e27e4fcaec9ef3cf788a3b0aa372600a92b57974cded2b9334794cba40c63e34cdea212c4cf07d41b7",
+  "chacha20MultiUpdate": "788127700131850a5c17db",
+  "chacha20Roundtrip": "hello world",
+  "rfc8439_2_8_2_ciphertext": "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b6116",
+  "rfc8439_2_8_2_tag": "1ae10b594f09e26a7e902ecbd0600691",
+  "polyCiphertext": "9579915ce8d7c8be105988",
+  "polyTagLen": 16,
+  "polyRoundtrip": "secret data",
+  "polyTagLen12": 12,
+  "polyTag12": "e31e529f366477f29ce5cca6",
+  "polyBadTag": {
+    "ok": false,
+    "name": "Error",
+    "message": "Unsupported state or unable to authenticate data"
+  },
+  "polyNoVerify": {
+    "ok": false,
+    "name": "Error",
+    "message": "Unsupported state or unable to authenticate data"
+  },
+  "errBadKey": {
+    "ok": false,
+    "name": "RangeError",
+    "code": "ERR_CRYPTO_INVALID_KEYLEN",
+    "message": "Invalid key length"
+  },
+  "errBadIv20": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_IV",
+    "message": "Invalid initialization vector"
+  },
+  "errEmptyIv": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_IV",
+    "message": "Invalid initialization vector"
+  },
+  "errIv13": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_IV",
+    "message": "Invalid initialization vector"
+  },
+  "errTag0": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_AUTH_TAG",
+    "message": "Invalid authentication tag length: 0"
+  },
+  "errTag17": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_AUTH_TAG",
+    "message": "Invalid authentication tag length: 17"
+  },
+  "errSetTag8": {
+    "ok": false,
+    "name": "TypeError",
+    "code": "ERR_CRYPTO_INVALID_AUTH_TAG",
+    "message": "Invalid authentication tag length: 8"
+  },
+  "errGetTagRaw": {
+    "ok": false,
+    "name": "Error",
+    "code": "ERR_CRYPTO_INVALID_STATE",
+    "message": "Invalid state for operation getAuthTag"
+  },
+  "errSetAadRaw": {
+    "ok": false,
+    "name": "Error",
+    "code": "ERR_CRYPTO_INVALID_STATE",
+    "message": "Invalid state for operation setAAD"
+  },
+  "errSetAadAfterData": {
+    "ok": false,
+    "name": "Error",
+    "code": "ERR_CRYPTO_INVALID_STATE",
+    "message": "Invalid state for operation setAAD"
+  },
+  "okSetAutoPadding": {
+    "ok": true,
+    "value": "ok"
+  }
+}

@@ -402,7 +402,7 @@ describe('cipher error behaviour matches Node', () => {
   it('rejects unknown and unimplemented ciphers distinctly', () => {
     expect(codeOf(() => crypto.createCipheriv('aes-999-cbc', KEYS[128], IV16))).toBe('ERR_CRYPTO_UNKNOWN_CIPHER');
     // Known to OpenSSL but not implemented here → a loud, typed error, not "unknown".
-    expect(codeOf(() => crypto.createCipheriv('chacha20-poly1305', KEYS[256], IV12))).toBe(
+    expect(codeOf(() => crypto.createCipheriv('aes-128-ocb', KEYS[128], IV12))).toBe(
       'ERR_WEB_NODE_NOT_IMPLEMENTED',
     );
   });
