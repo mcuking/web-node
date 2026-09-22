@@ -42,12 +42,109 @@ export const netSpec: BuiltinSpec = {
       readonly writableFinished: boolean;
       readonly destroyed: boolean;
       push(chunk: unknown): boolean;
+      read(size?: number): unknown;
       end(cb?: () => void): void;
       destroy(error?: Error): void;
       setEncoding(enc: string): unknown;
     }
 
     const kAttached = Symbol('web-node.socket.side');
+
+    // --- error + validation helpers (Node's internal/errors + validators) ---
+    /** Node's `determineSpecificType`, used in ERR_INVALID_ARG_TYPE messages. */
+    function describeType(value: unknown): string {
+      if (value === null) return 'null';
+      if (value === undefined) return 'undefined';
+      if (typeof value === 'function') return `function ${value.name}`;
+      if (typeof value === 'object') {
+        const ctor = (value as { constructor?: { name?: string } }).constructor;
+        return ctor?.name ? `an instance of ${ctor.name}` : String(value);
+      }
+      let inspected = typeof value === 'string' ? `'${value}'` : String(value);
+      if (inspected.length > 28) inspected = `${inspected.slice(0, 25)}...`;
+      return `type ${typeof value} (${inspected})`;
+    }
+
+    function invalidArgType(name: string, expected: string, actual: unknown): TypeError {
+      const err = new TypeError(
+        `The "${name}" argument must be of type ${expected}. Received ${describeType(actual)}`,
+      );
+      (err as { code?: string }).code = 'ERR_INVALID_ARG_TYPE';
+      return err;
+    }
+
+    function outOfRange(name: string, range: string, value: unknown): RangeError {
+      const err = new RangeError(
+        `The value of "${name}" is out of range. It must be ${range}. Received ${String(value)}`,
+      );
+      (err as { code?: string }).code = 'ERR_OUT_OF_RANGE';
+      return err;
+    }
+
+    /** Node's `validateNumber` (internal/validators.js). */
+    function validateNumber(value: unknown, name: string): void {
+      if (typeof value !== 'number') {
+        throw invalidArgType(name, 'number', value);
+      }
+    }
+
+    function validateFunction(value: unknown, name: string): void {
+      if (typeof value !== 'function') {
+        throw invalidArgType(name, 'function', value);
+      }
+    }
+
+    /** `internal/timers.js` TIMEOUT_MAX (a signed 32-bit millisecond count). */
+    const TIMEOUT_MAX = 2 ** 31 - 1;
+
+    /** Node's `getTimerDuration` (internal/timers.js). */
+    function getTimerDuration(msecs: unknown, name: string): number {
+      validateNumber(msecs, name);
+      const value = msecs as number;
+      if (value < 0 || !Number.isFinite(value)) {
+        throw outOfRange(name, 'a non-negative finite number', value);
+      }
+      if (value > TIMEOUT_MAX) {
+        emitTimeoutOverflowWarning(value);
+        return TIMEOUT_MAX;
+      }
+      return value;
+    }
+
+    function emitTimeoutOverflowWarning(msecs: number): void {
+      void msecs;
+      try {
+        const process = ctx.require('process') as {
+          emitWarning?: (w: string, type: string) => void;
+        };
+        process.emitWarning?.(
+          `${msecs} does not fit into a 32-bit signed integer.` +
+            `\nTimer duration was truncated to ${TIMEOUT_MAX}.`,
+          'TimeoutOverflowWarning',
+        );
+      } catch {
+        // `process` unavailable during early boot; the clamp still holds.
+      }
+    }
+
+    /**
+     * The public `timers` module, resolved lazily (its own init would otherwise
+     * overlap with `net`'s). Node's socket timeouts are ordinary unref'd
+     * timers owned by the stream, so this is exactly the primitive needed.
+     */
+    type TimerHandle = { unref(): void };
+    let timersModule:
+      | {
+          setTimeout: (fn: () => void, ms: number) => TimerHandle;
+          clearTimeout: (handle: TimerHandle) => void;
+        }
+      | null = null;
+    const timers = (): NonNullable<typeof timersModule> => {
+      if (timersModule === null) {
+        timersModule = ctx.require('timers') as NonNullable<typeof timersModule>;
+      }
+      return timersModule;
+    };
 
     class Socket extends (Duplex as new (opts?: unknown) => StreamLike) {
       connecting = false;
@@ -61,10 +158,27 @@ export const netSpec: BuiltinSpec = {
       #bytesRead = 0;
       #bytesWritten = 0;
       #setTOS: number | undefined;
+      /** The unref'd stream timer `setTimeout` / `_unrefTimer` own (Node's `kTimeout`). */
+      #timer: TimerHandle | null = null;
+      #timeoutMs = 0;
 
       constructor(options?: { allowHalfOpen?: boolean }) {
         // Node's default is `allowHalfOpen: false` (a half-close ends both sides).
         super({ allowHalfOpen: options?.allowHalfOpen ?? false });
+      }
+
+      /**
+       * Whether the socket is being destroyed with an error. `lib/net.js` owns
+       * the 'close' event's `hadError` flag (it reads it off the failing
+       * handle); here it is carried from `_destroy` into the stream's own
+       * 'close'.
+       */
+      #hadError = false;
+
+      /** @internal — inject `hadError` into the stream's 'close' event. */
+      override emit(name: string, ...args: unknown[]): boolean {
+        if (name === 'close') return super.emit('close', this.#hadError);
+        return super.emit(name, ...args);
       }
 
       // --- Node's prototype accessors (lib/net.js) --------------------------
@@ -141,7 +255,39 @@ export const netSpec: BuiltinSpec = {
       }
 
       /** @internal — the timer is owned by the host; nothing to unreference. */
-      _unrefTimer(): void {}
+      _unrefTimer(): void {
+        // The stream timer is already created unref'd (Node's
+        // `reuseOrCreateUnrefTimeout`), so there is nothing to do here.
+        this.#timer?.unref();
+      }
+
+      /** Arm (re-arming first) the single stream timer. */
+      #armTimer(msecs: number): void {
+        this.#clearTimer();
+        const handle = timers().setTimeout(() => {
+          this.#timer = null;
+          this._onTimeout();
+        }, msecs);
+        // Node's socket timers never hold the loop open.
+        handle.unref();
+        this.#timer = handle;
+      }
+
+      /** Drop the pending timer, if any (Node's `clearTimeout(s[kTimeout])`). */
+      #clearTimer(): void {
+        if (this.#timer !== null) {
+          timers().clearTimeout(this.#timer);
+          this.#timer = null;
+        }
+      }
+
+      /**
+       * Restart the timer after read/write activity — libuv resets a handle's
+       * timeout on I/O, which is why a busy socket never emits 'timeout'.
+       */
+      #refreshTimer(): void {
+        if (this.#timeoutMs > 0) this.#armTimer(this.#timeoutMs);
+      }
 
       /** @internal */
       _onTimeout(): void {
@@ -205,6 +351,8 @@ export const netSpec: BuiltinSpec = {
           this.#bytesWritten += bytes.byteLength;
           vsock.write(bytes);
         }
+        // Writing is I/O activity: restart the idle timer.
+        this.#refreshTimer();
         cb();
       }
 
@@ -216,6 +364,8 @@ export const netSpec: BuiltinSpec = {
         this.#sockname = { address: '127.0.0.1', family: 'IPv4', port: vsock.localPort };
         vsock.onData((chunk) => {
           this.#bytesRead += chunk.byteLength;
+          // Reading is I/O activity: restart the idle timer.
+          this.#refreshTimer();
           // Feed the real Readable machinery so 'data'/'end'/'close' all follow
           // Node's stream lifecycle (and `setEncoding` is the stream's own).
           this.push(toBuffer(ctx, chunk));
@@ -224,6 +374,10 @@ export const netSpec: BuiltinSpec = {
           // End the readable side; `allowHalfOpen: false` then ends the writable
           // side too, which drives the socket to 'close'.
           this.push(null);
+          // net sockets read their handle continuously (Node's `_read` calls
+          // `readStart`), so EOF is always observed — and 'end' emitted — even
+          // when nothing consumes the readable side.
+          this.read(0);
         });
         vsock.onClose(() => {
           // Abrupt closes (peer destroy) still need the 'close' event.
@@ -238,12 +392,21 @@ export const netSpec: BuiltinSpec = {
         const [options, cb] = normalizeArgs(args);
         const port = Number(options.port);
         this.connecting = true;
+        // Node registers the connect callback as `once('connect')` *before*
+        // dialing, so on success it runs ahead of listeners added afterwards and
+        // on failure it never runs.
+        if (typeof cb === 'function') this.once('connect' as never, cb as never);
         let vsock: VirtualSocket;
         try {
           vsock = network.dial(port);
         } catch (err) {
-          this.connecting = false;
-          ctx.binding.nextTick(() => this.emit('error', err as Error));
+          // `connecting` stays true for the remainder of this tick (Node only
+          // clears it when the failure surfaces), then the socket is destroyed —
+          // which emits 'error' followed by 'close'. `
+          ctx.binding.nextTick(() => {
+            this.connecting = false;
+            this.destroy(err as Error);
+          });
           return this;
         }
         this._attach(vsock, 'client');
@@ -251,7 +414,6 @@ export const netSpec: BuiltinSpec = {
         ctx.binding.nextTick(() => {
           this.emit('connect');
           this.emit('ready');
-          if (typeof cb === 'function') cb();
         });
         return this;
       }
@@ -276,7 +438,16 @@ export const netSpec: BuiltinSpec = {
 
       /** @internal */
       _destroy(err: Error | null, cb: (err?: Error | null) => void): void {
-        this.#vsock?.destroy(err ?? undefined);
+        // `hadError` rides on the stream's own 'close' (emitted after 'error'
+        // by the destroy machinery), mirroring lib/net.js.
+        this.#hadError = err ? true : false;
+        // Node clears the stream timer and drops the handle in `_destroy`; the
+        // dropped handle is what makes `pending` report true once closed.
+        this.#clearTimer();
+        // The stream emits the error itself; passing it to the virtual socket
+        // would fire `onError` and duplicate the 'error' event.
+        this.#vsock?.destroy();
+        this.#vsock = null;
         cb(err);
       }
 
@@ -292,9 +463,26 @@ export const netSpec: BuiltinSpec = {
       setKeepAlive(): this {
         return this;
       }
-      setTimeout(ms: number, cb?: () => void): this {
-        this.timeout = ms;
-        if (typeof cb === 'function') this.once('timeout', cb as never);
+      setTimeout(msecs: number, callback?: () => void): this {
+        // /`setStreamTimeout` — a destroyed socket is a no-op, and `this.timeout`
+        // is assigned *before* validation (so a bad value still lands there).
+        if (this.destroyed) return this;
+        this.timeout = msecs;
+        const ms = getTimerDuration(msecs, 'msecs');
+        this.#clearTimer();
+        this.#timeoutMs = ms;
+        if (ms === 0) {
+          if (callback !== undefined) {
+            validateFunction(callback, 'callback');
+            this.removeListener('timeout' as never, callback as never);
+          }
+        } else {
+          this.#armTimer(ms);
+          if (callback !== undefined) {
+            validateFunction(callback, 'callback');
+            this.once('timeout' as never, callback as never);
+          }
+        }
         return this;
       }
       ref(): this {
@@ -318,6 +506,7 @@ export const netSpec: BuiltinSpec = {
       #port = 0;
       #host = '127.0.0.1';
       #listening = false;
+      #closeEmitted = false;
 
       constructor(connectionListener?: (socket: Socket) => void) {
         super();
@@ -379,6 +568,8 @@ export const netSpec: BuiltinSpec = {
           socket.once('close' as never, () => {
             this.connections--;
             this._sockets.delete(socket);
+            // A pending `close()` waits for the last connection to drain.
+            this._emitCloseIfDrained();
           });
           socket._attach(vsock, 'server');
           this.emit('connection', socket);
@@ -397,9 +588,11 @@ export const netSpec: BuiltinSpec = {
 
       /** @internal — Node emits 'close' once the last connection drains. */
       _emitCloseIfDrained(): void {
-        if (this.#listening || this.connections > 0) return;
+        if (this.#closeEmitted || this.#listening || this.connections > 0) return;
         ctx.binding.nextTick(() => {
-          if (!this.#listening && this.connections === 0) this.emit('close');
+          if (this.#closeEmitted || this.#listening || this.connections > 0) return;
+          this.#closeEmitted = true;
+          this.emit('close');
         });
       }
 
@@ -408,12 +601,14 @@ export const netSpec: BuiltinSpec = {
       }
 
       close(cb?: (err?: Error) => void): this {
-        if (this.#listening) network.unlisten(this.#port);
-        this.#listening = false;
-        ctx.binding.nextTick(() => {
-          this.emit('close');
-          if (typeof cb === 'function') cb();
-        });
+        // Node runs the callback from the 'close' event, which fires only after
+        // the last live connection has drained.
+        if (typeof cb === 'function') this.once('close' as never, cb as never);
+        if (this.#listening) {
+          network.unlisten(this.#port);
+          this.#listening = false;
+        }
+        this._emitCloseIfDrained();
         return this;
       }
 
@@ -558,8 +753,14 @@ export const netSpec: BuiltinSpec = {
         return addressTypes().BlockList;
       },
       createServer: (connectionListener?: (socket: Socket) => void) => new Server(connectionListener),
-      createConnection: (...args: unknown[]) => new Socket().connect(...args),
-      connect: (...args: unknown[]) => new Socket().connect(...args),
+      createConnection: (...args: unknown[]) => {
+        const [options] = normalizeArgs(args);
+        return new Socket(options as { allowHalfOpen?: boolean }).connect(...args);
+      },
+      connect: (...args: unknown[]) => {
+        const [options] = normalizeArgs(args);
+        return new Socket(options as { allowHalfOpen?: boolean }).connect(...args);
+      },
       isIP,
       isIPv4: (v: unknown) => isIP(v) === 4,
       isIPv6: (v: unknown) => isIP(v) === 6,

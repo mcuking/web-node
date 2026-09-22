@@ -244,6 +244,29 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M95 `net` 连接生命周期与超时（阶段 B 开张）
+
+**改了什么**：把 `net.Socket` 的连接状态机、事件序、`setTimeout` 超时、半开连接与 `allowHalfOpen` 语义逐字对齐真 Node。新增差分探针 `tools/net-lifecycle-probe.cjs`（真 Node 与 web-node 各跑一遍，`tools/net-lifecycle-oracle.mjs` 录制成 `test/fixtures/net-lifecycle.json`），**首次修正后 0 diff**。过程中修了三个真 bug。
+
+**`net.Socket`（`builtins/net.ts`）**：
+- **`setTimeout(ms[, cb])`**：真正实现（以前只是存 `ms`，定时器从不触发）。语义全按 `setStreamTimeout` + `getTimerDuration`：先写 `this.timeout` 再校验；`destroyed` 时直接返回；`0` 取消并 `removeListener('timeout', cb)`；非 0 则创建一个 **unref'd** 定时器（不吊住事件循环）调 `_onTimeout()`，`cb` 走 `once('timeout')`。校验与 Node 逐字：非数字 `ERR_INVALID_ARG_TYPE`（`Received type string ('x')`）、负数/非有限 `ERR_OUT_OF_RANGE`、超 `2^31-1` 截断并发 `TimeoutOverflowWarning`。**I/O（读/写）会重置定时器**（libuv 语义），所以忙时不触发。
+- **`connect()`**：失败时改为 `destroy(err)`（而非只 `emit('error')`）——于是 `error` 后跟 `close:true`，状态机进 `closed`；`connecting` 在本 tick 保持 `true`（错误下个 tick 才显形）；连接回调改注 `once('connect', cb)`（Node 在拨号前注册），故成功时顺序为 `callback` → `connect` → `ready`。
+- **`allowHalfOpen`**：`net.connect(options)`/`createConnection` 现在把 options 传给 `Socket` 构造器（之前被丢弃，`allowHalfOpen:true` 无效）。
+- **`_destroy`**：清定时器 + 置空句柄（于是 `pending` 关闭后为 `true`）；`close` 事件的 `hadError` 由重写的 `emit('close', this.#hadError)` 注入（Node 由 `lib/net.js` 的 handle 负责，基类流事件不带这个参数）；不再把 `err` 透传给虚拟 socket（那会经 `onError` 重复发一次 `error`）。
+- **`#sockname`/`_read`**：EOF 时补 `this.read(0)`——net socket 持续读，故即使没有 `data` 消费者（如只 `on('end')` 的 server 端）也必然观测到 EOF 并发出 `end`。
+- 误差文案：新增 `describeType`/`invalidArgType`/`outOfRange`/`validateNumber`/`validateFunction` 本地 helper，对齐 `internal/errors` + `internal/validators`。
+
+**虚拟 TCP（`net/network.ts`）——两个真 bug**：
+1. **半开语义**：`end()` 以前会把**本端** `#readableEnded=true` 并触发本端 `endCbs`（本地 FIN 不该结束自己的读侧，应只让对端看到 EOF）。已改为只 `peer._remoteEnded()`。且 `end()` 的对端通知不能以「本端已关闭」为条件（半开时本端可先 auto-destroy，导致 FIN 永不送达）；改为只看对端状态。
+2. **关闭模型**：`destroy()` 以前无条件把对端也 `destroy()`。现按 TCP 语义：已发 FIN（`#finSent`）则只通知对端 EOF（对端可保持可写，配合 `allowHalfOpen`）；未发 FIN 的突发关闭才把对端拆掉（让「服务端中途断连」表现为错误而非空等）。
+
+**`http.Server#close`（`builtins/http.ts`）**：补上 Node 的行为——close 前先 `closeIdleConnections()`（`_http_server.js#httpServerPreClose`）。否则 keep-alive 空闲连接会让新实现的「close 等到连接排空」永久悬住（以前 close 不等待才没暴露）。
+
+**验证**：`tools/net-lifecycle-probe.cjs` 覆盖：拒绝连接的事件序/终态、idle 超时与 busy 不超时、`setTimeout(0)`/校验错误、`allowHalfOpen` 真/假、connect 回调顺序、`destroy(err)`、`server.close` 排空、`destroySoon`、`getConnections`。真 Node 与 web-node **逐字段 0 diff**。
+**门禁**：`tsc` 干净 · vitest **974 passed / 2 skipped（107 文件）** · build worker **2468.39 kB**。
+
+**为什么**：阶段 B 第一项，差分方法是本项目已固定的验证主干。
+
 ### 2026-09-22 · M91 ML-KEM（FIPS 203）后量子 KEM
 
 **改了什么**：新增 `src/node-runtime/crypto/mlkem.ts`（纯 JS 实现的 ML-KEM），接入 `crypto.encapsulate` / `crypto.decapsulate` 以及 `ml-kem-512/768/1024` 密钥类型。阶段 A crypto 收尾。

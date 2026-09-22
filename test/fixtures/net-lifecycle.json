@@ -1,0 +1,116 @@
+{
+  "proto": {
+    "setTimeout": true,
+    "setTimeoutLength": 2,
+    "_unrefTimer": "function",
+    "_onTimeout": "function",
+    "destroySoon": "function",
+    "resetAndDestroy": "function",
+    "readyState": true
+  },
+  "refusedConnectingSync": true,
+  "refused": {
+    "ev": [
+      "error:ECONNREFUSED",
+      "close:true"
+    ],
+    "readyState": "closed",
+    "connecting": false,
+    "destroyed": true,
+    "pending": true,
+    "writableEnded": false,
+    "readableEnded": false
+  },
+  "setTimeout": {
+    "returnsThis": true,
+    "prop": 60,
+    "hasOwn": true
+  },
+  "setTimeoutIdleEvents": [
+    "timeout",
+    "close"
+  ],
+  "timeoutActivityEvents": [],
+  "setTimeoutCallbackRegistered": 1,
+  "setTimeoutZero": {
+    "returnsThis": true,
+    "listeners": 0,
+    "timeout": 0
+  },
+  "setTimeoutAfterDestroy": {
+    "ok": true
+  },
+  "setTimeoutType": {
+    "err": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"msecs\" argument must be of type number. Received type string ('x')"
+    }
+  },
+  "setTimeoutNeg": {
+    "err": {
+      "name": "RangeError",
+      "code": "ERR_OUT_OF_RANGE",
+      "message": "The value of \"msecs\" is out of range. It must be a non-negative finite number. Received -1"
+    }
+  },
+  "setTimeoutBadCb": {
+    "err": {
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"callback\" argument must be of type function. Received type number (5)"
+    }
+  },
+  "halfOpenFalse": {
+    "ev": [
+      "data:bye",
+      "end",
+      "finish",
+      "close"
+    ],
+    "writableEnded": true,
+    "readableEnded": true
+  },
+  "halfOpenTrueBefore": {
+    "writable": true,
+    "writableEnded": false,
+    "readable": true,
+    "destroyed": false
+  },
+  "halfOpenTrueAfter": {
+    "writable": true,
+    "writableEnded": false,
+    "readableEnded": true,
+    "destroyed": false,
+    "ev": [
+      "data:echo:hi",
+      "end"
+    ]
+  },
+  "connectCallbackOrder": [
+    "callback",
+    "connect",
+    "ready",
+    "close"
+  ],
+  "destroyError": [
+    "error:boom",
+    "close:true"
+  ],
+  "getConnections": [
+    true,
+    1
+  ],
+  "serverClosePendingWhileOpen": {
+    "listening": false,
+    "closed": false
+  },
+  "serverCloseAfterDrain": {
+    "closed": true,
+    "listening": false
+  },
+  "destroySoon": [
+    "finish",
+    "close"
+  ]
+}

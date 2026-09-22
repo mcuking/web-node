@@ -22,6 +22,7 @@ export class VirtualSocket {
   #errorCbs: Array<(err: Error) => void> = [];
   #closed = false;
   #readableEnded = false;
+  #finSent = false;
   #remotePort: number;
   #localPort: number;
 
@@ -95,12 +96,19 @@ export class VirtualSocket {
   end(chunk?: Uint8Array | string): void {
     if (this.#closed) return;
     if (chunk !== undefined) this.write(chunk);
+    // A half-close signals EOF to the peer; a later local `destroy()` must then
+    // treat the peer as already notified (rather than tearing it down).
+    this.#finSent = true;
     const peer = this.#peer;
     queueMicrotask(() => {
-      if (this.#closed) return;
-      this.#readableEnded = true;
-      for (const cb of [...this.#endCbs]) cb();
-      peer?._remoteEnded();
+      // Only the peer's state matters: our own half may already have been torn
+      // down (a half-close finishes the writable side, which auto-destroys the
+      // socket before this microtask runs), but the FIN still reached the peer.
+      if (!peer || peer.#closed) return;
+      // A local FIN ends *our* write side only — it must not mark our own read
+      // side as ended nor fire our own 'end' callbacks (the peer's FIN does
+      // that). It is the peer that sees EOF.
+      peer._remoteEnded();
     });
   }
 
@@ -117,8 +125,13 @@ export class VirtualSocket {
     const peer = this.#peer;
     if (err) for (const cb of [...this.#errorCbs]) cb(err);
     for (const cb of [...this.#closeCbs]) cb();
-    // Tear the other half down too — this is a pipe, not half-open persistent.
-    if (peer && !peer.#closed) queueMicrotask(() => peer.destroy());
+    // Mirror TCP: a half-closed socket has already told the peer (FIN), so close
+    // gracefully; an abrupt destroy instead rips the peer down, which is what
+    // surfaces a dropped connection as an error rather than an idle hang.
+    if (peer && !peer.#closed) {
+      if (this.#finSent) queueMicrotask(() => peer._remoteEnded());
+      else queueMicrotask(() => peer.destroy());
+    }
   }
 
   /** @internal — close without notifying the peer (used by network.reset()). */

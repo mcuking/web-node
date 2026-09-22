@@ -1264,6 +1264,18 @@ export const httpSpec: BuiltinSpec = {
         return [...((this as unknown as { _sockets?: Set<NetSocket> })._sockets ?? [])];
       }
 
+      /**
+       * Node's `http.Server#close` drops idle keep-alive connections first
+       * (`_http_server.js#httpServerPreClose`), so the server can actually
+       * drain and emit 'close' instead of waiting on sockets that are idle by
+       * design.
+       */
+      close(cb?: (err?: Error) => void): this {
+        this.closeIdleConnections();
+        (super.close as (cb?: (err?: Error) => void) => unknown)(cb);
+        return this;
+      }
+
       /** `server.closeAllConnections()` — forcibly destroy every connection. */
       closeAllConnections(): void {
         for (const socket of this.#allSockets()) socket.destroy();
