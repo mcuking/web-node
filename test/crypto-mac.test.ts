@@ -130,8 +130,8 @@ describe('crypto.createMac unit surface', () => {
     expect(
       crypto.createMac('cmac', new Uint8Array(16).fill(1), { cipher: 'camellia-128-cbc' }).update('data').final('hex'),
     ).toBe('db7871c299307e017b90417133beb481');
-    // Ciphers still outside this runtime stay loud.
-    expect(() => crypto.createMac('cmac', new Uint8Array(16).fill(1), { cipher: 'aria-128-cbc' })).toThrowError(
+    // A known-but-unimplemented CBC cipher stays loud.
+    expect(() => crypto.createMac('cmac', new Uint8Array(16).fill(1), { cipher: 'aes-128-cbc-cts' })).toThrowError(
       /not implemented/i,
     );
   });

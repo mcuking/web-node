@@ -700,11 +700,11 @@ console.log('gcm tag     : ' + gcm.getAuthTag().toString('hex'));
 console.log('gcm ciphers : ' + crypto.getCiphers().filter(function (n) { return n.indexOf('aes-') === 0; }).length + ' aes entries');
 console.log('');
 
-// --- ChaCha20, DES/3DES, CCM and Camellia (milestone 93) ---
+// --- ChaCha20, DES/3DES, CCM, Camellia, ARIA and SM4 (milestone 93) ---
 // Beyond AES, the runtime also carries ChaCha20-Poly1305 (RFC 8439), the
-// DES-EDE / DES-EDE3 family, AES-CCM (SP 800-38C) and Camellia (RFC 3713), all
-// matching OpenSSL byte for byte.
-console.log('-- ChaCha20 / DES / CCM / Camellia (milestone 93) --');
+// DES-EDE / DES-EDE3 family, AES-CCM (SP 800-38C), Camellia (RFC 3713),
+// ARIA (RFC 5794) and SM4 (GB/T 32907), all matching OpenSSL byte for byte.
+console.log('-- ChaCha20 / DES / CCM / Camellia / ARIA / SM4 (milestone 93) --');
 const chaKey = Buffer.alloc(32, 1);
 const chaNonce = Buffer.alloc(12, 2);
 const chacha = crypto.createCipheriv('chacha20-poly1305', chaKey, chaNonce, { authTagLength: 16 });
@@ -732,6 +732,10 @@ console.log('camellia ct : ' + camCt.toString('hex'));
 const camBack = crypto.createDecipheriv('camellia-128-cbc', camKey, camIv);
 console.log('camellia pt : ' + Buffer.concat([camBack.update(camCt), camBack.final()]).toString());
 console.log('camellia mac: ' + crypto.createMac('cmac', camKey, { cipher: 'camellia-128-cbc' }).update('data').final('hex'));
+const aria = crypto.createCipheriv('aria-128-cbc', camKey, camIv);
+console.log('aria ct     : ' + Buffer.concat([aria.update('The quick brown fox'), aria.final()]).toString('hex'));
+const sm4 = crypto.createCipheriv('sm4-cbc', camKey, camIv);
+console.log('sm4 ct      : ' + Buffer.concat([sm4.update('The quick brown fox'), sm4.final()]).toString('hex'));
 console.log('');
 
 // --- url (milestone 53) ---

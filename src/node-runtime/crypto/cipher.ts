@@ -94,10 +94,12 @@ function inc32(counter: Uint8Array): void {
 // --- the cipher surface ------------------------------------------------------
 
 import { AesKey } from './aes';
+import { Aria } from './aria';
 import { Camellia } from './camellia';
 import { AesCcm } from './ccm';
 import { ChaCha20Cipher, ChaCha20Poly1305, isValidTagLength, type SyncCipher } from './chacha20';
 import { DesCipher, DesEde, type DesMode } from './des';
+import { Sm4 } from './sm4';
 
 export type { SyncCipher };
 
@@ -210,29 +212,54 @@ const SPECS: CipherSpec[] = [];
     SPECS.push({ name, infoName, mode: 'ccm', nid, keyLength, blockSize: 1, ivLength: 12 });
     SPECS.push({ name: infoName, infoName, mode: 'ccm', nid, keyLength, blockSize: 1, ivLength: 12, alias: true });
   }
-  // Camellia (RFC 3713). Same 128-bit block and mode set; the bare `camellia128`
-  // aliases mean CBC.
-  const camellia: Array<[number, number[]]> = [
-    [16, [754, 751, 757, 766, 963]],
-    [24, [755, 752, 758, 767, 967]],
-    [32, [756, 753, 759, 768, 971]],
+  // Camellia (RFC 3713), ARIA (RFC 5794) and SM4 (GB/T 32907). All three are
+  // 128-bit block ciphers, so they share the mode list; the bare `camellia128`,
+  // `aria128` and `sm4` aliases mean CBC.
+  const blockModes: Array<{ mode: CipherMode; blockSize: number; ivLength: number | null }> = [
+    { mode: 'ecb', blockSize: 16, ivLength: null },
+    { mode: 'cbc', blockSize: 16, ivLength: 16 },
+    { mode: 'cfb', blockSize: 1, ivLength: 16 },
+    { mode: 'ofb', blockSize: 1, ivLength: 16 },
+    { mode: 'ctr', blockSize: 1, ivLength: 16 },
   ];
-  for (const [keyLength, nids] of camellia) {
-    const bits = keyLength * 8;
-    modes.forEach((m, index) => {
-      SPECS.push({
-        name: `camellia-${bits}-${m.mode}`,
-        infoName: `camellia-${bits}-${m.mode}`,
-        mode: m.mode,
-        nid: nids[index],
-        keyLength,
-        blockSize: m.blockSize,
-        ivLength: m.ivLength,
-        family: 'camellia',
+  const blockFamilies: Array<{ prefix: string; aliases: string[]; sizes: Array<[number, number[]]> }> = [
+    {
+      prefix: 'camellia',
+      aliases: ['camellia128', 'camellia192', 'camellia256'],
+      sizes: [
+        [16, [754, 751, 757, 766, 963]],
+        [24, [755, 752, 758, 767, 967]],
+        [32, [756, 753, 759, 768, 971]],
+      ],
+    },
+    {
+      prefix: 'aria',
+      aliases: ['aria128', 'aria192', 'aria256'],
+      sizes: [
+        [16, [1065, 1066, 1067, 1068, 1069]],
+        [24, [1070, 1071, 1072, 1073, 1074]],
+        [32, [1075, 1076, 1077, 1078, 1079]],
+      ],
+    },
+    {
+      prefix: 'sm4',
+      aliases: ['sm4'],
+      sizes: [[16, [1133, 1134, 1137, 1135, 1139]]],
+    },
+  ];
+  for (const { prefix, aliases, sizes } of blockFamilies) {
+    sizes.forEach(([keyLength, nids], sizeIndex) => {
+      const bits = keyLength * 8;
+      blockModes.forEach((m, index) => {
+        const name = keyLength === 16 && prefix === 'sm4' ? `sm4-${m.mode}` : `${prefix}-${bits}-${m.mode}`;
+        SPECS.push({ name, infoName: name, mode: m.mode, nid: nids[index], keyLength, blockSize: m.blockSize, ivLength: m.ivLength, family: prefix as 'camellia' | 'aria' | 'sm4' });
       });
+      if (aliases[sizeIndex]) {
+        const cbcName = keyLength === 16 && prefix === 'sm4' ? 'sm4-cbc' : `${prefix}-${bits}-cbc`;
+        const cbc = SPECS.find((s) => s.name === cbcName)!;
+        SPECS.push({ ...cbc, name: aliases[sizeIndex], alias: true });
+      }
     });
-    const cbc = SPECS.find((s) => s.name === `camellia-${bits}-cbc`)!;
-    SPECS.push({ ...cbc, name: `camellia${bits}`, alias: true });
   }
 }
 
@@ -343,6 +370,8 @@ export function createCipher(
   if (spec.mode === 'ccm') return new AesCcm(key, iv as Uint8Array, encrypt, authTagLength, plaintextLength);
   if (spec.family === 'des') return new DesCipher(spec.mode as DesMode, key, iv, encrypt);
   if (spec.family === 'camellia') return new Cipheriv(spec, key, iv, encrypt, authTagLength, new Camellia(key));
+  if (spec.family === 'aria') return new Cipheriv(spec, key, iv, encrypt, authTagLength, new Aria(key));
+  if (spec.family === 'sm4') return new Cipheriv(spec, key, iv, encrypt, authTagLength, new Sm4(key));
   return new Cipheriv(spec, key, iv, encrypt, authTagLength);
 }
 
@@ -729,10 +758,30 @@ export function camelliaCmac(key: Uint8Array, data: Uint8Array): Uint8Array {
   }, 16, 0x87, data);
 }
 
+/** CMAC whose block cipher is ARIA; the usual 16-byte tag. */
+export function ariaCmac(key: Uint8Array, data: Uint8Array): Uint8Array {
+  const aria = new Aria(key);
+  return cmacCore((block) => {
+    aria.encryptBlock(block);
+    return block;
+  }, 16, 0x87, data);
+}
+
+/** CMAC whose block cipher is SM4; the usual 16-byte tag. */
+export function sm4Cmac(key: Uint8Array, data: Uint8Array): Uint8Array {
+  const sm4 = new Sm4(key);
+  return cmacCore((block) => {
+    sm4.encryptBlock(block);
+    return block;
+  }, 16, 0x87, data);
+}
+
 /** Dispatches CMAC to the block cipher named by `spec`. */
 export function cmacForCipher(spec: CipherSpec, key: Uint8Array, data: Uint8Array): Uint8Array {
   if (spec.family === 'des') return desCmac(key, data);
   if (spec.family === 'camellia') return camelliaCmac(key, data);
+  if (spec.family === 'aria') return ariaCmac(key, data);
+  if (spec.family === 'sm4') return sm4Cmac(key, data);
   return aesCmac(key, data);
 }
 

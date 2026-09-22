@@ -244,6 +244,24 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M93.4b ARIA / SM4
+
+**改了什么**：新增 `src/node-runtime/crypto/aria.ts`（RFC 5794）与 `src/node-runtime/crypto/sm4.ts`（GB/T 32907）。
+
+ARIA：`FO(D,RK)=A(SL1(D^RK))`、`FE(D,RK)=A(SL2(D^RK))`，128 位块、12/14/16 轮，末轮用 `SL2(D^ek_n)^ek_{n+1}`；密钥编排是 (KL‖KR) 上的三轮 Feistel（W0…W3 由 FO/FE 与 CK1–3 生成，CK 按密钥长度取 C1/C2/C3 的轮换）。**SB3/SB4 不手抄表**——它们是 SB1/SB2 的逆，由 `inverse()` 现算，避免与 SB1/SB2 抄错不一致。解密密钥 `dk1=ek{n+1}`、`dk{i}=A(ek{n+2-i})`、`dk{n+1}=ek1`，解密直接复用同一数据路径。
+
+SM4：128 位块、32 轮，轮函数为字节 S 盒 `tau` + 线性 `L`（旋转 2/10/18/24），密钥编排用 `L'`（旋转 13/23），轮密钥 `rk[i]=K[i]^L'(…)`；输出为 `(X35,X34,X33,X32)`。
+
+两者都是 128 位块，因此直接复用 M93.4a 泛化出的 `Cipheriv`（`BlockCipher` 接口）与 PKCS#7。接入 `aria-{128,192,256}` 与 `sm4` 的 ecb/cbc/cfb/ofb/ctr，加 `aria128/192/256`、`sm4`（CBC）别名；CMAC 分派扩展到 aria/sm4。
+
+**顺手修隐患**：M93.4a 的 Camellia 误用了含 gcm 的 6 项 `modes` 表生成条目，会造出幽灵 `camellia-*-gcm`（nid undefined）。现改为专用的 5 模式表（`blockModes`），camellia/aria/sm4 共用。
+
+**验证（差分 0 diff）**：`tools/crypto-aria-sm4-probe.cjs` 在真 Node 与 web-node 内各跑一遭，逐字段等于 `test/fixtures/crypto-aria-sm4.json`。覆盖：ARIA/SM4 全部 20 个名称的 `getCipherInfo`、20 组（算法×模式）密文与回环、流式 update 整合、setAutoPadding(false)、CMAC（aria 128/192/256 / sm4 / 块对齐 / 空）、错误面（`ERR_CRYPTO_INVALID_KEYLEN`、`ERR_CRYPTO_INVALID_IV`、`ERR_CRYPTO_UNKNOWN_CIPHER`、`ERR_OSSL_EVP_INVALID_KEY_LENGTH`、`ERR_OSSL_INVALID_MODE`）。首次运行即 0 diff。
+
+**门禁**：`tsc` 干净 · vitest **959 passed / 2 skipped（101 文件）** · build worker **2439.06 kB**。demo 新增 ARIA/SM4 示例，输出对齐真 Node。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md` 的 M93.4 拆分顺序。
+
 ### 2026-09-22 · M93.4a Camellia
 
 **改了什么**：新增 `src/node-runtime/crypto/camellia.ts`——按 RFC 3713 用 BigInt 实现的 128 位分组密码（128/192/256 位密钥）。密钥编排（KL/KR/KA/KB、Sigma1–6）与 Feistel 数据路径（18/24 轮 + 每 6 轮一次 FL/FLINV）基本按规范逐行写；S 盒 `s2 = s1<<<1`、`s3 = s1<<<7`、`s4 = s1[x<<<1]` 由 `s1` 推导。解密复用同一数据路径，只把子密钥逆序。
