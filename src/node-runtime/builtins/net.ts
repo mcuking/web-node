@@ -40,15 +40,19 @@ export const netSpec: BuiltinSpec = {
       readonly writable: boolean;
       readonly writableLength: number;
       readonly writableFinished: boolean;
+      readonly destroyed: boolean;
+      push(chunk: unknown): boolean;
       end(cb?: () => void): void;
       destroy(error?: Error): void;
+      setEncoding(enc: string): unknown;
     }
 
     const kAttached = Symbol('web-node.socket.side');
 
     class Socket extends (Duplex as new (opts?: unknown) => StreamLike) {
       connecting = false;
-      timeout = 0;
+      /** Set only by `setTimeout` (Node leaves it absent otherwise). */
+      declare timeout: number | undefined;
 
       #vsock: VirtualSocket | null = null;
       #encoding: string | null = null;
@@ -58,8 +62,9 @@ export const netSpec: BuiltinSpec = {
       #bytesWritten = 0;
       #setTOS: number | undefined;
 
-      constructor() {
-        super({ allowHalfOpen: true });
+      constructor(options?: { allowHalfOpen?: boolean }) {
+        // Node's default is `allowHalfOpen: false` (a half-close ends both sides).
+        super({ allowHalfOpen: options?.allowHalfOpen ?? false });
       }
 
       // --- Node's prototype accessors (lib/net.js) --------------------------
@@ -211,24 +216,27 @@ export const netSpec: BuiltinSpec = {
         this.#sockname = { address: '127.0.0.1', family: 'IPv4', port: vsock.localPort };
         vsock.onData((chunk) => {
           this.#bytesRead += chunk.byteLength;
-          this.emit('data', this.#encoding ? new TextDecoder(this.#encoding).decode(chunk) : toBuffer(ctx, chunk));
+          // Feed the real Readable machinery so 'data'/'end'/'close' all follow
+          // Node's stream lifecycle (and `setEncoding` is the stream's own).
+          this.push(toBuffer(ctx, chunk));
         });
         vsock.onEnd(() => {
-          // `readyState` is derived from the live stream flags (as in Node).
-          this.emit('end');
+          // End the readable side; `allowHalfOpen: false` then ends the writable
+          // side too, which drives the socket to 'close'.
+          this.push(null);
         });
         vsock.onClose(() => {
-          // Nothing to do: `readyState` follows `readable`/`writable`.
+          // Abrupt closes (peer destroy) still need the 'close' event.
+          if (!this.destroyed) this.destroy();
         });
         vsock.onError((err) => this.emit('error', err));
       }
 
-      /** Dial a virtual port. Mirrors `socket.connect(port[, host][, cb])`. */
-      connect(port: number, host?: string | (() => void), cb?: () => void): this {
-        if (typeof host === 'function') {
-          cb = host;
-          host = undefined;
-        }
+      /** Dial a virtual port. Mirrors `socket.connect(port[, host][, cb])` and
+       * `socket.connect(options[, cb])`. */
+      connect(...args: unknown[]): this {
+        const [options, cb] = normalizeArgs(args);
+        const port = Number(options.port);
         this.connecting = true;
         let vsock: VirtualSocket;
         try {
@@ -242,6 +250,7 @@ export const netSpec: BuiltinSpec = {
         this.connecting = false;
         ctx.binding.nextTick(() => {
           this.emit('connect');
+          this.emit('ready');
           if (typeof cb === 'function') cb();
         });
         return this;
@@ -273,6 +282,7 @@ export const netSpec: BuiltinSpec = {
 
       setEncoding(enc: string): this {
         this.#encoding = enc;
+        (super.setEncoding as (e: string) => unknown).call(this, enc);
         return this;
       }
 
@@ -299,7 +309,8 @@ export const netSpec: BuiltinSpec = {
     }
 
     class Server extends (EventEmitter as new () => EmitterLike) {
-      maxConnections = Infinity;
+      /** Node leaves this `undefined` until the caller sets it. */
+      maxConnections: number | undefined;
       connections = 0;
       /** @internal — live sockets, so http.Server can close them by policy. */
       _sockets = new Set<Socket>();
@@ -547,8 +558,8 @@ export const netSpec: BuiltinSpec = {
         return addressTypes().BlockList;
       },
       createServer: (connectionListener?: (socket: Socket) => void) => new Server(connectionListener),
-      createConnection: (port: number, host?: string, cb?: () => void) => new Socket().connect(port, host, cb),
-      connect: (port: number, host?: string, cb?: () => void) => new Socket().connect(port, host, cb),
+      createConnection: (...args: unknown[]) => new Socket().connect(...args),
+      connect: (...args: unknown[]) => new Socket().connect(...args),
       isIP,
       isIPv4: (v: unknown) => isIP(v) === 4,
       isIPv6: (v: unknown) => isIP(v) === 6,

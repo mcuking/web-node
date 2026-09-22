@@ -1,0 +1,132 @@
+{
+  "isIP": [
+    4,
+    6,
+    0
+  ],
+  "isIPv4": [
+    true,
+    false
+  ],
+  "isIPv6": [
+    true,
+    false
+  ],
+  "moduleTypes": [
+    "createServer:function",
+    "connect:function",
+    "createConnection:function",
+    "isIP:function",
+    "isIPv4:function",
+    "isIPv6:function",
+    "Socket:function",
+    "Server:function",
+    "BlockList:function",
+    "SocketAddress:function"
+  ],
+  "socketProto": [
+    "connect",
+    "write",
+    "end",
+    "destroy",
+    "pause",
+    "resume",
+    "setTimeout",
+    "setNoDelay",
+    "setKeepAlive",
+    "address",
+    "ref",
+    "unref",
+    "setEncoding",
+    "pipe"
+  ],
+  "socketProtoAccessors": [
+    "remoteAddress",
+    "remotePort",
+    "localAddress",
+    "localPort",
+    "bytesRead",
+    "bytesWritten",
+    "readyState",
+    "pending",
+    "destroyed",
+    "readable",
+    "writable",
+    "bufferSize"
+  ],
+  "serverProto": [
+    "listen",
+    "close",
+    "address",
+    "getConnections",
+    "ref",
+    "unref"
+  ],
+  "fresh": {
+    "readyState": "open",
+    "connecting": false,
+    "destroyed": false,
+    "readable": true,
+    "writable": true,
+    "pending": true,
+    "bytesRead": 0,
+    "bytesWritten": 0,
+    "allowHalfOpen": false,
+    "bufferSizeType": "undefined",
+    "addressType": "function"
+  },
+  "setNoDelayReturnsThis": true,
+  "setKeepAliveReturnsThis": true,
+  "setTimeoutReturnsThis": true,
+  "afterDestroy": {
+    "readyState": "closed",
+    "destroyed": true,
+    "connecting": false,
+    "writable": false
+  },
+  "afterListen": {
+    "listening": true
+  },
+  "serverAddress": {
+    "family": "IPv4",
+    "address": "127.0.0.1",
+    "portIsNumber": true
+  },
+  "refReturnsThis": true,
+  "unrefReturnsThis": true,
+  "getConnections": [
+    true,
+    0
+  ],
+  "connectReturnsSocket": true,
+  "connectInstaceOfServer": true,
+  "echo": "ping",
+  "clientEvents": [
+    "connect",
+    "ready",
+    "data",
+    "end",
+    "close"
+  ],
+  "clientBytes": {
+    "read": 4,
+    "written": 4
+  },
+  "clientAfterClose": {
+    "readyState": "closed",
+    "destroyed": true,
+    "writable": false,
+    "readable": false
+  },
+  "serverEvents": [
+    "connection",
+    "data:ping",
+    "end",
+    "close"
+  ],
+  "writeReturnsBoolean": "boolean",
+  "afterClose": {
+    "listening": false
+  },
+  "serverProtoAfterClose": null
+}
