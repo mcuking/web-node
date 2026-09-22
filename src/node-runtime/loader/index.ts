@@ -420,10 +420,18 @@ export class ModuleLoader {
     if (!browser || typeof browser !== 'object') return null;
     const map = browser as Record<string, string | false>;
 
+    // `browser` field *targets* are resolved relative to the package root, not
+    // the requesting file (`{ "util": "./lib/util-browser.js" }` in tapable
+    // means `<pkg>/lib/util-browser.js`). A bare target is a plain specifier.
+    const target = (value: string | false): string => {
+      if (value === false) return EMPTY_MODULE;
+      if (value.startsWith('.')) return p.resolve(owner.dir, value);
+      return value;
+    };
+
     const apply = (key: string): string | null | undefined => {
       if (!Object.prototype.hasOwnProperty.call(map, key)) return undefined;
-      const value = map[key];
-      return value === false ? EMPTY_MODULE : value;
+      return target(map[key]);
     };
 
     // Bare specifier: remap by exact name.

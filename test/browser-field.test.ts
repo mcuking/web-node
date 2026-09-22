@@ -75,6 +75,24 @@ describe('package.json "browser" field', () => {
     expect(out.join('')).toBe('undefined\n');
   });
 
+  it('resolves bare-specifier map targets against the package root', () => {
+    // tapable does exactly this: `{ "util": "./lib/util-browser.js" }`. The
+    // target is relative to the package root, not to the file that tripped it.
+    const { run, out } = boot({
+      '/project/node_modules/taplike/package.json': JSON.stringify({
+        name: 'taplike',
+        main: 'index.js',
+        browser: { util: './lib/util-browser.js' },
+      }),
+      '/project/node_modules/taplike/lib/hook.js': `module.exports = require('util').tag;`,
+      '/project/node_modules/taplike/lib/util-browser.js': `module.exports = { tag: 'browser-util' };`,
+      '/project/node_modules/taplike/index.js': `module.exports = require('./lib/hook.js');`,
+      '/project/index.js': `console.log(require('taplike'));`,
+    });
+    run();
+    expect(out.join('')).toBe('browser-util\n');
+  });
+
   it('leaves packages without a browser field on their main entry', () => {
     const { run, out } = boot({
       '/project/node_modules/plain/package.json': JSON.stringify({ name: 'plain', main: 'main.js' }),
