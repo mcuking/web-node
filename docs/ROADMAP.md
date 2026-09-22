@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-22（基线 = M93.4d 完成；AES-SIV 与 AES-XTS 上线；**阶段 A crypto 收尾全部完成**）
+> - **最后更新**：2026-09-22（基线 = M94 完成；`crypto.Certificate`（SPKAC）落地）
 
 ---
 
@@ -21,9 +21,9 @@
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **41** | **20** | **20**（+1 不做） |
+| **合计** | | **41** | **21** | **19**（+1 不做） |
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 107 个里程碑，剩余 20 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 108 个里程碑，剩余 19 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.4（26 → 30），同日晚 M90.5 又拆为 M90.5–M90.9（30 → 34）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
 
@@ -174,9 +174,8 @@
     - 差分：`tools/crypto-siv-xts-probe.cjs` → `test/fixtures/crypto-siv-xts.json`（SIV：128/192/256 密钥、多 AAD、空/16/32/40 字节载荷；XTS：16/20/32/33/48/1000 字节、全块与 CTS、两套 key/iv；全套错误面）——**0 diff**；`test/crypto-siv-xts.test.ts`。
     - 风险：中高。
 
-- [ ] **M94 · `crypto.Certificate`**
-  - Node 已弃用的 `crypto.Certificate` 类（`verifySpkac`/`exportPublicKey`/`exportChallenge`）。
-  - 基于 M87 的 `x509.ts`/`der.ts`。目前是响亮抛错的桩（M87 保留）。
+- [x] **M94 · `crypto.Certificate`** ✅ 2026-09-22
+  - Node 已弃用的 `crypto.Certificate` 类（`verifySpkac`/`exportPublicKey`/`exportChallenge`）。由 `src/node-runtime/crypto/spkac.ts` 实现（NETSCAPE_SPKI 解析 + OpenSSL 风格 base64 解码 + 签名校验），在 builtin 里接成「可 new 也可直接调用」的函数 + 原型/静态三方法。
   - 风险：低。
 
 ---
@@ -291,7 +290,7 @@
 - **构建工具**：M5 esbuild WASM · M5b rollup WASM · M5c Vite build · M5d Vite dev server · M5e HMR · M5f CSS 热更 · **M18 Vue 3 SFC 跑起来**
 - **性能/体积**：M32 worker 减重（1259→1028KB） · M41 Buffer slab 池化
 - **语义深度（差分语料）**：M79 http · M80 net · M81 fs
-- **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2 · M90.1 MAC（HMAC + BLAKE2b MAC） · M90.2 KMAC（Keccak/SHA-3/cSHAKE） · M90.3 CMAC/GMAC（AES） · M90.4 BLAKE2s MAC / Poly1305 / SipHash · M90.5 SHA-3/Keccak/SHAKE/keccak-kmac · M90.6 BLAKE2b-512/BLAKE2s-256 · M90.7 SM3/RIPEMD-160 · M90.8 截断变体与复合摘要 · M90.9 getHashes 全表对齐（81/81） · M92.1 DH KeyObject · M92.2 crypto.diffieHellman · M93.1 ChaCha20-Poly1305 · M93.2 DES/3DES · M93.3 AES-CCM · M93.4a Camellia · M93.4b ARIA/SM4 · M93.4c OCB/wrap · M93.4d SIV/XTS
+- **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2 · M90.1 MAC（HMAC + BLAKE2b MAC） · M90.2 KMAC（Keccak/SHA-3/cSHAKE） · M90.3 CMAC/GMAC（AES） · M90.4 BLAKE2s MAC / Poly1305 / SipHash · M90.5 SHA-3/Keccak/SHAKE/keccak-kmac · M90.6 BLAKE2b-512/BLAKE2s-256 · M90.7 SM3/RIPEMD-160 · M90.8 截断变体与复合摘要 · M90.9 getHashes 全表对齐（81/81） · M92.1 DH KeyObject · M92.2 crypto.diffieHellman · M93.1 ChaCha20-Poly1305 · M93.2 DES/3DES · M93.3 AES-CCM · M93.4a Camellia · M93.4b ARIA/SM4 · M93.4c OCB/wrap · M93.4d SIV/XTS · M94 crypto.Certificate（SPKAC）
 
 ---
 

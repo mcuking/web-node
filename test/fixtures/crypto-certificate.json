@@ -1,0 +1,213 @@
+{
+  "validVerify": true,
+  "validChallenge": "this-is-a-challenge",
+  "validPublicKey": "-----BEGIN PUBLIC KEY-----MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt9xYiIonscC3vz/A2ceR7KhZZlDu/5bye53nCVTcKnWd2seY6UAdKersX6njr83Dd5OVe1BW/wJvp5EjWTAGYbFswlNmeD44edEGM939B6Lq+/8iBkrTi8mGN4YCytivE24YI0D4XZMPfkLSpab2y/Hy4DjQKBq1ThZ0UBnK+9IhX37Ju/ZoGYSlTIGIhzyaiYBh7wrZBoPczIEu6et/kN2VnnbRUtkYTF97ggcv5h+hDpUQjQW0ZgOMcTc8n+RkGpIt0/iM/bTjI3Tz/gsFdi6hHcpZgbopPL630296iByyigQCPJVzdusFrQN5DeC+zT/nGypQkZanLb4ZspSx9QIDAQAB-----END PUBLIC KEY-----",
+  "pubMatchesFixture": true,
+  "pubHead": "-----BEGIN PUBLIC KEY-----",
+  "pubTail": "",
+  "invalidVerify": false,
+  "invalidChallenge": "",
+  "invalidPublicKey": "",
+  "empty": {
+    "verify": "",
+    "challenge": "",
+    "publicKey": ""
+  },
+  "badBase64": {
+    "verify": false,
+    "challenge": "",
+    "publicKey": ""
+  },
+  "notBase64": {
+    "verify": false,
+    "challenge": ""
+  },
+  "oddLength": {
+    "verify": false,
+    "challenge": ""
+  },
+  "trailingNewline": true,
+  "trailingSpaces": true,
+  "trailingCRLF": true,
+  "leadingSpaces": true,
+  "wrappedLines": false,
+  "types": {
+    "buffer": true,
+    "arrayBuffer": true,
+    "uint8Array": true,
+    "dataView": true,
+    "rawDerBuffer": false,
+    "encodingBase64": false,
+    "encodingUtf8": true
+  },
+  "instance": {
+    "isInstance": true,
+    "noNewIsInstance": true,
+    "staticIsPrototype": true,
+    "verify": true,
+    "challenge": "this-is-a-challenge"
+  },
+  "badArgs": {
+    "one": {
+      "verifySpkac": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type number (1)"
+        }
+      },
+      "exportPublicKey": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type number (1)"
+        }
+      },
+      "exportChallenge": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type number (1)"
+        }
+      }
+    },
+    "object": {
+      "verifySpkac": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received an instance of Object"
+        }
+      },
+      "exportPublicKey": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received an instance of Object"
+        }
+      },
+      "exportChallenge": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received an instance of Object"
+        }
+      }
+    },
+    "array": {
+      "verifySpkac": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received an instance of Array"
+        }
+      },
+      "exportPublicKey": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received an instance of Array"
+        }
+      },
+      "exportChallenge": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received an instance of Array"
+        }
+      }
+    },
+    "infinity": {
+      "verifySpkac": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type number (Infinity)"
+        }
+      },
+      "exportPublicKey": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type number (Infinity)"
+        }
+      },
+      "exportChallenge": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type number (Infinity)"
+        }
+      }
+    },
+    "boolean": {
+      "verifySpkac": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type boolean (true)"
+        }
+      },
+      "exportPublicKey": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type boolean (true)"
+        }
+      },
+      "exportChallenge": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received type boolean (true)"
+        }
+      }
+    },
+    "undefined": {
+      "verifySpkac": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received undefined"
+        }
+      },
+      "exportPublicKey": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received undefined"
+        }
+      },
+      "exportChallenge": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received undefined"
+        }
+      }
+    },
+    "null": {
+      "verifySpkac": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received null"
+        }
+      },
+      "exportPublicKey": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received null"
+        }
+      },
+      "exportChallenge": {
+        "error": {
+          "name": "TypeError",
+          "code": "ERR_INVALID_ARG_TYPE",
+          "message": "The \"spkac\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received null"
+        }
+      }
+    }
+  }
+}

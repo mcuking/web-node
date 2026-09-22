@@ -754,6 +754,16 @@ const xts = crypto.createCipheriv('aes-128-xts', sivKey, Buffer.from('0001020304
 console.log('xts ct      : ' + Buffer.concat([xts.update(Buffer.alloc(20, 7)), xts.final()]).toString('hex'));
 console.log('');
 
+// --- crypto.Certificate (SPKAC, milestone 94) ---
+// The legacy SPKAC helper is real now: verifySpkac checks the embedded
+// signature, exportChallenge returns the challenge string and exportPublicKey
+// PEM-encodes the key. Anything that is not a valid SPKAC comes back falsy.
+console.log('-- crypto.Certificate / SPKAC (milestone 94) --');
+console.log('spkac trio  : ' + ['verifySpkac', 'exportPublicKey', 'exportChallenge'].every((m) => typeof crypto.Certificate[m] === 'function'));
+console.log('bad spkac   : ' + crypto.Certificate.verifySpkac('not-a-spkac'));
+console.log('empty spkac : ' + JSON.stringify(crypto.Certificate.exportChallenge('')));
+console.log('');
+
 // --- url (milestone 53) ---
 // url is Node's real lib/url.js now: the legacy Url/parse/format/resolve API
 // next to the WHATWG classes, and pathToFileURL/fileURLToPath. The WHATWG side

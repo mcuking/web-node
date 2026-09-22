@@ -244,6 +244,38 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M94 `crypto.Certificate`（SPKAC）
+
+**改了什么**：新增 `src/node-runtime/crypto/spkac.ts`，把此前「响亮抛错的桁」换成真实现。
+
+`crypto.Certificate` 是 Node 已弃用但仍广泛部署的 SPKAC（Netscape SPKI）工具。SPKAC 是 base64 编码的 `NETSCAPE_SPKI`：
+
+```
+NETSCAPE_SPKI ::= SEQUENCE {
+  spkac      NETSCAPE_SPKAC,   -- SEQUENCE { pubkey SubjectPublicKeyInfo, challenge IA5String }
+  sig_algor  AlgorithmIdentifier,
+  signature  BIT STRING
+}
+```
+
+- `verifySpkac`：解出内层 `spkac` 的 DER，用内嵌公钥校 `signature`（等价于 OpenSSL 的 `ASN1_item_verify(NETSCAPE_SPKAC, ...)`）。签名算法 OID 为 `rsaEncryption`（1.2.840.113549.1.1.1）时，从 PKCS#1 v1.5 的 DigestInfo 里反推摘要算法；也支持 `md5/sha*WithRSAEncryption` 与 `ecdsa-with-SHA*` OID。
+- `exportPublicKey`：把内嵌 `SubjectPublicKeyInfo` PEM 编码（`-----BEGIN PUBLIC KEY-----`）。
+- `exportChallenge`：返回 `challenge`（IA5String）内容。
+
+**三个必须照抄的 OpenSSL 怪癖**：
+
+1. **base64 解码用 `EVP_DecodeBlock`，不是标准 base64**：它会去掉**开头**的空格/tab，并且**在保留长度 >3 的前提下**从尾部剥掉空格/tab/`\n`/`\r`/`-`（这些在它的 `data_ascii2bin` 表里是 0xE0/0xF0/0xF1/0xF2）；但**不解尾部以外的空白**——所以行折叠（每 64 字换行）的 base64 直接解码失败。实测：`valid+\n` → true，`valid+\r\n` → true，`valid` 前置空格 → true，**每 64 字换行 → false**。
+2. **末尾组永远出 3 字节**：源码里 `eof = (c=='=')+(d=='=')` 拿的是**解码后的值**（'=' 的值为 0）与裸字符 '=' 比，恒为 0，于是 padding 从不起作用——多出的尾巴字节靠 `d2i` 忽略尾部数据兼容掉。我把这个行为原样复刻。
+3. **空输入返回空字符串而不是 false**：`ncrypto` 在 `input.empty()` 时提前返回 `SetEmptyString()`，所以 `verifySpkac('') === ''`、`exportChallenge('') === ''`、`exportPublicKey('') === ''`（注意 `''` 不是 `false`/空 Buffer）。
+
+接口形态也照 Node：`Certificate` 是**普通函数**（可 `new` 也可直接调用，直接调用返回实例），三方法同时挂在原型与构造器上（`Certificate.verifySpkac === Certificate.prototype.verifySpkac`）。入参用 `getArrayBufferOrView(spkac, 'spkac', encoding)` 的语义：接受 `string | ArrayBuffer | Buffer | TypedArray | DataView`，否则报 `ERR_INVALID_ARG_TYPE`（含完整 5 类型文案）。
+
+**验证（差分 0 diff，首次运行即过）**：`tools/crypto-certificate-probe.cjs` 在真 Node 与 web-node 内各跑一遭，逐字段等于 `test/fixtures/crypto-certificate.json`。覆盖：Node 官方 fixture（`rsa_spkac.spkac` / `rsa_spkac_invalid.spkac`）的 true/false 与 challenge、PEM 与 `rsa_public.pem` 逐字对比；空串 / 非法 base64 / 非 base64 / 畸形长度；尾部 `\n`、`\r\n`、空格与前置空格、**行折叠**；`Buffer`/`ArrayBuffer`/`Uint8Array`/`DataView`/原始 DER/`encoding='base64'`；new / 直接调用 / 静态与原型同一函数；以及 7 种非法入参在三方法上的完整错误文案。
+
+**门禁**：`tsc` 干净 · vitest **962 passed / 2 skipped（104 文件）** · build worker **2457.01 kB**。demo 新增 SPKAC 小段，输出对齐真 Node。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md` 顺序。
+
 ### 2026-09-22 · M93.4d AES-SIV 与 AES-XTS
 
 **改了什么**：新增 `src/node-runtime/crypto/siv.ts`（RFC 5297）与 `src/node-runtime/crypto/xts.ts`（IEEE 1619），至此 **M93.4 四个子项全部完成，阶段 A crypto 收尾 22/22 到顶**。

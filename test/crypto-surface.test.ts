@@ -107,11 +107,15 @@ describe('crypto new real surface', () => {
 describe('crypto unsupported-but-present surface throws loudly', () => {
   it('native-only classes are constructible names that throw', () => {
     const crypto = boot();
-    // `Certificate` is still a native-only stub.
-    for (const name of ['Certificate']) {
-      expect(typeof crypto[name]).toBe('function');
-      expect(crypto[name].name).toBe(name);
-      expect(() => new crypto[name]()).toThrowError(/not implemented/i);
+    // `Certificate` is the real legacy SPKAC helper now: it is a plain function
+    // callable with or without `new`, and its trio is present as statics and on
+    // the prototype.
+    expect(typeof crypto.Certificate).toBe('function');
+    expect(crypto.Certificate.name).toBe('Certificate');
+    expect(new crypto.Certificate()).toBeInstanceOf(crypto.Certificate);
+    for (const name of ['exportChallenge', 'exportPublicKey', 'verifySpkac']) {
+      expect(typeof crypto.Certificate[name]).toBe('function');
+      expect(typeof crypto.Certificate.prototype[name]).toBe('function');
     }
     // `X509Certificate` is a real DER/PEM parser now.
     expect(typeof crypto.X509Certificate).toBe('function');

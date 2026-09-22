@@ -69,6 +69,11 @@ import { blake2s } from '../crypto/blake2s';
 import { poly1305 } from '../crypto/poly1305';
 import { siphash } from '../crypto/siphash';
 import { kmac } from '../crypto/keccak';
+import {
+  exportChallengeBytes as rawExportChallenge,
+  exportPublicKeyBytes as rawExportPublicKey,
+  verifySpkacBytes as rawVerifySpkac,
+} from '../crypto/spkac';
 
 /**
  * `crypto` — the subset tooling actually calls in a browser tab.
@@ -1686,33 +1691,9 @@ export const cryptoSpec: BuiltinSpec = {
     const createECDH = (curve: unknown): InstanceType<typeof ECDH> => new ECDH(curve);
 
     // Asymmetric-key / engine / X.509 classes. Node exposes them as real
-    // classes with a rich prototype; we have no backend, so each stays present
-    // and shaped like Node (right base class, right members) but every entry
-    // point throws a typed error instead of fabricating a result. This keeps
-    // feature detection (`instanceof`, `'sign' in x`, `typeof x.foo`) honest.
-    const stubMethod =
-      (name: string): ((...args: unknown[]) => never) =>
-      () => {
-        throw notImplemented('api', `crypto.${name}`);
-      };
-    const defineStubs = (proto: object, names: readonly string[]): void => {
-      for (const name of names) {
-        Object.defineProperty(proto, name, {
-          value: stubMethod(name),
-          writable: true,
-          configurable: true,
-        });
-      }
-    };
-    const defineStaticStubs = (Ctor: object, names: readonly string[]): void => {
-      for (const name of names) {
-        Object.defineProperty(Ctor, name, {
-          value: stubMethod(name),
-          writable: true,
-          configurable: true,
-        });
-      }
-    };
+    // classes with a rich prototype; the ones we implement are wired to real
+    // backends, and anything still missing throws a typed error instead of
+    // fabricating a result, so feature detection stays honest.
     const namedClass = <T extends new (...args: any[]) => any>(name: string, Ctor: T): T => {
       Object.defineProperty(Ctor, 'name', { value: name, configurable: true });
       return Ctor;
@@ -1826,17 +1807,68 @@ export const cryptoSpec: BuiltinSpec = {
     const createDiffieHellmanGroup = getDiffieHellman;
     const diffieHellman = (options: unknown): Uint8Array => asBuffer(asymDiffieHellman(options));
 
-    // `Certificate` is a legacy class with the same three methods as statics.
-    const Certificate = namedClass(
-      'Certificate',
-      class {
-        constructor() {
-          throw notImplemented('api', 'crypto.Certificate');
-        }
-      },
-    );
-    defineStubs(Certificate.prototype, ['exportChallenge', 'exportPublicKey', 'verifySpkac']);
-    defineStaticStubs(Certificate, ['exportChallenge', 'exportPublicKey', 'verifySpkac']);
+    // `Certificate` is the legacy SPKAC helper (Netscape SPKI). Node exposes it
+    // as a plain function callable with or without `new`, and its three methods
+    // are identical to the statics. The SPKAC work lives in
+    // `../crypto/spkac`, which mirrors OpenSSL's `x509spki.c`/`x_spkac.c`.
+    const coerceSpkac = (spkac: unknown, encoding?: unknown): Uint8Array => {
+      if (isRawBytes(spkac)) return new Uint8Array(spkac as ArrayBuffer);
+      if (typeof spkac === 'string') {
+        const enc = encoding === 'buffer' ? 'utf8' : typeof encoding === 'string' ? encoding : 'utf8';
+        return bytesFromString(spkac, enc);
+      }
+      if (ArrayBuffer.isView(spkac)) {
+        return new Uint8Array(spkac.buffer, spkac.byteOffset, spkac.byteLength);
+      }
+      throw coded(
+        'TypeError',
+        'ERR_INVALID_ARG_TYPE',
+        `The "spkac" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received ${describe(spkac)}`,
+      );
+    };
+    type CertificateMethod = (spkac: unknown, encoding?: unknown) => unknown;
+    interface CertificateInstance { verifySpkac: CertificateMethod; exportPublicKey: CertificateMethod; exportChallenge: CertificateMethod; }
+    interface CertificateConstructor {
+      new (): CertificateInstance;
+      (): CertificateInstance;
+      prototype: CertificateInstance;
+      verifySpkac: CertificateMethod;
+      exportPublicKey: CertificateMethod;
+      exportChallenge: CertificateMethod;
+    }
+    const certVerifySpkac: CertificateMethod = (spkac, encoding) => {
+      const bytes = coerceSpkac(spkac, encoding);
+      // An empty input yields an empty string, not `false` (matching ncrypto,
+      // which returns early before touching OpenSSL).
+      if (bytes.length === 0) return '';
+      return rawVerifySpkac(bytes);
+    };
+    const certExportPublicKey: CertificateMethod = (spkac, encoding) => {
+      const bytes = coerceSpkac(spkac, encoding);
+      if (bytes.length === 0) return '';
+      const pem = rawExportPublicKey(bytes);
+      return pem === null ? '' : asBuffer(pem);
+    };
+    const certExportChallenge: CertificateMethod = (spkac, encoding) => {
+      const bytes = coerceSpkac(spkac, encoding);
+      if (bytes.length === 0) return '';
+      const challenge = rawExportChallenge(bytes);
+      return challenge === null ? '' : asBuffer(challenge);
+    };
+    const Certificate = function Certificate(this: unknown): CertificateInstance | undefined {
+      if (!(this instanceof Certificate)) return new (Certificate as unknown as new () => CertificateInstance)();
+      return undefined;
+    } as unknown as CertificateConstructor;
+    namedClass('Certificate', Certificate as unknown as new (...args: unknown[]) => unknown);
+    const certMethods: Array<[keyof CertificateInstance, CertificateMethod]> = [
+      ['verifySpkac', certVerifySpkac],
+      ['exportPublicKey', certExportPublicKey],
+      ['exportChallenge', certExportChallenge],
+    ];
+    for (const [name, fn] of certMethods) {
+      Object.defineProperty(Certificate.prototype, name, { value: fn, writable: true, configurable: true });
+      Object.defineProperty(Certificate, name, { value: fn, writable: true, configurable: true });
+    }
 
     const randomUUID = (): string => webcrypto.randomUUID();
 
