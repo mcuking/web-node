@@ -244,6 +244,15 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M90.6 注册 BLAKE2b-512 / BLAKE2s-256
+
+**改了什么**：`crypto/hash.ts` 的 `DEFS` 新增两项，复用 M90.1/M90.4 的 `blake2b.ts`/`blake2s.ts`（无 key/salt/personal 的普通摘要形式）：`blake2b512`（别名 `blake2b-512`，block 128）与 `blake2s256`（别名 `blake2s-256`，block 64）。
+
+**验证**：差分语料 `test/fixtures/crypto-hashes.json` 扩到 **25 个名/长度组合**（新增 blake2b512/blake2b-512/blake2s256/blake2s-256）—— `test/crypto-hashes.test.ts` **0 diff**。`getHashes()` 48 → **52**。
+- 门禁：`tsc` 干净 · vitest **947 passed / 2 skipped（93 文件）** · build worker **2398.11 kB**。
+
+**涉及文件**：`src/node-runtime/crypto/hash.ts`、`tools/crypto-hashes-probe.cjs`、`test/fixtures/crypto-hashes.json`、`docs/ROADMAP.md`。
+
 ### 2026-09-22 · M90.5 SHA-3 / Keccak / SHAKE / keccak-kmac 注册（先拆路线图）
 
 **先改路线图（按唐工要求）**：动手前实测真 Node 的 `getHashes()` 有 **81 个可用名字**（远不是原先以为的十来种），包含 SHA-3/Keccak/SHAKE/keccak-kmac/blake2/SM3/RIPEMD-160/SHA-512-t/SHA-256-192/md5-sha1 及大量 `RSA-*`/`…WithRSAEncryption` 别名。原估「中低」严重偏低 → 先将 M90.5 **拆为 M90.5–M90.9**（任务数 30 → 34），本次先完成 M90.5。

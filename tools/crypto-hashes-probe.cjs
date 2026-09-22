@@ -21,6 +21,7 @@ const cases = [
   ['keccak-kmac-128', 32], ['keccak-kmac-128', 16], ['keccak-kmac-256', 64], ['keccak-kmac-256', 32],
   ['RSA-SHA3-256', undefined], ['id-rsassa-pkcs1-v1_5-with-sha3-224', undefined],
   ['shake-128', 32], ['keccak-kmac128', 32],
+  ['blake2b512', undefined], ['blake2b-512', undefined], ['blake2s256', undefined], ['blake2s-256', undefined],
 ];
 
 const out = {};

@@ -28,6 +28,8 @@ import {
   shake128,
   shake256,
 } from './keccak';
+import { blake2b } from './blake2b';
+import { blake2s } from './blake2s';
 
 export type DigestFn = (bytes: Uint8Array, outputLength?: number) => Uint8Array;
 
@@ -351,6 +353,9 @@ const DEFS: AlgoDef[] = [
   { name: 'shake256', blockSize: 136, digestSize: 32, hash: (b, n) => shake256(b, n ?? 32), xof: true, defaultOutputLength: 32, aliases: ['shake-256'] },
   { name: 'keccak-kmac-128', blockSize: 168, digestSize: 32, hash: (b, n) => keccakKmac(128, b, n ?? 32), xof: true, defaultOutputLength: 32, aliases: ['keccak-kmac128'] },
   { name: 'keccak-kmac-256', blockSize: 136, digestSize: 64, hash: (b, n) => keccakKmac(256, b, n ?? 64), xof: true, defaultOutputLength: 64, aliases: ['keccak-kmac256'] },
+  // BLAKE2 (unkeyed digests; BLAKE2b block 128, BLAKE2s block 64).
+  { name: 'blake2b512', blockSize: 128, digestSize: 64, hash: (b) => blake2b(b, 64), aliases: ['blake2b-512'] },
+  { name: 'blake2s256', blockSize: 64, digestSize: 32, hash: (b) => blake2s(b, 32), aliases: ['blake2s-256'] },
 ];
 
 /** Collapse an OpenSSL digest spelling to a bare, alphanumeric tag. */
