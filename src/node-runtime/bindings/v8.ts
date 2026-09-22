@@ -87,6 +87,16 @@ export const v8Binding: BindingFactory = () => ({
   kExternalScriptSourceSizeIndex: 2,
   kCPUProfilerMetaDataSizeIndex: 3,
 
+  // `HeapProfiler::SamplingFlags` (`deps/v8/include/v8-profiler.h`): the bits
+  // `internal/v8/heap_profile.js` ORs together when it starts a sampling heap
+  // profile. The profiler itself is unreachable here, but the module builds the
+  // flag mask on its (reachable) construction path, so the constants must be
+  // real numbers rather than `undefined`.
+  kSamplingNoFlags: 0,
+  kSamplingForceGC: 1,
+  kSamplingIncludeObjectsCollectedByMajorGC: 2,
+  kSamplingIncludeObjectsCollectedByMinorGC: 4,
+
   kHeapSpaces: HEAP_SPACES,
 
   // `AliasedFloat64Array`s in Node; the shape is what `lib/v8.js` indexes.
@@ -141,6 +151,11 @@ export const heapUtilsBinding: BindingFactory = () => ({
 
 /** `internalBinding('profiler')`: only read when `config.hasInspector`. */
 export const profilerBinding: BindingFactory = () => ({
+  // `internal/util.js` only calls the first two when `process.features.inspector`
+  // is on (it is not here), but the shape should still be honest.
+  setCoverageDirectory: UNSUPPORTED('profiler.setCoverageDirectory'),
+  setSourceMapCacheGetter: UNSUPPORTED('profiler.setSourceMapCacheGetter'),
   takeCoverage: UNSUPPORTED('v8.takeCoverage'),
   stopCoverage: UNSUPPORTED('v8.stopCoverage'),
+  endCoverage: UNSUPPORTED('v8.endCoverage'),
 });

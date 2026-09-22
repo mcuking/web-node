@@ -349,6 +349,7 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 | M58 | **补齐 `internal/errors` 码表**——把 vendored/`src` 树里所有 `ERR_*` 引用与 shim 表对了一遍，发现 **9 个码被 `internal/errors` 解构引用但表里从未定义**，于是 `codes.X` 是 `undefined`、`new` 在罕至路径上报 “is not a constructor”。9 个码已逐字（对齐 `lib/internal/errors.js` 与 `src/node_errors.h`）补齐，并有结构回归门测试（每个被引用的码都必须是构造函数，扫到 76 个）与差分语料（真 Node 经 `--expose-internals` 直取 `internal/errors` 逐字段比对，10/10 一致）兵护 | ✅ |
 | M59 | **真 worker 标准 IO**——`worker.stdin`/`stdout`/`stderr` 三个 getter 以前都抛错，而 Node 从不（`stdin` 默认 null，仅 `stdin: true` 时是流；`stdout`/`stderr` 总是可读流、默认只是转发到父进程）。现为经**第二条 MessageChannel** 传输的真流：worker 侧 `process.stdout/stderr/stdin` 是真流、其 `console` 绑到自己的 stdout/stderr、转发行为与 Node 一致，未 `end()` 的 `worker.stdin` 会 ref 住 worker；顺带用静默期修复了“worker 可能在在途消息送达前先退出”的竞态 | ✅ |
 | M60 | **修正 SystemError 基底错误码**——Node 用 `E(code, msg, SystemError)` 声明的码（`ERR_FS_CP_*`、`ERR_FS_EISDIR`、`ERR_SYSTEM_ERROR`）本应从**上下文对象**拼消息且 `name='SystemError'`；表里只登记了 `ERR_TTY_INIT_FAILED`，其余丢了名字与 `: syscall returned code (message) path => dest` 后缀。11 个码现已全部正确，并带上 `HideStackFramesError` 伴生类；一条新的全量消息文案差分还抓出 3 处真实文案错误（两个 `ERR_FS_CP_*` 互换了文案） | ✅ |
+| M61 | **补齐 `internalBinding` 表面**——Node 内部只经 `internalBinding(id)` 取宿主能力，名字没定义就 `undefined`、调用点报 “is not a function”（与 M58 同类）。扫出 5 处真缺失并补上：`util.markPromiseAsHandled`（`internal/streams/iter/*` 调用）、`uv.UV_ENOSPC` 及整张 `UV_E*` 表（`internal/fs/watchers`）、`v8.kSampling*`、`constants.internal`（`internal/vfs/setup`）、`process_methods.dlopenBinary`；`uv` 改为从 `ERRNO` 生成整张常量表（88 值逐值对齐真 Node），并新增一条遍历 vendored 树的结构金门卫 | ✅ |
 
 ## Vendored 真源码现状
 

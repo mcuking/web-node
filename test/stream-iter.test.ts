@@ -233,4 +233,23 @@ describe('stream/iter: error paths', () => {
     const { from } = req('stream/iter');
     expect(() => from(42 as any)).toThrowError(/ERR_INVALID_ARG_TYPE|must be of type/);
   });
+
+  it('tolerates a toAsyncStreamable source whose protocol rejects', async () => {
+    // `internal/streams/iter/from` calls `util`'s `markPromiseAsHandled` on the
+    // promise the protocol returns, so a rejection it deliberately abandons does
+    // not surface as an unhandled rejection. Without the binding function, the
+    // call site itself throws "markPromiseAsHandled is not a function".
+    const { req } = boot();
+    const { from } = req('stream/iter');
+    const symbol = Symbol.for('Stream.toAsyncStreamable');
+    const source = {
+      [symbol]() {
+        return Promise.reject(new Error('protocol rejected, abandoned'));
+      },
+    };
+    let result: unknown;
+    expect(() => { result = from(source as any); }).not.toThrow();
+    expect(result).toBeTypeOf('object');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 });

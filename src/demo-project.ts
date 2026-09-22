@@ -489,6 +489,28 @@ const cpConflict = new codes.ERR_FS_CP_EINVAL({
 console.log('system-error    : ' + cpConflict.name + ' [' + cpConflict.code + '] ' + cpConflict.message);
 console.log('');
 
+// --- binding surface (milestone 61) ---
+// Node's internal code reaches the host only through internalBinding(id), then
+// reads named properties off it. A name the binding doesn't define is
+// undefined, and the call site throws "is not a function" the first time that
+// path runs. The surface is now complete for everything the vendored tree reads:
+// the full libuv errno set, the V8 heap-profiler sampling flags, the
+// extensionless-module format table, and util's markPromiseAsHandled (which
+// stream/iter relies on for promises it deliberately abandons).
+console.log('-- binding surface (milestone 61) --');
+const util = require('util');
+console.log('libuv errnos    : ' + util.getSystemErrorMap().size + ' (e.g. -28 = "' + util.getSystemErrorName(-28) + '")');
+(async function () {
+  const { from } = require('stream/iter');
+  const symbol = Symbol.for('Stream.toAsyncStreamable');
+  const source = {};
+  source[symbol] = function () { return Promise.reject(new Error('abandoned')); };
+  const iterable = from(source);
+  await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  console.log('markPromiseAsHandled: ok (stream/iter tolerated ' + typeof iterable + ' from a rejected protocol)');
+  console.log('');
+})();
+
 // --- readline (milestone 31) ---
 // A "terminal" here is just an { input, output } stream pair - a tab has no TTY,
 // but the line editor, the keypress decoder, the ANSI cursor writers and the

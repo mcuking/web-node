@@ -260,6 +260,15 @@ export const processMethodsBinding: BindingFactory = (ctx) => ({
   kill: () => {
     throw new Error('process.kill is not supported in web-node');
   },
+  // `internal/vfs/setup.js` reaches for this only when loading a native addon
+  // (`.node`), which a page cannot do. `dlopen` of a shared library is equally
+  // impossible, so both refuse loudly instead of returning a fake handle.
+  dlopen: (): never => {
+    throw notImplemented('binding', 'process_methods.dlopen');
+  },
+  dlopenBinary: (): never => {
+    throw notImplemented('binding', 'process_methods.dlopenBinary');
+  },
   availableMemory: () => 512 * 1024 * 1024,
   constrainedMemory: () => 512 * 1024 * 1024,
 });
@@ -743,23 +752,18 @@ export const uvBinding: BindingFactory = () => {
   for (const [name, errno] of Object.entries(ERRNO)) {
     errorMap.set(errno, [name, ERRNO_DESC[name] ?? 'unknown error']);
   }
+  // Every negative libuv errno as a named constant (`UV_ENOENT`, `UV_EAI_AGAIN`,
+  // `UV_UNKNOWN`, and `UV_EOF = -4095`), which is exactly the numeric set
+  // `src/uv.cc` publishes. `ERRNO` is the same `deps/uv/include/uv.h` table
+  // `getErrorMap` is built from, so the names and values cannot drift from one
+  // another; `internal/fs/watchers` reads `UV_ENOSPC`/`UV_ENOENT`, and
+  // `internal/webstreams/adapters` compares a raw read against `UV_EOF`.
+  const uvConstants: Record<string, number> = {};
+  for (const [name, errno] of Object.entries(ERRNO)) {
+    uvConstants[`UV_${name}`] = errno;
+  }
   return {
-  // `uv.h`: `UV_EOF = -4095`. `internal/webstreams/adapters` compares a raw
-  // read result against it when it turns a `stream_base` socket into a web
-  // stream. The `UV_E*` names are the negative libuv error codes
-  // `internal/vfs/errors` builds its ENOENT/ENOTDIR/... errors from.
-  UV_EOF: -4095,
-  UV_ENOENT: -2,
-  UV_ENOTDIR: -20,
-  UV_ENOTEMPTY: -66,
-  UV_EISDIR: -21,
-  UV_EBADF: -9,
-  UV_EEXIST: -17,
-  UV_EROFS: -30,
-  UV_EINVAL: -22,
-  UV_ELOOP: -62,
-  UV_EACCES: -13,
-  UV_EXDEV: -18,
+  ...uvConstants,
   hrtime: () => [0, 0],
   getLibuvNow: () => Date.now(),
   updateTime: () => undefined,

@@ -221,6 +221,16 @@ export const utilBinding: BindingFactory = (ctx: BindingContext) => ({
   },
   getExternalValue: () => 0n,
   getPromiseDetails: (v: unknown): unknown => (v instanceof Promise ? [kPending, undefined] : undefined),
+  /**
+   * `markPromiseAsHandled` (`src/node_util.cc`): stop a promise from being
+   * reported as an unhandled rejection. Node sets V8's internal handled flag,
+   * which JS cannot reach; attaching a no-op rejection handler has the same
+   * observable effect and leaves no floating rejection (both arms are handled).
+   * `internal/streams/iter/*` calls this on promises it deliberately abandons.
+   */
+  markPromiseAsHandled: (promise: Promise<unknown>): void => {
+    if (promise instanceof Promise) Promise.prototype.then.call(promise, () => {}, () => {});
+  },
   getProxyDetails: () => undefined,
   /**
    * A partial preview of a collection's entries, used by `util.inspect` for

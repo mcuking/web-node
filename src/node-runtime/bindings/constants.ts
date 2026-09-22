@@ -153,6 +153,13 @@ export const constantsBinding: BindingFactory = () => {
     zlib: {},
     dlopen: {},
     trace: {},
+    // `constants.internal` (`src/node_constants.cc`): how a module with no
+    // extension is classified. Read by `internal/vfs/setup.js` when it resolves
+    // an extensionless file's `format`.
+    internal: {
+      EXTENSIONLESS_FORMAT_JAVASCRIPT: 0,
+      EXTENSIONLESS_FORMAT_WASM: 1,
+    },
     ...errno,
   };
 };
