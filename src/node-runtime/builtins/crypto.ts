@@ -266,63 +266,94 @@ export const cryptoSpec: BuiltinSpec = {
 
     // -- digests --------------------------------------------------------------
 
-    const createHashState = (algo: HashAlgo) => {
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      let finalized = false;
-      const api = {
-        update(data: unknown, encoding?: string) {
-          if (finalized) throw coded('Error', 'ERR_CRYPTO_HASH_FINALIZED', 'Digest already called');
-          const bytes = toBytes(data, encoding);
-          chunks.push(bytes);
-          total += bytes.length;
-          return api;
-        },
-        digest(encoding?: string): unknown {
-          if (finalized) throw coded('Error', 'ERR_CRYPTO_HASH_FINALIZED', 'Digest already called');
-          finalized = true;
-          const result = algo.hash(concatBytes(chunks, total));
-          return encodeOutput(asBuffer(result), encoding);
-        },
-        copy() {
-          const clone = createHashState(algo);
-          for (const chunk of chunks) clone.update(chunk);
-          return clone;
-        },
-      };
-      return api;
-    };
+    /**
+     * `crypto.Hash` — and the class `crypto.createHash()` returns. Node
+     * deprecates `new Hash(...)` but it still works, so we support both.
+     */
+    class Hash {
+      #name: string;
+      #algo: HashAlgo;
+      #chunks: Uint8Array[] = [];
+      #total = 0;
+      #finalized = false;
 
-    const createHash = (algorithm: string) => {
-      const algo = resolveHash(algorithm);
-      if (!algo) throw new Error('Digest method not supported');
-      return createHashState(algo);
-    };
+      constructor(algorithm: unknown) {
+        if (typeof algorithm !== 'string') {
+          throw coded(
+            'TypeError',
+            'ERR_INVALID_ARG_TYPE',
+            `The "algorithm" argument must be of type string. Received ${describe(algorithm)}`,
+          );
+        }
+        const algo = resolveHash(algorithm);
+        if (!algo) throw new Error('Digest method not supported');
+        this.#name = algorithm;
+        this.#algo = algo;
+      }
 
-    const createHmac = (algorithm: string, key: unknown) => {
-      const algo = resolveHash(algorithm);
-      if (!algo) throw invalidDigest(algorithm);
-      const keyBytes = toBytes(key);
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      let finalized = false;
-      const api = {
-        update(data: unknown, encoding?: string) {
-          if (finalized) throw coded('Error', 'ERR_CRYPTO_HASH_FINALIZED', 'Digest already called');
-          const bytes = toBytes(data, encoding);
-          chunks.push(bytes);
-          total += bytes.length;
-          return api;
-        },
-        digest(encoding?: string): unknown {
-          if (finalized) throw coded('Error', 'ERR_CRYPTO_HASH_FINALIZED', 'Digest already called');
-          finalized = true;
-          const result = hmac(algo, keyBytes, concatBytes(chunks, total));
-          return encodeOutput(asBuffer(result), encoding);
-        },
-      };
-      return api;
-    };
+      update(data: unknown, encoding?: string): this {
+        if (this.#finalized) throw coded('Error', 'ERR_CRYPTO_HASH_FINALIZED', 'Digest already called');
+        const bytes = toBytes(data, encoding);
+        this.#chunks.push(bytes);
+        this.#total += bytes.length;
+        return this;
+      }
+
+      digest(encoding?: string): unknown {
+        if (this.#finalized) throw coded('Error', 'ERR_CRYPTO_HASH_FINALIZED', 'Digest already called');
+        this.#finalized = true;
+        const result = this.#algo.hash(concatBytes(this.#chunks, this.#total));
+        return encodeOutput(asBuffer(result), encoding);
+      }
+
+      copy(): Hash {
+        const clone = new Hash(this.#name);
+        for (const chunk of this.#chunks) clone.update(chunk);
+        return clone;
+      }
+    }
+
+    const createHash = (algorithm: string): Hash => new Hash(algorithm);
+
+    /** `crypto.Hmac` — and the class `crypto.createHmac()` returns. */
+    class Hmac {
+      #algo: HashAlgo;
+      #keyBytes: Uint8Array;
+      #chunks: Uint8Array[] = [];
+      #total = 0;
+      #finalized = false;
+
+      constructor(algorithm: unknown, key: unknown) {
+        if (typeof algorithm !== 'string') {
+          throw coded(
+            'TypeError',
+            'ERR_INVALID_ARG_TYPE',
+            `The "hmac" argument must be of type string. Received ${describe(algorithm)}`,
+          );
+        }
+        const algo = resolveHash(algorithm);
+        if (!algo) throw invalidDigest(algorithm);
+        this.#algo = algo;
+        this.#keyBytes = toBytes(key);
+      }
+
+      update(data: unknown, encoding?: string): this {
+        if (this.#finalized) throw coded('Error', 'ERR_CRYPTO_HASH_FINALIZED', 'Digest already called');
+        const bytes = toBytes(data, encoding);
+        this.#chunks.push(bytes);
+        this.#total += bytes.length;
+        return this;
+      }
+
+      digest(encoding?: string): unknown {
+        if (this.#finalized) throw coded('Error', 'ERR_CRYPTO_HASH_FINALIZED', 'Digest already called');
+        this.#finalized = true;
+        const result = hmac(this.#algo, this.#keyBytes, concatBytes(this.#chunks, this.#total));
+        return encodeOutput(asBuffer(result), encoding);
+      }
+    }
+
+    const createHmac = (algorithm: string, key: unknown): Hmac => new Hmac(algorithm, key);
 
     const hash = (algorithm: string, data: unknown, outputEncoding?: string): unknown => {
       if (typeof data !== 'string' && !ArrayBuffer.isView(data) && !(data instanceof ArrayBuffer)) {
@@ -540,7 +571,7 @@ export const cryptoSpec: BuiltinSpec = {
       );
     };
 
-    const makeCipher = (
+    const buildCipher = (
       algorithm: unknown,
       key: unknown,
       iv: unknown,
@@ -590,10 +621,31 @@ export const cryptoSpec: BuiltinSpec = {
       return api;
     };
 
+    // `crypto.Cipheriv` / `crypto.Decipheriv` are the classes the factories
+    // return; their constructors match `createCipheriv`/`createDecipheriv`
+    // (Node deprecates `new`, but it still works). The instances are objects on
+    // the class prototype, so `instanceof` behaves.
+    class Cipheriv {
+      constructor(algorithm: unknown, key: unknown, iv?: unknown, options?: unknown) {
+        return Object.setPrototypeOf(
+          buildCipher(algorithm, key, iv, options, true),
+          Cipheriv.prototype,
+        ) as unknown as Cipheriv;
+      }
+    }
+    class Decipheriv {
+      constructor(algorithm: unknown, key: unknown, iv?: unknown, options?: unknown) {
+        return Object.setPrototypeOf(
+          buildCipher(algorithm, key, iv, options, false),
+          Decipheriv.prototype,
+        ) as unknown as Decipheriv;
+      }
+    }
+
     const createCipheriv = (algorithm: unknown, key: unknown, iv?: unknown, options?: unknown) =>
-      makeCipher(algorithm, key, iv, options, true);
+      new Cipheriv(algorithm, key, iv, options) as unknown as Record<string, unknown>;
     const createDecipheriv = (algorithm: unknown, key: unknown, iv?: unknown, options?: unknown) =>
-      makeCipher(algorithm, key, iv, options, false);
+      new Decipheriv(algorithm, key, iv, options) as unknown as Record<string, unknown>;
     const getCipherInfo = (nameOrNid: string | number) => lookupCipherInfo(nameOrNid);
 
     // -- explicitly unsupported ----------------------------------------------
@@ -634,13 +686,93 @@ export const cryptoSpec: BuiltinSpec = {
       setFips: unsupportedApi('setFips'),
       X509Certificate: unsupportedApi('X509Certificate'),
       Certificate: unsupportedApi('Certificate'),
+      createECDH: unsupportedApi('createECDH'),
+      argon2: unsupportedApi('argon2'),
+      argon2Sync: unsupportedApi('argon2Sync'),
+      createMac: unsupportedApi('createMac'),
+      getMacs: unsupportedApi('getMacs'),
+      encapsulate: unsupportedApi('encapsulate'),
+      decapsulate: unsupportedApi('decapsulate'),
     };
 
+    // Asymmetric-key / engine classes Node exposes we have no backend for. They
+    // are real constructors in Node, so we keep them callable and throw a typed
+    // error the moment they are constructed.
+    const unsupportedClass = (name: string): new (...args: unknown[]) => never => {
+      const Ctor = class {
+        constructor() {
+          throw notImplemented('api', `crypto.${name}`);
+        }
+      };
+      Object.defineProperty(Ctor, 'name', { value: name });
+      return Ctor as unknown as new (...args: unknown[]) => never;
+    };
+    const Sign = unsupportedClass('Sign');
+    const Verify = unsupportedClass('Verify');
+    const KeyObject = unsupportedClass('KeyObject');
+    const DiffieHellman = unsupportedClass('DiffieHellman');
+    const DiffieHellmanGroup = unsupportedClass('DiffieHellmanGroup');
+    const ECDH = unsupportedClass('ECDH');
+
     const randomUUID = (): string => webcrypto.randomUUID();
+
+    /** `crypto.randomUUIDv7([options])` — RFC 9562 UUIDv7. */
+    const randomUUIDv7 = (options?: unknown): string => {
+      if (options !== undefined && (options === null || typeof options !== 'object')) {
+        throw coded(
+          'TypeError',
+          'ERR_INVALID_ARG_TYPE',
+          `The "options" argument must be of type object. Received ${describe(options)}`,
+        );
+      }
+      const disableEntropyCache =
+        (options as { disableEntropyCache?: unknown } | undefined)?.disableEntropyCache ?? false;
+      if (typeof disableEntropyCache !== 'boolean') {
+        throw coded(
+          'TypeError',
+          'ERR_INVALID_ARG_TYPE',
+          `The "options.disableEntropyCache" argument must be of type boolean. Received ${describe(disableEntropyCache)}`,
+        );
+      }
+      const bytes = new Uint8Array(16);
+      webcrypto.getRandomValues(bytes);
+      const ms = Date.now();
+      for (let i = 0; i < 6; i++) bytes[i] = Math.floor(ms / 2 ** (8 * (5 - i))) & 0xff;
+      bytes[6] = (bytes[6] & 0x0f) | 0x70; // version 7
+      bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+      let hex = '';
+      for (const b of bytes) hex += b.toString(16).padStart(2, '0');
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    };
+
+    // The secure heap is off unless started with `--secure-heap`; Node reports
+    // zeros (with `min` reporting the configured minimum, whose default is 2).
+    const secureHeapUsed = (): { total: number; used: number; utilization: number | null; min: number } => ({
+      total: 0,
+      used: 0,
+      utilization: null,
+      min: 2,
+    });
+
+    // `crypto.setEngine(id, flags)` loads an OpenSSL engine. We have no engines,
+    // so every id is unknown — exactly what Node reports for a bad id.
+    const setEngine = (id: unknown, _flags?: unknown): never => {
+      throw coded('Error', 'ERR_CRYPTO_ENGINE_UNKNOWN', `Engine "${String(id)}" was not found`);
+    };
 
     return {
       createHash,
       createHmac,
+      Hash,
+      Hmac,
+      Cipheriv,
+      Decipheriv,
+      Sign,
+      Verify,
+      KeyObject,
+      DiffieHellman,
+      DiffieHellmanGroup,
+      ECDH,
       hash,
       getHashes: listHashes,
       createCipheriv,
@@ -652,6 +784,7 @@ export const cryptoSpec: BuiltinSpec = {
       randomFillSync,
       randomInt,
       randomUUID,
+      randomUUIDv7,
       getRandomValues: (buffer: Uint8Array) => webcrypto.getRandomValues(buffer),
       timingSafeEqual,
       pbkdf2: pbkdf2Async,
@@ -660,6 +793,9 @@ export const cryptoSpec: BuiltinSpec = {
       hkdfSync,
       scrypt: scryptAsync,
       scryptSync,
+      subtle: webcrypto.subtle,
+      secureHeapUsed,
+      setEngine,
       webcrypto,
       crypto: webcrypto,
       constants: {},

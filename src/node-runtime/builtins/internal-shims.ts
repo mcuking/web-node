@@ -79,6 +79,7 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_UNKNOWN_SIGNAL: 'Unknown signal: %s',
   ERR_SOCKET_BAD_PORT: 'Port should be %s. Received %s',
   ERR_INVALID_ADDRESS: 'Invalid socket address',
+  ERR_CRYPTO_ENGINE_UNKNOWN: 'Engine "%s" was not found',
   ERR_NO_CRYPTO: 'Node.js is not compiled with OpenSSL crypto support',
   ERR_NO_TYPESCRIPT: 'Node.js is not compiled with TypeScript support',
   ERR_WEBASSEMBLY_NOT_SUPPORTED:
