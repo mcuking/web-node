@@ -1,6 +1,7 @@
 import type { BuiltinSpec, BuiltinInitContext } from './types';
 import type { VirtualSocket } from '../net/network';
 import type { VirtualNetwork } from '../net/network';
+import { createAddressTypes, type AddressTypes, type NetAddressErrorCodes } from '../net/socket-address';
 
 /**
  * `net` builtin — a TS equivalent implementation over the virtual network.
@@ -288,15 +289,57 @@ export const netSpec: BuiltinSpec = {
       return 0;
     }
 
+    // `SocketAddress` / `BlockList` come from a TS stand-in for the native
+    // `block_list` binding; the error codes and `util.inspect` it uses live in
+    // other builtins, resolved on first touch so `require('net')` stays cheap.
+    let addrTypes: AddressTypes | null = null;
+    const addressTypes = (): AddressTypes => {
+      if (addrTypes === null) {
+        const codes = (ctx.require('internal/errors') as { codes: NetAddressErrorCodes }).codes;
+        let inspect: ((value: unknown) => string) | undefined;
+        try {
+          inspect = (ctx.require('internal/util/inspect') as { inspect: (v: unknown) => string })
+            .inspect;
+        } catch {
+          inspect = undefined;
+        }
+        addrTypes = createAddressTypes(codes, inspect);
+      }
+      return addrTypes;
+    };
+
+    // `net.getDefaultAutoSelectFamily*` — process-wide knobs. Node's defaults.
+    let autoSelectFamily = true;
+    let autoSelectFamilyAttemptTimeout = 500;
+
     return {
       Server,
       Socket,
+      /** Legacy alias: `net.Stream === net.Socket`. */
+      Stream: Socket,
+      get SocketAddress() {
+        return addressTypes().SocketAddress;
+      },
+      get BlockList() {
+        return addressTypes().BlockList;
+      },
       createServer: (connectionListener?: (socket: Socket) => void) => new Server(connectionListener),
       createConnection: (port: number, host?: string, cb?: () => void) => new Socket().connect(port, host, cb),
       connect: (port: number, host?: string, cb?: () => void) => new Socket().connect(port, host, cb),
       isIP,
       isIPv4: (v: unknown) => isIP(v) === 4,
       isIPv6: (v: unknown) => isIP(v) === 6,
+      getDefaultAutoSelectFamily: () => autoSelectFamily,
+      setDefaultAutoSelectFamily: (value: boolean) => {
+        autoSelectFamily = Boolean(value);
+      },
+      getDefaultAutoSelectFamilyAttemptTimeout: () => autoSelectFamilyAttemptTimeout,
+      setDefaultAutoSelectFamilyAttemptTimeout: (value: number) => {
+        if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+          throw new RangeError('Attempt timeout must be a positive integer.');
+        }
+        autoSelectFamilyAttemptTimeout = value;
+      },
       default: { Server, Socket },
       /** Non-standard, for tests + the ServiceWorker bridge. */
       _network: network,
