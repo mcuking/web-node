@@ -726,10 +726,14 @@ export const cryptoSpec: BuiltinSpec = {
         return null;
       }
       if (bytes === null || bytes.length === 0) invalid();
-      // GCM accepts any positive IV length (OpenSSL derives J0), CCM 7..13, and
-      // the other modes require exactly the block-sized IV.
+      // GCM accepts any positive IV length (OpenSSL derives J0); OCB 1..15, CCM
+      // 7..13, and the other modes require exactly the block-sized IV.
       if (spec.mode === 'ccm') {
         if ((bytes as Uint8Array).length < 7 || (bytes as Uint8Array).length > 13) invalid();
+        return bytes;
+      }
+      if (spec.mode === 'ocb') {
+        if ((bytes as Uint8Array).length < 1 || (bytes as Uint8Array).length > 15) invalid();
         return bytes;
       }
       if (spec.mode === 'gcm' ? (bytes as Uint8Array).length < 1 : (bytes as Uint8Array).length !== spec.ivLength) invalid();
@@ -780,8 +784,8 @@ export const cryptoSpec: BuiltinSpec = {
       const ivBytes = coerceIv(iv, spec);
       const rawOptions = (options ?? undefined) as { authTagLength?: number; plaintextLength?: number } | undefined;
       const authTagLength = rawOptions?.authTagLength ?? 16;
-      if (spec.mode === 'ccm') {
-        // CCM has no default tag length; it must be spelled out.
+      if (spec.mode === 'ccm' || spec.mode === 'ocb') {
+        // Neither CCM nor OCB has a default tag length; it must be spelled out.
         if (rawOptions?.authTagLength === undefined) {
           throw coded('TypeError', 'ERR_CRYPTO_INVALID_AUTH_TAG', `authTagLength required for ${spec.name}`);
         }

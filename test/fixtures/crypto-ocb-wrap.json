@@ -1,0 +1,247 @@
+{
+  "info": {
+    "aes-128-ocb": {
+      "mode": "ocb",
+      "name": "aes-128-ocb",
+      "nid": 958,
+      "keyLength": 16,
+      "blockSize": 16,
+      "ivLength": 12
+    },
+    "aes-192-ocb": {
+      "mode": "ocb",
+      "name": "aes-192-ocb",
+      "nid": 959,
+      "keyLength": 24,
+      "blockSize": 16,
+      "ivLength": 12
+    },
+    "aes-256-ocb": {
+      "mode": "ocb",
+      "name": "aes-256-ocb",
+      "nid": 960,
+      "keyLength": 32,
+      "blockSize": 16,
+      "ivLength": 12
+    },
+    "aes-128-wrap": {
+      "mode": "wrap",
+      "name": "id-aes128-wrap",
+      "nid": 788,
+      "keyLength": 16,
+      "blockSize": 8,
+      "ivLength": 8
+    },
+    "aes128-wrap": {
+      "mode": "wrap",
+      "name": "id-aes128-wrap",
+      "nid": 788,
+      "keyLength": 16,
+      "blockSize": 8,
+      "ivLength": 8
+    },
+    "id-aes128-wrap": {
+      "mode": "wrap",
+      "name": "id-aes128-wrap",
+      "nid": 788,
+      "keyLength": 16,
+      "blockSize": 8,
+      "ivLength": 8
+    },
+    "aes-128-wrap-pad": {
+      "mode": "wrap",
+      "name": "id-aes128-wrap-pad",
+      "nid": 897,
+      "keyLength": 16,
+      "blockSize": 8,
+      "ivLength": 4
+    },
+    "aes128-wrap-pad": {
+      "mode": "wrap",
+      "name": "id-aes128-wrap-pad",
+      "nid": 897,
+      "keyLength": 16,
+      "blockSize": 8,
+      "ivLength": 4
+    },
+    "id-aes128-wrap-pad": {
+      "mode": "wrap",
+      "name": "id-aes128-wrap-pad",
+      "nid": 897,
+      "keyLength": 16,
+      "blockSize": 8,
+      "ivLength": 4
+    },
+    "aes-256-wrap": {
+      "mode": "wrap",
+      "name": "id-aes256-wrap",
+      "nid": 790,
+      "keyLength": 32,
+      "blockSize": 8,
+      "ivLength": 8
+    },
+    "aes256-wrap": {
+      "mode": "wrap",
+      "name": "id-aes256-wrap",
+      "nid": 790,
+      "keyLength": 32,
+      "blockSize": 8,
+      "ivLength": 8
+    }
+  },
+  "rfc_ct": "bea5e8798dbe7110031c144da0b26122ceaab9b05df771a657149d53773463cb",
+  "rfc_tag": "2e9bbcd2ea10e7df702d64bc76f7f49d",
+  "rfc_pt": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "modes": {
+    "a128": "|fad2397c6151c932181288|606a6d05294960304344b625203e4b21||68656c6c6f20776f726c64",
+    "a192": "|6b38866136860ce4cd7dc5|ba118b0f42bdf0e95efa7bf52669c7d8||68656c6c6f20776f726c64",
+    "a256": "|928a61f9c6221fd992a76d|22184e60a4ea18d11f91b5bbaefea564||68656c6c6f20776f726c64",
+    "noAad": "|fad2397c6151c932181288|0e5d6beebe93df6abe694554a20a851d||68656c6c6f20776f726c64",
+    "empty": "||774c9ad7d3c783d917d6d89ee10f5fbe||",
+    "block16": "c5ed6b4b2dbaf4928dddc5fe424b889f||28e8c9a86f796f853cdb086b80c3dc8b|07070707070707070707070707070707|",
+    "block40": "c5ed6b4b2dbaf4928dddc5fe424b889fccba866ece1a1cf741dcd7e746800a66|4fe0725c937a8715|bbb3dcfc28c0f3246a15c8cfa1c19e0c|0707070707070707070707070707070707070707070707070707070707070707|0707070707070707",
+    "iv13": "|783a82329779f1caf8b20e|d928ef0d7176f3677b95bf7eda24d0a6||68656c6c6f20776f726c64",
+    "iv15": "|623d|7a01b24bebd6d2a6572c2289ac962f9e||6869",
+    "iv8": "|afcb|a1cdf33282325a901ba6c27a4cab44bb||6869",
+    "tag8": "|3b36571b094f59e1f8a13e|4429532bc69a82dc||68656c6c6f20776f726c64",
+    "tag12": "|483040dc11dd49e24469a9|7ce879cdd1de821ff644a064||68656c6c6f20776f726c64"
+  },
+  "streaming": "ba9dadffb05cbcef9c2b61bc072a66fe|eff92f26338662bdbb0648176da02b18||4de2705e91|5a1191d3a84a10d671e60f6d650132f1",
+  "ocbErr": {
+    "noTag": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_AUTH_TAG",
+      "message": "authTagLength required for aes-128-ocb"
+    },
+    "tag17": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_AUTH_TAG",
+      "message": "Invalid authentication tag length: 17"
+    },
+    "tag0": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation setAAD"
+    },
+    "iv16": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "iv0": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "badKey": {
+      "ok": false,
+      "name": "RangeError",
+      "code": "ERR_CRYPTO_INVALID_KEYLEN",
+      "message": "Invalid key length"
+    },
+    "badTag": {
+      "ok": false,
+      "name": "Error",
+      "message": "Unsupported state or unable to authenticate data"
+    },
+    "noTagSet": {
+      "ok": false,
+      "name": "Error",
+      "message": "Unsupported state or unable to authenticate data"
+    },
+    "getTagEarly": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation getAuthTag"
+    },
+    "undefinedName": {
+      "ok": true,
+      "value": {
+        "mode": "ocb",
+        "name": "aes-128-ocb",
+        "nid": 958,
+        "keyLength": 16,
+        "blockSize": 16,
+        "ivLength": 12
+      }
+    }
+  },
+  "wrap": {
+    "aes128": "1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5||00112233445566778899aabbccddeeff",
+    "aes192": "031d33264e15d33268f24ec260743edce1c6c7ddee725a936ba814915c6762d2||00112233445566778899aabbccddeeff0001020304050607",
+    "aes256": "28c9f404c4b810f4cbccb35cfb87f8263f5786e2d80ed326cbc7f0e71a99f43bfb988b9b7a02dd21||00112233445566778899aabbccddeeff000102030405060708090a0b0c0d0e0f",
+    "alias": "1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5||00112233445566778899aabbccddeeff",
+    "idAlias": "1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5||00112233445566778899aabbccddeeff",
+    "pad20": "8464eef50633e85287dbac88b75128321370db3601c246010f23c72f3e061ab8||00112233445566778899aabbccddeeff00010203",
+    "pad8": "23ea99084e592c2f29f496536c00d5af||0011223344556677",
+    "pad1": "a56d54870180d0e0e48a9fc47ec727e7||11",
+    "padAlias": "8464eef50633e85287dbac88b75128321370db3601c246010f23c72f3e061ab8||00112233445566778899aabbccddeeff00010203"
+  },
+  "wrapErr": {
+    "noIv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "badIv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "padNoIv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "pad8Iv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "shortData": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "oddData": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "secondUpdate": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "unwrapBadIv": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "unwrapShort": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "padUnwrapBad": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "finalWithoutUpdate": {
+      "ok": false,
+      "name": "Error",
+      "message": "Unsupported state"
+    }
+  }
+}

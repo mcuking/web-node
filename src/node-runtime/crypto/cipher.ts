@@ -99,7 +99,9 @@ import { Camellia } from './camellia';
 import { AesCcm } from './ccm';
 import { ChaCha20Cipher, ChaCha20Poly1305, isValidTagLength, type SyncCipher } from './chacha20';
 import { DesCipher, DesEde, type DesMode } from './des';
+import { AesOcb } from './ocb';
 import { Sm4 } from './sm4';
+import { AesWrap } from './wrap';
 
 export type { SyncCipher };
 
@@ -117,6 +119,8 @@ export type CipherMode =
   | 'ofb'
   | 'gcm'
   | 'ccm'
+  | 'ocb'
+  | 'wrap'
   | 'chacha20'
   | 'chacha20-poly1305';
 
@@ -261,6 +265,35 @@ const SPECS: CipherSpec[] = [];
       }
     });
   }
+  // AES-OCB (RFC 7253). A 1..15 byte IV; the tag length is mandatory.
+  const ocb: Array<[number, number]> = [
+    [16, 958],
+    [24, 959],
+    [32, 960],
+  ];
+  for (const [keyLength, nid] of ocb) {
+    const bits = keyLength * 8;
+    SPECS.push({ name: `aes-${bits}-ocb`, infoName: `aes-${bits}-ocb`, mode: 'ocb', nid, keyLength, blockSize: 16, ivLength: 12 });
+  }
+  // AES key wrap (RFC 3394) and wrap with padding (RFC 5649). Both spellings and
+  // the `id-` prefixed name resolve to the same info.
+  const wrapSizes: Array<[number, number, number]> = [
+    [16, 788, 897],
+    [24, 789, 900],
+    [32, 790, 903],
+  ];
+  for (const [keyLength, wrapNid, padNid] of wrapSizes) {
+    const bits = keyLength * 8;
+    for (const [suffix, nid, ivLength] of [
+      ['wrap', wrapNid, 8],
+      ['wrap-pad', padNid, 4],
+    ] as Array<[string, number, number]>) {
+      const infoName = `id-aes${bits}-${suffix}`;
+      for (const name of [`aes-${bits}-${suffix}`, `aes${bits}-${suffix}`, infoName]) {
+        SPECS.push({ name, infoName, mode: 'wrap', nid, keyLength, blockSize: 8, ivLength });
+      }
+    }
+  }
 }
 
 const LOOKUP = new Map<string, CipherSpec>(SPECS.map((s) => [s.name, s]));
@@ -368,6 +401,8 @@ export function createCipher(
     return new ChaCha20Poly1305(key, iv as Uint8Array, encrypt, authTagLength);
   }
   if (spec.mode === 'ccm') return new AesCcm(key, iv as Uint8Array, encrypt, authTagLength, plaintextLength);
+  if (spec.mode === 'ocb') return new AesOcb(key, iv as Uint8Array, encrypt, authTagLength);
+  if (spec.mode === 'wrap') return new AesWrap(key, iv as Uint8Array, encrypt, spec.name.includes('-pad') ? 'wrap-pad' : 'wrap');
   if (spec.family === 'des') return new DesCipher(spec.mode as DesMode, key, iv, encrypt);
   if (spec.family === 'camellia') return new Cipheriv(spec, key, iv, encrypt, authTagLength, new Camellia(key));
   if (spec.family === 'aria') return new Cipheriv(spec, key, iv, encrypt, authTagLength, new Aria(key));

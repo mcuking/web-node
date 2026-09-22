@@ -244,6 +244,24 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M93.4c AES-OCB 与 key wrap
+
+**改了什么**：新增 `src/node-runtime/crypto/ocb.ts`（RFC 7253）与 `src/node-runtime/crypto/wrap.ts`（RFC 3394/5649）。
+
+OCB 完全照 OpenSSL 的 `crypto/modes/ocb128.c` 写。**最关键的一点：OpenSSL 的 nonce 不是 RFC 原文那套**——它把 tag 长度塞进了 nonce 头部：`nonce[0] = ((taglen*8)%128)<<1`，IV 靠右放，IV 左边一字节置 1；`Ktop` 是 `AES(nonce & …c0)`，`Stretch = Ktop ‖ (Ktop[0..7]^Ktop[1..8])`，`Offset_0` 是 Stretch 从 bit `bottom = nonce[15]&0x3f` 起的 128 位窗口。因此**密文会随 tag 长度改变**（以 taglen 16 的 12 字节 IV 为例，nonce[0]=0；taglen 12 则 nonce[0]=0xC0），必须严格按它来。此外还复刻了 OpenSSL provider 的缓冲语义：尾部不满块会被缓存，输出在 `final` 才给出（整块则在 `update` 输出）。
+
+key wrap 照 `wrap128.c`：`wrap`（RFC 3394，6 轮、A 与 t 异或）与 `wrap-pad`（RFC 5649，AIV = `a65959a6` + 长度，含 padded 正好 8 字节时 `AIV‖P` 单块 ECB 的特例）。两者都是**单次 update**：`update` 返回全部输出，`final` 空；第二次 `update`（或长度不合法）报 `Error: Trying to add data in unsupported state`；未 `update` 就 `final` 报 `Error: Unsupported state`。
+
+接入：`aes-{128,192,256}-ocb`（nid 958/959/960；IV 1..15字节；`authTagLength` 必填且 0..16）；wrap 组 `aes-{128,192,256}-wrap`（nid 788/789/790，`infoName` = `id-aes{bits}-wrap`）与 `aes{bits}-wrap`、`id-aes{bits}-wrap` 三种拼写同一 spec，IV 必须 8 字节；`aes-{128,192,256}-wrap-pad` / `aes{bits}-wrap-pad` / `id-aes{bits}-wrap-pad`（nid 897/900/903），IV 必须 4 字节。
+
+**已知偏离**：`aes-*-wrap-inv`/`-wrap-pad-inv`（OpenSSL 的逆 wrap 系列）与 `des3-wrap`/`id-smime-alg-cms3deswrap` 仍抛 `NotImplementedError`。
+
+**验证（差分 0 diff）**：`tools/crypto-ocb-wrap-probe.cjs` 在真 Node 与 web-node 内各跑一遭，逐字段等于 `test/fixtures/crypto-ocb-wrap.json`。覆盖：RFC 7253 附录 A 向量（`ct bea5e879…7663cb` / `tag 2e9bbcd2…f7f49d`）、tag 8/12/16、IV 8/12/13/15、空/16/40 字节 payload、无 AAD、**流式分块并逐步记录每段输出**（验证缓存边界一致）、RFC 3394 的 128/192/256 密钥 wrap 向量、RFC 5649 的 20/8/1 字节 wrap-pad、wrap-pad 回环，以及全套错误面（`ERR_CRYPTO_INVALID_AUTH_TAG`、`ERR_CRYPTO_INVALID_IV`、`ERR_CRYPTO_INVALID_KEYLEN`、`ERR_CRYPTO_INVALID_STATE`、`Unsupported state`、`Trying to add data in unsupported state`）。首次运行即 0 diff。
+
+**门禁**：`tsc` 干净 · vitest **960 passed / 2 skipped（102 文件）** · build worker **2446.90 kB**。demo 新增 OCB/wrap 示例，输出对齐真 Node。
+
+**为什么**：阶段 A crypto 收尾，按 `docs/ROADMAP.md` 的 M93.4 拆分顺序。此刻阶段 A 的 crypto 收尾任务全部完成（19/19）。
+
 ### 2026-09-22 · M93.4b ARIA / SM4
 
 **改了什么**：新增 `src/node-runtime/crypto/aria.ts`（RFC 5794）与 `src/node-runtime/crypto/sm4.ts`（GB/T 32907）。

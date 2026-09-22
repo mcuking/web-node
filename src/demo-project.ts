@@ -700,11 +700,12 @@ console.log('gcm tag     : ' + gcm.getAuthTag().toString('hex'));
 console.log('gcm ciphers : ' + crypto.getCiphers().filter(function (n) { return n.indexOf('aes-') === 0; }).length + ' aes entries');
 console.log('');
 
-// --- ChaCha20, DES/3DES, CCM, Camellia, ARIA and SM4 (milestone 93) ---
+// --- ChaCha20, DES/3DES, CCM, Camellia, ARIA, SM4, OCB and key wrap (milestone 93) ---
 // Beyond AES, the runtime also carries ChaCha20-Poly1305 (RFC 8439), the
 // DES-EDE / DES-EDE3 family, AES-CCM (SP 800-38C), Camellia (RFC 3713),
-// ARIA (RFC 5794) and SM4 (GB/T 32907), all matching OpenSSL byte for byte.
-console.log('-- ChaCha20 / DES / CCM / Camellia / ARIA / SM4 (milestone 93) --');
+// ARIA (RFC 5794), SM4 (GB/T 32907), AES-OCB (RFC 7253) and AES key wrap
+// (RFC 3394/5649), all matching OpenSSL byte for byte.
+console.log('-- ChaCha20 / DES / CCM / Camellia / ARIA / SM4 / OCB / wrap (milestone 93) --');
 const chaKey = Buffer.alloc(32, 1);
 const chaNonce = Buffer.alloc(12, 2);
 const chacha = crypto.createCipheriv('chacha20-poly1305', chaKey, chaNonce, { authTagLength: 16 });
@@ -736,6 +737,13 @@ const aria = crypto.createCipheriv('aria-128-cbc', camKey, camIv);
 console.log('aria ct     : ' + Buffer.concat([aria.update('The quick brown fox'), aria.final()]).toString('hex'));
 const sm4 = crypto.createCipheriv('sm4-cbc', camKey, camIv);
 console.log('sm4 ct      : ' + Buffer.concat([sm4.update('The quick brown fox'), sm4.final()]).toString('hex'));
+const ocb = crypto.createCipheriv('aes-128-ocb', camKey, Buffer.from('000102030405060708090a0b', 'hex'), { authTagLength: 16 });
+ocb.setAAD(Buffer.from('header-v1'));
+console.log('ocb ct      : ' + Buffer.concat([ocb.update('hello world'), ocb.final()]).toString('hex'));
+console.log('ocb tag     : ' + ocb.getAuthTag().toString('hex'));
+const kek = Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex');
+const wrapped = crypto.createCipheriv('aes-128-wrap', kek, Buffer.from('a6a6a6a6a6a6a6a6', 'hex'));
+console.log('wrap ct     : ' + Buffer.concat([wrapped.update(camKey), wrapped.final()]).toString('hex'));
 console.log('');
 
 // --- url (milestone 53) ---
