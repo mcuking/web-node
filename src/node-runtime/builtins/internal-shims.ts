@@ -116,6 +116,23 @@ export const ERROR_CODES: Record<string, string> = {
     'The worker script or module filename must be an absolute path or a relative path starting with \'./\' or \'../\'.',
   ERR_WORKER_INVALID_EXEC_ARGV: 'Initiated Worker with %s: %s',
   ERR_WORKER_NOT_RUNNING: 'Worker instance not running',
+  // Referenced via `internal/errors` by vendored modules (fs, webstreams, perf,
+  // readline) and by user code that reaches those paths. Keep adding any code a
+  // vendored/`src` file destructures, or `codes.X` is `undefined` at the call
+  // site and `new` throws "is not a constructor".
+  // Message body lives in CUSTOM_FORMATTERS (it is the caller's own sentence).
+  ERR_ACCESS_DENIED: '%s',
+  ERR_ARG_NOT_ITERABLE: '%s must be iterable',
+  ERR_FEATURE_UNAVAILABLE_ON_PLATFORM:
+    'The feature %s is unavailable on the current platform' +
+    ', which is being used to run Node.js',
+  ERR_FS_WATCH_QUEUE_OVERFLOW: 'fs.watch() queued more than %d events',
+  ERR_NO_TEMPORAL: 'Temporal is not supported in this environment',
+  ERR_PERFORMANCE_INVALID_TIMESTAMP: '%d is not a valid timestamp',
+  ERR_PERFORMANCE_MEASURE_INVALID_OPTIONS: '%s',
+  ERR_USE_AFTER_CLOSE: '%s was closed',
+  // Message body lives in CUSTOM_FORMATTERS; listed here so the class exists.
+  ERR_INVALID_RETURN_VALUE: 'Expected %s to be returned from the "%s" function but got %s.',
 };
 
 /**
@@ -187,6 +204,10 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_WORKER_PATH: TypeError,
   ERR_WORKER_INVALID_EXEC_ARGV: Error,
   ERR_WORKER_NOT_RUNNING: Error,
+  ERR_ARG_NOT_ITERABLE: TypeError,
+  ERR_FEATURE_UNAVAILABLE_ON_PLATFORM: TypeError,
+  ERR_PERFORMANCE_INVALID_TIMESTAMP: TypeError,
+  ERR_PERFORMANCE_MEASURE_INVALID_OPTIONS: TypeError,
 };
 
 class NodeError extends Error {
@@ -233,6 +254,10 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
     return `The ${type} '${name}' ${reason ?? 'is invalid'}. Received ${inspectArg(value)}`;
   },
   ERR_INVALID_ARG_TYPE: formatInvalidArgType,
+  // `ERR_ACCESS_DENIED(message, permission = '', resource = '')`: the message is
+  // the caller's own sentence (no template), and permission/resource ride along
+  // as own properties (see CUSTOM_PROPS).
+  ERR_ACCESS_DENIED: (args) => String(args[0]),
   ERR_INVALID_RETURN_VALUE: (args) => {
     const [input, name, value] = args as [string, string, unknown];
     return `Expected ${input} to be returned from the "${name}" function but got ${determineSpecificType(value)}.`;
@@ -303,6 +328,11 @@ const CUSTOM_PROPS: Record<string, (err: Record<string, unknown>, args: unknown[
   },
   ERR_INVALID_FILE_URL_PATH: (err, args) => {
     err.input = args[1];
+  },
+  // `ERR_ACCESS_DENIED` carries the permission and resource it was denied for.
+  ERR_ACCESS_DENIED: (err, args) => {
+    err.permission = args[1] ?? '';
+    err.resource = args[2] ?? '';
   },
 };
 
@@ -443,6 +473,9 @@ function formatInvalidArgType(args: unknown[]): string {
 const ERROR_EXTRA_BASES: Record<string, ErrorConstructor[]> = {
   ERR_INVALID_STATE: [TypeError, RangeError],
   ERR_OPERATION_FAILED: [TypeError],
+  // `E('ERR_INVALID_RETURN_VALUE', …, TypeError, RangeError)`: the RangeError
+  // variant is the one `internal/streams/iter` reaches for.
+  ERR_INVALID_RETURN_VALUE: [RangeError],
 };
 
 function makeErrorClass(

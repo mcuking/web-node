@@ -431,6 +431,19 @@ const { Worker } = require('worker_threads');
   console.log('');
 })();
 
+// --- internal/errors (milestone 58) ---
+// The internal/errors table now covers every code the vendored modules ask for.
+// Each entry is a real constructor: name is the built-in base it extends and
+// code rides on the instance, exactly as in Node (previously a code that was
+// referenced but not declared came back undefined and new threw).
+console.log('-- internal/errors (milestone 58) --');
+const { codes } = require('internal/errors');
+const useAfterClose = new codes.ERR_USE_AFTER_CLOSE('readline');
+const notIterable = new codes.ERR_ARG_NOT_ITERABLE('value');
+console.log('use-after-close : ' + useAfterClose.name + ' ' + useAfterClose.code + ' - ' + useAfterClose.message);
+console.log('not-iterable    : ' + notIterable.name + ' ' + notIterable.code + ' - ' + notIterable.message);
+console.log('');
+
 // --- readline (milestone 31) ---
 // A "terminal" here is just an { input, output } stream pair - a tab has no TTY,
 // but the line editor, the keypress decoder, the ANSI cursor writers and the

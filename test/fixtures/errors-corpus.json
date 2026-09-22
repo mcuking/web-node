@@ -1,0 +1,197 @@
+[
+  {
+    "code": "ERR_ACCESS_DENIED",
+    "args": [
+      "Access to this API has been restricted",
+      "FileSystemRead",
+      "/etc/shadow"
+    ],
+    "name": "Error",
+    "errorCode": "ERR_ACCESS_DENIED",
+    "message": "Access to this API has been restricted",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "permission": "FileSystemRead",
+      "resource": "/etc/shadow"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_ARG_NOT_ITERABLE",
+    "args": [
+      "foo"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_ARG_NOT_ITERABLE",
+    "message": "foo must be iterable",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM",
+    "args": [
+      "windowsHandle"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM",
+    "message": "The feature windowsHandle is unavailable on the current platform, which is being used to run Node.js",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_FS_WATCH_QUEUE_OVERFLOW",
+    "args": [
+      16
+    ],
+    "name": "Error",
+    "errorCode": "ERR_FS_WATCH_QUEUE_OVERFLOW",
+    "message": "fs.watch() queued more than 16 events",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_INVALID_RETURN_VALUE",
+    "args": [
+      "instance of Promise",
+      "pipeline",
+      {
+        "a": 1
+      }
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_RETURN_VALUE",
+    "message": "Expected instance of Promise to be returned from the \"pipeline\" function but got an instance of Object.",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [
+      "RangeError"
+    ],
+    "props": {},
+    "extra": {
+      "RangeError": {
+        "name": "RangeError",
+        "code": "ERR_INVALID_RETURN_VALUE",
+        "message": "Expected instance of Promise to be returned from the \"pipeline\" function but got an instance of Object."
+      }
+    }
+  },
+  {
+    "code": "ERR_INVALID_RETURN_VALUE",
+    "args": [
+      "a Buffer",
+      "transform",
+      "nope"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_RETURN_VALUE",
+    "message": "Expected a Buffer to be returned from the \"transform\" function but got type string ('nope').",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [
+      "RangeError"
+    ],
+    "props": {},
+    "extra": {
+      "RangeError": {
+        "name": "RangeError",
+        "code": "ERR_INVALID_RETURN_VALUE",
+        "message": "Expected a Buffer to be returned from the \"transform\" function but got type string ('nope')."
+      }
+    }
+  },
+  {
+    "code": "ERR_NO_TEMPORAL",
+    "args": [],
+    "name": "Error",
+    "errorCode": "ERR_NO_TEMPORAL",
+    "message": "Temporal is not supported in this environment",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_PERFORMANCE_INVALID_TIMESTAMP",
+    "args": [
+      5
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_PERFORMANCE_INVALID_TIMESTAMP",
+    "message": "5 is not a valid timestamp",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_PERFORMANCE_MEASURE_INVALID_OPTIONS",
+    "args": [
+      "Option start must be a number"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_PERFORMANCE_MEASURE_INVALID_OPTIONS",
+    "message": "Option start must be a number",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_USE_AFTER_CLOSE",
+    "args": [
+      "readline"
+    ],
+    "name": "Error",
+    "errorCode": "ERR_USE_AFTER_CLOSE",
+    "message": "readline was closed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  }
+]

@@ -80,6 +80,7 @@
 | M55 | **真 `tty`**：vendor 真 `lib/tty.js` + `lib/internal/tty.js`（MANIFEST 151 → 153）；新增 `tty_wrap` binding（`isTTY` 恒 false，`TTY` 构造即抛，`UV_TTY_MODE_*` 常量）；`internal/errors` 补 `ERR_INVALID_FD`/`ERR_INVALID_CURSOR_POS`/`ERR_INVALID_FD_TYPE`/`ERR_TTY_INIT_FAILED` 与真 `SystemError` + `kIsNodeError`；`internal/util/colors` 的 `FORCE_COLOR` 惰性路径从此可用（之前会炸）。验证：**57 条颜色深度 + 10 条 `hasColors` 语料与真 Node v26.9.0 全等** | ✅ 完成 |
 | M56 | **真 `vm`**：vendor 真 `lib/vm.js` + `lib/internal/vm.js`（MANIFEST 153 → 155）；新增 `contextify` binding——把沙箱对象当作上下文（标 Node 的 contextify 符号），脚本跑在 `with (scope) { return eval(code) }` 里，`createContext`/`isContext`/`Script`/`compileFunction`/`runIn*Context` 全是真的；上下文对 `process`/`require`/`Buffer`/`setTimeout` 保持 `undefined`（只暴露标准内建 + `console`）。验证：**59 条差分语料与真 Node v26.9.0 逐条一致** | ✅ 完成 |
 | M57 | **真 `Worker`**：`worker_threads.Worker` 落地为“同 loop 的协作式工作器”（`proc/worker.ts`）——一个 worker = 第二个模块注册表 + 自己的 `process`/`worker_threads` 视图 + 一条真实的 `MessageChannel`；`workerData`/消息往返/`online`/`message`/`error`/`exit` 生命周期/`terminate()` 与构造校验均与真 Node 对齐（退出后 `threadId=-1`、`postMessage` no-op、`terminate()` 返回 `undefined` 也一致）。**无并行**是唯一要紧的偏离（故 `eval`/worker 标准 IO/`resourceLimits`/剖析/嵌套 `Worker` 响亮报错）。验证：**15 条差分语料与真 Node v26.9.0（真线程）逐条一致** | ✅ 完成 |
+| M58 | **补齐 `internal/errors` 码表**：对比 vendored+src 的全部 `ERR_*` 引用与 shim 的表，发现 **9 个码被 `internal/errors` 解构引用却未定义**（解构得 `undefined`，`new codes.ERR_X` 报 “is not a constructor”）——只在罕至路径显形的潜在真 bug；逐字对齐 `lib/internal/errors.js`/`src/node_errors.h` 补齐，并新增**结构回归门禁**（遍历 vendored 树断言所有引用码都存在，扫到 76 个）与**差分语料**（真 Node `--expose-internals` 直取 `internal/errors` 逐字段比对，10/10 一致） | ✅ 完成 |
 | M51b | **`fs.opendir`/`Dir` + `fs.watchFile`**：`fs_dir` binding 真实现（`opendir`/`opendirSync` + `DirHandle`：`read` 返回 libuv 扁平 `[name,type,…]`、穷尽 `null`；`close`；`dirfd`），`lib/internal/fs/dir.js` 的 `Dir` 原样可跑；`StatWatcher` 从抛错换成**轮询实现**（复刻 libuv `uv_fs_poll` 协议，轮询走 `ctx.timers` 参与事件循环判定） | ✅ 完成 |
 | M51 | **真回调式 `fs`**：vendor 真 `lib/fs.js`（4083 行）+ `internal/fs/read/context.js` + `internal/fs/cp/cp-sync.js` + `internal/streams/fast-utf8-stream.js`（MANIFEST 142 → 146）；`fs` binding 补 `readFileUtf8`/`writeFileUtf8`（整文件 utf8 快路，写做成单次 VFS 操作使 `fs.watch` 每整写只报一个事件）/`handleToFd`/`cpSyncCheckPaths`/`cpSyncCopyDir`/`cpSyncOverrideFile`/`CpDirJob`/`StatWatcher`/`kFsStatsFieldsNumber`；`fs_event_wrap.FSEvent` 从抛错换成 **VFS 投影**（订阅 `Vfs.subscribe`，`create`/`delete`→`rename`、`change`→`change`），`fs.watch`/`fs.promises.watch` 因此走真 watchers 代码；`readSync`/`writeSync` 把 `position === -1` 按“当前位置”处理；`internal/fs/streams.js` 顶层回环不进 vendor，另写 `builtins/fs-streams.ts`（VFS 原生读写流） | ✅ 完成 |
 | M50 | **真 `fs/promises`**：vendor 真 `lib/fs/promises.js` + `lib/internal/fs/promises.js`（2304 行）+ `internal/fs/{dir,watchers,recursive_watch}.js` + `internal/vfs/setup.js` + `internal/fs/cp/cp.js`（MANIFEST 135 → 142）；`fs` binding 补齐整张 async/promise 面（`kUsePromises` 三态派发：Promise / 回调 / 同步；`FileHandle`/`ReadFileJob`/`WriteFileJob`；`stat` 家族返回 18 槽元组；`readdir` 返回 `{0:names,1:types}`）；`hideStackFrames` 补 `.withoutStackTrace`；`internal/fs/rimraf` 改成 VFS 原生 shim（真 rimraf 驱动回调 fs + Buffer 路径，标签页没有）；`fs.promises` 换成 `require('fs/promises')` 同一个对象 | ✅ 完成 |
@@ -199,12 +200,12 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
    - **`v8` 换真源码**：✅ **已处理（2026-09-21，M54）**：真 `lib/v8.js` 已 vendor（MANIFEST 148 → 151），`serdes` binding 用 JS 实现 V8 线格式（版本 15）并对 115 条差分语料逐字节对齐真 Node v26.9.0；堆与 profiler 面一律抛 `ERR_WEB_NODE_NOT_IMPLEMENTED`。剩：数组 elements kind 的“历史状态”、`Proxy` 识别、异常对象的 clone 错误文案是**已记录的近似**；`hasInspector: false` 使 `takeCoverage`/`stopCoverage` 不存在。
    - **`tty` 换真源码**：✅ **已处理（2026-09-21，M55）**：真 `lib/tty.js` + `lib/internal/tty.js` 已 vendor（MANIFEST 151 → 153），`tty_wrap` binding 让 `isatty` 与颜色深度成为真实现，`ReadStream`/`WriteStream` 构造即抛（标签页没有 TTY 句柄）。
    - **`vm` 换真源码**：✅ **已处理（2026-09-21，M56）**：真 `lib/vm.js` + `lib/internal/vm.js` 已 vendor（MANIFEST 153 → 155），`contextify` binding 把上下文/`Script`/`compileFunction` 落实为单 realm 内的 `with`-scope 语义，59 条差分语料与真 Node v26.9.0 逐条一致。`unsupported` 现在只剩 **`tls`**。
-   - **下一步（M58）候选**：`tls`（最后一块 stub；标签页没有原生 TLS，且 vendored 代码里没有任何模块 require 它——硬做只能造假，倾向于明确保留为抛错）；或继续拓宽 `internal/errors` 的错误码表；或给 `worker_threads` 补 worker 标准 IO 的惰性流；或把 `Worker` 的可选并行（真嵌套 Web Worker）做成可选项。
+   - **下一步（M59）候选**：`tls`（最后一块纯抛错桩；vendored 无模块 require 它，硬做只能造假，倾向保留）；或给 `worker_threads` 补 worker 标准 IO 的惰性流；或 worker 的可选真并行（嵌套 Web Worker）；或继续拓宽 `internal/errors` 的其它表（`SYSTEM_ERROR_CODES`/`CUSTOM_PROPS`）。
    - ~~**`internal/fs/glob`**~~ ✅ **已处理（2026-09-21，M33）**：真 `internal/fs/glob.js` + 随包 `internal/deps/minimatch/index`；`path.matchesGlob`、`fs.glob`/`globSync`、`fs.promises.glob` 上线。剩：`internal/fs/utils` 仍是只含 `DirentFromStats` 的 shim（真文件是 fs 基座）；`withFileTypes` 的 `Dirent.parentPath` 与我们自研 readdir 的形状一致（绝对值 vs Node 按传入路径）已对齐。
    - ~~**`stream/iter` + `stream/consumers`**~~ ✅ **已处理（2026-09-21，M38）**：真 `lib/stream/iter.js` + `lib/stream/consumers.js` + 整个 `internal/streams/iter/*`（12 文件）。`internal/streams/iter/transform.js` 不在内（它顶层 `internalBinding('zlib')`；M45 的 builtin `zlib` 不能代替 native 绑定，故仍未支持）。
    - **`internal/perf/*` 的直方图半边**：⚠️ 部分过时——M35 已把 `perf_hooks` 换成真源码；仅 `createHistogram`/`importHistogram`/`monitorEventLoopDelay` 仍抛错（真 `internal/histogram` 背后是 native hdr_histogram + 一整套统计检验，JS 移植代价大、优先级低）。
    - **`internal/fs/*` 其余部分**：我们已是自研 `fs`，其上层模块（`fs/promises`、`internal/fs/*`）可逐个尝试真源码；`internal/fs/utils.js` 是 fs 基座，替换它等于重写整个 `fs`，暂不碰。
-   - **`internal/errors.js`**：目前仍是 shim（断言已逼它长大一截）。真文件是环形依赖枢纽（211 文件），全量 vendoring 不现实，但可继续按需拓宽。
+   - **`internal/errors.js`**：仍是 shim，但 **M58 已把它对齐到 vendored 代码实际取用的每一个码**（补齐 9 个被解构引用却漏定义的码，并新增结构回归门测试兵护）。真文件是环形依赖枢纽（211 文件），全量 vendoring 不现实；继续拓宽时（`SYSTEM_ERROR_CODES`/`CUSTOM_PROPS`）优先靠那门测试报缺。
    - **`util` 里剩下的自研块**：⚠️ 已过时——M24 已把 `lib/util.js` 整份换成真源码。
    - **`lib/timers.js` + `internal/timers.js`**：⚠️ 已过时——M29 已整份换成真源码（含一个代替 libuv 的驱动）。
    - **`internal/worker/io.js`（MessagePort/MessageChannel）**：⚠️ 已过时——M30 已整份换成真源码（含一个 JS 重实现的 `messaging` binding）。
@@ -223,6 +224,42 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-22 · M58 补齐 `internal/errors` 错误码表（+ 一条结构回归门禁）
+
+**动机（证据驱动）**：把 `vendor/node-lib` + `src/node-runtime` 里所有 `ERR_*` 引用与 shim 的表对了一遍，发现 **9 个码被 `internal/errors` 解构引用、但表里没有定义** —— 解构拿到 `undefined`，调用点 `new codes.ERR_X(...)` 就报 "is not a constructor"。这是**只在罕至路径上才显形的潜在真 bug**：
+
+| 码 | 谁在用 | 触发路径 |
+|---|---|---|
+| `ERR_ACCESS_DENIED` | `fs.js`、`internal/fs/promises.js` | Permission Model 拦截 fs 调用 |
+| `ERR_ARG_NOT_ITERABLE` | `internal/webstreams/readablestream.js` | `ReadableStream.from(非可迭代)` |
+| `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` | `internal/fs/streams.js` | Windows 专属句柄 |
+| `ERR_FS_WATCH_QUEUE_OVERFLOW` | `internal/fs/watchers.js` | `fs.watch` 队列溢出 |
+| `ERR_INVALID_RETURN_VALUE` | `assert.js`、`streams/iter/*`、`streams/duplexify.js` 等 6 处 | pipeline/transform 回调返回非法值 |
+| `ERR_NO_TEMPORAL` | `internal/fs/utils.js` | Temporal 缺失分支 |
+| `ERR_PERFORMANCE_INVALID_TIMESTAMP` | `internal/perf/usertiming.js` | `performance.measure` 非法时间戳 |
+| `ERR_PERFORMANCE_MEASURE_INVALID_OPTIONS` | `internal/perf/usertiming.js` | `performance.measure` 非法选项 |
+| `ERR_USE_AFTER_CLOSE` | `internal/readline/interface.js` | `rl` 关闭后再调用 |
+
+奇怪的是 `ERR_INVALID_RETURN_VALUE` 已在 `ERROR_BASES`/`CUSTOM_FORMATTERS` 里，却漏在 `ERROR_CODES` 里——而 `codes` 只由 `ERROR_CODES` 的键构建，所以它依然是 `undefined`。这正是“两个地方都要加”的典型坑。
+
+**改了什么**
+
+1. `src/node-runtime/builtins/internal-shims.ts`：把上述 9 个码补进 `ERROR_CODES`（文案与 `lib/internal/errors.js` / `src/node_errors.h` 逐字对齐）；`ERROR_BASES` 给 `ERR_ARG_NOT_ITERABLE`/`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`/`ERR_PERFORMANCE_INVALID_TIMESTAMP`/`ERR_PERFORMANCE_MEASURE_INVALID_OPTIONS` 标 `TypeError`；新增 `ERR_ACCESS_DENIED` 的自定义格式化器（返回调用方自己的句子）与 `CUSTOM_PROPS`（挂上 `permission`/`resource`）；`ERROR_EXTRA_BASES` 给 `ERR_INVALID_RETURN_VALUE` 补 `RangeError` 变体（`E(code, msg, TypeError, RangeError)`）。
+2. **新增结构回归门禁** `test/errors-table.test.ts`：遍历整个 vendored 树，收集每个文件从 `internal/errors` 解构/内联引用的码，断言全部在表里存在为构造函数。**当前扫描到 76 个码**；修复前这 9 个都会让它失败。
+3. **新增差分语料** `tools/errors-corpus-oracle.mjs` + `test/fixtures/errors-corpus.json` + `test/errors-corpus.test.ts`：真 Node `--expose-internals` 下直接 `require('internal/errors')`，逐码记录 `name`/`code`/`message`/`instanceof` 各基类/额外自有属性/`E(...Extra)` 静态变体，再在 web-node 跑同一调用逐字段比对。
+4. 把两个 `_m5c`/`_m5d` 可行性 spike 改成**夹具缺失时跳过**：它们靠 `/tmp` 下的磁盘夹具（已被系统清理），夹具不在时本无可测，不应报模块解析失败（环境性失效，与本次改动无关）。
+
+**验证**
+
+- 差分语料 **10/10 一致**（涵盖 9 个新码；含 `ERR_ACCESS_DENIED` 的 `permission`/`resource` 与 `ERR_INVALID_RETURN_VALUE` 的两种具体类型文案）。
+- 门禁：`tsc` 干净 · vitest **717 用例（715 passed / 2 skipped）** · build 绿（worker 2229.19 → **2230.33 kB**）。
+- 浏览器端到端：demo 新增 milestone 58 段，实测 **`use-after-close : Error ERR_USE_AFTER_CLOSE - readline was closed`** / **`not-iterable : TypeError ERR_ARG_NOT_ITERABLE - value must be iterable`**。
+
+**已知边界**：`ERR_CRYPTO_*`与`ERR_OSSL_*`不走`internal/errors`，由 `crypto.ts`/`cipher.ts` 的本地 `coded(...)` helper 构造 Node 形状错误（`name` 为基类名 + `.code`），无需入表；`ERR_WEB_NODE_SYNC_SPAWN` 是 web-node 自己的 `SpawnError`。
+
+**涉及文件**
+新增：`test/errors-corpus.test.ts`、`test/errors-table.test.ts`、`test/fixtures/errors-corpus.json`、`tools/errors-corpus-oracle.mjs`。修改：`src/node-runtime/builtins/internal-shims.ts`、`src/demo-project.ts`、`test/_m5c.test.ts`、`test/_m5d.test.ts`、`README.md`、`README_zh.md`。
 
 ### 2026-09-21 · M57 真 `Worker`（`worker_threads.Worker` 落地为“同 loop 的协作式工作器”）
 

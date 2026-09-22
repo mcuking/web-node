@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { MemoryVfs } from '../src/node-runtime/vfs';
 import { NodeRuntime } from '../src/node-runtime/runtime';
@@ -13,6 +13,17 @@ const DEPS: Array<[string, string]> = [
   ['picocolors', '/tmp/vdeps/picocolors'],
   ['source-map-js', '/tmp/vdeps/source-map-js'],
 ];
+
+// These spikes read the bundled packages off the real disk under `/tmp`, which
+// an OS temp sweep can clear. When the fixtures are gone the test has nothing
+// to measure, so skip it rather than fail on a module-resolution error.
+const depsReady = DEPS.every(([, disk]) => {
+  try {
+    return existsSync(disk) && readdirSync(disk).length > 0;
+  } catch {
+    return false;
+  }
+});
 
 function loadDir(vfs: MemoryVfs, diskDir: string, vfsDir: string): void {
   for (const name of readdirSync(diskDir)) {
@@ -28,7 +39,7 @@ function loadDir(vfs: MemoryVfs, diskDir: string, vfsDir: string): void {
   }
 }
 
-describe('M5c feasibility: vite build in the runtime', () => {
+describe.skipIf(!depsReady)('M5c feasibility: vite build in the runtime', () => {
   it('boots vite and bundles a project', async () => {
     const vfs = new MemoryVfs({ cwd: '/project' });
     vfs.mkdir('/project', { recursive: true });
