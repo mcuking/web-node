@@ -19,6 +19,10 @@ export const netSpec: BuiltinSpec = {
   deps: ['events'],
   init: (ctx: BuiltinInitContext) => {
     const { EventEmitter } = ctx.require('events') as { EventEmitter: new () => EmitterLike };
+    // net.Socket is a Duplex in Node; extending the vendored stream.Duplex gives
+    // us the whole readable/writable/duplex surface (pipe, pause, resume, …)
+    // instead of a hand-rolled subset.
+    const { Duplex } = ctx.require('stream') as { Duplex: new (opts?: unknown) => EmitterLike };
     const network = ctx.binding.network;
 
     interface EmitterLike {
@@ -30,9 +34,8 @@ export const netSpec: BuiltinSpec = {
 
     const kAttached = Symbol('web-node.socket.side');
 
-    class Socket extends (EventEmitter as new () => EmitterLike) {
+    class Socket extends (Duplex as new (opts?: unknown) => EmitterLike) {
       connecting = false;
-      destroyed = false;
       pending = false;
       readyState = 'closed';
       remoteAddress = '127.0.0.1';
@@ -47,6 +50,10 @@ export const netSpec: BuiltinSpec = {
 
       #vsock: VirtualSocket | null = null;
       #encoding: string | null = null;
+
+      constructor() {
+        super({ allowHalfOpen: true });
+      }
 
       /** @internal */
       _attach(vsock: VirtualSocket, side: 'client' | 'server'): void {
@@ -63,15 +70,10 @@ export const netSpec: BuiltinSpec = {
           this.readyState = 'readOnly';
           this.emit('end');
         });
-        vsock.onClose(() => this.#onClose());
+        vsock.onClose(() => {
+          this.readyState = 'closed';
+        });
         vsock.onError((err) => this.emit('error', err));
-      }
-
-      #onClose(): void {
-        if (this.destroyed) return;
-        this.destroyed = true;
-        this.readyState = 'closed';
-        this.emit('close', false);
       }
 
       /** Dial a virtual port. Mirrors `socket.connect(port[, host][, cb])`. */
@@ -88,7 +90,6 @@ export const netSpec: BuiltinSpec = {
         } catch (err) {
           this.connecting = false;
           this.readyState = 'closed';
-          this.destroyed = true;
           ctx.binding.nextTick(() => this.emit('error', err as Error));
           return this;
         }
@@ -101,45 +102,38 @@ export const netSpec: BuiltinSpec = {
         return this;
       }
 
-      write(data: unknown, enc?: unknown, cb?: () => void): boolean {
-        if (typeof enc === 'function') {
-          cb = enc as () => void;
-          enc = undefined;
-        }
+      // --- stream plumbing ---------------------------------------------------
+      /** @internal */
+      _read(): void {
+        // Incoming bytes are pushed straight from the virtual socket; nothing to
+        // pull. Present so the Duplex machinery has a `_read` to call.
+      }
+
+      /** @internal */
+      _write(chunk: Uint8Array, _enc: string, cb: (err?: Error | null) => void): void {
         const vsock = this.#vsock;
-        if (!vsock || this.destroyed) {
-          const err = Object.assign(new Error('This socket has been ended by the other party'), { code: 'EPIPE' });
-          if (typeof cb === 'function') ctx.binding.nextTick(() => (cb as (e: Error) => void)(err));
-          else ctx.binding.nextTick(() => this.emit('error', err));
-          return false;
+        if (!vsock) {
+          cb(Object.assign(new Error('This socket has been ended by the other party'), { code: 'EPIPE' }));
+          return;
         }
-        const bytes = toBytes(data);
+        const bytes = toBytes(chunk);
         this.bytesWritten += bytes.byteLength;
         vsock.write(bytes);
-        if (typeof cb === 'function') ctx.binding.nextTick(cb as () => void);
-        return true;
+        cb();
       }
 
-      end(data?: unknown, enc?: unknown, cb?: () => void): this {
-        if (typeof data === 'function') {
-          cb = data as () => void;
-          data = undefined;
-        } else if (typeof enc === 'function') {
-          cb = enc as () => void;
-          enc = undefined;
-        }
-        if (data !== undefined) this.write(data);
+      /** @internal */
+      _final(cb: (err?: Error | null) => void): void {
         this.readyState = 'readOnly';
         this.#vsock?.end();
-        if (typeof cb === 'function') ctx.binding.nextTick(cb as () => void);
-        return this;
+        cb();
       }
 
-      destroy(err?: Error): this {
-        if (this.destroyed) return this;
-        this.#vsock?.destroy(err);
-        if (!this.#vsock) this.#onClose();
-        return this;
+      /** @internal */
+      _destroy(err: Error | null, cb: (err?: Error | null) => void): void {
+        this.readyState = 'closed';
+        this.#vsock?.destroy(err ?? undefined);
+        cb(err);
       }
 
       setEncoding(enc: string): this {
@@ -166,14 +160,6 @@ export const netSpec: BuiltinSpec = {
       }
       address(): { address: string; family: string; port: number } {
         return { address: this.localAddress, family: 'IPv4', port: this.localPort };
-      }
-
-      /** Total queued bytes — always 0 here, writes go straight to the pipe. */
-      get writableLength(): number {
-        return 0;
-      }
-      get readableLength(): number {
-        return 0;
       }
     }
 
