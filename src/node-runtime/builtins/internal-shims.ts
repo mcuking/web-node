@@ -147,7 +147,8 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_INVALID_ASYNC_ID: RangeError,
   ERR_INVALID_ARG_VALUE: TypeError,
   ERR_OUT_OF_RANGE: RangeError,
-  ERR_INVALID_URI: TypeError,
+  ERR_INVALID_URI: URIError,
+  ERR_FS_FILE_TOO_LARGE: RangeError,
   ERR_INVALID_URL: TypeError,
   ERR_INVALID_URL_SCHEME: TypeError,
   ERR_INVALID_FILE_URL_HOST: TypeError,
@@ -250,6 +251,13 @@ function addNumericalSeparator(val: string): string {
 }
 
 const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
+  // These three are *function* messages in Node that ignore extra arguments for
+  // the message (they only set own properties). As plain `%s` templates the
+  // real `util.format` would append the leftover arguments, so they need an
+  // explicit formatter.
+  ERR_INVALID_URL: () => 'Invalid URL',
+  ERR_FALSY_VALUE_REJECTION: () => 'Promise was rejected with falsy value',
+  ERR_INVALID_FILE_URL_PATH: (args) => `File URL path ${args[0]}`,
   // Node: `ERR_BUFFER_OUT_OF_BOUNDS('offset')` reads '"offset" is outside of
   // buffer bounds'; with no name it is the plain memory-bounds sentence.
   ERR_BUFFER_OUT_OF_BOUNDS: (args) => {
@@ -311,7 +319,7 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
       if (input > 2n ** 32n || input < -(2n ** 32n)) received = addNumericalSeparator(received);
       received += 'n';
     } else {
-      received = inspectArg(input);
+      received = lazyUtilInspect()?.inspect(input) ?? inspectArg(input);
     }
     return `${msg} It must be ${range}. Received ${received}`;
   },
@@ -377,8 +385,8 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
   },
   // `ERR_WORKER_INVALID_EXEC_ARGV(errors, msg = 'invalid execArgv flags')`.
   ERR_WORKER_INVALID_EXEC_ARGV: (args) => {
-    const [list, msg = 'invalid execArgv flags'] = args as [unknown[], string?];
-    return `Initiated Worker with ${msg}: ${list.join(', ')}`;
+    const [list, msg = 'invalid execArgv flags'] = args as [ArrayLike<unknown>, string?];
+    return `Initiated Worker with ${msg}: ${Array.prototype.join.call(list, ', ')}`;
   },
 };
 
@@ -393,8 +401,8 @@ const CUSTOM_PROPS: Record<string, (err: Record<string, unknown>, args: unknown[
   ERR_INVALID_URL: (err, args) => {
     err.input = args[0];
     if (args[1] != null) err.base = args[1];
-  },
-  // `ERR_INVALID_FILE_URL_PATH` carries the offending input on the error.
+  },  // `ERR_INVALID_FILE_URL_PATH(reason, input)` carries the offending input on
+  // the error.
   ERR_INVALID_FILE_URL_PATH: (err, args) => {
     err.input = args[1];
   },
@@ -414,8 +422,44 @@ function formatError(code: string, args: unknown[]): string {
   const formatter = CUSTOM_FORMATTERS[code];
   if (formatter) return formatter(args);
   const template = ERROR_CODES[code] ?? code;
+  // Node builds string-message codes with `util.format(msg, ...args)` (via
+  // `lazyInternalUtilInspect()` in `makeNodeErrorWithCode`). Use the vendored
+  // real `util.format` so `%d`/`%j`/`%o`/`%s`-with-object all match, and only
+  // fall back to naive `%s` substitution if that module is not reachable yet
+  // (e.g. an error thrown while `internal/util/inspect` is still loading).
+  const inspect = lazyUtilInspect();
+  if (inspect && typeof inspect.format === 'function') {
+    return inspect.format(template, ...args);
+  }
   let i = 0;
   return template.replace(/%[sdj]/g, () => String(args[i++]));
+}
+
+/**
+ * `internal/util/inspect`'s `format`/`inspect`, resolved lazily and cached.
+ *
+ * Node's `internal/errors` does the same (`lazyInternalUtilInspect()`): it may
+ * not require that module at init time because the two sit on a load-time cycle
+ * (`inspect.js` requires `internal/errors`). We record a resolver when the
+ * errors module is materialized and only invoke it while formatting.
+ */
+type UtilInspectModule = {
+  format: (...args: unknown[]) => string;
+  inspect: (value: unknown, options?: unknown) => string;
+};
+let resolveUtilInspect: (() => UtilInspectModule) | null = null;
+let cachedUtilInspect: UtilInspectModule | null = null;
+
+function lazyUtilInspect(): UtilInspectModule | null {
+  if (cachedUtilInspect) return cachedUtilInspect;
+  if (!resolveUtilInspect) return null;
+  try {
+    const mod = resolveUtilInspect();
+    if (mod && typeof mod.format === 'function') cachedUtilInspect = mod;
+    return mod;
+  } catch {
+    return null;
+  }
 }
 
 const CLASS_LIKE = /^[A-Z][a-zA-Z0-9]*$/;
@@ -433,7 +477,7 @@ const PRIMITIVE_TYPES = [
   'symbol',
 ];
 
-function formatList(list: string[], conjunction: 'and' | 'or' = 'and'): string {
+function formatList(list: ArrayLike<unknown>, conjunction: 'and' | 'or' = 'and'): string {
   switch (list.length) {
     case 0:
       return '';
@@ -444,7 +488,12 @@ function formatList(list: string[], conjunction: 'and' | 'or' = 'and'): string {
     case 3:
       return `${list[0]}, ${list[1]}, ${conjunction} ${list[2]}`;
     default:
-      return `${list.slice(0, -1).join(', ')}, ${conjunction} ${list[list.length - 1]}`;
+      // Node reaches the list methods via `Array.prototype.*.call`, which stays
+      // generic when the argument is not a real array — mirror that.
+      return `${Array.prototype.join.call(
+        Array.prototype.slice.call(list, 0, -1),
+        ', ',
+      )}, ${conjunction} ${list[list.length - 1]}`;
   }
 }
 
@@ -681,7 +730,10 @@ function makeSystemErrorWithCode(key: string): new (ctx: Record<string, unknown>
   return NodeSystemError as unknown as new (ctx: Record<string, unknown>) => Error;
 }
 
-function createErrorsBindingContext(): Record<string, unknown> {
+function createErrorsBindingContext(ctx: BuiltinInitContext): Record<string, unknown> {
+  // `internal/errors` and `internal/util/inspect` form a load-time cycle; this
+  // is the resolver `formatError` uses to reach the real `util.format`.
+  resolveUtilInspect = () => ctx.require('internal/util/inspect') as UtilInspectModule;
   const codes: Record<string, unknown> = {};
   for (const code of Object.keys(ERROR_CODES)) {
     codes[code] = makeErrorClass(code);
@@ -850,7 +902,7 @@ function createErrorsBindingContext(): Record<string, unknown> {
 export const internalErrorsSpec: BuiltinSpec = {
   id: 'internal/errors',
   origin: 'web-node',
-  init: () => createErrorsBindingContext(),
+  init: (ctx) => createErrorsBindingContext(ctx),
 };
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,4972 @@
+{
+  "ERR_ACCESS_DENIED": {
+    "code": "ERR_ACCESS_DENIED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_ACCESS_DENIED",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "permission": "",
+      "resource": ""
+    },
+    "extra": {}
+  },
+  "ERR_AMBIGUOUS_ARGUMENT": {
+    "code": "ERR_AMBIGUOUS_ARGUMENT",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_AMBIGUOUS_ARGUMENT",
+    "message": "The \"__a__\" argument is ambiguous. 1",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ARG_NOT_ITERABLE": {
+    "code": "ERR_ARG_NOT_ITERABLE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_ARG_NOT_ITERABLE",
+    "message": "__a__ must be iterable",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ASSERTION": {
+    "code": "ERR_ASSERTION",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_ASSERTION",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ASYNC_CALLBACK": {
+    "code": "ERR_ASYNC_CALLBACK",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_ASYNC_CALLBACK",
+    "message": "__a__ must be a function",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ASYNC_LOADER_REQUEST_NEVER_SETTLED": {
+    "code": "ERR_ASYNC_LOADER_REQUEST_NEVER_SETTLED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_ASYNC_LOADER_REQUEST_NEVER_SETTLED",
+    "message": "Async loader request never settled",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ASYNC_TYPE": {
+    "code": "ERR_ASYNC_TYPE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_ASYNC_TYPE",
+    "message": "Invalid name for async \"type\": __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_BROTLI_INVALID_PARAM": {
+    "code": "ERR_BROTLI_INVALID_PARAM",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_BROTLI_INVALID_PARAM",
+    "message": "__a__ is not a valid Brotli parameter",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_BUFFER_OUT_OF_BOUNDS": {
+    "code": "ERR_BUFFER_OUT_OF_BOUNDS",
+    "args": [],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_BUFFER_OUT_OF_BOUNDS",
+    "message": "Attempt to access memory outside buffer bounds",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_BUFFER_TOO_LARGE": {
+    "code": "ERR_BUFFER_TOO_LARGE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_BUFFER_TOO_LARGE",
+    "message": "Cannot create a Buffer larger than __a__ bytes",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CANNOT_WATCH_SIGINT": {
+    "code": "ERR_CANNOT_WATCH_SIGINT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CANNOT_WATCH_SIGINT",
+    "message": "Cannot watch for SIGINT signals",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CHILD_CLOSED_BEFORE_REPLY": {
+    "code": "ERR_CHILD_CLOSED_BEFORE_REPLY",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CHILD_CLOSED_BEFORE_REPLY",
+    "message": "Child closed before reply received",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CHILD_PROCESS_IPC_REQUIRED": {
+    "code": "ERR_CHILD_PROCESS_IPC_REQUIRED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CHILD_PROCESS_IPC_REQUIRED",
+    "message": "Forked processes must have an IPC channel, missing value 'ipc' in __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CHILD_PROCESS_STDIO_MAXBUFFER": {
+    "code": "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+    "message": "__a__ maxBuffer length exceeded",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CONSOLE_WRITABLE_STREAM": {
+    "code": "ERR_CONSOLE_WRITABLE_STREAM",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_CONSOLE_WRITABLE_STREAM",
+    "message": "Console expects a writable stream instance for __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CONSTRUCT_CALL_REQUIRED": {
+    "code": "ERR_CONSTRUCT_CALL_REQUIRED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_CONSTRUCT_CALL_REQUIRED",
+    "message": "Class constructor __a__ cannot be invoked without `new`",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CONTEXT_NOT_INITIALIZED": {
+    "code": "ERR_CONTEXT_NOT_INITIALIZED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CONTEXT_NOT_INITIALIZED",
+    "message": "context used is not initialized",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_ARGON2_NOT_SUPPORTED": {
+    "code": "ERR_CRYPTO_ARGON2_NOT_SUPPORTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_ARGON2_NOT_SUPPORTED",
+    "message": "Argon2 algorithm not supported",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_CUSTOM_ENGINE_NOT_SUPPORTED": {
+    "code": "ERR_CRYPTO_CUSTOM_ENGINE_NOT_SUPPORTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_CUSTOM_ENGINE_NOT_SUPPORTED",
+    "message": "Custom engines not supported by this OpenSSL",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_ECDH_INVALID_FORMAT": {
+    "code": "ERR_CRYPTO_ECDH_INVALID_FORMAT",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_CRYPTO_ECDH_INVALID_FORMAT",
+    "message": "Invalid ECDH format: __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY": {
+    "code": "ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY",
+    "message": "Public key is not valid for specified curve",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_ENGINE_UNKNOWN": {
+    "code": "ERR_CRYPTO_ENGINE_UNKNOWN",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_ENGINE_UNKNOWN",
+    "message": "Engine \"__a__\" was not found",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_FIPS_FORCED": {
+    "code": "ERR_CRYPTO_FIPS_FORCED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_FIPS_FORCED",
+    "message": "Cannot set FIPS mode, it was forced with --force-fips at startup.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_FIPS_UNAVAILABLE": {
+    "code": "ERR_CRYPTO_FIPS_UNAVAILABLE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_FIPS_UNAVAILABLE",
+    "message": "Cannot set FIPS mode in a non-FIPS build.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_HASH_FINALIZED": {
+    "code": "ERR_CRYPTO_HASH_FINALIZED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_HASH_FINALIZED",
+    "message": "Digest already called",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_HASH_UPDATE_FAILED": {
+    "code": "ERR_CRYPTO_HASH_UPDATE_FAILED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_HASH_UPDATE_FAILED",
+    "message": "Hash update failed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_INCOMPATIBLE_KEY": {
+    "code": "ERR_CRYPTO_INCOMPATIBLE_KEY",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_INCOMPATIBLE_KEY",
+    "message": "Incompatible __a__: 1",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS": {
+    "code": "ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS",
+    "message": "The selected key encoding __a__ 1.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_INVALID_DIGEST": {
+    "code": "ERR_CRYPTO_INVALID_DIGEST",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_CRYPTO_INVALID_DIGEST",
+    "message": "Invalid digest: __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_INVALID_JWK": {
+    "code": "ERR_CRYPTO_INVALID_JWK",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_CRYPTO_INVALID_JWK",
+    "message": "Invalid JWK data",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE": {
+    "code": "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE",
+    "message": "Invalid key object type __a__, expected 1.",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_INVALID_MAC": {
+    "code": "ERR_CRYPTO_INVALID_MAC",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_CRYPTO_INVALID_MAC",
+    "message": "Invalid MAC: __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_INVALID_STATE": {
+    "code": "ERR_CRYPTO_INVALID_STATE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_INVALID_STATE",
+    "message": "Invalid state for operation __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_KEM_NOT_SUPPORTED": {
+    "code": "ERR_CRYPTO_KEM_NOT_SUPPORTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_KEM_NOT_SUPPORTED",
+    "message": "KEM is not supported",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_MAC_FINALIZED": {
+    "code": "ERR_CRYPTO_MAC_FINALIZED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_MAC_FINALIZED",
+    "message": "MAC already finalized",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_MAC_NOT_SUPPORTED": {
+    "code": "ERR_CRYPTO_MAC_NOT_SUPPORTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_MAC_NOT_SUPPORTED",
+    "message": "MAC is not supported",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_MAC_UPDATE_FAILED": {
+    "code": "ERR_CRYPTO_MAC_UPDATE_FAILED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_MAC_UPDATE_FAILED",
+    "message": "MAC update failed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_PBKDF2_ERROR": {
+    "code": "ERR_CRYPTO_PBKDF2_ERROR",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_PBKDF2_ERROR",
+    "message": "PBKDF2 error",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_SCRYPT_NOT_SUPPORTED": {
+    "code": "ERR_CRYPTO_SCRYPT_NOT_SUPPORTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_SCRYPT_NOT_SUPPORTED",
+    "message": "Scrypt algorithm not supported",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_CRYPTO_SIGN_KEY_REQUIRED": {
+    "code": "ERR_CRYPTO_SIGN_KEY_REQUIRED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_CRYPTO_SIGN_KEY_REQUIRED",
+    "message": "No key provided to sign",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_DEBUGGER_ERROR": {
+    "code": "ERR_DEBUGGER_ERROR",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_DEBUGGER_ERROR",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_DEBUGGER_STARTUP_ERROR": {
+    "code": "ERR_DEBUGGER_STARTUP_ERROR",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_DEBUGGER_STARTUP_ERROR",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_DIR_CLOSED": {
+    "code": "ERR_DIR_CLOSED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_DIR_CLOSED",
+    "message": "Directory handle was closed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_DIR_CONCURRENT_OPERATION": {
+    "code": "ERR_DIR_CONCURRENT_OPERATION",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_DIR_CONCURRENT_OPERATION",
+    "message": "Cannot do synchronous work on directory handle with concurrent asynchronous operations",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_DNS_SET_SERVERS_FAILED": {
+    "code": "ERR_DNS_SET_SERVERS_FAILED",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_DNS_SET_SERVERS_FAILED",
+    "message": "c-ares failed to set servers: \"__a__\" [1]",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_DOMAIN_CALLBACK_NOT_AVAILABLE": {
+    "code": "ERR_DOMAIN_CALLBACK_NOT_AVAILABLE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_DOMAIN_CALLBACK_NOT_AVAILABLE",
+    "message": "A callback was registered through process.setUncaughtExceptionCaptureCallback(), which is mutually exclusive with using the `domain` module",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_DOMAIN_CANNOT_SET_UNCAUGHT_EXCEPTION_CAPTURE": {
+    "code": "ERR_DOMAIN_CANNOT_SET_UNCAUGHT_EXCEPTION_CAPTURE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_DOMAIN_CANNOT_SET_UNCAUGHT_EXCEPTION_CAPTURE",
+    "message": "The `domain` module is in use, which is mutually exclusive with calling process.setUncaughtExceptionCaptureCallback()",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_DUPLICATE_STARTUP_SNAPSHOT_MAIN_FUNCTION": {
+    "code": "ERR_DUPLICATE_STARTUP_SNAPSHOT_MAIN_FUNCTION",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_DUPLICATE_STARTUP_SNAPSHOT_MAIN_FUNCTION",
+    "message": "Deserialize main function is already configured.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ENCODING_INVALID_ENCODED_DATA": {
+    "code": "ERR_ENCODING_INVALID_ENCODED_DATA",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_ENCODING_INVALID_ENCODED_DATA",
+    "message": "The encoded data was not valid for encoding __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "errno": 1
+    },
+    "extra": {}
+  },
+  "ERR_ENCODING_NOT_SUPPORTED": {
+    "code": "ERR_ENCODING_NOT_SUPPORTED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_ENCODING_NOT_SUPPORTED",
+    "message": "The \"__a__\" encoding is not supported",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_EVAL_ESM_CANNOT_PRINT": {
+    "code": "ERR_EVAL_ESM_CANNOT_PRINT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_EVAL_ESM_CANNOT_PRINT",
+    "message": "--print cannot be used with ESM input",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_EVENT_RECURSION": {
+    "code": "ERR_EVENT_RECURSION",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_EVENT_RECURSION",
+    "message": "The event \"__a__\" is already being dispatched",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_FALSY_VALUE_REJECTION": {
+    "code": "ERR_FALSY_VALUE_REJECTION",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_FALSY_VALUE_REJECTION",
+    "message": "Promise was rejected with falsy value",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "reason": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM": {
+    "code": "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM",
+    "message": "The feature __a__ is unavailable on the current platform, which is being used to run Node.js",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_FFI_LIBRARY_CLOSED": {
+    "code": "ERR_FFI_LIBRARY_CLOSED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_FFI_LIBRARY_CLOSED",
+    "message": "Library is closed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_FS_CP_DIR_TO_NON_DIR": {
+    "code": "ERR_FS_CP_DIR_TO_NON_DIR",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_DIR_TO_NON_DIR",
+    "message": "Cannot overwrite non-directory with directory: undefined returned undefined (undefined)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "info": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_FS_CP_EEXIST": {
+    "code": "ERR_FS_CP_EEXIST",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_EEXIST",
+    "message": "Target already exists: undefined returned undefined (undefined)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "info": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_FS_CP_EINVAL": {
+    "code": "ERR_FS_CP_EINVAL",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_EINVAL",
+    "message": "Invalid src or dest: undefined returned undefined (undefined)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "info": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_FS_CP_FIFO_PIPE": {
+    "code": "ERR_FS_CP_FIFO_PIPE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_FIFO_PIPE",
+    "message": "Cannot copy a FIFO pipe: undefined returned undefined (undefined)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "info": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_FS_CP_NON_DIR_TO_DIR": {
+    "code": "ERR_FS_CP_NON_DIR_TO_DIR",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_NON_DIR_TO_DIR",
+    "message": "Cannot overwrite directory with non-directory: undefined returned undefined (undefined)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "info": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_FS_CP_SOCKET": {
+    "code": "ERR_FS_CP_SOCKET",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_SOCKET",
+    "message": "Cannot copy a socket file: undefined returned undefined (undefined)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "info": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY": {
+    "code": "ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY",
+    "message": "Cannot overwrite symlink in subdirectory of self: undefined returned undefined (undefined)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "info": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_FS_CP_UNKNOWN": {
+    "code": "ERR_FS_CP_UNKNOWN",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SystemError",
+    "errorCode": "ERR_FS_CP_UNKNOWN",
+    "message": "Cannot copy an unknown file type: undefined returned undefined (undefined)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "info": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_FS_EISDIR": {
+    "code": "ERR_FS_EISDIR",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SystemError",
+    "errorCode": "ERR_FS_EISDIR",
+    "message": "Path is a directory: undefined returned undefined (undefined)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "info": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_FS_FILE_TOO_LARGE": {
+    "code": "ERR_FS_FILE_TOO_LARGE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_FS_FILE_TOO_LARGE",
+    "message": "File size (__a__) is greater than 2 GiB",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_FS_WATCH_QUEUE_OVERFLOW": {
+    "code": "ERR_FS_WATCH_QUEUE_OVERFLOW",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_FS_WATCH_QUEUE_OVERFLOW",
+    "message": "fs.watch() queued more than NaN events",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_ALTSVC_INVALID_ORIGIN": {
+    "code": "ERR_HTTP2_ALTSVC_INVALID_ORIGIN",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_HTTP2_ALTSVC_INVALID_ORIGIN",
+    "message": "HTTP/2 ALTSVC frames require a valid origin",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_ALTSVC_LENGTH": {
+    "code": "ERR_HTTP2_ALTSVC_LENGTH",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_HTTP2_ALTSVC_LENGTH",
+    "message": "HTTP/2 ALTSVC frames are limited to 16382 bytes",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_CONNECT_AUTHORITY": {
+    "code": "ERR_HTTP2_CONNECT_AUTHORITY",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_CONNECT_AUTHORITY",
+    "message": ":authority header is required for CONNECT requests",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_CONNECT_PATH": {
+    "code": "ERR_HTTP2_CONNECT_PATH",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_CONNECT_PATH",
+    "message": "The :path header is forbidden for CONNECT requests",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_CONNECT_SCHEME": {
+    "code": "ERR_HTTP2_CONNECT_SCHEME",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_CONNECT_SCHEME",
+    "message": "The :scheme header is forbidden for CONNECT requests",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_GOAWAY_SESSION": {
+    "code": "ERR_HTTP2_GOAWAY_SESSION",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_GOAWAY_SESSION",
+    "message": "New streams cannot be created after receiving a GOAWAY",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_HEADERS_AFTER_RESPOND": {
+    "code": "ERR_HTTP2_HEADERS_AFTER_RESPOND",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_HEADERS_AFTER_RESPOND",
+    "message": "Cannot specify additional headers after response initiated",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_HEADERS_SENT": {
+    "code": "ERR_HTTP2_HEADERS_SENT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_HEADERS_SENT",
+    "message": "Response has already been initiated.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_HEADER_SINGLE_VALUE": {
+    "code": "ERR_HTTP2_HEADER_SINGLE_VALUE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_HTTP2_HEADER_SINGLE_VALUE",
+    "message": "Header field \"__a__\" must only have a single value",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_INFO_STATUS_NOT_ALLOWED": {
+    "code": "ERR_HTTP2_INFO_STATUS_NOT_ALLOWED",
+    "args": [],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_HTTP2_INFO_STATUS_NOT_ALLOWED",
+    "message": "Informational status codes cannot be used",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_INVALID_CONNECTION_HEADERS": {
+    "code": "ERR_HTTP2_INVALID_CONNECTION_HEADERS",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_HTTP2_INVALID_CONNECTION_HEADERS",
+    "message": "HTTP/1 Connection specific headers are forbidden: \"__a__\"",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_INVALID_HEADER_VALUE": {
+    "code": "ERR_HTTP2_INVALID_HEADER_VALUE",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_HTTP2_INVALID_HEADER_VALUE",
+    "message": "Invalid value \"__a__\" for header \"1\"",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_INVALID_INFO_STATUS": {
+    "code": "ERR_HTTP2_INVALID_INFO_STATUS",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_HTTP2_INVALID_INFO_STATUS",
+    "message": "Invalid informational status code: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_INVALID_ORIGIN": {
+    "code": "ERR_HTTP2_INVALID_ORIGIN",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_HTTP2_INVALID_ORIGIN",
+    "message": "HTTP/2 ORIGIN frames require a valid origin",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_INVALID_PACKED_SETTINGS_LENGTH": {
+    "code": "ERR_HTTP2_INVALID_PACKED_SETTINGS_LENGTH",
+    "args": [],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_HTTP2_INVALID_PACKED_SETTINGS_LENGTH",
+    "message": "Packed settings length must be a multiple of six",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_INVALID_PSEUDOHEADER": {
+    "code": "ERR_HTTP2_INVALID_PSEUDOHEADER",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_HTTP2_INVALID_PSEUDOHEADER",
+    "message": "\"__a__\" is an invalid pseudoheader or is used incorrectly",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_INVALID_SESSION": {
+    "code": "ERR_HTTP2_INVALID_SESSION",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_INVALID_SESSION",
+    "message": "The session has been destroyed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_INVALID_SETTING_VALUE": {
+    "code": "ERR_HTTP2_INVALID_SETTING_VALUE",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_HTTP2_INVALID_SETTING_VALUE",
+    "message": "Invalid value for setting \"__a__\": 1",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "actual": 1
+    },
+    "extra": {
+      "RangeError": {
+        "name": "RangeError",
+        "code": "ERR_HTTP2_INVALID_SETTING_VALUE",
+        "message": "Invalid value for setting \"__a__\": 1"
+      }
+    }
+  },
+  "ERR_HTTP2_INVALID_STREAM": {
+    "code": "ERR_HTTP2_INVALID_STREAM",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_INVALID_STREAM",
+    "message": "The stream has been destroyed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_MAX_PENDING_SETTINGS_ACK": {
+    "code": "ERR_HTTP2_MAX_PENDING_SETTINGS_ACK",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_MAX_PENDING_SETTINGS_ACK",
+    "message": "Maximum number of pending settings acknowledgements",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_NESTED_PUSH": {
+    "code": "ERR_HTTP2_NESTED_PUSH",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_NESTED_PUSH",
+    "message": "A push stream cannot initiate another push stream.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_NO_MEM": {
+    "code": "ERR_HTTP2_NO_MEM",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_NO_MEM",
+    "message": "Out of memory",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_NO_SOCKET_MANIPULATION": {
+    "code": "ERR_HTTP2_NO_SOCKET_MANIPULATION",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_NO_SOCKET_MANIPULATION",
+    "message": "HTTP/2 sockets should not be directly manipulated (e.g. read and written)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_ORIGIN_LENGTH": {
+    "code": "ERR_HTTP2_ORIGIN_LENGTH",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_HTTP2_ORIGIN_LENGTH",
+    "message": "HTTP/2 ORIGIN frames are limited to 16382 bytes",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_OUT_OF_STREAMS": {
+    "code": "ERR_HTTP2_OUT_OF_STREAMS",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_OUT_OF_STREAMS",
+    "message": "No stream ID is available because maximum stream ID has been reached",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_PAYLOAD_FORBIDDEN": {
+    "code": "ERR_HTTP2_PAYLOAD_FORBIDDEN",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_PAYLOAD_FORBIDDEN",
+    "message": "Responses with __a__ status must not have a payload",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_PING_CANCEL": {
+    "code": "ERR_HTTP2_PING_CANCEL",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_PING_CANCEL",
+    "message": "HTTP2 ping cancelled",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_PING_LENGTH": {
+    "code": "ERR_HTTP2_PING_LENGTH",
+    "args": [],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_HTTP2_PING_LENGTH",
+    "message": "HTTP2 ping payload must be 8 bytes",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_PSEUDOHEADER_NOT_ALLOWED": {
+    "code": "ERR_HTTP2_PSEUDOHEADER_NOT_ALLOWED",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_HTTP2_PSEUDOHEADER_NOT_ALLOWED",
+    "message": "Cannot set HTTP/2 pseudo-headers",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_PUSH_DISABLED": {
+    "code": "ERR_HTTP2_PUSH_DISABLED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_PUSH_DISABLED",
+    "message": "HTTP/2 client has disabled push streams",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_SEND_FILE": {
+    "code": "ERR_HTTP2_SEND_FILE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_SEND_FILE",
+    "message": "Directories cannot be sent",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_SEND_FILE_NOSEEK": {
+    "code": "ERR_HTTP2_SEND_FILE_NOSEEK",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_SEND_FILE_NOSEEK",
+    "message": "Offset or length can only be specified for regular files",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_SESSION_ERROR": {
+    "code": "ERR_HTTP2_SESSION_ERROR",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_SESSION_ERROR",
+    "message": "Session closed with error code __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_SETTINGS_CANCEL": {
+    "code": "ERR_HTTP2_SETTINGS_CANCEL",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_SETTINGS_CANCEL",
+    "message": "HTTP2 session settings canceled",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_SOCKET_BOUND": {
+    "code": "ERR_HTTP2_SOCKET_BOUND",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_SOCKET_BOUND",
+    "message": "The socket is already bound to an Http2Session",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_SOCKET_UNBOUND": {
+    "code": "ERR_HTTP2_SOCKET_UNBOUND",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_SOCKET_UNBOUND",
+    "message": "The socket has been disconnected from the Http2Session",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_STATUS_101": {
+    "code": "ERR_HTTP2_STATUS_101",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_STATUS_101",
+    "message": "HTTP status code 101 (Switching Protocols) is forbidden in HTTP/2",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_STATUS_INVALID": {
+    "code": "ERR_HTTP2_STATUS_INVALID",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_HTTP2_STATUS_INVALID",
+    "message": "Invalid status code: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_STREAM_CANCEL": {
+    "code": "ERR_HTTP2_STREAM_CANCEL",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_STREAM_CANCEL",
+    "message": "The pending stream has been canceled",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "cause": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_HTTP2_STREAM_ERROR": {
+    "code": "ERR_HTTP2_STREAM_ERROR",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_STREAM_ERROR",
+    "message": "Stream closed with error code __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_STREAM_SELF_DEPENDENCY": {
+    "code": "ERR_HTTP2_STREAM_SELF_DEPENDENCY",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_STREAM_SELF_DEPENDENCY",
+    "message": "A stream cannot depend on itself",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_TOO_MANY_CUSTOM_SETTINGS": {
+    "code": "ERR_HTTP2_TOO_MANY_CUSTOM_SETTINGS",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_TOO_MANY_CUSTOM_SETTINGS",
+    "message": "Number of custom settings exceeds MAX_ADDITIONAL_SETTINGS",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_TOO_MANY_INVALID_FRAMES": {
+    "code": "ERR_HTTP2_TOO_MANY_INVALID_FRAMES",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_TOO_MANY_INVALID_FRAMES",
+    "message": "Too many invalid HTTP/2 frames",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_TOO_MANY_ORIGINS": {
+    "code": "ERR_HTTP2_TOO_MANY_ORIGINS",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_TOO_MANY_ORIGINS",
+    "message": "The server sent more ORIGIN frames than the allowed number of __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_TRAILERS_ALREADY_SENT": {
+    "code": "ERR_HTTP2_TRAILERS_ALREADY_SENT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_TRAILERS_ALREADY_SENT",
+    "message": "Trailing headers have already been sent",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_TRAILERS_NOT_READY": {
+    "code": "ERR_HTTP2_TRAILERS_NOT_READY",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_TRAILERS_NOT_READY",
+    "message": "Trailing headers cannot be sent until after the wantTrailers event is emitted",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP2_UNSUPPORTED_PROTOCOL": {
+    "code": "ERR_HTTP2_UNSUPPORTED_PROTOCOL",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP2_UNSUPPORTED_PROTOCOL",
+    "message": "protocol \"__a__\" is unsupported.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP_BODY_NOT_ALLOWED": {
+    "code": "ERR_HTTP_BODY_NOT_ALLOWED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP_BODY_NOT_ALLOWED",
+    "message": "Adding content for this request method or response status is not allowed.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP_CONTENT_LENGTH_MISMATCH": {
+    "code": "ERR_HTTP_CONTENT_LENGTH_MISMATCH",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP_CONTENT_LENGTH_MISMATCH",
+    "message": "Response body's content-length of __a__ byte(s) does not match the content-length of 1 byte(s) set in header",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP_HEADERS_SENT": {
+    "code": "ERR_HTTP_HEADERS_SENT",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP_HEADERS_SENT",
+    "message": "Cannot __a__ headers after they are sent to the client",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP_INVALID_HEADER_VALUE": {
+    "code": "ERR_HTTP_INVALID_HEADER_VALUE",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_HTTP_INVALID_HEADER_VALUE",
+    "message": "Invalid value \"__a__\" for header \"1\"",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP_INVALID_STATUS_CODE": {
+    "code": "ERR_HTTP_INVALID_STATUS_CODE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_HTTP_INVALID_STATUS_CODE",
+    "message": "Invalid status code: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP_REQUEST_TIMEOUT": {
+    "code": "ERR_HTTP_REQUEST_TIMEOUT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP_REQUEST_TIMEOUT",
+    "message": "Request timeout",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP_SOCKET_ASSIGNED": {
+    "code": "ERR_HTTP_SOCKET_ASSIGNED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP_SOCKET_ASSIGNED",
+    "message": "ServerResponse has an already assigned socket",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP_SOCKET_ENCODING": {
+    "code": "ERR_HTTP_SOCKET_ENCODING",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP_SOCKET_ENCODING",
+    "message": "Changing the socket encoding is not allowed per RFC7230 Section 3.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_HTTP_TRAILER_INVALID": {
+    "code": "ERR_HTTP_TRAILER_INVALID",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_HTTP_TRAILER_INVALID",
+    "message": "Trailers are invalid with this transfer encoding",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ILLEGAL_CONSTRUCTOR": {
+    "code": "ERR_ILLEGAL_CONSTRUCTOR",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_ILLEGAL_CONSTRUCTOR",
+    "message": "Illegal constructor",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_IMPORT_ATTRIBUTE_MISSING": {
+    "code": "ERR_IMPORT_ATTRIBUTE_MISSING",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_IMPORT_ATTRIBUTE_MISSING",
+    "message": "Module \"__a__\" needs an import attribute of \"1: [ 'x', 'y' ]\"",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE": {
+    "code": "ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE",
+    "message": "Module \"__a__\" is not of type \"1\"",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_IMPORT_ATTRIBUTE_UNSUPPORTED": {
+    "code": "ERR_IMPORT_ATTRIBUTE_UNSUPPORTED",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_IMPORT_ATTRIBUTE_UNSUPPORTED",
+    "message": "Import attribute \"__a__\" with value \"1\" is not supported",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INCOMPATIBLE_OPTION_PAIR": {
+    "code": "ERR_INCOMPATIBLE_OPTION_PAIR",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INCOMPATIBLE_OPTION_PAIR",
+    "message": "Option \"__a__\" cannot be used in combination with option \"1\"",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INPUT_TYPE_NOT_ALLOWED": {
+    "code": "ERR_INPUT_TYPE_NOT_ALLOWED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INPUT_TYPE_NOT_ALLOWED",
+    "message": "--input-type can only be used with string input via --eval, --print, or STDIN",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INSPECTOR_ALREADY_ACTIVATED": {
+    "code": "ERR_INSPECTOR_ALREADY_ACTIVATED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INSPECTOR_ALREADY_ACTIVATED",
+    "message": "Inspector is already activated. Close it with inspector.close() before activating it again.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INSPECTOR_ALREADY_CONNECTED": {
+    "code": "ERR_INSPECTOR_ALREADY_CONNECTED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INSPECTOR_ALREADY_CONNECTED",
+    "message": "__a__ is already connected",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INSPECTOR_CLOSED": {
+    "code": "ERR_INSPECTOR_CLOSED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INSPECTOR_CLOSED",
+    "message": "Session was closed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INSPECTOR_COMMAND": {
+    "code": "ERR_INSPECTOR_COMMAND",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INSPECTOR_COMMAND",
+    "message": "Inspector error NaN: 1",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INSPECTOR_NOT_ACTIVE": {
+    "code": "ERR_INSPECTOR_NOT_ACTIVE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INSPECTOR_NOT_ACTIVE",
+    "message": "Inspector is not active",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INSPECTOR_NOT_AVAILABLE": {
+    "code": "ERR_INSPECTOR_NOT_AVAILABLE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INSPECTOR_NOT_AVAILABLE",
+    "message": "Inspector is not available",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INSPECTOR_NOT_CONNECTED": {
+    "code": "ERR_INSPECTOR_NOT_CONNECTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INSPECTOR_NOT_CONNECTED",
+    "message": "Session is not connected",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INSPECTOR_NOT_WORKER": {
+    "code": "ERR_INSPECTOR_NOT_WORKER",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INSPECTOR_NOT_WORKER",
+    "message": "Current thread is not a worker",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INTERNAL_ASSERTION": {
+    "code": "ERR_INTERNAL_ASSERTION",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INTERNAL_ASSERTION",
+    "message": "__a__\nThis is caused by either a bug in Node.js or incorrect usage of Node.js internals.\nPlease open an issue with this stack trace at https://github.com/nodejs/node/issues\n",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_ADDRESS_FAMILY": {
+    "code": "ERR_INVALID_ADDRESS_FAMILY",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_INVALID_ADDRESS_FAMILY",
+    "message": "Invalid address family: __a__ 1:x,y",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {
+      "host": 1,
+      "port": [
+        "x",
+        "y"
+      ]
+    },
+    "extra": {}
+  },
+  "ERR_INVALID_ARG_TYPE": {
+    "code": "ERR_INVALID_ARG_TYPE",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": false,
+    "threw": "Error: All expected entries have to be of type string\nThis is caused by either a bug in Node.js or incorrect usage of Node.js internals.\nPlease open an issue with this stack trace at https://github.com/nodejs/node/issues\n"
+  },
+  "ERR_INVALID_ARG_VALUE": {
+    "code": "ERR_INVALID_ARG_VALUE",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_ARG_VALUE",
+    "message": "The argument '__a__' is invalid. Received 1",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {
+      "RangeError": {
+        "name": "RangeError",
+        "code": "ERR_INVALID_ARG_VALUE",
+        "message": "The argument '__a__' is invalid. Received 1"
+      }
+    }
+  },
+  "ERR_INVALID_ASYNC_ID": {
+    "code": "ERR_INVALID_ASYNC_ID",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_INVALID_ASYNC_ID",
+    "message": "Invalid __a__ value: 1",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_BUFFER_SIZE": {
+    "code": "ERR_INVALID_BUFFER_SIZE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_INVALID_BUFFER_SIZE",
+    "message": "Buffer size must be a multiple of __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_CHAR": {
+    "code": "ERR_INVALID_CHAR",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_CHAR",
+    "message": "Invalid character in __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_CURSOR_POS": {
+    "code": "ERR_INVALID_CURSOR_POS",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_CURSOR_POS",
+    "message": "Cannot set cursor row without setting its column",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_FD": {
+    "code": "ERR_INVALID_FD",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_INVALID_FD",
+    "message": "\"fd\" must be a positive integer: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_FD_TYPE": {
+    "code": "ERR_INVALID_FD_TYPE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_FD_TYPE",
+    "message": "Unsupported fd type: __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_FILE_URL_HOST": {
+    "code": "ERR_INVALID_FILE_URL_HOST",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_FILE_URL_HOST",
+    "message": "File URL host must be \"localhost\" or empty on __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_FILE_URL_PATH": {
+    "code": "ERR_INVALID_FILE_URL_PATH",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_FILE_URL_PATH",
+    "message": "File URL path __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "input": 1
+    },
+    "extra": {}
+  },
+  "ERR_INVALID_HANDLE_TYPE": {
+    "code": "ERR_INVALID_HANDLE_TYPE",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_HANDLE_TYPE",
+    "message": "This handle type cannot be sent",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_HTTP_TOKEN": {
+    "code": "ERR_INVALID_HTTP_TOKEN",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_HTTP_TOKEN",
+    "message": "__a__ must be a valid HTTP token [\"1\"]",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_IP_ADDRESS": {
+    "code": "ERR_INVALID_IP_ADDRESS",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_IP_ADDRESS",
+    "message": "Invalid IP address: __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_MIME_SYNTAX": {
+    "code": "ERR_INVALID_MIME_SYNTAX",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_MIME_SYNTAX",
+    "message": "The MIME syntax for a __a__ in \"1\" is invalid at x,y",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_MODULE_SPECIFIER": {
+    "code": "ERR_INVALID_MODULE_SPECIFIER",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_MODULE_SPECIFIER",
+    "message": "Invalid module \"__a__\" 1",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_PACKAGE_CONFIG": {
+    "code": "ERR_INVALID_PACKAGE_CONFIG",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INVALID_PACKAGE_CONFIG",
+    "message": "Invalid package config __a__ while importing 1. x,y",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_PACKAGE_TARGET": {
+    "code": "ERR_INVALID_PACKAGE_TARGET",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INVALID_PACKAGE_TARGET",
+    "message": "Invalid \"exports\" target [\"x\",\"y\"] defined for '1' in the package config __a__package.json",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_PROTOCOL": {
+    "code": "ERR_INVALID_PROTOCOL",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_PROTOCOL",
+    "message": "Protocol \"__a__\" not supported. Expected \"1\"",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_REPL_EVAL_CONFIG": {
+    "code": "ERR_INVALID_REPL_EVAL_CONFIG",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_REPL_EVAL_CONFIG",
+    "message": "Cannot specify both \"breakEvalOnSigint\" and \"eval\" for REPL",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_REPL_INPUT": {
+    "code": "ERR_INVALID_REPL_INPUT",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_REPL_INPUT",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_RETURN_PROPERTY": {
+    "code": "ERR_INVALID_RETURN_PROPERTY",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ],
+      {
+        "k": 1
+      }
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_RETURN_PROPERTY",
+    "message": "Expected a valid __a__ to be returned for the \"x,y\" from the \"1\" hook but got an instance of Object.",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_RETURN_PROPERTY_VALUE": {
+    "code": "ERR_INVALID_RETURN_PROPERTY_VALUE",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ],
+      {
+        "k": 1
+      }
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_RETURN_PROPERTY_VALUE",
+    "message": "Expected __a__ to be returned for the \"x,y\" from the \"1\" hook but got an instance of Object.",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_RETURN_VALUE": {
+    "code": "ERR_INVALID_RETURN_VALUE",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_RETURN_VALUE",
+    "message": "Expected __a__ to be returned from the \"1\" function but got an instance of Array.",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {
+      "RangeError": {
+        "name": "RangeError",
+        "code": "ERR_INVALID_RETURN_VALUE",
+        "message": "Expected __a__ to be returned from the \"1\" function but got an instance of Array."
+      }
+    }
+  },
+  "ERR_INVALID_STATE": {
+    "code": "ERR_INVALID_STATE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_INVALID_STATE",
+    "message": "Invalid state: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {
+      "TypeError": {
+        "name": "TypeError",
+        "code": "ERR_INVALID_STATE",
+        "message": "Invalid state: __a__"
+      },
+      "RangeError": {
+        "name": "RangeError",
+        "code": "ERR_INVALID_STATE",
+        "message": "Invalid state: __a__"
+      }
+    }
+  },
+  "ERR_INVALID_SYNC_FORK_INPUT": {
+    "code": "ERR_INVALID_SYNC_FORK_INPUT",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_SYNC_FORK_INPUT",
+    "message": "Asynchronous forks do not support Buffer, TypedArray, DataView or string input: __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_THIS": {
+    "code": "ERR_INVALID_THIS",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_THIS",
+    "message": "Value of \"this\" must be of type __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_TUPLE": {
+    "code": "ERR_INVALID_TUPLE",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_TUPLE",
+    "message": "__a__ must be an iterable 1 tuple",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_TYPESCRIPT_SYNTAX": {
+    "code": "ERR_INVALID_TYPESCRIPT_SYNTAX",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SyntaxError",
+    "errorCode": "ERR_INVALID_TYPESCRIPT_SYNTAX",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": true,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_URI": {
+    "code": "ERR_INVALID_URI",
+    "args": [],
+    "built": true,
+    "name": "URIError",
+    "errorCode": "ERR_INVALID_URI",
+    "message": "URI malformed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_INVALID_URL": {
+    "code": "ERR_INVALID_URL",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_URL",
+    "message": "Invalid URL",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "input": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_INVALID_URL_SCHEME": {
+    "code": "ERR_INVALID_URL_SCHEME",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_URL_SCHEME",
+    "message": "The URL must be of scheme __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_IPC_CHANNEL_CLOSED": {
+    "code": "ERR_IPC_CHANNEL_CLOSED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_IPC_CHANNEL_CLOSED",
+    "message": "Channel closed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_IPC_DISCONNECTED": {
+    "code": "ERR_IPC_DISCONNECTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_IPC_DISCONNECTED",
+    "message": "IPC channel is already disconnected",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_IPC_ONE_PIPE": {
+    "code": "ERR_IPC_ONE_PIPE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_IPC_ONE_PIPE",
+    "message": "Child process can have only one IPC pipe",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_IPC_SYNC_FORK": {
+    "code": "ERR_IPC_SYNC_FORK",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_IPC_SYNC_FORK",
+    "message": "IPC cannot be used with synchronous forks",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_IP_BLOCKED": {
+    "code": "ERR_IP_BLOCKED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_IP_BLOCKED",
+    "message": "IP(__a__) is blocked by net.BlockList",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_LOADER_CHAIN_INCOMPLETE": {
+    "code": "ERR_LOADER_CHAIN_INCOMPLETE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_LOADER_CHAIN_INCOMPLETE",
+    "message": "\"__a__\" did not call the next hook in its chain and did not explicitly signal a short circuit. If this is intentional, include `shortCircuit: true` in the hook's return.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_METHOD_NOT_IMPLEMENTED": {
+    "code": "ERR_METHOD_NOT_IMPLEMENTED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_METHOD_NOT_IMPLEMENTED",
+    "message": "The __a__ method is not implemented",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_MISSING_ARGS": {
+    "code": "ERR_MISSING_ARGS",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_MISSING_ARGS",
+    "message": "The \"__a__\" argument must be specified",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_MISSING_OPTION": {
+    "code": "ERR_MISSING_OPTION",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_MISSING_OPTION",
+    "message": "__a__ is required",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_MODULE_LINK_MISMATCH": {
+    "code": "ERR_MODULE_LINK_MISMATCH",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_MODULE_LINK_MISMATCH",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_MODULE_NOT_FOUND": {
+    "code": "ERR_MODULE_NOT_FOUND",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_MODULE_NOT_FOUND",
+    "message": "Cannot find module '__a__' imported from 1",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "url": "x,y"
+    },
+    "extra": {}
+  },
+  "ERR_MULTIPLE_CALLBACK": {
+    "code": "ERR_MULTIPLE_CALLBACK",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_MULTIPLE_CALLBACK",
+    "message": "Callback called multiple times",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_NAPI_CONS_FUNCTION": {
+    "code": "ERR_NAPI_CONS_FUNCTION",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_NAPI_CONS_FUNCTION",
+    "message": "Constructor must be a function",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_NAPI_INVALID_DATAVIEW_ARGS": {
+    "code": "ERR_NAPI_INVALID_DATAVIEW_ARGS",
+    "args": [],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_NAPI_INVALID_DATAVIEW_ARGS",
+    "message": "byte_offset + byte_length should be less than or equal to the size in bytes of the array passed in",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_NAPI_INVALID_TYPEDARRAY_ALIGNMENT": {
+    "code": "ERR_NAPI_INVALID_TYPEDARRAY_ALIGNMENT",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_NAPI_INVALID_TYPEDARRAY_ALIGNMENT",
+    "message": "start offset of __a__ should be a multiple of 1",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_NAPI_INVALID_TYPEDARRAY_LENGTH": {
+    "code": "ERR_NAPI_INVALID_TYPEDARRAY_LENGTH",
+    "args": [],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_NAPI_INVALID_TYPEDARRAY_LENGTH",
+    "message": "Invalid typed array length",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_NOT_BUILDING_SNAPSHOT": {
+    "code": "ERR_NOT_BUILDING_SNAPSHOT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_NOT_BUILDING_SNAPSHOT",
+    "message": "Operation cannot be invoked when not building startup snapshot",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_NOT_IN_SINGLE_EXECUTABLE_APPLICATION": {
+    "code": "ERR_NOT_IN_SINGLE_EXECUTABLE_APPLICATION",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_NOT_IN_SINGLE_EXECUTABLE_APPLICATION",
+    "message": "Operation cannot be invoked when not in a single-executable application",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_NOT_SUPPORTED_IN_SNAPSHOT": {
+    "code": "ERR_NOT_SUPPORTED_IN_SNAPSHOT",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_NOT_SUPPORTED_IN_SNAPSHOT",
+    "message": "__a__ is not supported in startup snapshot",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_NO_CRYPTO": {
+    "code": "ERR_NO_CRYPTO",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_NO_CRYPTO",
+    "message": "Node.js is not compiled with OpenSSL crypto support",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_NO_ICU": {
+    "code": "ERR_NO_ICU",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_NO_ICU",
+    "message": "__a__ is not supported on Node.js compiled without ICU",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_NO_TEMPORAL": {
+    "code": "ERR_NO_TEMPORAL",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_NO_TEMPORAL",
+    "message": "Temporal is not supported in this environment",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_NO_TYPESCRIPT": {
+    "code": "ERR_NO_TYPESCRIPT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_NO_TYPESCRIPT",
+    "message": "Node.js is not compiled with TypeScript support",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_OPERATION_FAILED": {
+    "code": "ERR_OPERATION_FAILED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_OPERATION_FAILED",
+    "message": "Operation failed: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {
+      "TypeError": {
+        "name": "TypeError",
+        "code": "ERR_OPERATION_FAILED",
+        "message": "Operation failed: __a__"
+      }
+    }
+  },
+  "ERR_OUT_OF_RANGE": {
+    "code": "ERR_OUT_OF_RANGE",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_OUT_OF_RANGE",
+    "message": "The value of \"__a__\" is out of range. It must be 1. Received [ 'x', 'y' ]",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_PACKAGE_IMPORT_NOT_DEFINED": {
+    "code": "ERR_PACKAGE_IMPORT_NOT_DEFINED",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_PACKAGE_IMPORT_NOT_DEFINED",
+    "message": "Package import specifier \"__a__\" is not defined in package 1package.json imported from x,y",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_PACKAGE_MAP_EXTERNAL_FILE": {
+    "code": "ERR_PACKAGE_MAP_EXTERNAL_FILE",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_PACKAGE_MAP_EXTERNAL_FILE",
+    "message": "Cannot resolve \"__a__\" from \"1\": file is not within any package defined in x,y",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_PACKAGE_MAP_INVALID": {
+    "code": "ERR_PACKAGE_MAP_INVALID",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "SyntaxError",
+    "errorCode": "ERR_PACKAGE_MAP_INVALID",
+    "message": "Invalid package-map.json at \"__a__\": 1",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": true,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_PACKAGE_MAP_KEY_NOT_FOUND": {
+    "code": "ERR_PACKAGE_MAP_KEY_NOT_FOUND",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_PACKAGE_MAP_KEY_NOT_FOUND",
+    "message": "Package key \"__a__\" referenced in dependencies but not defined in 1",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_PACKAGE_PATH_NOT_EXPORTED": {
+    "code": "ERR_PACKAGE_PATH_NOT_EXPORTED",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_PACKAGE_PATH_NOT_EXPORTED",
+    "message": "Package subpath '1' is not defined by \"exports\" in __a__package.json",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_PARSE_ARGS_INVALID_OPTION_VALUE": {
+    "code": "ERR_PARSE_ARGS_INVALID_OPTION_VALUE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_PARSE_ARGS_INVALID_OPTION_VALUE",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL": {
+    "code": "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL",
+    "message": "Unexpected argument '__a__'. This command does not take positional arguments",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_PARSE_ARGS_UNKNOWN_OPTION": {
+    "code": "ERR_PARSE_ARGS_UNKNOWN_OPTION",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_PARSE_ARGS_UNKNOWN_OPTION",
+    "message": "Unknown option '__a__'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"__a__\"",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_PERFORMANCE_INVALID_TIMESTAMP": {
+    "code": "ERR_PERFORMANCE_INVALID_TIMESTAMP",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_PERFORMANCE_INVALID_TIMESTAMP",
+    "message": "NaN is not a valid timestamp",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_PERFORMANCE_MEASURE_INVALID_OPTIONS": {
+    "code": "ERR_PERFORMANCE_MEASURE_INVALID_OPTIONS",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_PERFORMANCE_MEASURE_INVALID_OPTIONS",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_PROXY_INVALID_CONFIG": {
+    "code": "ERR_PROXY_INVALID_CONFIG",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_PROXY_INVALID_CONFIG",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_PROXY_TUNNEL": {
+    "code": "ERR_PROXY_TUNNEL",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_PROXY_TUNNEL",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_QUIC_CONNECTION_FAILED": {
+    "code": "ERR_QUIC_CONNECTION_FAILED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_QUIC_CONNECTION_FAILED",
+    "message": "QUIC connection failed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_QUIC_ENDPOINT_CLOSED": {
+    "code": "ERR_QUIC_ENDPOINT_CLOSED",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_QUIC_ENDPOINT_CLOSED",
+    "message": "QUIC endpoint closed: __a__ (1)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_QUIC_OPEN_STREAM_FAILED": {
+    "code": "ERR_QUIC_OPEN_STREAM_FAILED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_QUIC_OPEN_STREAM_FAILED",
+    "message": "Failed to open QUIC stream",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_QUIC_STREAM_ABORTED": {
+    "code": "ERR_QUIC_STREAM_ABORTED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_QUIC_STREAM_ABORTED",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_QUIC_STREAM_RESET": {
+    "code": "ERR_QUIC_STREAM_RESET",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_QUIC_STREAM_RESET",
+    "message": "The QUIC stream was reset by the peer with error code NaN",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_QUIC_VERSION_NEGOTIATION_ERROR": {
+    "code": "ERR_QUIC_VERSION_NEGOTIATION_ERROR",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_QUIC_VERSION_NEGOTIATION_ERROR",
+    "message": "The QUIC session requires version negotiation",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_REQUIRE_ASYNC_MODULE": {
+    "code": "ERR_REQUIRE_ASYNC_MODULE",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_REQUIRE_ASYNC_MODULE",
+    "message": "require() cannot be used on an ESM graph with top-level await. Use import() instead. To see where the top-level await comes from, use --experimental-print-required-tla.\nRequired module: __a__\nRequire stack:\n- ",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_REQUIRE_CYCLE_MODULE": {
+    "code": "ERR_REQUIRE_CYCLE_MODULE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_REQUIRE_CYCLE_MODULE",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_REQUIRE_ESM": {
+    "code": "ERR_REQUIRE_ESM",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_REQUIRE_ESM",
+    "message": "require() of ES Module __a__ not supported.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_REQUIRE_ESM_RACE_CONDITION": {
+    "code": "ERR_REQUIRE_ESM_RACE_CONDITION",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_REQUIRE_ESM_RACE_CONDITION",
+    "message": "Cannot require() ES Module __a__ because it is not yet fully loaded.\nThis may be caused by a race condition if the module is simultaneously dynamically import()-ed via Promise.all().\nTry await-ing the import() sequentially in a loop instead.\n (From 1 in loader hook worker thread)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SCRIPT_EXECUTION_INTERRUPTED": {
+    "code": "ERR_SCRIPT_EXECUTION_INTERRUPTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SCRIPT_EXECUTION_INTERRUPTED",
+    "message": "Script execution was interrupted by `SIGINT`",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SERVER_ALREADY_LISTEN": {
+    "code": "ERR_SERVER_ALREADY_LISTEN",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SERVER_ALREADY_LISTEN",
+    "message": "Listen method has been called more than once without closing.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SERVER_NOT_RUNNING": {
+    "code": "ERR_SERVER_NOT_RUNNING",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SERVER_NOT_RUNNING",
+    "message": "Server is not running.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SINGLE_EXECUTABLE_APPLICATION_ASSET_NOT_FOUND": {
+    "code": "ERR_SINGLE_EXECUTABLE_APPLICATION_ASSET_NOT_FOUND",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SINGLE_EXECUTABLE_APPLICATION_ASSET_NOT_FOUND",
+    "message": "Cannot find asset __a__ for the single executable application",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOCKET_ALREADY_BOUND": {
+    "code": "ERR_SOCKET_ALREADY_BOUND",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SOCKET_ALREADY_BOUND",
+    "message": "Socket is already bound",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOCKET_BAD_BUFFER_SIZE": {
+    "code": "ERR_SOCKET_BAD_BUFFER_SIZE",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_SOCKET_BAD_BUFFER_SIZE",
+    "message": "Buffer size must be a positive integer",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOCKET_BAD_PORT": {
+    "code": "ERR_SOCKET_BAD_PORT",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_SOCKET_BAD_PORT",
+    "message": "__a__ should be >= 0 and < 65536. Received type number (1).",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOCKET_BAD_TYPE": {
+    "code": "ERR_SOCKET_BAD_TYPE",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_SOCKET_BAD_TYPE",
+    "message": "Bad socket type specified. Valid types are: udp4, udp6",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOCKET_BUFFER_SIZE": {
+    "code": "ERR_SOCKET_BUFFER_SIZE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SystemError",
+    "errorCode": "ERR_SOCKET_BUFFER_SIZE",
+    "message": "Could not get or set buffer size: undefined returned undefined (undefined)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "info": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_SOCKET_CLOSED": {
+    "code": "ERR_SOCKET_CLOSED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SOCKET_CLOSED",
+    "message": "Socket is closed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOCKET_CLOSED_BEFORE_CONNECTION": {
+    "code": "ERR_SOCKET_CLOSED_BEFORE_CONNECTION",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SOCKET_CLOSED_BEFORE_CONNECTION",
+    "message": "Socket closed before the connection was established",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOCKET_CONNECTION_TIMEOUT": {
+    "code": "ERR_SOCKET_CONNECTION_TIMEOUT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SOCKET_CONNECTION_TIMEOUT",
+    "message": "Socket connection timeout",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOCKET_DGRAM_IS_CONNECTED": {
+    "code": "ERR_SOCKET_DGRAM_IS_CONNECTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SOCKET_DGRAM_IS_CONNECTED",
+    "message": "Already connected",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOCKET_DGRAM_NOT_CONNECTED": {
+    "code": "ERR_SOCKET_DGRAM_NOT_CONNECTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SOCKET_DGRAM_NOT_CONNECTED",
+    "message": "Not connected",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOCKET_DGRAM_NOT_RUNNING": {
+    "code": "ERR_SOCKET_DGRAM_NOT_RUNNING",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SOCKET_DGRAM_NOT_RUNNING",
+    "message": "Not running",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOCKET_HANDLE_ADOPTED": {
+    "code": "ERR_SOCKET_HANDLE_ADOPTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SOCKET_HANDLE_ADOPTED",
+    "message": "The bound socket has already been adopted by a server or socket",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOURCE_MAP_CORRUPT": {
+    "code": "ERR_SOURCE_MAP_CORRUPT",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SOURCE_MAP_CORRUPT",
+    "message": "The source map for '__a__' does not exist or is corrupt.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SOURCE_MAP_MISSING_SOURCE": {
+    "code": "ERR_SOURCE_MAP_MISSING_SOURCE",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SOURCE_MAP_MISSING_SOURCE",
+    "message": "Cannot find '__a__' imported from the source map for '1'",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SRI_PARSE": {
+    "code": "ERR_SRI_PARSE",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "SyntaxError",
+    "errorCode": "ERR_SRI_PARSE",
+    "message": "Subresource Integrity string \"__a__\" had an unexpected 1 at position NaN",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": true,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_STREAM_ALREADY_FINISHED": {
+    "code": "ERR_STREAM_ALREADY_FINISHED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_STREAM_ALREADY_FINISHED",
+    "message": "Cannot call __a__ after a stream was finished",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_STREAM_CANNOT_PIPE": {
+    "code": "ERR_STREAM_CANNOT_PIPE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_STREAM_CANNOT_PIPE",
+    "message": "Cannot pipe, not readable",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_STREAM_DESTROYED": {
+    "code": "ERR_STREAM_DESTROYED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_STREAM_DESTROYED",
+    "message": "Cannot call __a__ after a stream was destroyed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_STREAM_ITER_MISSING_FLAG": {
+    "code": "ERR_STREAM_ITER_MISSING_FLAG",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_STREAM_ITER_MISSING_FLAG",
+    "message": "The stream/iter API requires the --experimental-stream-iter flag",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_STREAM_NULL_VALUES": {
+    "code": "ERR_STREAM_NULL_VALUES",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_STREAM_NULL_VALUES",
+    "message": "May not write null values to stream",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_STREAM_PREMATURE_CLOSE": {
+    "code": "ERR_STREAM_PREMATURE_CLOSE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_STREAM_PREMATURE_CLOSE",
+    "message": "Premature close",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_STREAM_PUSH_AFTER_EOF": {
+    "code": "ERR_STREAM_PUSH_AFTER_EOF",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_STREAM_PUSH_AFTER_EOF",
+    "message": "stream.push() after EOF",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_STREAM_UNABLE_TO_PIPE": {
+    "code": "ERR_STREAM_UNABLE_TO_PIPE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_STREAM_UNABLE_TO_PIPE",
+    "message": "Cannot pipe to a closed or destroyed stream",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_STREAM_UNSHIFT_AFTER_END_EVENT": {
+    "code": "ERR_STREAM_UNSHIFT_AFTER_END_EVENT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_STREAM_UNSHIFT_AFTER_END_EVENT",
+    "message": "stream.unshift() after end event",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_STREAM_WRAP": {
+    "code": "ERR_STREAM_WRAP",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_STREAM_WRAP",
+    "message": "Stream has StringDecoder set or is in objectMode",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_STREAM_WRITE_AFTER_END": {
+    "code": "ERR_STREAM_WRITE_AFTER_END",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_STREAM_WRITE_AFTER_END",
+    "message": "write after end",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SYNTHETIC": {
+    "code": "ERR_SYNTHETIC",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_SYNTHETIC",
+    "message": "JavaScript Callstack",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_SYSTEM_ERROR": {
+    "code": "ERR_SYSTEM_ERROR",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SystemError",
+    "errorCode": "ERR_SYSTEM_ERROR",
+    "message": "A system error occurred: undefined returned undefined (undefined)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "info": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_TEST_FAILURE": {
+    "code": "ERR_TEST_FAILURE",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": false,
+    "threw": "Error: The 'failureType' argument must be of type string or symbol.\nThis is caused by either a bug in Node.js or incorrect usage of Node.js internals.\nPlease open an issue with this stack trace at https://github.com/nodejs/node/issues\n"
+  },
+  "ERR_TLS_ALPN_CALLBACK_INVALID_RESULT": {
+    "code": "ERR_TLS_ALPN_CALLBACK_INVALID_RESULT",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": false,
+    "threw": "TypeError: protocols.join is not a function"
+  },
+  "ERR_TLS_ALPN_CALLBACK_WITH_PROTOCOLS": {
+    "code": "ERR_TLS_ALPN_CALLBACK_WITH_PROTOCOLS",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_TLS_ALPN_CALLBACK_WITH_PROTOCOLS",
+    "message": "The ALPNCallback and ALPNProtocols TLS options are mutually exclusive",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TLS_CERT_ALTNAME_FORMAT": {
+    "code": "ERR_TLS_CERT_ALTNAME_FORMAT",
+    "args": [],
+    "built": true,
+    "name": "SyntaxError",
+    "errorCode": "ERR_TLS_CERT_ALTNAME_FORMAT",
+    "message": "Invalid subject alternative name string",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": true,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TLS_CERT_ALTNAME_INVALID": {
+    "code": "ERR_TLS_CERT_ALTNAME_INVALID",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_TLS_CERT_ALTNAME_INVALID",
+    "message": "Hostname/IP does not match certificate's altnames: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "reason": "__a__",
+      "host": 1,
+      "cert": [
+        "x",
+        "y"
+      ]
+    },
+    "extra": {}
+  },
+  "ERR_TLS_DH_PARAM_SIZE": {
+    "code": "ERR_TLS_DH_PARAM_SIZE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_TLS_DH_PARAM_SIZE",
+    "message": "DH parameter size __a__ is less than 2048",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TLS_HANDSHAKE_TIMEOUT": {
+    "code": "ERR_TLS_HANDSHAKE_TIMEOUT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_TLS_HANDSHAKE_TIMEOUT",
+    "message": "TLS handshake timeout",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TLS_INVALID_CONTEXT": {
+    "code": "ERR_TLS_INVALID_CONTEXT",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_TLS_INVALID_CONTEXT",
+    "message": "__a__ must be a SecureContext",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TLS_INVALID_PROTOCOL_VERSION": {
+    "code": "ERR_TLS_INVALID_PROTOCOL_VERSION",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_TLS_INVALID_PROTOCOL_VERSION",
+    "message": "\"__a__\" is not a valid 1 TLS protocol version",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TLS_INVALID_STATE": {
+    "code": "ERR_TLS_INVALID_STATE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_TLS_INVALID_STATE",
+    "message": "TLS socket connection must be securely established",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TLS_PROTOCOL_VERSION_CONFLICT": {
+    "code": "ERR_TLS_PROTOCOL_VERSION_CONFLICT",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_TLS_PROTOCOL_VERSION_CONFLICT",
+    "message": "TLS protocol version \"__a__\" conflicts with secureProtocol 1",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TLS_RENEGOTIATION_DISABLED": {
+    "code": "ERR_TLS_RENEGOTIATION_DISABLED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_TLS_RENEGOTIATION_DISABLED",
+    "message": "TLS session renegotiation disabled for this socket",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TLS_RENEGOTIATION_UNSUPPORTED": {
+    "code": "ERR_TLS_RENEGOTIATION_UNSUPPORTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_TLS_RENEGOTIATION_UNSUPPORTED",
+    "message": "TLS session renegotiation is unsupported by this TLS implementation",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TLS_REQUIRED_SERVER_NAME": {
+    "code": "ERR_TLS_REQUIRED_SERVER_NAME",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_TLS_REQUIRED_SERVER_NAME",
+    "message": "\"servername\" is required parameter for Server.addContext",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TLS_SESSION_ATTACK": {
+    "code": "ERR_TLS_SESSION_ATTACK",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_TLS_SESSION_ATTACK",
+    "message": "TLS session renegotiation attack detected",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TLS_SNI_FROM_SERVER": {
+    "code": "ERR_TLS_SNI_FROM_SERVER",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_TLS_SNI_FROM_SERVER",
+    "message": "Cannot issue SNI from a TLS server-side socket",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TRACE_EVENTS_CATEGORY_REQUIRED": {
+    "code": "ERR_TRACE_EVENTS_CATEGORY_REQUIRED",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_TRACE_EVENTS_CATEGORY_REQUIRED",
+    "message": "At least one category is required",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TRACE_EVENTS_UNAVAILABLE": {
+    "code": "ERR_TRACE_EVENTS_UNAVAILABLE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_TRACE_EVENTS_UNAVAILABLE",
+    "message": "Trace events are unavailable",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TRAILING_JUNK_AFTER_STREAM_END": {
+    "code": "ERR_TRAILING_JUNK_AFTER_STREAM_END",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_TRAILING_JUNK_AFTER_STREAM_END",
+    "message": "Trailing junk found after the end of the compressed stream",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_TTY_INIT_FAILED": {
+    "code": "ERR_TTY_INIT_FAILED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SystemError",
+    "errorCode": "ERR_TTY_INIT_FAILED",
+    "message": "TTY initialization failed: undefined returned undefined (undefined)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "info": "__a__"
+    },
+    "extra": {}
+  },
+  "ERR_UNAVAILABLE_DURING_EXIT": {
+    "code": "ERR_UNAVAILABLE_DURING_EXIT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_UNAVAILABLE_DURING_EXIT",
+    "message": "Cannot call function in process exit handler",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNCAUGHT_EXCEPTION_CAPTURE_ALREADY_SET": {
+    "code": "ERR_UNCAUGHT_EXCEPTION_CAPTURE_ALREADY_SET",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_UNCAUGHT_EXCEPTION_CAPTURE_ALREADY_SET",
+    "message": "`process.setupUncaughtExceptionCapture()` was called while a capture callback was already active",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNESCAPED_CHARACTERS": {
+    "code": "ERR_UNESCAPED_CHARACTERS",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_UNESCAPED_CHARACTERS",
+    "message": "__a__ contains unescaped characters",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNHANDLED_ERROR": {
+    "code": "ERR_UNHANDLED_ERROR",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_UNHANDLED_ERROR",
+    "message": "Unhandled error.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNKNOWN_BUILTIN_MODULE": {
+    "code": "ERR_UNKNOWN_BUILTIN_MODULE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_UNKNOWN_BUILTIN_MODULE",
+    "message": "No such built-in module: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNKNOWN_CREDENTIAL": {
+    "code": "ERR_UNKNOWN_CREDENTIAL",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_UNKNOWN_CREDENTIAL",
+    "message": "__a__ identifier does not exist: 1",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNKNOWN_ENCODING": {
+    "code": "ERR_UNKNOWN_ENCODING",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_UNKNOWN_ENCODING",
+    "message": "Unknown encoding: __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNKNOWN_FILE_EXTENSION": {
+    "code": "ERR_UNKNOWN_FILE_EXTENSION",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_UNKNOWN_FILE_EXTENSION",
+    "message": "Unknown file extension \"__a__\" for 1",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNKNOWN_MODULE_FORMAT": {
+    "code": "ERR_UNKNOWN_MODULE_FORMAT",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_UNKNOWN_MODULE_FORMAT",
+    "message": "Unknown module format: __a__ for URL 1",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNKNOWN_SIGNAL": {
+    "code": "ERR_UNKNOWN_SIGNAL",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_UNKNOWN_SIGNAL",
+    "message": "Unknown signal: __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNSUPPORTED_DIR_IMPORT": {
+    "code": "ERR_UNSUPPORTED_DIR_IMPORT",
+    "args": [
+      "__a__",
+      1,
+      [
+        "x",
+        "y"
+      ]
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_UNSUPPORTED_DIR_IMPORT",
+    "message": "Directory import '__a__' is not supported resolving ES modules imported from 1",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "url": [
+        "x",
+        "y"
+      ]
+    },
+    "extra": {}
+  },
+  "ERR_UNSUPPORTED_ESM_URL_SCHEME": {
+    "code": "ERR_UNSUPPORTED_ESM_URL_SCHEME",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_UNSUPPORTED_ESM_URL_SCHEME",
+    "message": "Only URLs with a scheme in: , and undefined are supported by the default ESM loader. Received protocol 'undefined'",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING": {
+    "code": "ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING",
+    "message": "Stripping types is currently unsupported for files under node_modules, for \"__a__\"",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNSUPPORTED_RESOLVE_REQUEST": {
+    "code": "ERR_UNSUPPORTED_RESOLVE_REQUEST",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_UNSUPPORTED_RESOLVE_REQUEST",
+    "message": "Failed to resolve module specifier \"__a__\" from \"1\": Invalid relative URL or base scheme is not hierarchical.",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX": {
+    "code": "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "SyntaxError",
+    "errorCode": "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": true,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_USE_AFTER_CLOSE": {
+    "code": "ERR_USE_AFTER_CLOSE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_USE_AFTER_CLOSE",
+    "message": "__a__ was closed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_VALID_PERFORMANCE_ENTRY_TYPE": {
+    "code": "ERR_VALID_PERFORMANCE_ENTRY_TYPE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_VALID_PERFORMANCE_ENTRY_TYPE",
+    "message": "At least one valid performance entry type is required",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING": {
+    "code": "ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING",
+    "message": "A dynamic import callback was not specified.",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING_FLAG": {
+    "code": "ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING_FLAG",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING_FLAG",
+    "message": "A dynamic import callback was invoked without --experimental-vm-modules",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_VM_MODULE_ALREADY_LINKED": {
+    "code": "ERR_VM_MODULE_ALREADY_LINKED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_VM_MODULE_ALREADY_LINKED",
+    "message": "Module has already been linked",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_VM_MODULE_CANNOT_CREATE_CACHED_DATA": {
+    "code": "ERR_VM_MODULE_CANNOT_CREATE_CACHED_DATA",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_VM_MODULE_CANNOT_CREATE_CACHED_DATA",
+    "message": "Cached data cannot be created for a module which has been evaluated",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_VM_MODULE_DIFFERENT_CONTEXT": {
+    "code": "ERR_VM_MODULE_DIFFERENT_CONTEXT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_VM_MODULE_DIFFERENT_CONTEXT",
+    "message": "Linked modules must use the same context",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_VM_MODULE_LINK_FAILURE": {
+    "code": "ERR_VM_MODULE_LINK_FAILURE",
+    "args": [
+      "__a__",
+      1
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_VM_MODULE_LINK_FAILURE",
+    "message": "__a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {
+      "cause": 1
+    },
+    "extra": {}
+  },
+  "ERR_VM_MODULE_NOT_MODULE": {
+    "code": "ERR_VM_MODULE_NOT_MODULE",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_VM_MODULE_NOT_MODULE",
+    "message": "Provided module is not an instance of Module",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_VM_MODULE_STATUS": {
+    "code": "ERR_VM_MODULE_STATUS",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_VM_MODULE_STATUS",
+    "message": "Module status __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WASI_ALREADY_STARTED": {
+    "code": "ERR_WASI_ALREADY_STARTED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_WASI_ALREADY_STARTED",
+    "message": "WASI instance has already started",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WEBASSEMBLY_NOT_SUPPORTED": {
+    "code": "ERR_WEBASSEMBLY_NOT_SUPPORTED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_WEBASSEMBLY_NOT_SUPPORTED",
+    "message": "WebAssembly is not supported in this environment, but is required for __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WEBASSEMBLY_RESPONSE": {
+    "code": "ERR_WEBASSEMBLY_RESPONSE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_WEBASSEMBLY_RESPONSE",
+    "message": "WebAssembly response __a__",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WORKER_HANDLE_NOT_TRANSFERABLE": {
+    "code": "ERR_WORKER_HANDLE_NOT_TRANSFERABLE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_WORKER_HANDLE_NOT_TRANSFERABLE",
+    "message": "__a__ cannot be transferred in its current state; it must be a freshly created or accepted handle that has not started reading and has no pending writes",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WORKER_INIT_FAILED": {
+    "code": "ERR_WORKER_INIT_FAILED",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_WORKER_INIT_FAILED",
+    "message": "Worker initialization failure: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WORKER_INVALID_EXEC_ARGV": {
+    "code": "ERR_WORKER_INVALID_EXEC_ARGV",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_WORKER_INVALID_EXEC_ARGV",
+    "message": "Initiated Worker with invalid execArgv flags: _, _, a, _, _",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WORKER_MESSAGING_ERRORED": {
+    "code": "ERR_WORKER_MESSAGING_ERRORED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_WORKER_MESSAGING_ERRORED",
+    "message": "The destination thread threw an error while processing the message",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WORKER_MESSAGING_FAILED": {
+    "code": "ERR_WORKER_MESSAGING_FAILED",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_WORKER_MESSAGING_FAILED",
+    "message": "Cannot find the destination thread or listener",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WORKER_MESSAGING_SAME_THREAD": {
+    "code": "ERR_WORKER_MESSAGING_SAME_THREAD",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_WORKER_MESSAGING_SAME_THREAD",
+    "message": "Cannot sent a message to the same thread",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WORKER_MESSAGING_TIMEOUT": {
+    "code": "ERR_WORKER_MESSAGING_TIMEOUT",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_WORKER_MESSAGING_TIMEOUT",
+    "message": "Sending a message to another thread timed out",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WORKER_NOT_RUNNING": {
+    "code": "ERR_WORKER_NOT_RUNNING",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_WORKER_NOT_RUNNING",
+    "message": "Worker instance not running",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WORKER_OUT_OF_MEMORY": {
+    "code": "ERR_WORKER_OUT_OF_MEMORY",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_WORKER_OUT_OF_MEMORY",
+    "message": "Worker terminated due to reaching memory limit: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WORKER_PATH": {
+    "code": "ERR_WORKER_PATH",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_WORKER_PATH",
+    "message": "The worker script or module filename must be an absolute path or a relative path starting with './' or '../'. Received \"__a__\"",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WORKER_UNSERIALIZABLE_ERROR": {
+    "code": "ERR_WORKER_UNSERIALIZABLE_ERROR",
+    "args": [],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_WORKER_UNSERIALIZABLE_ERROR",
+    "message": "Serializing an uncaught exception failed",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_WORKER_UNSUPPORTED_OPERATION": {
+    "code": "ERR_WORKER_UNSUPPORTED_OPERATION",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_WORKER_UNSUPPORTED_OPERATION",
+    "message": "__a__ is not supported in workers",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ZIP_ARCHIVE_TOO_LARGE": {
+    "code": "ERR_ZIP_ARCHIVE_TOO_LARGE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_ZIP_ARCHIVE_TOO_LARGE",
+    "message": "ZIP archive structure exceeds the allowed size: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ZIP_ENTRY_CORRUPT": {
+    "code": "ERR_ZIP_ENTRY_CORRUPT",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_ZIP_ENTRY_CORRUPT",
+    "message": "ZIP entry is corrupt: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ZIP_ENTRY_NOT_FOUND": {
+    "code": "ERR_ZIP_ENTRY_NOT_FOUND",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_ZIP_ENTRY_NOT_FOUND",
+    "message": "no such entry \"__a__\" in the archive",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ZIP_ENTRY_TOO_LARGE": {
+    "code": "ERR_ZIP_ENTRY_TOO_LARGE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_ZIP_ENTRY_TOO_LARGE",
+    "message": "ZIP entry exceeds the allowed size: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ZIP_INVALID_ARCHIVE": {
+    "code": "ERR_ZIP_INVALID_ARCHIVE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_ZIP_INVALID_ARCHIVE",
+    "message": "invalid ZIP archive: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ZIP_NOT_WRITABLE": {
+    "code": "ERR_ZIP_NOT_WRITABLE",
+    "args": [],
+    "built": true,
+    "name": "TypeError",
+    "errorCode": "ERR_ZIP_NOT_WRITABLE",
+    "message": "this archive was not opened for writing",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ZIP_UNSUPPORTED_FEATURE": {
+    "code": "ERR_ZIP_UNSUPPORTED_FEATURE",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "Error",
+    "errorCode": "ERR_ZIP_UNSUPPORTED_FEATURE",
+    "message": "unsupported ZIP feature: __a__",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  },
+  "ERR_ZSTD_INVALID_PARAM": {
+    "code": "ERR_ZSTD_INVALID_PARAM",
+    "args": [
+      "__a__"
+    ],
+    "built": true,
+    "name": "RangeError",
+    "errorCode": "ERR_ZSTD_INVALID_PARAM",
+    "message": "__a__ is not a valid zstd parameter",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "props": {},
+    "extra": {}
+  }
+}
