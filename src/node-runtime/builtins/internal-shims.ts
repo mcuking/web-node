@@ -80,6 +80,9 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_SOCKET_BAD_PORT: 'Port should be %s. Received %s',
   ERR_INVALID_ADDRESS: 'Invalid socket address',
   ERR_CRYPTO_ENGINE_UNKNOWN: 'Engine "%s" was not found',
+  ERR_INVALID_HTTP_TOKEN: '%s must be a valid HTTP token ["%s"]',
+  ERR_HTTP_INVALID_HEADER_VALUE: 'Invalid value "%s" for header "%s"',
+  ERR_INVALID_CHAR: 'Invalid character in %s',
   ERR_NO_CRYPTO: 'Node.js is not compiled with OpenSSL crypto support',
   ERR_NO_TYPESCRIPT: 'Node.js is not compiled with TypeScript support',
   ERR_WEBASSEMBLY_NOT_SUPPORTED:
@@ -193,6 +196,9 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_FALSY_VALUE_REJECTION: Error,
   ERR_INVALID_MIME_SYNTAX: TypeError,
   ERR_PARSE_ARGS_INVALID_OPTION_VALUE: TypeError,
+  ERR_INVALID_HTTP_TOKEN: TypeError,
+  ERR_HTTP_INVALID_HEADER_VALUE: TypeError,
+  ERR_INVALID_CHAR: TypeError,
   ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL: TypeError,
   ERR_PARSE_ARGS_UNKNOWN_OPTION: TypeError,
   ERR_EVENT_RECURSION: Error,
@@ -272,6 +278,14 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
     const [name, value, reason] = args as [string, unknown, string?];
     const type = String(name).includes('.') ? 'property' : 'argument';
     return `The ${type} '${name}' ${reason ?? 'is invalid'}. Received ${inspectArg(value)}`;
+  },
+  // `ERR_INVALID_CHAR(name, field = undefined)`: appends the quoted field only
+  // when one was given (default arg keeps `Function#length` at 1).
+  ERR_INVALID_CHAR: (args) => {
+    const [name, field] = args as [string, string?];
+    let msg = `Invalid character in ${name}`;
+    if (field !== undefined) msg += ` ["${field}"]`;
+    return msg;
   },
   ERR_INVALID_ARG_TYPE: formatInvalidArgType,
   // `ERR_ACCESS_DENIED(message, permission = '', resource = '')`: the message is

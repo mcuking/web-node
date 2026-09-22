@@ -1,5 +1,6 @@
 import type { BuiltinSpec, BuiltinInitContext } from './types';
 import type { VirtualSocket } from '../net/network';
+import { notImplemented } from '../errors';
 
 /**
  * `http` builtin — a TS equivalent implementation of the Node core module.
@@ -337,6 +338,14 @@ export const httpSpec: BuiltinSpec = {
       throw new TypeError('The "chunk" argument must be of type string or an instance of Buffer');
     }
 
+    // -- OutgoingMessage ------------------------------------------------------
+
+    /**
+     * Base class of both `ServerResponse` and `ClientRequest` — exported so
+     * `res instanceof http.OutgoingMessage` holds, like Node.
+     */
+    class OutgoingMessage extends (Writable as new (opts?: Record<string, unknown>) => WritableLike) {}
+
     // -- IncomingMessage ------------------------------------------------------
 
     class IncomingMessage extends (Readable as new (opts?: Record<string, unknown>) => ReadableLike) {
@@ -432,7 +441,7 @@ export const httpSpec: BuiltinSpec = {
 
     // -- ServerResponse -------------------------------------------------------
 
-    class ServerResponse extends (Writable as new (opts?: Record<string, unknown>) => WritableLike) {
+    class ServerResponse extends OutgoingMessage {
       statusCode = 200;
       statusMessage: string | undefined = undefined;
       headersSent = false;
@@ -608,10 +617,11 @@ export const httpSpec: BuiltinSpec = {
       constructor(requestListener?: (req: IncomingMessage, res: ServerResponse) => void) {
         super();
         if (typeof requestListener === 'function') this.on('request', requestListener as never);
-        this.on('connection', ((socket: NetSocket) => this.#serveConnection(socket)) as never);
+        this.on('connection', _connectionListener as never);
       }
 
-      #serveConnection(socket: NetSocket): void {
+      /** @internal — Node names this `_connectionListener`; see below. */
+      _serveConnection(socket: NetSocket): void {
         let reader: HttpMessageReader;
         let currentReq: IncomingMessage | null = null;
 
@@ -681,6 +691,14 @@ export const httpSpec: BuiltinSpec = {
         }) as never);
         socket.on('error' as never, (() => undefined) as never);
       }
+    }
+
+    /**
+     * Node's `http._connectionListener`: attach the per-connection HTTP
+     * request loop. EventEmitter invokes listeners with `this` = the server.
+     */
+    function _connectionListener(this: Server, socket: NetSocket): void {
+      this._serveConnection(socket);
     }
 
     function createServer(requestListener?: (req: IncomingMessage, res: ServerResponse) => void): Server {
@@ -797,9 +815,10 @@ export const httpSpec: BuiltinSpec = {
       path?: string;
       method?: string;
       headers?: Record<string, string | string[]>;
+      agent?: unknown;
     }
 
-    class ClientRequest extends (Writable as new (opts?: Record<string, unknown>) => WritableLike) {
+    class ClientRequest extends OutgoingMessage {
       method: string;
       path: string;
       host: string;
@@ -808,10 +827,12 @@ export const httpSpec: BuiltinSpec = {
       aborted = false;
       finished = false;
       reusedSocket = false;
+      agent: unknown = globalAgent;
 
       #socket: NetSocket | null = null;
       #conn: Connection | null = null;
       #keepAlive = true;
+      #agentKeepAlive = true;
       #chunks: Uint8Array[] = [];
       #cb: ((res: IncomingMessage) => void) | undefined;
       #response: IncomingMessage | null = null;
@@ -826,6 +847,15 @@ export const httpSpec: BuiltinSpec = {
         this.port = Number(opts.port ?? 80);
         this.headers = { ...(opts.headers ?? {}) };
         this.#cb = cb;
+        // `agent: false` opts out of keep-alive; an Agent instance supplies its
+        // own `keepAlive` preference.
+        if (opts.agent === false) {
+          this.agent = false;
+          this.#agentKeepAlive = false;
+        } else if (opts.agent instanceof Agent) {
+          this.agent = opts.agent;
+          this.#agentKeepAlive = opts.agent.keepAlive;
+        }
       }
 
       setHeader(name: string, value: string | string[]): this {
@@ -874,7 +904,7 @@ export const httpSpec: BuiltinSpec = {
         // HTTP/1.1 is persistent by default; the caller opts out via
         // `Connection: close`.
         const requested = String(headers.get('connection') ?? '').toLowerCase();
-        this.#keepAlive = !requested.includes('close');
+        this.#keepAlive = this.#agentKeepAlive && !requested.includes('close');
         if (!headers.has('connection')) headers.set('connection', 'keep-alive');
         headers.set('content-length', String(body.byteLength));
         for (const [name, value] of headers) {
@@ -923,8 +953,7 @@ export const httpSpec: BuiltinSpec = {
       }
     }
 
-    function normalizeOptions(options: RequestOptions | string): RequestOptions {
-      if (typeof options === 'string') {
+    function normalizeOptions(options: RequestOptions | string): RequestOptions {      if (typeof options === 'string') {
         const url = new URL(options);
         return {
           protocol: url.protocol,
@@ -949,11 +978,140 @@ export const httpSpec: BuiltinSpec = {
       return req;
     }
 
+    // -- Agent + header helpers ----------------------------------------------
+
+    /**
+     * `http.Agent`. Our client keeps keep-alive connections in the runtime's own
+     * per-port cache, so this tracks options/requests and honours `agent: false`
+     * (disable keep-alive) rather than owning the socket pool.
+     */
+    class Agent {
+      options: Record<string, unknown>;
+      maxSockets = Infinity;
+      maxFreeSockets = 256;
+      maxTotalSockets = Infinity;
+      keepAlive: boolean;
+      scheduling: string;
+      timeout?: number;
+      requests: Record<string, unknown[]> = {};
+      sockets: Record<string, unknown[]> = {};
+      freeSockets: Record<string, unknown[]> = {};
+
+      constructor(options: Record<string, unknown> = {}) {
+        this.options = { noDelay: true, path: null, ...options };
+        this.keepAlive = Boolean(options.keepAlive);
+        this.scheduling = String(options.scheduling ?? 'lifo');
+        if (options.timeout !== undefined) this.timeout = Number(options.timeout);
+        if (options.maxSockets !== undefined) this.maxSockets = Number(options.maxSockets);
+        if (options.maxFreeSockets !== undefined) this.maxFreeSockets = Number(options.maxFreeSockets);
+      }
+
+      getName(
+        options: { host?: string; hostname?: string; port?: number | string; localAddress?: string } = {},
+      ): string {
+        const host = options.host || options.hostname || 'localhost';
+        const port = options.port || '';
+        const localAddress = options.localAddress || '';
+        return `${host}:${port}:${localAddress}`;
+      }
+
+      createConnection(): never {
+        throw notImplemented('api', 'http.Agent#createConnection');
+      }
+      createSocket(): never {
+        throw notImplemented('api', 'http.Agent#createSocket');
+      }
+      addRequest(
+        req: unknown,
+        options: { host?: string; hostname?: string; port?: number | string },
+      ): void {
+        const name = this.getName(options);
+        (this.requests[name] ??= []).push(req);
+      }
+      removeSocket(): void {}
+      keepSocketAlive(): void {}
+      reuseSocket(): void {}
+      destroy(): void {
+        for (const k of Object.keys(this.sockets)) delete this.sockets[k];
+        for (const k of Object.keys(this.freeSockets)) delete this.freeSockets[k];
+        for (const k of Object.keys(this.requests)) delete this.requests[k];
+      }
+    }
+
+    const globalAgent = new Agent({ keepAlive: true, scheduling: 'lifo', timeout: 5000 });
+
+    const maxHeaderSize = 16384;
+    // `checkIsHttpToken` / `checkInvalidHeaderChar` from `lib/_http_common.js`.
+    const httpTokenRegExp = /^[\^_`a-zA-Z\-0-9!#$%&'*+.|~]+$/;
+    const strictHeaderCharRegex = /[^\t\x20-\x7e\x80-\xff]/;
+    const lenientHeaderCharRegex = /[\x00\x0a\x0d]|[^\x00-\xff]/;
+    const checkIsHttpToken = (val: string): boolean => val.length > 0 && httpTokenRegExp.test(val);
+    const checkInvalidHeaderChar = (val: string, lenient = false): boolean =>
+      (lenient ? lenientHeaderCharRegex : strictHeaderCharRegex).test(val);
+
+    const errorCodes = (): Record<string, new (...a: unknown[]) => Error> =>
+      (ctx.require('internal/errors') as { codes: Record<string, new (...a: unknown[]) => Error> }).codes;
+
+    const validateHeaderName = (name: unknown, label?: string): void => {
+      if (typeof name !== 'string' || name.length === 0 || !checkIsHttpToken(name)) {
+        throw new (errorCodes().ERR_INVALID_HTTP_TOKEN)(label ?? 'Header name', name);
+      }
+    };
+    const validateHeaderValue = (name: unknown, value: unknown, lenient?: boolean): void => {
+      if (value === undefined) {
+        throw new (errorCodes().ERR_HTTP_INVALID_HEADER_VALUE)(value, name);
+      }
+      if (checkInvalidHeaderChar(String(value), lenient)) {
+        throw new (errorCodes().ERR_INVALID_CHAR)('header content', name);
+      }
+    };
+
+    let maxIdleHTTPParsers = 1000;
+    const setMaxIdleHTTPParsers = (value: unknown): void => {
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+        throw new RangeError('The value of "n" is out of range.');
+      }
+      maxIdleHTTPParsers = value;
+    };
+    // We have no proxy support; only fail when the environment actually asks
+    // for one, so the common no-op call stays silent.
+    const setGlobalProxyFromEnv = (): void => {
+      const env =
+        (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {};
+      const found = ['http_proxy', 'https_proxy', 'all_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY'].find(
+        (k) => env[k],
+      );
+      if (found !== undefined) throw notImplemented('api', 'http.setGlobalProxyFromEnv (proxy support)');
+    };
+
+    // Node re-exports the globals (since v22); mirror whichever the host has and
+    // fall back to loud classes.
+    const globalAny = globalThis as unknown as {
+      MessageEvent?: unknown;
+      CloseEvent?: unknown;
+      WebSocket?: unknown;
+    };
+    const MessageEvent = globalAny.MessageEvent ?? undefined;
+    const CloseEvent = globalAny.CloseEvent ?? undefined;
+    const WebSocket = globalAny.WebSocket ?? undefined;
+
     return {
       Server,
       ServerResponse,
       IncomingMessage,
+      OutgoingMessage,
       ClientRequest,
+      Agent,
+      globalAgent,
+      maxHeaderSize,
+      validateHeaderName,
+      validateHeaderValue,
+      setMaxIdleHTTPParsers,
+      setGlobalProxyFromEnv,
+      MessageEvent,
+      CloseEvent,
+      WebSocket,
+      _connectionListener,
       STATUS_CODES,
       METHODS: [
         'ACL','BIND','CHECKOUT','CONNECT','COPY','DELETE','GET','HEAD','LINK','LOCK','M-SEARCH','MERGE','MKACTIVITY','MKCALENDAR','MKCOL','MOVE','NOTIFY','OPTIONS','PATCH','POST','PROPFIND','PROPPATCH','PURGE','PUT','REBIND','REPORT','SEARCH','SOURCE','SUBSCRIBE','TRACE','UNBIND','UNLINK','UNLOCK','UNSUBSCRIBE',
