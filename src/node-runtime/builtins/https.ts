@@ -159,7 +159,7 @@ export const httpsSpec: BuiltinSpec = {
       return out;
     }
 
-    const globalAgent = new HttpsAgent();
+    const globalAgent = new HttpsAgent({ keepAlive: true, scheduling: 'lifo', timeout: 5000 });
 
     const createServer = (options?: unknown, listener?: (socket: unknown) => void): HttpsServer =>
       new HttpsServer(options, listener);

@@ -109,6 +109,13 @@ export class HttpMessageReader {
   #mode: 'head' | 'length' | 'chunk-size' | 'chunk-data' | 'chunk-crlf' | 'trailer' | 'done' = 'head';
   #remaining = 0;
 
+  /**
+   * When set, the response carries no body regardless of its framing headers —
+   * this is what a HEAD response looks like (Node keys this off the request
+   * method). A function makes it dynamic for pooled keep-alive connections.
+   */
+  headOnly: boolean | (() => boolean) = false;
+
   constructor(
     private readonly onHead: (head: ParsedHead) => void,
     private readonly onBody: (chunk: Uint8Array) => void,
@@ -154,6 +161,15 @@ export class HttpMessageReader {
           continue;
         }
         this.onHead(head);
+
+        // A HEAD response advertises the headers a GET would but sends no body
+        // at all, so no matter the framing headers the body is empty.
+        const headOnly = typeof this.headOnly === 'function' ? this.headOnly() : this.headOnly;
+        if (headOnly) {
+          this.#mode = 'done';
+          this.onEnd();
+          return;
+        }
 
         const te = head.headers['transfer-encoding'];
         const teValue = Array.isArray(te) ? te.join(',') : te ?? '';
@@ -1099,6 +1115,12 @@ export const httpSpec: BuiltinSpec = {
           this.#flush();
           const bytes = toBytes(chunk);
           this.#bodyLength += bytes.byteLength;
+          // A HEAD response carries the headers a GET would (incl. framing) but
+          // no body at all; Node discards the chunks and the terminator.
+          if (this.req?.method === 'HEAD') {
+            cb(null);
+            return;
+          }
           if (this.#chunked) this.socket?.write(new TextEncoder().encode(bytes.byteLength.toString(16) + '\r\n'));
           if (bytes.byteLength) this.socket?.write(bytes);
           if (this.#chunked) this.socket?.write(CRLF);
@@ -1112,7 +1134,7 @@ export const httpSpec: BuiltinSpec = {
       _final(cb: (err?: Error | null) => void): void {
         try {
           this.#flush();
-          if (this.#chunked) {
+          if (this.#chunked && this.req?.method !== 'HEAD') {
             if (this._trailers.size > 0) {
               let tail = '0\r\n';
               for (const [key, value] of this._trailers) {
@@ -1187,8 +1209,14 @@ export const httpSpec: BuiltinSpec = {
           }
         }
 
-        // Body framing: a known length wins, otherwise stream as chunked.
-        const bodiless = this.statusCode === 204 || this.statusCode === 304 || this.statusCode === 101;
+        // Body framing: a known length wins, otherwise stream as chunked. A HEAD
+        // response (like 204/304/101) advertises no body framing at all — Node
+        // clears `_hasBody`, so neither Content-Length nor chunked is emitted.
+        const bodiless =
+          this.statusCode === 204 ||
+          this.statusCode === 304 ||
+          this.statusCode === 101 ||
+          this.req?.method === 'HEAD';
         if (bodiless) {
           this.#chunked = false;
         } else if (sawTransferEncoding) {
@@ -1397,6 +1425,8 @@ export const httpSpec: BuiltinSpec = {
       current: ResponseHandlers | null = null;
       keepAlive = true;
       destroyed = false;
+      /** The in-flight request targeted HEAD, so the response has no body. */
+      headOnly = false;
 
       constructor(socket: VirtualSocket) {
         this.socket = socket;
@@ -1438,6 +1468,9 @@ export const httpSpec: BuiltinSpec = {
           },
           (line) => this.current?.onTrailer?.(line),
         );
+        // The reader checks this dynamically (keep-alive connections are pooled
+        // and reused across requests with different methods).
+        reader.headOnly = () => this.headOnly;
         this.reader = reader;
         if (leftover.length > 0) reader.push(leftover);
       }
@@ -1445,6 +1478,11 @@ export const httpSpec: BuiltinSpec = {
       send(handlers: ResponseHandlers, write: () => void): void {
         this.current = handlers;
         write();
+      }
+
+      /** Whether the in-flight request targeted HEAD (bodyless response). */
+      setHeadOnly(value: boolean): void {
+        this.headOnly = value;
       }
 
       destroy(): void {
@@ -1509,8 +1547,19 @@ export const httpSpec: BuiltinSpec = {
       #keepAlive = true;
       #agentKeepAlive = true;
       #chunks: Uint8Array[] = [];
+      /** True once the caller wrote the body with `write()` (→ chunked framing). */
+      #userWrote = false;
       #cb: ((res: IncomingMessage) => void) | undefined;
       #response: IncomingMessage | null = null;
+
+      /**
+       * A body produced with `req.write()` is sent chunked (Node only sets
+       * `Content-Length` when the whole body is handed to `end(data)`).
+       */
+      write(chunk: unknown, enc?: unknown, cb?: unknown): boolean {
+        this.#userWrote = true;
+        return (super.write as (...a: unknown[]) => boolean)(chunk, enc, cb);
+      }
 
       /** The request target (path + query) as sent on the request line. */
       get path(): string {
@@ -1638,6 +1687,9 @@ export const httpSpec: BuiltinSpec = {
         }
         this.#conn = conn;
         this.socket = conn.socket as unknown as NetSocket;
+        // A HEAD response announces the headers a GET would but has no body, so
+        // tell the reader to stop after the head.
+        conn.setHeadOnly(this.method === 'HEAD');
 
         const body = concatAll(this.#chunks);
         const lines: string[] = [`${this.method} ${this.path} HTTP/1.1`];
@@ -1648,10 +1700,17 @@ export const httpSpec: BuiltinSpec = {
         this.#keepAlive = this.#agentKeepAlive && !requested.includes('close');
         if (!headers.has('connection')) headers.set('connection', this.#keepAlive ? 'keep-alive' : 'close');
         // Request framing mirrors Node's `_hasBody`/`useChunkedEncodingByDefault`:
-        // bodyless methods carry no Content-Length; the rest measure it.
+        // bodyless methods carry no Content-Length; a body written with `write()`
+        // is sent chunked; a body passed to `end(data)` is measured.
         const NO_BODY = ['GET', 'HEAD', 'DELETE', 'OPTIONS', 'TRACE', 'CONNECT'];
+        let chunkedBody = false;
         if (!headers.has('content-length') && !headers.has('transfer-encoding') && !NO_BODY.includes(this.method)) {
-          headers.set('content-length', String(body.byteLength));
+          if (this.#userWrote) {
+            headers.set('transfer-encoding', 'chunked');
+            chunkedBody = true;
+          } else {
+            headers.set('content-length', String(body.byteLength));
+          }
         }
         for (const [name, value] of headers) {
           const canonical = name.replace(/(^|-)([a-z])/g, (_, p1, p2) => `${p1}${p2.toUpperCase()}`);
@@ -1661,6 +1720,14 @@ export const httpSpec: BuiltinSpec = {
         lines.push('', '');
         // Mark the head as sent so `req.headersSent` reflects Node's `!!_header`.
         this._header = lines.join('\r\n');
+        // Body wire framing: raw when Content-Length, hex-length chunks otherwise.
+        const bodyWire = chunkedBody
+          ? concatAll([
+              new TextEncoder().encode(body.byteLength.toString(16) + '\r\n'),
+              body,
+              END_CHUNK,
+            ])
+          : body;
 
         conn.send(
           {
@@ -1688,10 +1755,11 @@ export const httpSpec: BuiltinSpec = {
           },
           () => {
             conn.socket.write(new TextEncoder().encode(lines.join('\r\n')));
-            if (body.byteLength) conn.socket.write(body);
-            // Keep-alive: leave the connection open for the next request. The
-            // body is framed by Content-Length, so the server knows where it ends.
-            if (!this.#keepAlive) conn.socket.end();
+            if (bodyWire.byteLength) conn.socket.write(bodyWire);
+            // Node keeps the write side open even for `Connection: close` — it
+            // only tears the socket down once the response is complete (see the
+            // reader's onEnd, which destroys a non-keep-alive connection).
+            // Half-closing here would drop a response the server writes later.
           },
         );
       }

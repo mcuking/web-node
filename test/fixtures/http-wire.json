@@ -1,0 +1,502 @@
+{
+  "client": [
+    {
+      "name": "hello",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "11",
+        "keep-alive": "timeout=5"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "hello world"
+    },
+    {
+      "name": "echo",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "9",
+        "keep-alive": "timeout=5",
+        "x-echo": "yes"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "PING PONG"
+    },
+    {
+      "name": "chunked",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "part-one;part-two;part-three"
+    },
+    {
+      "name": "trailer",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-type": "text/plain",
+        "keep-alive": "timeout=5",
+        "trailer": "X-Checksum",
+        "transfer-encoding": "chunked"
+      },
+      "trailers": {
+        "x-checksum": "abc123"
+      },
+      "complete": true,
+      "body": "some-body"
+    },
+    {
+      "name": "no-body",
+      "statusCode": 204,
+      "statusMessage": "No Content",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": ""
+    },
+    {
+      "name": "headers",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-type": "text/plain",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked",
+        "x-kept": "kept"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "hdr"
+    },
+    {
+      "name": "status",
+      "statusCode": 418,
+      "statusMessage": "Short and Stout",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "6",
+        "keep-alive": "timeout=5"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "teapot"
+    },
+    {
+      "name": "missing",
+      "statusCode": 404,
+      "statusMessage": "Not Found",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "9",
+        "keep-alive": "timeout=5"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "not found"
+    },
+    {
+      "name": "head",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": ""
+    },
+    {
+      "name": "close",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "close",
+        "content-length": "11"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "hello world"
+    },
+    {
+      "name": "ka1",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "11",
+        "keep-alive": "timeout=5"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "hello world"
+    },
+    {
+      "name": "ka2",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "11",
+        "keep-alive": "timeout=5"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "hello world"
+    }
+  ],
+  "server": [
+    {
+      "method": "GET",
+      "url": "/hello",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "POST",
+      "url": "/echo",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>",
+        "transfer-encoding": "chunked"
+      },
+      "body": "Ping Pong"
+    },
+    {
+      "method": "GET",
+      "url": "/chunked",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "url": "/trailer",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "url": "/no-body",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "url": "/headers",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "url": "/status",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "url": "/nope",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "HEAD",
+      "url": "/hello",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "url": "/hello",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "close",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "url": "/hello",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "url": "/hello",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    }
+  ],
+  "httpsClient": [
+    {
+      "name": "hello",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "11",
+        "keep-alive": "timeout=5"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "hello world"
+    },
+    {
+      "name": "echo",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "8",
+        "keep-alive": "timeout=5",
+        "x-echo": "yes"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "TLS BODY"
+    },
+    {
+      "name": "chunked",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "part-one;part-two;part-three"
+    },
+    {
+      "name": "trailer",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-type": "text/plain",
+        "keep-alive": "timeout=5",
+        "trailer": "X-Checksum",
+        "transfer-encoding": "chunked"
+      },
+      "trailers": {
+        "x-checksum": "abc123"
+      },
+      "complete": true,
+      "body": "some-body"
+    },
+    {
+      "name": "status",
+      "statusCode": 418,
+      "statusMessage": "Short and Stout",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "6",
+        "keep-alive": "timeout=5"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "teapot"
+    },
+    {
+      "name": "head",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": ""
+    },
+    {
+      "name": "ka1",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "11",
+        "keep-alive": "timeout=5"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "hello world"
+    },
+    {
+      "name": "ka2",
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "11",
+        "keep-alive": "timeout=5"
+      },
+      "trailers": {},
+      "complete": true,
+      "body": "hello world"
+    }
+  ],
+  "httpsServer": [
+    {
+      "method": "GET",
+      "url": "/hello",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "POST",
+      "url": "/echo",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>",
+        "transfer-encoding": "chunked"
+      },
+      "body": "Tls Body"
+    },
+    {
+      "method": "GET",
+      "url": "/chunked",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "url": "/trailer",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "url": "/status",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "HEAD",
+      "url": "/hello",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "url": "/hello",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "url": "/hello",
+      "httpVersion": "1.1",
+      "headers": {
+        "connection": "keep-alive",
+        "host": "127.0.0.1:<port>"
+      },
+      "body": ""
+    }
+  ],
+  "serverCount": 12,
+  "httpsServerCount": 8
+}

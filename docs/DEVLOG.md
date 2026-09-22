@@ -244,6 +244,22 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M98 `http`/`https` 报文级差分
+
+**改了什么**：新增端到端差分探针（同一程序在真 Node 与 web-node 各跑一遭）——单个 runtime 内同时起服务端与客户端，走虚拟网络；覆盖 http（12 个请求）与 https（8 个）全流程，观测客户端与服务器两侧。**0 diff**。修了 4 个真 bug：
+1. **客户端 `req.write()` 不分块**：以前不管怎么给 body，都在 `end()` 时算出 `Content-Length`。现按 Node：`write()` 过的 body 走 `Transfer-Encoding: chunked`（十六进制长度帧），只有 `end(data)` 才量出 `Content-Length`（`ClientRequest#userWrote`）——服务器因此能从两侧看出分块语义。
+2. **HEAD 响应带了 body**：`http.Server` 以前对 HEAD 请求照常回写 body。现对齐：HEAD（以及 204/304/101）视为无体——不生 `Content-Length`/`chunked` 帧、不写任何字节；客户端也同步把 HEAD 响应当无体（`HttpMessageReader#headOnly`，keep-alive 连接上是动态的）——否则客户端会等一个不存在的 body 而挂死。
+3. **客户端过早半关连接**：`#send` 在 `Connection: close` 时一写完请求就 `socket.end()`。在 web-node 的虚拟 TCP 上，服务端 `allowHalfOpen:false` 会把对端的半关当作**全关**——服务端稍后异步写回的响应被丢弃（真 Node 客户端保留写侧至响应完成）。现改为不在发送后立即关，响应读完再由 reader 的 `onEnd` 销毁非 keep-alive 连接。
+4. **`https.globalAgent` 非 keep-alive**：`new HttpsAgent()` 的 `keepAlive` 默认 `false`，而 Node 是 `{ keepAlive: true, scheduling: 'lifo', timeout: 5000 }`——导致 https 默认发 `Connection: close`。已对齐。
+
+另有：HEAD 与 204/304/101 共用同一套无体逻辑（`ServerResponse._final`/`_write`），https 不再与 http 分叉。
+
+**验证**：`tools/http-wire-probe.cjs`（`tools/http-wire-oracle.mjs` 录成 `test/fixtures/http-wire.json`）在真 Node 与 web-node **逐字段 0 diff**；端口与 `Date` 头归一化。
+**门禁**：`tsc` 干净 · vitest **977 passed / 2 skipped（108/110 文件）** · build worker **2478.71 kB**。
+**已知偏离**：探针**不**观测每 socket 的连接复用次数（agent 池属 M103 `http.Agent` 范畴）；`Date` 头因随时刻变化被归一化。
+
+**为什么**：阶段 B 第四项；报文级差分是 M69 的端到端补全，发现并修掉了 4 个只在“服务端异步响应 / HEAD / 非 keep-alive / https 默认 agent”组合下显形的 bug。
+
 ### 2026-09-22 · M97 `module` 同步 loader 语义（hooks / SourceMap / findPackageJSON / 内部 loader 面）
 
 **改了什么**：把 `module` 的四块 loader 面从「响亮抛错 / 返回 `undefined`」落成真实现：
