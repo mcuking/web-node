@@ -1289,7 +1289,8 @@ export const httpSpec: BuiltinSpec = {
      * per-port cache, so this tracks options/requests and honours `agent: false`
      * (disable keep-alive) rather than owning the socket pool.
      */
-    class Agent {
+    class Agent extends (EventEmitter as new () => Emitter) {
+      static defaultMaxSockets = Infinity;
       options: Record<string, unknown>;
       maxSockets = Infinity;
       maxFreeSockets = 256;
@@ -1302,6 +1303,7 @@ export const httpSpec: BuiltinSpec = {
       freeSockets: Record<string, unknown[]> = {};
 
       constructor(options: Record<string, unknown> = {}) {
+        super();
         this.options = { noDelay: true, path: null, ...options };
         this.keepAlive = Boolean(options.keepAlive);
         this.scheduling = String(options.scheduling ?? 'lifo');

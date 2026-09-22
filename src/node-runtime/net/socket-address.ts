@@ -243,6 +243,27 @@ export function createAddressTypes(
       );
     }
 
+    /**
+     * `SocketAddress.parse(input)` — parse an `"${ip}:${port}"` string. Ports
+     * equal to the scheme default (80) are dropped by the URL parser, exactly
+     * as in Node. Returns `undefined` when the input is not a socket address.
+     */
+    static parse(input: unknown): unknown {
+      validateString(input, 'input');
+      try {
+        const u = new URL(`http://${input}`);
+        let address = u.hostname;
+        const port = Number(u.port) | 0;
+        if (address[0] === '[' && address[address.length - 1] === ']') {
+          address = address.slice(1, -1);
+          return new SocketAddress({ address, port, family: 'ipv6' });
+        }
+        return new SocketAddress({ address, port });
+      } catch {
+        return undefined;
+      }
+    }
+
     constructor(options: unknown = {}) {
       if (options === null || typeof options !== 'object') {
         throw new codes.ERR_INVALID_ARG_TYPE('options', 'object', options);

@@ -595,12 +595,20 @@ export const zlibSpec: BuiltinSpec = {
     const lose = (name: string, why: string) => (): never => {
       throw notImplemented('api', `zlib ${name}`, why);
     };
-    const loseClass = (name: string, why: string) =>
-      class {
-        constructor() {
+    // Stub classes still extend the real stream.Transform (so the prototype and
+    // statics — pipe/read/write/Duplex/… — are present for feature detection)
+    // but throw from the constructor.
+    const loseClass = (name: string, why: string, base?: TransformCtor) => {
+      const Parent = (base ?? Object) as new (opts?: Record<string, unknown>) => object;
+      const cls = class extends (Parent as new (opts?: Record<string, unknown>) => object) {
+        constructor(_options?: unknown) {
+          super();
           throw notImplemented('api', `zlib ${name}`, why);
         }
       };
+      Object.defineProperty(cls, 'name', { value: name, configurable: true });
+      return cls as unknown as new (opts?: StreamOpts) => never;
+    };
     const NO_BROTLI = 'The host ships no brotli codec.';
     const NO_ZSTD = 'The host ships no zstd codec.';
     const NO_ZIP = 'Zip archive support is not implemented.';
@@ -644,16 +652,16 @@ export const zlibSpec: BuiltinSpec = {
       brotliCompressSync: lose('brotliCompressSync', NO_BROTLI),
       brotliDecompress: lose('brotliDecompress', NO_BROTLI),
       brotliDecompressSync: lose('brotliDecompressSync', NO_BROTLI),
-      BrotliCompress: loseClass('BrotliCompress', NO_BROTLI),
-      BrotliDecompress: loseClass('BrotliDecompress', NO_BROTLI),
+      BrotliCompress: loseClass('BrotliCompress', NO_BROTLI, Transform),
+      BrotliDecompress: loseClass('BrotliDecompress', NO_BROTLI, Transform),
       createZstdCompress: lose('createZstdCompress', NO_ZSTD),
       createZstdDecompress: lose('createZstdDecompress', NO_ZSTD),
       zstdCompress: lose('zstdCompress', NO_ZSTD),
       zstdCompressSync: lose('zstdCompressSync', NO_ZSTD),
       zstdDecompress: lose('zstdDecompress', NO_ZSTD),
       zstdDecompressSync: lose('zstdDecompressSync', NO_ZSTD),
-      ZstdCompress: loseClass('ZstdCompress', NO_ZSTD),
-      ZstdDecompress: loseClass('ZstdDecompress', NO_ZSTD),
+      ZstdCompress: loseClass('ZstdCompress', NO_ZSTD, Transform),
+      ZstdDecompress: loseClass('ZstdDecompress', NO_ZSTD, Transform),
       createZipArchive: lose('createZipArchive', NO_ZIP),
       createZipArchiveSync: lose('createZipArchiveSync', NO_ZIP),
       zipFiles: lose('zipFiles', NO_ZIP),

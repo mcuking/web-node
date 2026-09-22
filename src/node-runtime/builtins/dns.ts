@@ -158,7 +158,19 @@ class Resolver {
     }
     this.#servers = servers.map((s) => String(s));
   }
+
+  /** `resolver.setLocalAddress(ip, family)` — a no-op without real sockets. */
+  setLocalAddress(): void {}
 }
+
+// The per-instance query surface mirrors the module-level one: loopback types
+// resolve, everything else is present but throws loudly on call.
+for (const name of QUERY_TYPES) {
+  (Resolver.prototype as unknown as Record<string, ResolverFn>)[name] = unsupported(`Resolver#${name}`);
+}
+(Resolver.prototype as unknown as Record<string, ResolverFn>).resolve4 = WORKING_TYPES.resolve4;
+(Resolver.prototype as unknown as Record<string, ResolverFn>).resolve6 = WORKING_TYPES.resolve6;
+(Resolver.prototype as unknown as Record<string, ResolverFn>).reverse = WORKING_TYPES.reverse;
 
 /**
  * Build the two namespaces from the same descriptors. `wrap` turns a callback
