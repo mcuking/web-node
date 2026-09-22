@@ -1,0 +1,124 @@
+{
+  "fromString": "hello world",
+  "length": 11,
+  "isBuffer": true,
+  "isBufferArray": false,
+  "byteLengthUtf8": 3,
+  "byteLengthAscii": 3,
+  "byteLengthUtf16": 6,
+  "encodings": [
+    "utf8:true",
+    "utf-8:true",
+    "hex:true",
+    "base64:true",
+    "base64url:true",
+    "ascii:true",
+    "latin1:true",
+    "binary:true",
+    "ucs2:true",
+    "ucs-2:true",
+    "utf16le:true",
+    "utf-16le:true"
+  ],
+  "encodingBad": false,
+  "fromHex": "abc",
+  "fromBase64": "abc",
+  "fromBase64Url": "abc",
+  "hexRoundtrip": "00ff10",
+  "base64Roundtrip": "AP8Q",
+  "latin1Roundtrip": "\u0000ÿ\u0010",
+  "utf16leRoundtrip": "扡",
+  "asciiRoundtrip": "abc",
+  "binaryAlias": "abc",
+  "allocFilled": [
+    7,
+    7,
+    7,
+    7
+  ],
+  "allocZero": [
+    0,
+    0,
+    0
+  ],
+  "fromArray": [
+    1,
+    2,
+    3
+  ],
+  "fromArrayBuffer": [
+    9,
+    8,
+    7
+  ],
+  "concat": "abcd",
+  "concatLen": "abc",
+  "compare": [
+    -1,
+    1,
+    0
+  ],
+  "equals": [
+    true,
+    false
+  ],
+  "sliceIsView": "el",
+  "sliceSharesMemory": "Jello",
+  "subarrayIsView": "Je",
+  "sliceParent": "different",
+  "indexOf": [
+    2,
+    -1,
+    true
+  ],
+  "indexOfBuffer": 2,
+  "write": "\u0000abc\u0000\u0000\u0000\u0000",
+  "writeInts": "ff61010204030201",
+  "readUInt16BE": 258,
+  "readUInt32LE": 16909060,
+  "readInt8": -1,
+  "readDoubleBE": 1.5,
+  "readFloatLE": 2.5,
+  "readBigInt64BE": "123456789012345",
+  "readBigUInt64LE": "8781752668787834880",
+  "copy": "bcd",
+  "swap16": [
+    2,
+    1,
+    4,
+    3
+  ],
+  "swap32": [
+    4,
+    3,
+    2,
+    1
+  ],
+  "toJSON": "{\"type\":\"Buffer\",\"data\":[1,2]}",
+  "keysType": [
+    0,
+    1
+  ],
+  "valuesType": [
+    97,
+    98
+  ],
+  "entriesType": [
+    [
+      0,
+      97
+    ],
+    [
+      1,
+      98
+    ]
+  ],
+  "poolSize": 65536,
+  "poolSizeIsNumber": true,
+  "byteOffsetIsNumber": true,
+  "hasParent": "object",
+  "protoMethods": 18,
+  "statics": 11,
+  "badOffset": "ERR_OUT_OF_RANGE",
+  "badEncoding": "ERR_UNKNOWN_ENCODING"
+}

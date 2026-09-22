@@ -71,6 +71,20 @@ function topLevelLexicalBindings(code: string): Set<string> {
 }
 
 /**
+ * The name V8 reports in a "redeclaration" SyntaxError, or `null`.
+ *
+ * `topLevelLexicalBindings` above is intentionally shallow (it only looks at
+ * the identifier right after `const`/`let`/`class`), so it misses destructuring
+ * like `const { Buffer } = require('buffer')`. Rather than reimplement a JS
+ * parser, we let the compiler tell us when an injected wrapper parameter
+ * collides with a real declaration and drop just that one parameter.
+ */
+function redeclaredIdentifier(message: string): string | null {
+  const m = /Identifier '([A-Za-z_$][\w$]*)' has already been declared/.exec(message);
+  return m ? m[1] : null;
+}
+
+/**
  * Drop a leading `#!` line.
  *
  * Node does this for the main module, and it matters more here than there: a
@@ -554,16 +568,38 @@ export class ModuleLoader {
     // `const __filename = fileURLToPath(import.meta.url)`, as Vite's chunks do).
     // So ESM gets only the prefixed bindings the transform emits; CJS keeps the
     // Node-shaped parameter list.
-    const params = isEsm
-      ? [EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING, ...globalNames]
-      : [...USER_CJS_PARAMS, ...globalNames];
+    const esmParams = [EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING, ...globalNames];
+    const cjsParams = [...USER_CJS_PARAMS, ...globalNames];
 
+    // The shallow `topLevelLexicalBindings` scan misses destructuring-of-require
+    // (`const { Buffer } = require('buffer')`) and similar, so a wrapper
+    // parameter can still collide with a real declaration. V8 reports every
+    // collision by name in one SyntaxError, so on failure we drop the named
+    // parameter(s) and retry — a bounded loop that converges.
+    let globals = globalNames;
+    let globalVals = globalValues;
     let fn: (...args: unknown[]) => void;
-    try {
-      fn = compileTagged(params, code, sourceUrl) as unknown as (...args: unknown[]) => void;
-    } catch (err) {
-      this.#cache.delete(absPath);
-      throw new Error(`Failed to compile ${absPath}: ${err instanceof Error ? err.message : String(err)}`);
+    for (;;) {
+      const params = isEsm ? esmParams : cjsParams;
+      try {
+        fn = compileTagged(params, code, sourceUrl) as unknown as (...args: unknown[]) => void;
+        break;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const redeclared = redeclaredIdentifier(message);
+        const dropAt = globals.indexOf(redeclared ?? '\u0000');
+        if (redeclared === null || dropAt === -1) {
+          this.#cache.delete(absPath);
+          throw new Error(`Failed to compile ${absPath}: ${message}`);
+        }
+        globals = globals.filter((_, i) => i !== dropAt);
+        globalVals = globalVals.filter((_, i) => i !== dropAt);
+        // Rebuild the ESM/CJS parameter lists rather than splice the originals.
+        esmParams.length = 0;
+        esmParams.push(EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING, ...globals);
+        cjsParams.length = 0;
+        cjsParams.push(...USER_CJS_PARAMS, ...globals);
+      }
     }
     const moduleObj = { exports: mod.exports };
     // ESM files resolve their imports under the `import` condition so that
@@ -584,8 +620,8 @@ export class ModuleLoader {
     const dynamicImport = (specifier: string): Promise<unknown> =>
       Promise.resolve().then(() => this.require(absPath, specifier, 'import'));
     try {
-      if (isEsm) fn(moduleObj.exports, requireFn, dynamicImport, ...globalValues);
-      else fn(moduleObj.exports, requireFn, moduleObj, absPath, dirname, ...globalValues);
+      if (isEsm) fn(moduleObj.exports, requireFn, dynamicImport, ...globalVals);
+      else fn(moduleObj.exports, requireFn, moduleObj, absPath, dirname, ...globalVals);
     } catch (err) {
       this.#cache.delete(absPath);
       // eslint-disable-next-line no-console

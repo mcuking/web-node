@@ -242,6 +242,19 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M82 buffer 语义 + loader 注入全局遮蔽（差分语料驱动）
+
+**方法**：新增 `tools/buffer-semantics-probe.cjs` / `tools/buffer-semantics-oracle.mjs` → `test/fixtures/buffer-semantics.json`，永久回归 `test/buffer-semantics.test.ts`。
+
+**buffer 本体**：编码/解码（hex/base64/base64url/latin1/utf16le/ascii/binary）、`from`/`alloc`/`concat`/`compare`/`equals`/`isEncoding`/`byteLength`、slice/subarray 视图语义与写共享、整数/浮点/BigInt 读写、`copy`/`fill`/`swap*`、`toJSON`/迭代器、`poolSize`、错误码（`ERR_OUT_OF_RANGE`/`ERR_UNKNOWN_ENCODING`）……**逐字段与真 Node v26.9.0 一致，无需改动**。
+
+**真正被语料抓出的 bug 在 loader**：观测程序第一行就是 `const { Buffer } = require('buffer')`，web-node 直接报 `Identifier 'Buffer' has already been declared`。原因是注入的全局（`Buffer`/`process`/`setTimeout`…）作为 CJS wrapper **形参**注入，而 `topLevelLexicalBindings` 只扫 `const <ident>` 的**浅层**形式，**漏掉解构**（`const { Buffer } = …`、`let WebSocket = class WebSocket …`）→ 与形参重名即编译失败。
+
+- `topLevelLexicalBindings` 保持浅扫（避免手写完整 JS 解析器、误判 ASI），新增 `redeclaredIdentifier(message)`：**从 V8 的 `Identifier 'X' has already been declared` 报错里取名字**，丢掉该形参、重建参数表、**重试编译**（有界收敛）。
+- 这是**真实世界级**修复：Vite 打包 chunk 里就有 `const { Buffer } = require('buffer')`（`dep-BK3b2jBa.js`）与 `let WebSocket = class WebSocket`——之前 M18（Vue SFC through Vite）会直接编译失败。
+
+**验证**：buffer 差分逐字段一致；`test/loader-globals.test.ts` 新增 3 例（解构遮蔽 / class 遮蔽 / 无关语法错仍抛）。门禁全绿：tsc 干净 · vitest **874 通过 / 2 预存 skip（83 文件）** · build worker **2298.20KB**。
+
 ### 2026-09-22 · M81 fs 语义深度（差分语料驱动）
 
 **方法**：同 M79/M80。新增 `tools/fs-semantics-probe.cjs`（只用公开 API，将临时目录名规范化后比较）、`tools/fs-semantics-oracle.mjs` → `test/fixtures/fs-semantics.json`、永久回归 `test/fs-semantics.test.ts`。
