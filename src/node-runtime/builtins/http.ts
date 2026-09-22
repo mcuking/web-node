@@ -113,6 +113,7 @@ export class HttpMessageReader {
     private readonly onHead: (head: ParsedHead) => void,
     private readonly onBody: (chunk: Uint8Array) => void,
     private readonly onEnd: () => void,
+    private readonly onTrailer?: (line: string) => void,
   ) {}
 
   /** True once a complete message has been delivered. */
@@ -145,6 +146,13 @@ export class HttpMessageReader {
           return;
         }
         this.#head = head;
+        // A 1xx interim response (100 Continue, 102 Processing, 103 Early Hints)
+        // carries no body and precedes the real response — skip it and keep
+        // reading headers. 101 Switching Protocols is a final response.
+        const status = head.statusCode;
+        if (typeof status === 'number' && status >= 100 && status < 200 && status !== 101) {
+          continue;
+        }
         this.onHead(head);
 
         const te = head.headers['transfer-encoding'];
@@ -213,7 +221,8 @@ export class HttpMessageReader {
           this.onEnd();
           return;
         }
-        continue; // skip a trailer header line
+        this.onTrailer?.(line);
+        continue; // otherwise a trailer header line
       }
 
       // chunk-crlf: consume the CRLF that terminates the previous chunk's data.
@@ -230,35 +239,67 @@ const END_CHUNK = new TextEncoder().encode('0\r\n\r\n');
 const STATUS_CODES: Record<number, string> = {
   100: 'Continue',
   101: 'Switching Protocols',
+  102: 'Processing',
+  103: 'Early Hints',
   200: 'OK',
   201: 'Created',
   202: 'Accepted',
+  203: 'Non-Authoritative Information',
   204: 'No Content',
+  205: 'Reset Content',
   206: 'Partial Content',
+  207: 'Multi-Status',
+  208: 'Already Reported',
+  226: 'IM Used',
+  300: 'Multiple Choices',
   301: 'Moved Permanently',
   302: 'Found',
   303: 'See Other',
   304: 'Not Modified',
+  305: 'Use Proxy',
   307: 'Temporary Redirect',
   308: 'Permanent Redirect',
   400: 'Bad Request',
   401: 'Unauthorized',
+  402: 'Payment Required',
   403: 'Forbidden',
   404: 'Not Found',
   405: 'Method Not Allowed',
+  406: 'Not Acceptable',
+  407: 'Proxy Authentication Required',
   408: 'Request Timeout',
   409: 'Conflict',
   410: 'Gone',
+  411: 'Length Required',
+  412: 'Precondition Failed',
   413: 'Payload Too Large',
+  414: 'URI Too Long',
   415: 'Unsupported Media Type',
+  416: 'Range Not Satisfiable',
+  417: 'Expectation Failed',
   418: "I'm a Teapot",
+  421: 'Misdirected Request',
   422: 'Unprocessable Entity',
+  423: 'Locked',
+  424: 'Failed Dependency',
+  425: 'Too Early',
+  426: 'Upgrade Required',
+  428: 'Precondition Required',
   429: 'Too Many Requests',
+  431: 'Request Header Fields Too Large',
+  451: 'Unavailable For Legal Reasons',
   500: 'Internal Server Error',
   501: 'Not Implemented',
   502: 'Bad Gateway',
   503: 'Service Unavailable',
   504: 'Gateway Timeout',
+  505: 'HTTP Version Not Supported',
+  506: 'Variant Also Negotiates',
+  507: 'Insufficient Storage',
+  508: 'Loop Detected',
+  509: 'Bandwidth Limit Exceeded',
+  510: 'Not Extended',
+  511: 'Network Authentication Required',
 };
 
 export const httpSpec: BuiltinSpec = {
@@ -330,6 +371,13 @@ export const httpSpec: BuiltinSpec = {
       return Buffer_.from(bytes);
     }
 
+    /** Node's `headersDistinct`/`trailersDistinct` shape: name -> string[]. */
+    function distinct(src: Record<string, string | string[]>): Record<string, string[]> {
+      const out: Record<string, string[]> = {};
+      for (const [k, v] of Object.entries(src)) out[k] = Array.isArray(v) ? v.slice() : [v];
+      return out;
+    }
+
     function toBytes(data: unknown): Uint8Array {
       if (typeof data === 'string') return new TextEncoder().encode(data);
       if (data instanceof Uint8Array) return data;
@@ -365,6 +413,31 @@ export const httpSpec: BuiltinSpec = {
       socket: NetSocket | null = null;
       connection: NetSocket | null = null;
       req: unknown = undefined;
+      #abortController: AbortController | null = null;
+      #headersDistinct: Record<string, string[]> | null = null;
+      #trailersDistinct: Record<string, string[]> | null = null;
+
+      /** `message.signal` — aborted when the message is destroyed/aborted. */
+      get signal(): AbortSignal {
+        return (this.#abortController ??= new AbortController()).signal;
+      }
+
+      /** A view where every header value is an array and never joined. */
+      get headersDistinct(): Record<string, string[]> {
+        return (this.#headersDistinct ??= distinct(this.headers));
+      }
+
+      /** A view where every trailer value is an array and never joined. */
+      get trailersDistinct(): Record<string, string[]> {
+        return (this.#trailersDistinct ??= distinct(this.trailers));
+      }
+
+      /** `message.setTimeout(msecs, cb)` — arm a socket inactivity timer. */
+      setTimeout(msecs: number, cb?: () => void): this {
+        if (typeof cb === 'function') this.once('timeout' as never, cb as never);
+        (this.socket as unknown as { setTimeout?: (ms: number) => void } | null)?.setTimeout?.(msecs);
+        return this;
+      }
 
       constructor() {
         // The socket reader pushes bodies at us, so `_read()` has nothing to
@@ -389,6 +462,7 @@ export const httpSpec: BuiltinSpec = {
         this.rawHeaders = head.rawHeaders;
         this.socket = socket;
         this.connection = socket;
+        this.#headersDistinct = null;
       }
 
       /** @internal */
@@ -403,6 +477,19 @@ export const httpSpec: BuiltinSpec = {
         this.push(null);
       }
 
+      /** @internal — one `Name: value` trailer line (after a chunked body). */
+      _addTrailer(line: string): void {
+        const idx = line.indexOf(':');
+        if (idx < 0) return;
+        const name = line.slice(0, idx).trim();
+        const value = line.slice(idx + 1).trim();
+        this.rawTrailers.push(name, value);
+        const key = name.toLowerCase();
+        const prev = this.trailers[key];
+        // Node joins duplicate trailer values with a comma, like headers.
+        this.trailers[key] = prev === undefined ? value : `${prev}, ${value}`;
+      }
+
       /** @internal */
       _destroy(err: Error | null, cb: (err?: Error | null) => void): void {
         // A normally-completed message must NOT tear down its socket: that
@@ -411,6 +498,7 @@ export const httpSpec: BuiltinSpec = {
         // closes the transport.
         if (err) {
           this.aborted = true;
+          this.#abortController?.abort(err);
           this.socket?.destroy();
         }
         cb(err);
@@ -451,6 +539,9 @@ export const httpSpec: BuiltinSpec = {
       req: IncomingMessage | null = null;
 
       #headers = new Map<string, string | string[]>();
+      #rawHeaderNames = new Map<string, string>();
+      #trailers = new Map<string, string | string[]>();
+      #rawTrailerNames = new Map<string, string>();
       #flushed = false;
       #chunked = false;
       #bodyLength = 0;
@@ -464,6 +555,16 @@ export const httpSpec: BuiltinSpec = {
         return this.#keepAlive;
       }
 
+      /** Node's `res.connection` is a getter for the bound socket. */
+      get connection(): NetSocket | null {
+        return this.socket;
+      }
+
+      /** True once the response is being framed with chunked transfer-encoding. */
+      get chunkedEncoding(): boolean {
+        return this.#chunked;
+      }
+
       constructor(socket: NetSocket) {
         // Node's OutgoingMessage is a plain Stream that does not auto-destroy on
         // `finish`; our ServerResponse is a Writable, so opt out explicitly.
@@ -474,6 +575,7 @@ export const httpSpec: BuiltinSpec = {
       setHeader(name: string, value: string | string[]): this {
         if (this.headersSent) throw new Error('Cannot set headers after they are sent to the client');
         this.#headers.set(name.toLowerCase(), value);
+        this.#rawHeaderNames.set(name.toLowerCase(), name);
         return this;
       }
       getHeader(name: string): string | string[] | undefined {
@@ -485,12 +587,118 @@ export const httpSpec: BuiltinSpec = {
       getHeaderNames(): string[] {
         return [...this.#headers.keys()];
       }
+      /** The header names exactly as they were first set (case preserved). */
+      getRawHeaderNames(): string[] {
+        return [...this.#rawHeaderNames.values()];
+      }
       hasHeader(name: string): boolean {
         return this.#headers.has(name.toLowerCase());
       }
       removeHeader(name: string): void {
         if (this.headersSent) throw new Error('Cannot remove headers after they are sent to the client');
         this.#headers.delete(name.toLowerCase());
+        this.#rawHeaderNames.delete(name.toLowerCase());
+      }
+
+      /** `res.setHeaders(objOrPairs)` — set several headers in one call. */
+      setHeaders(headers: Record<string, string | string[]> | Array<[string, string | string[]]>): void {
+        const entries = Array.isArray(headers) ? headers : Object.entries(headers);
+        for (const [name, value] of entries) this.setHeader(String(name), value);
+      }
+
+      /** `res.appendHeader(name, value)` — append to (or create) a header. */
+      appendHeader(name: string, value: string | string[]): this {
+        const key = name.toLowerCase();
+        if (!this.#headers.has(key)) return this.setHeader(name, value);
+        const prev = this.#headers.get(key)!;
+        const next = Array.isArray(prev) ? prev.concat(value as string | string[]) : [prev as string].concat(value as string | string[]);
+        this.#headers.set(key, next as string[]);
+        return this;
+      }
+
+      /**
+       * `res.addTrailers(headers)` — HTTP trailers sent after a chunked body.
+       * They are emitted just before the terminating chunk.
+       */
+      addTrailers(headers: Record<string, string | string[]> | Array<[string, string | string[]]>): void {
+        const entries = Array.isArray(headers) ? headers : Object.entries(headers);
+        for (const [name, value] of entries) {
+          const key = String(name).toLowerCase();
+          this.#trailers.set(key, value);
+          this.#rawTrailerNames.set(key, String(name));
+        }
+      }
+
+      /** `res.assignSocket(socket)` — bind an existing socket to this response. */
+      assignSocket(socket: NetSocket): void {
+        this.socket = socket;
+        (socket as unknown as { _httpMessage?: unknown })._httpMessage = this;
+        this.emit('socket' as never, socket as never);
+      }
+      /** `res.detachSocket(socket)` — unbind (leaves the socket open). */
+      detachSocket(socket: NetSocket): void {
+        (socket as unknown as { _httpMessage?: unknown })._httpMessage = null;
+        if (this.socket === socket) this.socket = null;
+      }
+
+      /** `res.setTimeout(msecs, cb)` — arm a socket inactivity timer. */
+      setTimeout(msecs: number, cb?: () => void): this {
+        if (typeof cb === 'function') this.once('timeout' as never, cb as never);
+        (this.socket as unknown as { setTimeout?: (ms: number) => void } | null)?.setTimeout?.(msecs);
+        return this;
+      }
+
+      /**
+       * `res.writeInformation(statusCode, headers, cb)` — write a 1xx interim
+       * response directly to the socket, before the final headers are flushed.
+       */
+      writeInformation(
+        statusCode: number,
+        headers?: Record<string, string | string[]> | Array<string | string[]> | null,
+        cb?: () => void,
+      ): void {
+        if (this.headersSent) throw new Error('Cannot write headers after they are sent to the client');
+        if (!Number.isInteger(statusCode) || statusCode < 100 || statusCode > 199) {
+          throw new RangeError(`The value of "statusCode" is out of range. It must be >= 100 and <= 199. Received ${statusCode}`);
+        }
+        let head = `HTTP/1.1 ${statusCode} ${STATUS_CODES[statusCode] ?? 'unknown'}\r\n`;
+        const entries: Array<[string, unknown]> = [];
+        if (Array.isArray(headers)) {
+          if (headers.length && Array.isArray(headers[0])) {
+            for (const pair of headers as Array<[string, unknown]>) entries.push([String(pair[0]), pair[1]]);
+          } else {
+            const flat = headers as Array<string | string[]>;
+            for (let i = 0; i + 1 < flat.length; i += 2) entries.push([String(flat[i]), flat[i + 1]]);
+          }
+        } else if (headers && typeof headers === 'object') {
+          for (const [k, v] of Object.entries(headers)) entries.push([k, v]);
+        }
+        for (const [name, value] of entries) {
+          if (Array.isArray(value)) for (const v of value) head += `${name}: ${v}\r\n`;
+          else head += `${name}: ${value}\r\n`;
+        }
+        head += '\r\n';
+        this.socket?.write(new TextEncoder().encode(head));
+        if (typeof cb === 'function') cb();
+      }
+
+      /** `res.writeContinue()` — the 100 Continue interim response. */
+      writeContinue(cb?: () => void): void {
+        this.writeInformation(100, null, cb);
+      }
+      /** `res.writeProcessing()` — the 102 Processing interim response. */
+      writeProcessing(cb?: () => void): void {
+        this.writeInformation(102, null, cb);
+      }
+      /** `res.writeEarlyHints({ link, ... })` — the 103 Early Hints response. */
+      writeEarlyHints(hints: { link?: string | string[] } & Record<string, unknown>, cb?: () => void): void {
+        const link = hints.link;
+        if (link === null || link === undefined) return;
+        const value = Array.isArray(link) ? link.join(', ') : String(link);
+        if (value.length === 0) return;
+        const headers: Record<string, string | string[]> = { Link: value };
+        for (const [k, v] of Object.entries(hints)) if (k !== 'link') headers[k] = v as string | string[];
+        this.writeInformation(103, headers, cb);
       }
 
       writeHead(status: number, a?: unknown, b?: unknown): this {
@@ -528,7 +736,20 @@ export const httpSpec: BuiltinSpec = {
       _final(cb: (err?: Error | null) => void): void {
         try {
           this.#flush();
-          if (this.#chunked) this.socket?.write(END_CHUNK);
+          if (this.#chunked) {
+            if (this.#trailers.size > 0) {
+              let tail = '0\r\n';
+              for (const [key, value] of this.#trailers) {
+                const name = this.#rawTrailerNames.get(key) ?? key;
+                if (Array.isArray(value)) for (const v of value) tail += `${name}: ${v}\r\n`;
+                else tail += `${name}: ${value}\r\n`;
+              }
+              tail += '\r\n';
+              this.socket?.write(new TextEncoder().encode(tail));
+            } else {
+              this.socket?.write(END_CHUNK);
+            }
+          }
           this.finished = true;
           cb(null);
           // The server decides whether to close the socket or keep the
@@ -609,15 +830,41 @@ export const httpSpec: BuiltinSpec = {
     // -- Server ---------------------------------------------------------------
 
     class Server extends (net.Server as new () => netServer) {
-      requestTimeout = 0;
-      headersTimeout = 0;
-      keepAliveTimeout = 0;
+      requestTimeout = 300000;
+      headersTimeout = 60000;
+      keepAliveTimeout = 5000;
+      maxRequestsPerSocket = 0;
       timeout = 0;
+
+      /** @internal — sockets with an in-flight request (not idle keep-alive). */
+      #active = new Set<NetSocket>();
 
       constructor(requestListener?: (req: IncomingMessage, res: ServerResponse) => void) {
         super();
         if (typeof requestListener === 'function') this.on('request', requestListener as never);
         this.on('connection', _connectionListener as never);
+      }
+
+      /** `server.setTimeout(msecs, cb)` — set the server inactivity timeout. */
+      setTimeout(msecs: number, cb?: () => void): this {
+        this.timeout = msecs;
+        if (typeof cb === 'function') this.on('timeout' as never, cb as never);
+        return this;
+      }
+
+      /** Every socket this server currently owns (accepted connections). */
+      #allSockets(): NetSocket[] {
+        return [...((this as unknown as { _sockets?: Set<NetSocket> })._sockets ?? [])];
+      }
+
+      /** `server.closeAllConnections()` — forcibly destroy every connection. */
+      closeAllConnections(): void {
+        for (const socket of this.#allSockets()) socket.destroy();
+      }
+
+      /** `server.closeIdleConnections()` — destroy only idle keep-alive sockets. */
+      closeIdleConnections(): void {
+        for (const socket of this.#allSockets()) if (!this.#active.has(socket)) socket.destroy();
       }
 
       /** @internal — Node names this `_connectionListener`; see below. */
@@ -641,11 +888,13 @@ export const httpSpec: BuiltinSpec = {
               req = request;
               res = response;
               currentReq = request;
+              this.#active.add(socket);
               response._onResponseFinish = () => {
                 if (!response.shouldKeepAlive || (socket as unknown as { destroyed?: boolean }).destroyed) {
                   socket.end();
                   return;
                 }
+                this.#active.delete(socket);
                 // Keep-alive: re-arm for the next request. Deferred to the next
                 // tick so the reader has fully finished this message (a handler
                 // may `res.end()` synchronously, from inside `onHead`), and so
@@ -680,6 +929,7 @@ export const httpSpec: BuiltinSpec = {
               }
               req._end();
             },
+            (line) => req?._addTrailer(line),
           );
         };
 
@@ -712,6 +962,7 @@ export const httpSpec: BuiltinSpec = {
       onData: (chunk: Uint8Array) => void;
       onEnd: () => void;
       onError: (err: Error) => void;
+      onTrailer?: (line: string) => void;
     }
 
     /**
@@ -765,6 +1016,7 @@ export const httpSpec: BuiltinSpec = {
             else this.destroy();
             handlers?.onEnd();
           },
+          (line) => this.current?.onTrailer?.(line),
         );
         this.reader = reader;
         if (leftover.length > 0) reader.push(leftover);
@@ -823,6 +1075,8 @@ export const httpSpec: BuiltinSpec = {
       path: string;
       host: string;
       port: number;
+      protocol = 'http:';
+      maxHeadersCount: number | null = null;
       headers: Record<string, string | string[]>;
       aborted = false;
       finished = false;
@@ -831,6 +1085,7 @@ export const httpSpec: BuiltinSpec = {
 
       #socket: NetSocket | null = null;
       #conn: Connection | null = null;
+      #rawHeaderNames = new Map<string, string>();
       #keepAlive = true;
       #agentKeepAlive = true;
       #chunks: Uint8Array[] = [];
@@ -850,8 +1105,11 @@ export const httpSpec: BuiltinSpec = {
         // `agent: false` opts out of keep-alive; an Agent instance supplies its
         // own `keepAlive` preference.
         if (opts.agent === false) {
-          this.agent = false;
-          this.#agentKeepAlive = false;
+          // Node creates a fresh one-off agent for `agent: false`, which has
+          // keep-alive off — so `req.agent` stays an Agent instance.
+          const oneOff = new Agent();
+          this.agent = oneOff;
+          this.#agentKeepAlive = oneOff.keepAlive;
         } else if (opts.agent instanceof Agent) {
           this.agent = opts.agent;
           this.#agentKeepAlive = opts.agent.keepAlive;
@@ -860,13 +1118,61 @@ export const httpSpec: BuiltinSpec = {
 
       setHeader(name: string, value: string | string[]): this {
         this.headers[name.toLowerCase()] = value;
+        this.#rawHeaderNames.set(name.toLowerCase(), name);
         return this;
       }
       getHeader(name: string): string | string[] | undefined {
         return this.headers[name.toLowerCase()];
       }
+      getHeaderNames(): string[] {
+        return Object.keys(this.headers);
+      }
+      /** The header names exactly as they were first set (case preserved). */
+      getRawHeaderNames(): string[] {
+        return [...this.#rawHeaderNames.values()];
+      }
+      hasHeader(name: string): boolean {
+        return name.toLowerCase() in this.headers;
+      }
       removeHeader(name: string): void {
         delete this.headers[name.toLowerCase()];
+        this.#rawHeaderNames.delete(name.toLowerCase());
+      }
+
+      /** `request.socket` / `request.connection` — the underlying transport. */
+      get socket(): NetSocket | null {
+        return this.#socket;
+      }
+      get connection(): NetSocket | null {
+        return this.#socket;
+      }
+
+      /** `request.setTimeout(msecs, cb)` — arm a socket inactivity timer. */
+      setTimeout(msecs: number, cb?: () => void): this {
+        if (typeof cb === 'function') this.once('timeout' as never, cb as never);
+        (this.#socket as unknown as { setTimeout?: (ms: number) => void } | null)?.setTimeout?.(msecs);
+        return this;
+      }
+      /** `request.clearTimeout()` — disarm the socket inactivity timer. */
+      clearTimeout(): void {
+        (this.#socket as unknown as { setTimeout?: (ms: number) => void } | null)?.setTimeout?.(0);
+      }
+
+      /** `request.onSocket(socket, err)` — adopt an already-connected socket. */
+      onSocket(socket: NetSocket, err?: Error): void {
+        this.#socket = socket;
+        if (err) ctx.binding.nextTick(() => this.emit('error', err));
+      }
+      /** `request.setNoDelay(noDelay)` — TCP_NODELAY toggle (no-op for a VFS socket). */
+      setNoDelay(noDelay?: boolean): this {
+        void noDelay;
+        return this;
+      }
+      /** `request.setSocketKeepAlive(enable, initialDelay)` — SO_KEEPALIVE (no-op). */
+      setSocketKeepAlive(enable?: boolean, initialDelay?: number): this {
+        void enable;
+        void initialDelay;
+        return this;
       }
 
       /** @internal — Writable contract: stash the body until `end()`. */
@@ -927,6 +1233,7 @@ export const httpSpec: BuiltinSpec = {
             },
             onData: (chunk) => this.#response?._pushBody(chunk),
             onEnd: () => this.#response?._end(),
+            onTrailer: (line) => this.#response?._addTrailer(line),
             onError: (err) => this.emit('error', err),
           },
           () => {
@@ -947,9 +1254,6 @@ export const httpSpec: BuiltinSpec = {
       _destroy(err: Error | null, cb: (err?: Error | null) => void): void {
         this.abort();
         cb(err);
-      }
-      setTimeout(): this {
-        return this;
       }
     }
 

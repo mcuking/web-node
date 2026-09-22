@@ -181,6 +181,8 @@ export const netSpec: BuiltinSpec = {
       listening = false;
       maxConnections = Infinity;
       connections = 0;
+      /** @internal — live sockets, so http.Server can close them by policy. */
+      _sockets = new Set<Socket>();
 
       #port = 0;
       #host = '127.0.0.1';
@@ -216,8 +218,10 @@ export const netSpec: BuiltinSpec = {
           network.listen(port, (vsock) => {
             this.connections++;
             const socket = new Socket();
+            this._sockets.add(socket);
             socket.once('close' as never, () => {
               this.connections--;
+              this._sockets.delete(socket);
             });
             socket._attach(vsock, 'server');
             this.emit('connection', socket);

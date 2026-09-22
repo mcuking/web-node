@@ -113,7 +113,10 @@ describe('http agent option', () => {
         res.on('end', () => resolve(data));
       });
       req.on('error', reject);
-      expect(req.agent).toBe(false);
+      // Node spins up a fresh one-off agent for `agent: false` (keep-alive off),
+      // so `req.agent` is still an Agent instance.
+      expect(req.agent).toBeInstanceOf(http.Agent);
+      expect((req.agent as any).keepAlive).toBe(false);
     });
     expect(body).toBe('ok');
     await new Promise<void>((resolve) => server.close(() => resolve()));
