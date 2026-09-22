@@ -543,5 +543,600 @@
       "syscall": "uv_tty_init"
     },
     "extra": {}
+  },
+  {
+    "code": "ERR_INVALID_ARG_TYPE",
+    "args": [
+      "foo",
+      "string",
+      42
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_ARG_TYPE",
+    "message": "The \"foo\" argument must be of type string. Received type number (42)",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_INVALID_ARG_TYPE",
+    "args": [
+      "opts",
+      [
+        "string",
+        "number"
+      ],
+      true
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_ARG_TYPE",
+    "message": "The \"opts\" argument must be one of type string or number. Received type boolean (true)",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_INVALID_ARG_VALUE",
+    "args": [
+      "options.highWaterMark",
+      -1
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_ARG_VALUE",
+    "message": "The property 'options.highWaterMark' is invalid. Received -1",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [
+      "RangeError"
+    ],
+    "props": {},
+    "extra": {
+      "RangeError": {
+        "name": "RangeError",
+        "code": "ERR_INVALID_ARG_VALUE",
+        "message": "The property 'options.highWaterMark' is invalid. Received -1"
+      }
+    }
+  },
+  {
+    "code": "ERR_INVALID_ARG_VALUE",
+    "args": [
+      "name",
+      "x",
+      "must be a string"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_ARG_VALUE",
+    "message": "The argument 'name' must be a string. Received 'x'",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [
+      "RangeError"
+    ],
+    "props": {},
+    "extra": {
+      "RangeError": {
+        "name": "RangeError",
+        "code": "ERR_INVALID_ARG_VALUE",
+        "message": "The argument 'name' must be a string. Received 'x'"
+      }
+    }
+  },
+  {
+    "code": "ERR_UNHANDLED_ERROR",
+    "args": [
+      "boom"
+    ],
+    "name": "Error",
+    "errorCode": "ERR_UNHANDLED_ERROR",
+    "message": "Unhandled error. (boom)",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_UNHANDLED_ERROR",
+    "args": [],
+    "name": "Error",
+    "errorCode": "ERR_UNHANDLED_ERROR",
+    "message": "Unhandled error.",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_BUFFER_OUT_OF_BOUNDS",
+    "args": [
+      "offset"
+    ],
+    "name": "RangeError",
+    "errorCode": "ERR_BUFFER_OUT_OF_BOUNDS",
+    "message": "\"offset\" is outside of buffer bounds",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_BUFFER_OUT_OF_BOUNDS",
+    "args": [],
+    "name": "RangeError",
+    "errorCode": "ERR_BUFFER_OUT_OF_BOUNDS",
+    "message": "Attempt to access memory outside buffer bounds",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_INVALID_URL",
+    "args": [
+      "http://[",
+      "http://base/"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_URL",
+    "message": "Invalid URL",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "input": "http://[",
+      "base": "http://base/"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_INVALID_URL_SCHEME",
+    "args": [
+      "file"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_URL_SCHEME",
+    "message": "The URL must be of scheme file",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_INVALID_URL_SCHEME",
+    "args": [
+      [
+        "file",
+        "http"
+      ]
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_URL_SCHEME",
+    "message": "The URL must be one of scheme file or http",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_INVALID_FILE_URL_PATH",
+    "args": [
+      "must not include encoded / characters",
+      "file:///a%2Fb"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_FILE_URL_PATH",
+    "message": "File URL path must not include encoded / characters",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "input": "file:///a%2Fb"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_OUT_OF_RANGE",
+    "args": [
+      "len",
+      ">= 0 && <= 100",
+      420
+    ],
+    "name": "RangeError",
+    "errorCode": "ERR_OUT_OF_RANGE",
+    "message": "The value of \"len\" is out of range. It must be >= 0 && <= 100. Received 420",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_OUT_OF_RANGE",
+    "args": [
+      "hint",
+      "> 0",
+      "nope"
+    ],
+    "name": "RangeError",
+    "errorCode": "ERR_OUT_OF_RANGE",
+    "message": "The value of \"hint\" is out of range. It must be > 0. Received 'nope'",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_MISSING_ARGS",
+    "args": [
+      "a"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_MISSING_ARGS",
+    "message": "The \"a\" argument must be specified",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_MISSING_ARGS",
+    "args": [
+      "a",
+      "b"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_MISSING_ARGS",
+    "message": "The \"a\" and \"b\" arguments must be specified",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_MISSING_ARGS",
+    "args": [
+      [
+        "a",
+        "b"
+      ],
+      "c"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_MISSING_ARGS",
+    "message": "The \"a\" or \"b\" and \"c\" arguments must be specified",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_MODULE_NOT_FOUND",
+    "args": [
+      "x",
+      "/base",
+      false
+    ],
+    "name": "Error",
+    "errorCode": "ERR_MODULE_NOT_FOUND",
+    "message": "Cannot find package 'x' imported from /base",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_MODULE_NOT_FOUND",
+    "args": [
+      "x",
+      "/base",
+      true
+    ],
+    "name": "Error",
+    "errorCode": "ERR_MODULE_NOT_FOUND",
+    "message": "Cannot find module 'x' imported from /base",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "url": "true"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_UNSUPPORTED_ESM_URL_SCHEME",
+    "args": [
+      {
+        "protocol": "ftp:"
+      },
+      [
+        "file",
+        "data"
+      ]
+    ],
+    "name": "Error",
+    "errorCode": "ERR_UNSUPPORTED_ESM_URL_SCHEME",
+    "message": "Only URLs with a scheme in: file and data are supported by the default ESM loader. Received protocol 'ftp:'",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_INTERNAL_ASSERTION",
+    "args": [
+      "something failed"
+    ],
+    "name": "Error",
+    "errorCode": "ERR_INTERNAL_ASSERTION",
+    "message": "something failed\nThis is caused by either a bug in Node.js or incorrect usage of Node.js internals.\nPlease open an issue with this stack trace at https://github.com/nodejs/node/issues\n",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_SOCKET_BAD_PORT",
+    "args": [
+      "port",
+      70000
+    ],
+    "name": "RangeError",
+    "errorCode": "ERR_SOCKET_BAD_PORT",
+    "message": "port should be >= 0 and < 65536. Received type number (70000).",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_SOCKET_BAD_PORT",
+    "args": [
+      "port",
+      0,
+      false
+    ],
+    "name": "RangeError",
+    "errorCode": "ERR_SOCKET_BAD_PORT",
+    "message": "port should be > 0 and < 65536. Received type number (0).",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": true,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_FALSY_VALUE_REJECTION",
+    "args": [
+      "falsy"
+    ],
+    "name": "Error",
+    "errorCode": "ERR_FALSY_VALUE_REJECTION",
+    "message": "Promise was rejected with falsy value",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {
+      "reason": "falsy"
+    },
+    "extra": {}
+  },
+  {
+    "code": "ERR_INVALID_MIME_SYNTAX",
+    "args": [
+      "script",
+      "x y",
+      1
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_MIME_SYNTAX",
+    "message": "The MIME syntax for a script in \"x y\" is invalid at 1",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_INVALID_MIME_SYNTAX",
+    "args": [
+      "script",
+      "x y",
+      -1
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_INVALID_MIME_SYNTAX",
+    "message": "The MIME syntax for a script in \"x y\" is invalid",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_PARSE_ARGS_UNKNOWN_OPTION",
+    "args": [
+      "--foo",
+      true
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_PARSE_ARGS_UNKNOWN_OPTION",
+    "message": "Unknown option '--foo'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"--foo\"",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_PARSE_ARGS_UNKNOWN_OPTION",
+    "args": [
+      "--foo",
+      false
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_PARSE_ARGS_UNKNOWN_OPTION",
+    "message": "Unknown option '--foo'",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_WORKER_PATH",
+    "args": [
+      "./relative/x.js"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_WORKER_PATH",
+    "message": "The worker script or module filename must be an absolute path or a relative path starting with './' or '../'. Received \"./relative/x.js\"",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_WORKER_PATH",
+    "args": [
+      "file:///x.js"
+    ],
+    "name": "TypeError",
+    "errorCode": "ERR_WORKER_PATH",
+    "message": "The worker script or module filename must be an absolute path or a relative path starting with './' or '../'. Wrap file:// URLs with `new URL`. Received \"file:///x.js\"",
+    "isError": true,
+    "isTypeError": true,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
+  },
+  {
+    "code": "ERR_WORKER_INVALID_EXEC_ARGV",
+    "args": [
+      [
+        "--a",
+        "--b"
+      ],
+      "invalid execArgv flags"
+    ],
+    "name": "Error",
+    "errorCode": "ERR_WORKER_INVALID_EXEC_ARGV",
+    "message": "Initiated Worker with invalid execArgv flags: --a, --b",
+    "isError": true,
+    "isTypeError": false,
+    "isRangeError": false,
+    "isSyntaxError": false,
+    "permutation": false,
+    "permutationNames": [],
+    "props": {},
+    "extra": {}
   }
 ]

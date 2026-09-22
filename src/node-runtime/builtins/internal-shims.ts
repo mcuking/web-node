@@ -169,7 +169,7 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_NOT_BUILDING_SNAPSHOT: Error,
   ERR_NOT_SUPPORTED_IN_SNAPSHOT: Error,
   ERR_UNKNOWN_FILE_EXTENSION: TypeError,
-  ERR_UNSUPPORTED_ESM_URL_SCHEME: TypeError,
+  ERR_UNSUPPORTED_ESM_URL_SCHEME: Error,
   ERR_ILLEGAL_CONSTRUCTOR: TypeError,
   ERR_STREAM_ALREADY_FINISHED: Error,
   ERR_STREAM_CANNOT_PIPE: Error,
@@ -238,6 +238,17 @@ function inspectArg(value: unknown): string {
   return String(value);
 }
 
+/** Node's `addNumericalSeparator`: groups digits with `_` from the right. */
+function addNumericalSeparator(val: string): string {
+  let res = '';
+  let i = val.length;
+  const start = val[0] === '-' ? 1 : 0;
+  for (; i >= start + 4; i -= 3) {
+    res = `_${val.slice(i - 3, i)}${res}`;
+  }
+  return `${val.slice(0, i)}${res}`;
+}
+
 const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
   // Node: `ERR_BUFFER_OUT_OF_BOUNDS('offset')` reads '"offset" is outside of
   // buffer bounds'; with no name it is the plain memory-bounds sentence.
@@ -274,12 +285,70 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
   // Node's builder drops the parenthesised detail when nothing was passed.
   ERR_UNHANDLED_ERROR: (args) =>
     args.length === 0 || args[0] === undefined ? 'Unhandled error.' : `Unhandled error. (${String(args[0])})`,
-  // `validatePort(name, port, allowZero = true)` picks the expected range by
-  // whether zero is allowed (lib/internal/errors.js).
+  // `validatePort(name, port, allowZero = true)` (lib/internal/errors.js):
+  // lowercase name, `and`, an exclusive `< 65536` bound, and the received value
+  // rendered through `determineSpecificType` with a trailing period.
   ERR_SOCKET_BAD_PORT: (args) => {
     const [name, port, allowZero = true] = args as [string, unknown, boolean?];
-    const range = allowZero ? '>= 0 && <= 65535' : '> 0 && <= 65535';
-    return `Port should be ${range}. Received ${inspectArg(port)}`;
+    const operator = allowZero ? '>=' : '>';
+    return `${name} should be ${operator} 0 and < 65536. Received ${determineSpecificType(port)}.`;
+  },
+  // `ERR_OUT_OF_RANGE(str, range, input, replaceDefaultBoolean = false)`. The
+  // received value goes through `inspect` (so strings are quoted) with
+  // `addNumericalSeparator` grouping large integers; `replaceDefaultBoolean`
+  // swaps the whole sentence for the caller's own.
+  ERR_OUT_OF_RANGE: (args) => {
+    const str = args[0] as string;
+    const range = args[1] as string;
+    const input = args[2];
+    const replaceDefaultBoolean = (args[3] as boolean | undefined) ?? false;
+    const msg = replaceDefaultBoolean ? str : `The value of "${str}" is out of range.`;
+    let received: string;
+    if (typeof input === 'number' && Number.isInteger(input) && Math.abs(input) > 2 ** 32) {
+      received = addNumericalSeparator(String(input));
+    } else if (typeof input === 'bigint') {
+      received = String(input);
+      if (input > 2n ** 32n || input < -(2n ** 32n)) received = addNumericalSeparator(received);
+      received += 'n';
+    } else {
+      received = inspectArg(input);
+    }
+    return `${msg} It must be ${range}. Received ${received}`;
+  },
+  // `ERR_MISSING_ARGS(...args)`: each name is quoted (an array becomes
+  // `"a" or "b"`), the list is joined with `formatList`, and the noun is
+  // pluralised for more than one argument.
+  ERR_MISSING_ARGS: (args) => {
+    const wrap = (a: unknown): string => `"${a}"`;
+    const mapped = args.map((a) => (Array.isArray(a) ? a.map(wrap).join(' or ') : wrap(a)));
+    return `The ${formatList(mapped)} argument${args.length > 1 ? 's' : ''} must be specified`;
+  },
+  // `ERR_MODULE_NOT_FOUND(path, base, exactUrl)`: says "module" only when an
+  // explicit URL was given, otherwise "package".
+  ERR_MODULE_NOT_FOUND: (args) => {
+    const [path, base, exactUrl] = args as [string, string, unknown];
+    return `Cannot find ${exactUrl ? 'module' : 'package'} '${path}' imported from ${base}`;
+  },
+  // `ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supported)`. The win32 sentence does
+  // not apply in a browser tab.
+  ERR_UNSUPPORTED_ESM_URL_SCHEME: (args) => {
+    const [url, supported] = args as [{ protocol: string }, string[]];
+    return (
+      'Only URLs with a scheme in: ' +
+      `${formatList(supported)} are supported by the default ESM loader. ` +
+      `Received protocol '${url.protocol}'`
+    );
+  },
+  // `ERR_INTERNAL_ASSERTION(message)`: the caller's message is prepended to a
+  // fixed two-line advisory (or is the whole message when none was given).
+  ERR_INTERNAL_ASSERTION: (args) => {
+    const message = args[0] as string | undefined;
+    const suffix =
+      'This is caused by either a bug in Node.js ' +
+      'or incorrect usage of Node.js internals.\n' +
+      'Please open an issue with this stack trace at ' +
+      'https://github.com/nodejs/node/issues\n';
+    return message === undefined ? suffix : `${message}\n${suffix}`;
   },
   // The `at <index>` suffix is only added when the invalid position is known.
   ERR_INVALID_MIME_SYNTAX: (args) => {
@@ -325,8 +394,14 @@ const CUSTOM_PROPS: Record<string, (err: Record<string, unknown>, args: unknown[
     err.input = args[0];
     if (args[1] != null) err.base = args[1];
   },
+  // `ERR_INVALID_FILE_URL_PATH` carries the offending input on the error.
   ERR_INVALID_FILE_URL_PATH: (err, args) => {
     err.input = args[1];
+  },
+  // `ERR_MODULE_NOT_FOUND(path, base, exactUrl)` sets a stringified `url` when
+  // an explicit URL was supplied (lib/internal/errors.js).
+  ERR_MODULE_NOT_FOUND: (err, args) => {
+    if (args[2]) err.url = `${args[2]}`;
   },
   // `ERR_ACCESS_DENIED` carries the permission and resource it was denied for.
   ERR_ACCESS_DENIED: (err, args) => {
@@ -472,6 +547,9 @@ function formatInvalidArgType(args: unknown[]): string {
 const ERROR_EXTRA_BASES: Record<string, ErrorConstructor[]> = {
   ERR_INVALID_STATE: [TypeError, RangeError],
   ERR_OPERATION_FAILED: [TypeError],
+  // `E('ERR_INVALID_ARG_VALUE', …, TypeError, RangeError)`: the RangeError
+  // variant is what the range-checking call sites reach for.
+  ERR_INVALID_ARG_VALUE: [RangeError],
   // `E('ERR_INVALID_RETURN_VALUE', …, TypeError, RangeError)`: the RangeError
   // variant is the one `internal/streams/iter` reaches for.
   ERR_INVALID_RETURN_VALUE: [RangeError],

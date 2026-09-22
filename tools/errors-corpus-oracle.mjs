@@ -53,6 +53,42 @@ const CASES = [
     [{ syscall: 'stat', code: 'ENOENT', message: 'no such file or directory', errno: -2, path: '/x' }],
   ],
   ['ERR_TTY_INIT_FAILED', [{ syscall: 'uv_tty_init', code: 'ENOTTY', message: 'inappropriate ioctl', errno: -25 }]],
+
+  // Codes whose Node message is a *function* (not a `%s` template). These are
+  // the ones a naive `%s` substitution gets wrong, so they are exercised with
+  // argument vectors mirroring real call sites. `ERR_INVALID_ARG_TYPE` and a
+  // few others already had formatters; the rest pin the ones added in M62.
+  ['ERR_INVALID_ARG_TYPE', ['foo', 'string', 42]],
+  ['ERR_INVALID_ARG_TYPE', ['opts', ['string', 'number'], true]],
+  ['ERR_INVALID_ARG_VALUE', ['options.highWaterMark', -1]],
+  ['ERR_INVALID_ARG_VALUE', ['name', 'x', 'must be a string']],
+  ['ERR_UNHANDLED_ERROR', ['boom']],
+  ['ERR_UNHANDLED_ERROR', []],
+  ['ERR_BUFFER_OUT_OF_BOUNDS', ['offset']],
+  ['ERR_BUFFER_OUT_OF_BOUNDS', []],
+  ['ERR_INVALID_URL', ['http://[', 'http://base/']],
+  ['ERR_INVALID_URL_SCHEME', ['file']],
+  ['ERR_INVALID_URL_SCHEME', [['file', 'http']]],
+  ['ERR_INVALID_FILE_URL_PATH', ['must not include encoded / characters', 'file:///a%2Fb']],
+  ['ERR_OUT_OF_RANGE', ['len', '>= 0 && <= 100', 420]],
+  ['ERR_OUT_OF_RANGE', ['hint', '> 0', 'nope']],
+  ['ERR_MISSING_ARGS', ['a']],
+  ['ERR_MISSING_ARGS', ['a', 'b']],
+  ['ERR_MISSING_ARGS', [['a', 'b'], 'c']],
+  ['ERR_MODULE_NOT_FOUND', ['x', '/base', false]],
+  ['ERR_MODULE_NOT_FOUND', ['x', '/base', true]],
+  ['ERR_UNSUPPORTED_ESM_URL_SCHEME', [{ protocol: 'ftp:' }, ['file', 'data']]],
+  ['ERR_INTERNAL_ASSERTION', ['something failed']],
+  ['ERR_SOCKET_BAD_PORT', ['port', 70000]],
+  ['ERR_SOCKET_BAD_PORT', ['port', 0, false]],
+  ['ERR_FALSY_VALUE_REJECTION', ['falsy']],
+  ['ERR_INVALID_MIME_SYNTAX', ['script', 'x y', 1]],
+  ['ERR_INVALID_MIME_SYNTAX', ['script', 'x y', -1]],
+  ['ERR_PARSE_ARGS_UNKNOWN_OPTION', ['--foo', true]],
+  ['ERR_PARSE_ARGS_UNKNOWN_OPTION', ['--foo', false]],
+  ['ERR_WORKER_PATH', ['./relative/x.js']],
+  ['ERR_WORKER_PATH', ['file:///x.js']],
+  ['ERR_WORKER_INVALID_EXEC_ARGV', [['--a', '--b'], 'invalid execArgv flags']],
 ];
 
 const describe = (code, args) => {
