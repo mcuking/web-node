@@ -46,6 +46,7 @@ import {
   type SignAlgorithm,
 } from '../crypto/asym';
 import { ECDH as RawECDH } from '../crypto/ecdh';
+import { X509Certificate as RawX509Certificate } from '../crypto/x509';
 import {
   DiffieHellman as RawDiffieHellman,
   DiffieHellmanGroup as RawDiffieHellmanGroup,
@@ -1107,21 +1108,12 @@ export const cryptoSpec: BuiltinSpec = {
 
     // `KeyObject` is the buffered proxy declared near the top of `init`.
 
+    // `X509Certificate` is a real DER/PEM parser (see `../crypto/x509`). Node
+    // returns Buffers from `raw`, so it goes through the byte factory too.
     const X509Certificate = namedClass(
       'X509Certificate',
-      class {
-        constructor() {
-          throw notImplemented('api', 'crypto.X509Certificate');
-        }
-      },
+      bufferedClass(RawX509Certificate, asBuffer),
     );
-    defineStubs(X509Certificate.prototype, [
-      'ca', 'checkEmail', 'checkHost', 'checkIP', 'checkIssued', 'checkPrivateKey', 'fingerprint',
-      'fingerprint256', 'fingerprint512', 'infoAccess', 'issuer', 'issuerCertificate', 'keyUsage',
-      'publicKey', 'raw', 'serialNumber', 'signatureAlgorithm', 'signatureAlgorithmOid', 'subject',
-      'subjectAltName', 'toJSON', 'toLegacyObject', 'toString', 'validFrom', 'validFromDate',
-      'validTo', 'validToDate', 'verify',
-    ]);
 
     // `DiffieHellman` / `DiffieHellmanGroup` are the real pure-JS classes. The
     // byte-output factory turns their `Uint8Array`s into runtime `Buffer`s (Node

@@ -399,6 +399,7 @@ export class KeyObject {
         `The property 'options.format' must be one of: undefined, 'buffer', 'jwk'. Received ${describe(format)}`);
     }
     const type = opts.type ?? (m.type === 'public' ? 'spki' : 'pkcs8');
+    if (format === 'jwk') return exportJwk(m) as unknown as string;
     const der = exportDer(m, type);
     if (format === 'der') return der;
     if (format === 'pem') {
@@ -437,6 +438,63 @@ function exportDer(m: KeyMaterial, type: string): Uint8Array {
 
 export function makeKeyObject(material: KeyMaterial): KeyObject {
   return new KeyObject(KEY_OBJECT_INTERNAL, material);
+}
+
+// --- JWK export -------------------------------------------------------------
+
+const CURVE_JWK: Record<string, string> = {
+  prime256v1: 'P-256',
+  secp384r1: 'P-384',
+  secp521r1: 'P-521',
+  secp256k1: 'secp256k1',
+};
+
+/** base64url of a big-endian integer with no unnecessary leading zero. */
+function jwkInt(value: bigint): string {
+  const bytes = bigIntToBytes(value);
+  let i = 0;
+  // JWK integers are unsigned magnitudes; drop both the DER sign pad and any
+  // redundant high zero bytes (`BN_bn2bin` semantics).
+  while (i < bytes.length - 1 && bytes[i] === 0) i++;
+  return base64Url(bytes.subarray(i));
+}
+
+/** base64url of a fixed-width field element. */
+function jwkFixed(value: bigint, size: number): string {
+  return base64Url(bigIntToBytes(value, size));
+}
+
+/** The `JsonWebKey` shape OpenSSL-backed `exportJwk` produces. */
+function exportJwk(m: KeyMaterial): Record<string, string> {
+  if (m.rsa) {
+    const jwk: Record<string, string> = { kty: 'RSA', n: jwkInt(m.rsa.n), e: jwkInt(m.rsa.e) };
+    if (m.type === 'private' && m.rsa.d !== undefined) {
+      jwk.d = jwkInt(m.rsa.d);
+      if (m.rsa.p !== undefined) jwk.p = jwkInt(m.rsa.p);
+      if (m.rsa.q !== undefined) jwk.q = jwkInt(m.rsa.q);
+      if (m.rsa.dp !== undefined) jwk.dp = jwkInt(m.rsa.dp);
+      if (m.rsa.dq !== undefined) jwk.dq = jwkInt(m.rsa.dq);
+      if (m.rsa.qinv !== undefined) jwk.qi = jwkInt(m.rsa.qinv);
+    }
+    return jwk;
+  }
+  if (m.ec) {
+    const size = m.ec.curve.byteLength;
+    const jwk: Record<string, string> = {
+      kty: 'EC',
+      crv: CURVE_JWK[m.ec.curve.nodeName] ?? m.ec.curve.nodeName,
+      x: jwkFixed(m.ec.x, size),
+      y: jwkFixed(m.ec.y, size),
+    };
+    if (m.type === 'private' && m.ec.d !== undefined) jwk.d = jwkFixed(m.ec.d, size);
+    return jwk;
+  }
+  if (m.ed) {
+    const jwk: Record<string, string> = { kty: 'OKP', crv: 'Ed25519', x: base64Url(m.ed.publicKey) };
+    if (m.type === 'private' && m.ed.seed) jwk.d = base64Url(m.ed.seed);
+    return jwk;
+  }
+  throw coded('TypeError', 'ERR_INVALID_ARG_VALUE', 'The property \'options.format\' must be one of: undefined, \'buffer\', \'jwk\'');
 }
 
 export function keyMaterialOf(key: KeyObject): KeyMaterial {

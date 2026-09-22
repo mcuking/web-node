@@ -107,11 +107,16 @@ describe('crypto new real surface', () => {
 describe('crypto unsupported-but-present surface throws loudly', () => {
   it('native-only classes are constructible names that throw', () => {
     const crypto = boot();
-    for (const name of ['X509Certificate', 'Certificate']) {
+    // `Certificate` is still a native-only stub.
+    for (const name of ['Certificate']) {
       expect(typeof crypto[name]).toBe('function');
       expect(crypto[name].name).toBe(name);
       expect(() => new crypto[name]()).toThrowError(/not implemented/i);
     }
+    // `X509Certificate` is a real DER/PEM parser now.
+    expect(typeof crypto.X509Certificate).toBe('function');
+    expect(crypto.X509Certificate.name).toBe('X509Certificate');
+    expect(() => new crypto.X509Certificate()).toThrowError(/must be of type string/);
   });
 
   it('unsupported functions exist and throw', () => {

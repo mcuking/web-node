@@ -65,7 +65,9 @@ describe('crypto stub classes', () => {
     }
     // KeyObject is real now: its constructor validates `type` like Node.
     expect(() => new crypto.KeyObject()).toThrowError(/The argument 'type' is invalid/);
-    expect(() => new crypto.X509Certificate()).toThrowError(/not implemented/i);
+    // X509Certificate is a real parser now: it validates its argument.
+    expect(() => new crypto.X509Certificate()).toThrowError(/must be of type string/);
+    expect(() => new crypto.X509Certificate('not a cert')).toThrowError(/PEM routines::no start line/);
     // DiffieHellman is real: no args is an argument-type error, an unknown group
     // a crypto error.
     expect(() => new crypto.DiffieHellman()).toThrowError(/sizeOrKey/);

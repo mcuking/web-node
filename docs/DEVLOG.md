@@ -242,6 +242,18 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-22 · M87 `crypto.X509Certificate` 真解析（差分语料驱动）
+
+**实现**：新建 `src/node-runtime/crypto/x509.ts`（~810 行）——`crypto.X509Certificate` 从「存在但抛错」改为**真 DER/PEM 解析器**，站在 M83 已落地的纯 JS ASN.1（`der.ts`）之上，复刻 Node 的**可观测表面**（Node 那层是 OpenSSL `X509View`，页面里没有，只能按 OpenSSL 的打印助手逐字重建）。
+
+**覆盖**：全部 getter（`subject`/`issuer`/`subjectAltName`/`infoAccess`/`validFrom`(ASN1_TIME 形 `MMM DD HH:MM:SS YYYY GMT`)/`validTo`/`validFromDate`/`validToDate`/`fingerprint`/`fingerprint256`/`fingerprint512`/`keyUsage`/`serialNumber`（大写冒号十六进制）/`signatureAlgorithm`/`signatureAlgorithmOid`/`raw`/`publicKey`（真 `KeyObject`）/`ca`/`issuerCertificate`）与方法（`toString`/`toJSON`/`checkHost`/`checkEmail`/`checkIP`/`checkIssued`/`checkPrivateKey`/`verify`/`toLegacyObject`），格式来自 OpenSSL 的 `X509_NAME_print_ex`（`kX509NameFlagsMultiline`）、`ASN1_TIME_print`、`PrintGeneralName`、`SafeX509InfoAccessPrint`、`BIGNUM` 与 DER/SKI 的十六进制打印。
+
+**顺带补齐**：① `asym.ts` 给非对称 `KeyObject.export()` 加 **JWK 导出**（RSA `kty/n/e`+私钥 `d/p/q/dp/dq/qi`；EC `kty/crv/x/y`(+`d`)；Ed25519 `kty:'OKP'`——RSA 字段用**最小无符号**大端、EC 坐标定长到曲线字节数，均 base64url 无 padding，对齐 `SetEncodedValue`/`crypto_ec.cc` 真源）；② `checkPrivateKey`/`verify` 的报错改成 Node 的 `ERR_INVALID_ARG_VALUE('pkey', key)` 形状（`The argument 'pkey' is invalid. Received PublicKeyObject [KeyObject] {}`）。
+
+**已知偏离/取舍**：`issuerCertificate` 恒 `undefined`（不回溯签发者，与 Node 未解析时一致）；链验证只做签名数学、不复刻 OpenSSL 的 CA/用途策略。
+
+**验证**：新差分语料 `tools/x509-probe.cjs` → `test/fixtures/x509.json`（自签 leaf/CA 证书，含 PEM/DER 两种输入）逐字段 **0 diff**。门禁全绿：tsc 干净 · vitest **911 通过 / 2 预存 skip（88 文件）** · build worker **2364.15KB**。
+
 ### 2026-09-22 · M86 对称密钥生成 + FIPS 开关（差分语料驱动）
 
 **实现**：`crypto.generateKeySync(type, options)` / `crypto.generateKey(type, options, callback)`（仅 `'hmac'` 与 `'aes'`，与 Node 一致），`crypto.getFips()`/`setFips()`。
