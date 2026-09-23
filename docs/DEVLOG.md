@@ -244,6 +244,26 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · M93.4e CFB 反馈位宽（cfb1/cfb8）+ SM4 128 位别名
+
+补上 OpenSSL 的 CFB 反馈位宽变体（真 Node `getCiphers()` 165 项，web-node 原先只报已实现的 111 项）。
+
+- 新增 `src/node-runtime/crypto/cfb.ts`：位粒度通用 CFB，按 OpenSSL `crypto/modes/cfb128.c` 的 `cfbr_encrypt_block` 逐位移植。反馈宽度取 1 / 8 / 128 位；每步 `E(R)`、取高 `s` 位异或、`R=(R<<s)|反馈位`。**加密时反馈输出位、解密时反馈输入位**——这个不对称才是可逆性来源。
+- AES/ARIA/Camellia 走 `Cipheriv`（16 字节块）；DES 走 `DesCipher`（8 字节块），各自接入 `cfb1`/`cfb8`。
+- 新增名称：`aes-{128,192,256}-cfb1/cfb8`、`aria-*-cfb1/cfb8`、`camellia-*-cfb1/cfb8`、`des-ede3-cfb1/cfb8`（20 个）+ `sm4-cfb128`/`sm4-ofb128`（别名，`getCipherInfo` 仍报 `sm4-cfb`/`sm4-ofb`）→ **`getCiphers()` 111 → 133**。
+
+**两个坑（都只在罕至路径显形）**：
+1. 位粒度的 keystream 必须**每步从寄存器重新加密**——初版对一块全零缓冲调用 `encryptBlock`（原地加密），得到的是 `E(K,0)` 而非 `E(R)`，首字节就错。
+2. `DesEde.encrypt` **返回新数组、不改原数组**，与 AES 的 `encryptBlock`（原地修改）不同；把返回值丢弃会让 DES 的 keystream 永远等于寄存器本身，而且 `cfb1` 与 `cfb8` 会**巧合地输出一致**（因为此时两者都退化成「用寄存器字节当 keystream」）——必须 `b.set(edes.encrypt(b))`。
+
+**差分**：`tools/crypto-cfb-feedback-probe.cjs` → `test/fixtures/crypto-cfb-feedback.json`（22 名称 × 9 种长度（含 0、非整块）× 加解密回环 + 流式分块 + `getCipherInfo` + `getCiphers` 成员）——**0 diff**；`test/crypto-cfb-feedback.test.ts`。
+
+**仍缺**（后续 M93.4f+）：`aes-*-cbc-cts`、`aes-*-gcm-siv`、`aria-*-ccm/gcm`、`sm4-ccm/gcm/xts`、`aes-*-wrap-inv`/`-wrap-pad-inv`、`des3-wrap`/`id-smime-alg-cms3deswrap`。
+
+**门禁**：`tsc --noEmit` 干净 · `vitest run` **990 通过 / 2 skip（115 files）** · `vite build` 绿（worker **655.59KB**）。
+
+---
+
 ### 2026-09-23 · M107 载荷拆分（vendored 源出 worker → 预加载资源）
 
 **问题**：worker bundle 2.5MB 里 **93%** 是 vendored Node 源文本（`import.meta.glob(..., { eager: true })` 把 160 个文件以字符串字面量内联）。浏览器必须先下载 + **按 JS 解析/编译** 这 2.3MB，才能跑第一行 runtime 代码。

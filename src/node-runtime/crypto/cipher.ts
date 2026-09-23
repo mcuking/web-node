@@ -97,6 +97,7 @@ import { AesKey } from './aes';
 import { Aria } from './aria';
 import { Camellia } from './camellia';
 import { AesCcm } from './ccm';
+import { CfbFeedback } from './cfb';
 import { ChaCha20Cipher, ChaCha20Poly1305, isValidTagLength, type SyncCipher } from './chacha20';
 import { DesCipher, DesEde, type DesMode } from './des';
 import { AesOcb } from './ocb';
@@ -118,6 +119,8 @@ export type CipherMode =
   | 'cbc'
   | 'ctr'
   | 'cfb'
+  | 'cfb1'
+  | 'cfb8'
   | 'ofb'
   | 'gcm'
   | 'ccm'
@@ -186,6 +189,18 @@ const SPECS: CipherSpec[] = [];
     const gcm = SPECS.find((s) => s.name === `aes-${bits}-gcm`)!;
     SPECS.push({ ...gcm, name: `id-aes${bits}-gcm`, alias: true });
   }
+  // CFB with a 1-/8-bit feedback register (the full-block variant is `cfb`).
+  const aesCfbFeedback: Array<[number, number, number]> = [
+    // bits, cfb1 nid, cfb8 nid
+    [128, 650, 653],
+    [192, 651, 654],
+    [256, 652, 655],
+  ];
+  for (const [bits, nid1, nid8] of aesCfbFeedback) {
+    const keyLength = bits / 8;
+    SPECS.push({ name: `aes-${bits}-cfb1`, infoName: `aes-${bits}-cfb1`, mode: 'cfb1', infoMode: 'cfb', nid: nid1, keyLength, blockSize: 1, ivLength: 16 });
+    SPECS.push({ name: `aes-${bits}-cfb8`, infoName: `aes-${bits}-cfb8`, mode: 'cfb8', infoMode: 'cfb', nid: nid8, keyLength, blockSize: 1, ivLength: 16 });
+  }
   // ChaCha20 and its AEAD (RFC 8439); OpenSSL reports both as mode `stream`.
   SPECS.push({ name: 'chacha20', infoName: 'chacha20', mode: 'chacha20', infoMode: 'stream', nid: 1019, keyLength: 32, blockSize: 1, ivLength: 16 });
   SPECS.push({ name: 'chacha20-poly1305', infoName: 'chacha20-poly1305', mode: 'chacha20-poly1305', infoMode: 'stream', nid: 1018, keyLength: 32, blockSize: 1, ivLength: 12 });
@@ -203,10 +218,13 @@ const SPECS: CipherSpec[] = [];
     ['des-ede3-cbc', 'cbc', 44, 24, 8, 8, 'des-ede3-cbc'],
     ['des3', 'cbc', 44, 24, 8, 8, 'des-ede3-cbc'],
     ['des-ede3-cfb', 'cfb', 61, 24, 1, 8, 'des-ede3-cfb'],
+    ['des-ede3-cfb1', 'cfb1', 658, 24, 1, 8, 'des-ede3-cfb1'],
+    ['des-ede3-cfb8', 'cfb8', 659, 24, 1, 8, 'des-ede3-cfb8'],
     ['des-ede3-ofb', 'ofb', 63, 24, 1, 8, 'des-ede3-ofb'],
   ];
   for (const [name, mode, nid, keyLength, blockSize, ivLength, infoName] of des) {
-    SPECS.push({ name, infoName, mode, nid, keyLength, blockSize, ivLength, family: 'des' });
+    const infoMode = mode === 'cfb1' || mode === 'cfb8' ? 'cfb' : undefined;
+    SPECS.push({ name, infoName, mode, infoMode, nid, keyLength, blockSize, ivLength, family: 'des' });
   }
   // AES-CCM (SP 800-38C). `authTagLength` is mandatory, and the plaintext
   // length is declared up front (constructor option or setAAD's second arg).
@@ -230,7 +248,7 @@ const SPECS: CipherSpec[] = [];
     { mode: 'ofb', blockSize: 1, ivLength: 16 },
     { mode: 'ctr', blockSize: 1, ivLength: 16 },
   ];
-  const blockFamilies: Array<{ prefix: string; aliases: string[]; sizes: Array<[number, number[]]> }> = [
+  const blockFamilies: Array<{ prefix: string; aliases: string[]; sizes: Array<[number, number[]]>; cfb1?: number[]; cfb8?: number[] }> = [
     {
       prefix: 'camellia',
       aliases: ['camellia128', 'camellia192', 'camellia256'],
@@ -239,6 +257,8 @@ const SPECS: CipherSpec[] = [];
         [24, [755, 752, 758, 767, 967]],
         [32, [756, 753, 759, 768, 971]],
       ],
+      cfb1: [760, 761, 762],
+      cfb8: [763, 764, 765],
     },
     {
       prefix: 'aria',
@@ -248,6 +268,8 @@ const SPECS: CipherSpec[] = [];
         [24, [1070, 1071, 1072, 1073, 1074]],
         [32, [1075, 1076, 1077, 1078, 1079]],
       ],
+      cfb1: [1080, 1081, 1082],
+      cfb8: [1083, 1084, 1085],
     },
     {
       prefix: 'sm4',
@@ -255,19 +277,36 @@ const SPECS: CipherSpec[] = [];
       sizes: [[16, [1133, 1134, 1137, 1135, 1139]]],
     },
   ];
-  for (const { prefix, aliases, sizes } of blockFamilies) {
+  for (const { prefix, aliases, sizes, cfb1, cfb8 } of blockFamilies) {
     sizes.forEach(([keyLength, nids], sizeIndex) => {
       const bits = keyLength * 8;
       blockModes.forEach((m, index) => {
         const name = keyLength === 16 && prefix === 'sm4' ? `sm4-${m.mode}` : `${prefix}-${bits}-${m.mode}`;
         SPECS.push({ name, infoName: name, mode: m.mode, nid: nids[index], keyLength, blockSize: m.blockSize, ivLength: m.ivLength, family: prefix as 'camellia' | 'aria' | 'sm4' });
       });
+      if (cfb1 && cfb8) {
+        for (const [mode, nid] of [
+          ['cfb1', cfb1[sizeIndex]],
+          ['cfb8', cfb8[sizeIndex]],
+        ] as Array<[CipherMode, number]>) {
+          const name = `${prefix}-${bits}-${mode}`;
+          SPECS.push({ name, infoName: name, mode, infoMode: 'cfb', nid, keyLength, blockSize: 1, ivLength: 16, family: prefix as 'camellia' | 'aria' | 'sm4' });
+        }
+      }
       if (aliases[sizeIndex]) {
         const cbcName = keyLength === 16 && prefix === 'sm4' ? 'sm4-cbc' : `${prefix}-${bits}-cbc`;
         const cbc = SPECS.find((s) => s.name === cbcName)!;
         SPECS.push({ ...cbc, name: aliases[sizeIndex], alias: true });
       }
     });
+  }
+  // SM4 spells the 128-bit-feedback CFB/OFB names with an explicit suffix.
+  for (const [alias, base] of [
+    ['sm4-cfb128', 'sm4-cfb'],
+    ['sm4-ofb128', 'sm4-ofb'],
+  ]) {
+    const spec = SPECS.find((s) => s.name === base)!;
+    SPECS.push({ ...spec, name: alias, alias: true });
   }
   // AES-OCB (RFC 7253). A 1..15 byte IV; the tag length is mandatory.
   const ocb: Array<[number, number]> = [
@@ -465,6 +504,7 @@ export class Cipheriv {
   #keystreamPos = 16;
   #cfbBlock: Uint8Array = new Uint8Array(16);
   #cfbPos = 0;
+  #bitCfb: CfbFeedback | null = null;
   // GCM
   #ghash: Ghash;
   #gcmJ0: Uint8Array = new Uint8Array(16);
@@ -499,6 +539,17 @@ export class Cipheriv {
       case 'cfb':
       case 'ofb':
         this.#register.set(this.#iv);
+        break;
+      case 'cfb1':
+      case 'cfb8':
+        // CFB with 1-/8-bit feedback, over the 16-byte block cipher.
+        this.#bitCfb = new CfbFeedback(
+          16,
+          this.spec.mode === 'cfb1' ? 1 : 8,
+          this.#iv,
+          this.encrypt,
+          (block) => this.#block.encryptBlock(block),
+        );
         break;
       case 'gcm': {
         // H = E(K, 0^128)
@@ -549,6 +600,7 @@ export class Cipheriv {
   #processStream(input: Uint8Array): Uint8Array {
     const out = new Uint8Array(input.length);
     const mode = this.spec.mode;
+    if (mode === 'cfb1' || mode === 'cfb8') return this.#bitCfb!.process(input);
     for (let i = 0; i < input.length; i++) {
       if (this.#keystreamPos === 16) this.#generateKeystream();
       const byte = input[i] ^ this.#keystream[this.#keystreamPos++];

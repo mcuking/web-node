@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-23（**阶段 D 4/4 收尾** + **M107 基准已立**：M102 `net.BoundSocket` 虚拟绑定 / M103 `http.Agent#createSocket`+`createConnection` / M104 `url.fileURLToPath({windows:true})` / M105 `console`+`v8` 面收尾；合计 **44 / 31 / 13**）
+> - **最后更新**：2026-09-23（**阶段 D 4/4 收尾** + **M107 载荷拆分** + **M93.4e CFB 反馈位宽**：M102 `net.BoundSocket` 虚拟绑定 / M103 `http.Agent` / M104 `url.fileURLToPath({windows:true})` / M105 `console`+`v8` 面收尾 / M107 worker 2.5MB→654KB（vendored 源出包预加载）/ M93.4e `cfb1`/`cfb8` + SM4 128 位别名（`getCiphers` 111→133）；合计 **44 / 33 / 11**）
 
 ---
 
@@ -14,7 +14,7 @@
 
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
-| A | crypto 收尾（接续 M87） | 22 | 20 | 2 |
+| A | crypto 收尾（接续 M87） | 22 | 22 | 0 |
 | B | 语义深度（差分语料继续扩面） | 5 | 5 | 0 |
 | C | 平台无对应物的补齐（选择性） | 3 | 0 | 3 |
 | D | 运行时常量小项收尾 | 4 | 4 | 0 |
@@ -22,9 +22,9 @@
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | G | 借鉴 WebContainer（2026-09-23 调研落地） | 2 | 0 | 2 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **44** | **31** | **13**（+1 不做） |
+| **合计** | | **44** | **33** | **11**（+1 不做） |
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 118 个里程碑，剩余 13 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 120 个里程碑，剩余 11 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.4（26 → 30），同日晚 M90.5 又拆为 M90.5–M90.9（30 → 34）。
 > 注：M97 于 2026-09-22 拆出 M97.1（`stripTypeScriptTypes` 需要真 TS 解析器 / amaro wasm，代价大）（41 → 42）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
@@ -49,7 +49,7 @@
   - 差分：`tools/crypto-argon2-probe.cjs` → `test/fixtures/crypto-argon2.json`（**0 diff**，含 RFC 9106 三条官方向量）；`test/crypto-argon2.test.ts`。
   - 风险：中（代码量大，算法是公开规范）。
 
-- [ ] **M90 · `createMac` / `getMacs`**（拆为 M90.1–M90.5）
+- [x] **M90 · `createMac` / `getMacs`**（拆为 M90.1–M90.5）✅ 2026-09-22
   > **2026-09-22 拆分原因**：原估计「低–中」偏乐观。实测 `crypto.getMacs()` 返回 11 项（`blake2bmac`/`blake2smac`/`cmac`/`gmac`/`hmac`/`kmac-128`/`kmac-256`/`kmac128`/`kmac256`/`poly1305`/`siphash`），`createMac(algorithm, key, options)` 每个算法各自要一套底层原语。拆成四个可独立验证的里程碑。
 
 - [x] **M90.1 · `getMacs()` + `createMac` 前端与 HMAC / BLAKE2b MAC** ✅ 2026-09-22
@@ -132,7 +132,7 @@
 - [x] **M93.2 · DES / 3DES** ✅ 2026-09-22
   - 新增 `src/node-runtime/crypto/des.ts`：纯 JS DES 块密码（FIPS 46-3 全表）+ EDE2/EDE3；`createCipheriv` 接入 `des-ede`/`des-ede-ecb`/`des-ede-cbc`/`des-ede-cfb`/`des-ede-ofb` 与 `des-ede3`/`des-ede3-ecb`/`des-ede3-cbc`/`des-ede3-cfb`/`des-ede3-ofb`/`des3`（ECB/CBC/CFB-128/OFB，8 字节块 + PKCS#7）。
   - 顺带把 CMAC 改成**通用块密码 CMAC**（`cmacCore` + `aesCmac`/`desCmac`），于是 `createMac('cmac', key, { cipher: 'des-ede3-cbc' })` 也能算了（8 字节 tag）——M90.3 记的「非 AES CMAC 报错」偏离因此收窄。
-  - **已知偏离**：`des-ede3-cfb1`/`des-ede3-cfb8` 与 `des3-wrap`/`id-smime-alg-cms3deswrap` 仍抛 `NotImplementedError`。
+  - **已知偏离**：`des3-wrap`/`id-smime-alg-cms3deswrap` 与 `aes-*-wrap-inv`/`-wrap-pad-inv` 仍抛 `NotImplementedError`（`des-ede3-cfb1`/`des-ede3-cfb8` 已在 M93.4e 落地）。
   - 差分：`tools/crypto-des-probe.cjs` → `test/fixtures/crypto-des.json`（**0 diff**）；`test/crypto-des.test.ts`；CMAC 语料并入 `test/fixtures/crypto-mac.json`。
   - 风险：中低。
 
@@ -144,7 +144,7 @@
   - 差分：`tools/crypto-ccm-probe.cjs` → `test/fixtures/crypto-ccm.json`（含 SP 800-38C 附录 C 例 1、16/24/32 密钥、tag 4–16、nonce 7–13、空 payload、全套错误面）——**0 diff**；`test/crypto-ccm.test.ts`。
   - 风险：中低。
 
-- [ ] **M93.4 · 其余模式与密码**（拆为 M93.4a–M93.4d）
+- [x] **M93.4 · 其余模式与密码**（拆为 M93.4a–M93.4e）
   > **2026-09-22 拆分原因**：与 M93 同理——覆盖面过大（三种额外块密码 + 四种额外模式/包装），逐项验证无法混在一起。拆为：
 
   - [x] **M93.4a · Camellia** ✅ 2026-09-22
@@ -176,6 +176,13 @@
     - 语义细节：SIV/XTS 都是**单次 update**（二次 update 与不足一块报 `Trying to add data in unsupported state`）；SIV 未 `update` 就 `final` 报鉴权错误，XTS 报 `Unsupported state`；XTS 的 `setAAD`/`getAuthTag`/`setAuthTag` 报 `ERR_CRYPTO_INVALID_STATE`。
     - 差分：`tools/crypto-siv-xts-probe.cjs` → `test/fixtures/crypto-siv-xts.json`（SIV：128/192/256 密钥、多 AAD、空/16/32/40 字节载荷；XTS：16/20/32/33/48/1000 字节、全块与 CTS、两套 key/iv；全套错误面）——**0 diff**；`test/crypto-siv-xts.test.ts`。
     - 风险：中高。
+  - [x] **M93.4e · CFB 反馈位宽（cfb1/cfb8）与 SM4 128 位别名** ✅ 2026-09-23
+    - 新增 `src/node-runtime/crypto/cfb.ts`：位粒度通用 CFB（反馈宽度 1/8/128 位），按 OpenSSL `cfb128.c` 的 `cfbr_encrypt_block` 逐位实现——每步 `E(R)`、取高 `s` 位、`R=(R<<s)|(反馈位)`；**加密反馈输出位、解密反馈输入位**（可逆性所在）。
+    - AES/ARIA/Camellia 走 `Cipheriv`（16 字节块），DES 走 `DesCipher`（8 字节块），分别接入 `cfb1`/`cfb8`。
+    - 新增名称：`aes-{128,192,256}-cfb1/cfb8`、`aria-*-cfb1/cfb8`、`camellia-*-cfb1/cfb8`、`des-ede3-cfb1/cfb8`（20 个）+ `sm4-cfb128`/`sm4-ofb128`（info 名为 `sm4-cfb`/`sm4-ofb` 的别名）——`getCiphers()` 从 **111 → 133**（真 Node 165）。
+    - **关键坑**：①位粒度的 keystream 必须**每步从寄存器重新加密**（初版对一个全零缓冲加密，得到 `E(K,0)`）；②`DesEde.encrypt` **返回新数组、不改原数组**，与 AES 的 `encryptBlock`（原地）不同，直接把返回值丢弃会让 DES 的 keystream 永远等于寄存器本身（且 cfb1 与 cfb8 输出巧合地一样）——需 `b.set(this.#ede.encrypt(b))`。
+    - 差分：`tools/crypto-cfb-feedback-probe.cjs` → `test/fixtures/crypto-cfb-feedback.json`（22 名称 × 9 种长度（含 0/非整块）× 加解密回环 + 流式分块 + `getCipherInfo` + `getCiphers` 成员）——**0 diff**；`test/crypto-cfb-feedback.test.ts`。
+    - 仍缺（后续 M93.4f+）：`aes-*-cbc-cts`、`aes-*-gcm-siv`、`aria-*-ccm/gcm`、`aria/sm4` 的 XTS/CCM/GCM、`aes-*-wrap-inv`/`-wrap-pad-inv`、`des3-wrap`/`id-smime-alg-cms3deswrap`。
 
 - [x] **M94 · `crypto.Certificate`** ✅ 2026-09-22
   - Node 已弃用的 `crypto.Certificate` 类（`verifySpkac`/`exportPublicKey`/`exportChallenge`）。由 `src/node-runtime/crypto/spkac.ts` 实现（NETSCAPE_SPKI 解析 + OpenSSL 风格 base64 解码 + 签名校验），在 builtin 里接成「可 new 也可直接调用」的函数 + 原型/静态三方法。

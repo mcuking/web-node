@@ -5,6 +5,7 @@
 // Everything here works on 64-bit blocks and feeds the shared `SyncCipher`
 // interface the cipher builtin drives.
 import type { SyncCipher } from './chacha20';
+import { CfbFeedback } from './cfb';
 
 // --- permutation tables (FIPS 46-3) -----------------------------------------
 const IP = [
@@ -188,7 +189,7 @@ export class DesEde {
 }
 
 /** The mode a DES spec uses. */
-export type DesMode = 'ecb' | 'cbc' | 'cfb' | 'ofb';
+export type DesMode = 'ecb' | 'cbc' | 'cfb' | 'cfb1' | 'cfb8' | 'ofb';
 
 function codedError(name: 'Error' | 'TypeError', code: string, message: string): Error {
   const error = new (name === 'TypeError' ? TypeError : Error)(message);
@@ -213,12 +214,16 @@ export class DesCipher implements SyncCipher {
   #cfbRegister: Uint8Array = new Uint8Array(8);
   #cfbBlock = new Uint8Array(8);
   #cfbPos = 0;
+  #bitCfb: CfbFeedback | null = null;
 
   constructor(mode: DesMode, key: Uint8Array, iv: Uint8Array | null, encrypt: boolean) {
     this.#ede = new DesEde(key);
     this.#mode = mode;
     this.#encrypt = encrypt;
     if (iv) this.#chain.set(iv);
+    if (mode === 'cfb1' || mode === 'cfb8') {
+      this.#bitCfb = new CfbFeedback(8, mode === 'cfb1' ? 1 : 8, iv ?? new Uint8Array(8), encrypt, (b) => void b.set(this.#ede.encrypt(b)));
+    }
   }
 
   /** Encrypt or decrypt one whole 8-byte block in place (ECB/CBC). */
@@ -250,6 +255,7 @@ export class DesCipher implements SyncCipher {
 
   /** Byte-wise CFB-128 / OFB (block size reported as 1 by OpenSSL). */
   #processStream(input: Uint8Array): Uint8Array {
+    if (this.#mode === 'cfb1' || this.#mode === 'cfb8') return this.#bitCfb!.process(input);
     const out = new Uint8Array(input.length);
     for (let i = 0; i < input.length; i++) {
       if (this.#mode === 'ofb') {
@@ -276,7 +282,7 @@ export class DesCipher implements SyncCipher {
 
   update(input: Uint8Array): Uint8Array {
     if (this.#finalized) throw new Error('Trying to add data in unsupported state');
-    if (this.#mode === 'cfb' || this.#mode === 'ofb') return this.#processStream(input);
+    if (this.#mode !== 'ecb' && this.#mode !== 'cbc') return this.#processStream(input);
     const combined = new Uint8Array(this.#buffer.length + input.length);
     combined.set(this.#buffer, 0);
     combined.set(input, this.#buffer.length);
@@ -290,7 +296,7 @@ export class DesCipher implements SyncCipher {
   final(): Uint8Array {
     if (this.#finalized) throw codedError('Error', 'ERR_CRYPTO_INVALID_STATE', 'Invalid state');
     this.#finalized = true;
-    if (this.#mode === 'cfb' || this.#mode === 'ofb') return new Uint8Array(0);
+    if (this.#mode !== 'ecb' && this.#mode !== 'cbc') return new Uint8Array(0);
     return this.#encrypt ? this.#finalBlockEncrypt() : this.#finalBlockDecrypt();
   }
 
