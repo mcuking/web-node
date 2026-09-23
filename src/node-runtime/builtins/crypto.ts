@@ -732,8 +732,8 @@ export const cryptoSpec: BuiltinSpec = {
         if (bytes !== null && bytes.length > 0) invalid();
         return null;
       }
-      if (spec.ivLength === null) {
-        // ECB takes no IV; anything non-empty is a mistake.
+      if (spec.ivLength === null || spec.ivLength === 0) {
+        // ECB takes no IV; DES3 key wrap derives one. Anything non-empty is a mistake.
         if (bytes !== null && bytes.length > 0) invalid();
         return null;
       }

@@ -1,0 +1,203 @@
+{
+  "info": {
+    "aes-128-wrap-inv": {
+      "mode": "wrap",
+      "name": "aes-128-wrap-inv",
+      "keyLength": 16,
+      "blockSize": 8,
+      "ivLength": 8
+    },
+    "aes128-wrap-inv": {
+      "mode": "wrap",
+      "name": "aes-128-wrap-inv",
+      "keyLength": 16,
+      "blockSize": 8,
+      "ivLength": 8
+    },
+    "aes-192-wrap-inv": {
+      "mode": "wrap",
+      "name": "aes-192-wrap-inv",
+      "keyLength": 24,
+      "blockSize": 8,
+      "ivLength": 8
+    },
+    "aes-256-wrap-inv": {
+      "mode": "wrap",
+      "name": "aes-256-wrap-inv",
+      "keyLength": 32,
+      "blockSize": 8,
+      "ivLength": 8
+    },
+    "aes-128-wrap-pad-inv": {
+      "mode": "wrap",
+      "name": "aes-128-wrap-pad-inv",
+      "keyLength": 16,
+      "blockSize": 8,
+      "ivLength": 4
+    },
+    "aes128-wrap-pad-inv": {
+      "mode": "wrap",
+      "name": "aes-128-wrap-pad-inv",
+      "keyLength": 16,
+      "blockSize": 8,
+      "ivLength": 4
+    },
+    "aes-192-wrap-pad-inv": {
+      "mode": "wrap",
+      "name": "aes-192-wrap-pad-inv",
+      "keyLength": 24,
+      "blockSize": 8,
+      "ivLength": 4
+    },
+    "aes-256-wrap-pad-inv": {
+      "mode": "wrap",
+      "name": "aes-256-wrap-pad-inv",
+      "keyLength": 32,
+      "blockSize": 8,
+      "ivLength": 4
+    },
+    "des3-wrap": {
+      "mode": "wrap",
+      "name": "id-smime-alg-cms3deswrap",
+      "nid": 246,
+      "keyLength": 24,
+      "blockSize": 8
+    },
+    "id-smime-alg-cms3deswrap": {
+      "mode": "wrap",
+      "name": "id-smime-alg-cms3deswrap",
+      "nid": 246,
+      "keyLength": 24,
+      "blockSize": 8
+    }
+  },
+  "wrapInv": {
+    "aes128": "88176ec1a7facee6daf9562fc6ca95f894a41b629a6ae5a2|00112233445566778899aabbccddeeff",
+    "aes192": "1429cbbf035501a87cc319e22500e5a373ece006bc9386e3bed25a1a78a16d38|00112233445566778899aabbccddeeff0001020304050607",
+    "aes256": "cba01acbdb4c7c39fa59babb383c485f318837208731a81c735b5be6ba710375a1159e26a9b57228|00112233445566778899aabbccddeeff000102030405060708090a0b0c0d0e0f",
+    "alias": "88176ec1a7facee6daf9562fc6ca95f894a41b629a6ae5a2|00112233445566778899aabbccddeeff",
+    "pad20": "3d2cc884edd83ce42726e31e8f356a974ace59af43896e53fc3a9b93fe47e5a0|00112233445566778899aabbccddeeff00010203",
+    "pad8": "96e1bb976431b6f2245f03909e7b4026|0011223344556677",
+    "pad1": "d5989094ac6e73228b27ff2af52f9625|11",
+    "padAlias": "3d2cc884edd83ce42726e31e8f356a974ace59af43896e53fc3a9b93fe47e5a0|00112233445566778899aabbccddeeff00010203",
+    "forward128": "1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5|00112233445566778899aabbccddeeff"
+  },
+  "wrapInvErr": {
+    "noIv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "badIv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "pad8Iv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "shortData": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "secondUpdate": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "unwrapBadIv": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "padUnwrapBad": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "getTag": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation getAuthTag"
+    }
+  },
+  "des3Wrap": {
+    "00112233445566778899aabbccddeeff": "00112233445566778899aabbccddeeff",
+    "00112233445566778899aabbccddeeff0011223344556677": "00112233445566778899aabbccddeeff0011223344556677"
+  },
+  "des3Round": {
+    "len16": {
+      "ctLen": 32,
+      "pt": "00112233445566778899aabbccddeeff"
+    },
+    "len24": {
+      "ctLen": 40,
+      "pt": "00112233445566778899aabbccddeeff0011223344556677"
+    },
+    "len32": {
+      "ctLen": 48,
+      "pt": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    },
+    "empty": {
+      "ctLen": 0,
+      "pt": ""
+    }
+  },
+  "des3Err": {
+    "badData": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "oddData": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "nonEmptyIv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "undefinedIv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_INVALID_ARG_TYPE",
+      "message": "The \"iv\" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView. Received undefined"
+    },
+    "secondUpdate": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "shortDecrypt": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "badTag": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "getTag": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation getAuthTag"
+    },
+    "finalNoUpdate": {
+      "ok": false,
+      "name": "Error",
+      "message": "Unsupported state"
+    }
+  }
+}

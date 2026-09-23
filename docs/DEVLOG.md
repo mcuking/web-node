@@ -244,6 +244,26 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · M93.4f 逆 cipher 密钥包装 + DES3-CBC 包装
+
+补齐 SP 800-38F 的逆-cipher 包装与 CMS 的 3DES 包装（真 Node 165 项，web-node 147）。
+
+- `wrap.ts` 新增**逆 cipher** 支持：`*-wrap-inv`/`*-wrap-pad-inv` 按 SP 800-38F 把 **AES 逆 cipher**（`AES_decrypt`）指定为块函数——加密实例用 `decryptBlock`、解密实例用 `encryptBlock`（与 OpenSSL `cipher_aes_wrp.c` 的 `use_forward_transform = !enc` 一致；实例内只有一个 designated block）。
+- 新增 `src/node-runtime/crypto/des3-wrap.ts`：RFC 3217 / CMS `des3-wrap`（canonical `id-smime-alg-cms3deswrap`，nid 246）。固定外层 IV `4adda22c79e82105`；内层随机 IV + SHA-1 ICV；整体 reverse 后再 CBC。**加密非确定**（随机 IV），差分只比**解密**与**回环**。
+- 新增名称 14 个：`aes-{128,192,256}-wrap[-pad]-inv` 与 `aes{128,192,256}-wrap[-pad]-inv`（12，无 nid）+ `des3-wrap`/`id-smime-alg-cms3deswrap`（2）→ **`getCiphers()` 133 → 147**。
+
+**关键坑（又一个 Buffer 别名）**：本 runtime 的 `Buffer.prototype.slice` **返回共享内存的视图**，`unwrapRaw` 里 `a = a.slice()` 实际改写了调用者的密文缓冲区。症状：“先解密再用同一密文”时密文被 XOR 掉一串计数器值（`1fa68b0a8112b447` → `...b44b`），且错误只在“解密过一次”之后出现。修正：本模块所有可能来自调用者的 `.slice()` 改为 `new Uint8Array(...)` 显式拷贝。
+
+**语义细节**：`des3-wrap` 用 null/空 IV（非空 IV → `ERR_CRYPTO_INVALID_IV`），空输入 → 空输出，非 8 字节倍数输入 → unsupported state，解密 <24 字节 → unsupported state。
+
+**差分**：`tools/crypto-wrap-inv-des3-probe.cjs` → `test/fixtures/crypto-wrap-inv-des3.json`（12 个 inv 名称 info + 加密/回环/与正向模式差异、des3 的录制密文解密 + 随机回环 + 全套错误面）——**0 diff**；`test/crypto-wrap-inv-des3.test.ts`。
+
+**门禁**：`tsc --noEmit` 干净 · `vitest run` **991 通过 / 2 skip（116 files）** · `vite build` 绿（worker **658.25KB**）。
+
+**余缺（M93.4g+，18）**：`aes-*-cbc-cts`、`aes-*-gcm-siv`、`aria-*-ccm`、`aria-*-gcm`、`camellia-*-cbc-cts`、`sm4-ccm`/`sm4-gcm`/`sm4-xts`。
+
+---
+
 ### 2026-09-23 · M93.4e CFB 反馈位宽（cfb1/cfb8）+ SM4 128 位别名
 
 补上 OpenSSL 的 CFB 反馈位宽变体（真 Node `getCiphers()` 165 项，web-node 原先只报已实现的 111 项）。

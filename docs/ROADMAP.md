@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-23（**阶段 D 4/4 收尾** + **M107 载荷拆分** + **M93.4e CFB 反馈位宽**：M102 `net.BoundSocket` 虚拟绑定 / M103 `http.Agent` / M104 `url.fileURLToPath({windows:true})` / M105 `console`+`v8` 面收尾 / M107 worker 2.5MB→654KB（vendored 源出包预加载）/ M93.4e `cfb1`/`cfb8` + SM4 128 位别名（`getCiphers` 111→133）；合计 **44 / 33 / 11**）
+> - **最后更新**：2026-09-23（阶段 A **22/22 收官**：M90/M93.4 父项补勾 + M93.4e `cfb1`/`cfb8` + M93.4f `wrap-inv`/`des3-wrap`；`getCiphers()` **111→147**（真 Node 165，余 18）；阶段 D 4/4、M107 载荷拆分；合计 **44 / 33 / 11**）
 
 ---
 
@@ -132,7 +132,7 @@
 - [x] **M93.2 · DES / 3DES** ✅ 2026-09-22
   - 新增 `src/node-runtime/crypto/des.ts`：纯 JS DES 块密码（FIPS 46-3 全表）+ EDE2/EDE3；`createCipheriv` 接入 `des-ede`/`des-ede-ecb`/`des-ede-cbc`/`des-ede-cfb`/`des-ede-ofb` 与 `des-ede3`/`des-ede3-ecb`/`des-ede3-cbc`/`des-ede3-cfb`/`des-ede3-ofb`/`des3`（ECB/CBC/CFB-128/OFB，8 字节块 + PKCS#7）。
   - 顺带把 CMAC 改成**通用块密码 CMAC**（`cmacCore` + `aesCmac`/`desCmac`），于是 `createMac('cmac', key, { cipher: 'des-ede3-cbc' })` 也能算了（8 字节 tag）——M90.3 记的「非 AES CMAC 报错」偏离因此收窄。
-  - **已知偏离**：`des3-wrap`/`id-smime-alg-cms3deswrap` 与 `aes-*-wrap-inv`/`-wrap-pad-inv` 仍抛 `NotImplementedError`（`des-ede3-cfb1`/`des-ede3-cfb8` 已在 M93.4e 落地）。
+  - **已知偏离**：原先缺的 `des-ede3-cfb1/cfb8`（M93.4e）与 `des3-wrap`/`id-smime-alg-cms3deswrap`（M93.4f）均已落地；DES 族已对齐真 Node（无遗留缺口）。
   - 差分：`tools/crypto-des-probe.cjs` → `test/fixtures/crypto-des.json`（**0 diff**）；`test/crypto-des.test.ts`；CMAC 语料并入 `test/fixtures/crypto-mac.json`。
   - 风险：中低。
 
@@ -165,7 +165,7 @@
     - 新增 `src/node-runtime/crypto/wrap.ts`：RFC 3394 `wrap` 与 RFC 5649 `wrap-pad`（含 n=1 的 AIV||P 单块特例）；两者都是**单次 update**（`update` 返回全部输出、`final` 空，二次 update 报 `Trying to add data in unsupported state`）。
     - 接入 `aes-{128,192,256}-ocb`（IV 1..15、`authTagLength` 必填、0..16）与 `aes-{128,192,256}-wrap`/`-wrap-pad`（含 `aes128-wrap`、`id-aes128-wrap` 等拼写，IV 8/4 字节且必填）。
     - 语义细节：OCB 按 OpenSSL provider 那样**缓存尾巴不满块**，末块输出在 `final`；解密 tag 不符在 `final` 报 `Unsupported state or unable to authenticate data`；`getAuthTag` 在 `final` 前报 `ERR_CRYPTO_INVALID_STATE`。
-    - **已知偏离**：`aes-*-wrap-inv`/`-wrap-pad-inv`（OpenSSL 的逆 wrap）与 `des3-wrap`/`id-smime-alg-cms3deswrap` 仍抛 `NotImplementedError`。
+    - **已知偏离**：`aes-*-wrap-inv`/`-wrap-pad-inv`（M93.4f）与 `des3-wrap`/`id-smime-alg-cms3deswrap`（M93.4f）均已落地。
     - 差分：`tools/crypto-ocb-wrap-probe.cjs` → `test/fixtures/crypto-ocb-wrap.json`（RFC 7253 附录 A、tag 8/12/16、IV 8/12/13/15、空/块/长 payload、流式分块、wrap/wrap-pad 的 RFC 3394/5649 向量与回环、全套错误面）——**0 diff**（首次运行）；`test/crypto-ocb-wrap.test.ts`。
     - 风险：中。
   - [x] **M93.4d · AES-SIV / AES-XTS** ✅ 2026-09-22
@@ -183,6 +183,14 @@
     - **关键坑**：①位粒度的 keystream 必须**每步从寄存器重新加密**（初版对一个全零缓冲加密，得到 `E(K,0)`）；②`DesEde.encrypt` **返回新数组、不改原数组**，与 AES 的 `encryptBlock`（原地）不同，直接把返回值丢弃会让 DES 的 keystream 永远等于寄存器本身（且 cfb1 与 cfb8 输出巧合地一样）——需 `b.set(this.#ede.encrypt(b))`。
     - 差分：`tools/crypto-cfb-feedback-probe.cjs` → `test/fixtures/crypto-cfb-feedback.json`（22 名称 × 9 种长度（含 0/非整块）× 加解密回环 + 流式分块 + `getCipherInfo` + `getCiphers` 成员）——**0 diff**；`test/crypto-cfb-feedback.test.ts`。
     - 仍缺（后续 M93.4f+）：`aes-*-cbc-cts`、`aes-*-gcm-siv`、`aria-*-ccm/gcm`、`aria/sm4` 的 XTS/CCM/GCM、`aes-*-wrap-inv`/`-wrap-pad-inv`、`des3-wrap`/`id-smime-alg-cms3deswrap`。
+  - [x] **M93.4f · 逆 cipher 密钥包装与 DES3-CBC 包装** ✅ 2026-09-23
+    - 新增 `wrap.ts` 的**逆 cipher** 支持：`*-wrap-inv`/`*-wrap-pad-inv` 按 SP 800-38F 指定 **AES 逆 cipher**（`AES_decrypt`）作为块函数——加密实例用 `decryptBlock`、解密实例用 `encryptBlock`（实例内单一 designated block，与 OpenSSL `cipher_aes_wrp.c` 的 `use_forward_transform = !enc` 一致）。
+    - 新增 `src/node-runtime/crypto/des3-wrap.ts`：RFC 3217 / CMS `des3-wrap`（`id-smime-alg-cms3deswrap`，nid 246）。固定外层 IV `4adda22c79e82105`；内层随机 IV + SHA-1 ICV；整体 reverse 后再 CBC。**加密非确定**（随机 IV），因此差分只比**解密**与**回环**。
+    - 新增名称：`aes-{128,192,256}-wrap[-pad]-inv` 与 `aes{128,192,256}-wrap[-pad]-inv`（12，无 nid）+ `des3-wrap`/`id-smime-alg-cms3deswrap`（2）→ **`getCiphers()` 133 → 147**。
+    - **关键坑（又一个 Buffer 别名）**：web-node 的 `Buffer.prototype.slice` **返回共享内存的视图**，`unwrapRaw` 里 `a = a.slice()` 实际改写了调用者的密文缓冲区——症状是「先解密再用同一密文」时密文被 XOR 掉一串计数器值（`1fa68b0a8112b447` → `...b44b`）。修正：本模块所有可能来自调用者的 `.slice()` 改为 `new Uint8Array(...)` 显式拷贝。
+    - 语义细节：`des3-wrap` 用 **null/空 IV**（非空 IV → `ERR_CRYPTO_INVALID_IV`），空输入 → 空输出，输入非 8 字节倍数 → unsupported state，解密 <24 字节 → unsupported state。
+    - 差分：`tools/crypto-wrap-inv-des3-probe.cjs` → `test/fixtures/crypto-wrap-inv-des3.json`（12 个 inv 名称的 info + 加密/回环/与正向模式差异、des3 的录制密文解密 + 随机回环 + 全套错误面）——**0 diff**；`test/crypto-wrap-inv-des3.test.ts`。
+    - 仍缺（M93.4g+，18 个）：`aes-*-cbc-cts`、`aes-*-gcm-siv`、`aria-*-ccm`、`aria-*-gcm`、`camellia-*-cbc-cts`、`sm4-ccm`/`sm4-gcm`/`sm4-xts`。
 
 - [x] **M94 · `crypto.Certificate`** ✅ 2026-09-22
   - Node 已弃用的 `crypto.Certificate` 类（`verifySpkac`/`exportPublicKey`/`exportChallenge`）。由 `src/node-runtime/crypto/spkac.ts` 实现（NETSCAPE_SPKI 解析 + OpenSSL 风格 base64 解码 + 签名校验），在 builtin 里接成「可 new 也可直接调用」的函数 + 原型/静态三方法。

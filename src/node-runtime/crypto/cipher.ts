@@ -104,6 +104,7 @@ import { AesOcb } from './ocb';
 import { AesSiv } from './siv';
 import { Sm4 } from './sm4';
 import { AesWrap } from './wrap';
+import { Des3Wrap } from './des3-wrap';
 import { AesXts } from './xts';
 
 export type { SyncCipher };
@@ -146,9 +147,11 @@ export interface CipherSpec {
   /** Required IV length, or `null` for ECB (no IV). */
   ivLength: number | null;
   /** Which implementation backs the spec (defaults to AES). */
-  family?: 'aes' | 'des' | 'camellia' | 'aria' | 'sm4';
+  family?: 'aes' | 'des' | 'camellia' | 'aria' | 'sm4' | 'des3wrap';
   /** GCM keys this spec under this alias (used to key the lookup table). */
   alias?: true;
+  /** `*-wrap-inv`: use the AES inverse cipher as the key-wrap block function. */
+  wrapInverse?: true;
 }
 
 const SPECS: CipherSpec[] = [];
@@ -335,7 +338,19 @@ const SPECS: CipherSpec[] = [];
       for (const name of [`aes-${bits}-${suffix}`, `aes${bits}-${suffix}`, infoName]) {
         SPECS.push({ name, infoName, mode: 'wrap', nid, keyLength, blockSize: 8, ivLength });
       }
+      // SP 800-38F designates the AES inverse cipher as the block function for
+      // the `-inv` names; OpenSSL reports these without a NID.
+      const invName = `aes-${bits}-${suffix}-inv`;
+      for (const name of [invName, `aes${bits}-${suffix}-inv`]) {
+        SPECS.push({ name, infoName: invName, mode: 'wrap', nid: 0, keyLength, blockSize: 8, ivLength, wrapInverse: true });
+      }
     }
+  }
+  // DES-EDE3-CBC key wrap (RFC 3217 / CMS). `getCipherInfo` omits `ivLength`
+  // (the IV is derived, not supplied) and reports the `id-smime-alg-cms3deswrap`
+  // canonical name with NID 246.
+  for (const name of ['des3-wrap', 'id-smime-alg-cms3deswrap']) {
+    SPECS.push({ name, infoName: 'id-smime-alg-cms3deswrap', mode: 'wrap', nid: 246, keyLength: 24, blockSize: 8, ivLength: 0, family: 'des3wrap' });
   }
   // AES-SIV (RFC 5297). Two key halves; no IV; the tag is the IV. OpenSSL
   // reports no nid and no ivLength for SIV.
@@ -463,7 +478,7 @@ export function createCipher(
   }
   if (spec.mode === 'ccm') return new AesCcm(key, iv as Uint8Array, encrypt, authTagLength, plaintextLength);
   if (spec.mode === 'ocb') return new AesOcb(key, iv as Uint8Array, encrypt, authTagLength);
-  if (spec.mode === 'wrap') return new AesWrap(key, iv as Uint8Array, encrypt, spec.name.includes('-pad') ? 'wrap-pad' : 'wrap');
+  if (spec.family === 'des3wrap') return new Des3Wrap(key, encrypt);  if (spec.mode === 'wrap') return new AesWrap(key, iv as Uint8Array, encrypt, spec.name.includes('-pad') ? 'wrap-pad' : 'wrap', spec.wrapInverse === true);
   if (spec.mode === 'siv') return new AesSiv(key, encrypt);
   if (spec.mode === 'xts') return new AesXts(key, iv as Uint8Array, encrypt);
   if (spec.family === 'des') return new DesCipher(spec.mode as DesMode, key, iv, encrypt);
