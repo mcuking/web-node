@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-22（基线 = M98 完成；`http`/`https` 报文级差分 0 diff，**阶段 B 4/5**）
+> - **最后更新**：2026-09-23（**M97.1 完成** = 纯 JS `stripTypeScriptTypes`，阶段 B **5/5 收尾**；合计 **44 / 27 / 17**）
 
 ---
 
@@ -15,15 +15,16 @@
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
 | A | crypto 收尾（接续 M87） | 22 | 20 | 2 |
-| B | 语义深度（差分语料继续扩面） | 5 | 4 | 1 |
+| B | 语义深度（差分语料继续扩面） | 5 | 5 | 0 |
 | C | 平台无对应物的补齐（选择性） | 3 | 0 | 3 |
 | D | 运行时常量小项收尾 | 4 | 0 | 4 |
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
+| G | 借鉴 WebContainer（2026-09-23 调研落地） | 2 | 0 | 2 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **42** | **26** | **16**（+1 不做） |
+| **合计** | | **44** | **27** | **17**（+1 不做） |
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 113 个里程碑，剩余 16 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 114 个里程碑，剩余 17 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.4（26 → 30），同日晚 M90.5 又拆为 M90.5–M90.9（30 → 34）。
 > 注：M97 于 2026-09-22 拆出 M97.1（`stripTypeScriptTypes` 需要真 TS 解析器 / amaro wasm，代价大）（41 → 42）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
@@ -199,10 +200,12 @@
   - 差分探针 `tools/module-hooks-probe.cjs`（35 个观测）在真 Node/web-node 各跑一遍，**0 diff**。
   - `stripTypeScriptTypes` 拆到 **M97.1**（需真 TS 解析器）。
 
-- [ ] **M97.1 · `stripTypeScriptTypes`（TS transform）**
-  - 真 Node 的 strip-only 模式把类型语法**按位替换成空格**（保列），需一个真 TS 解析器才能知道每个类型跨度的边界（`b as X`、泛型、`interface`/`type` 整声明删除、`import type` 等）。
-  - 选项：vendor `amaro`（SWC wasm，`deps/amaro/dist/index.js` ≈ 3.8MB raw / 1.4MB gzip，会把 worker 从 2.47MB → 6.3MB），或自研有界的 strip-only 扫描器（风险高）。
-  - 现状：仍响亮抛 `notImplemented`；未定取舍前不落地。
+- [x] **M97.1 · `stripTypeScriptTypes`（TS strip-only）** ✅ 2026-09-23
+  - 路线 = **选项 B（纯 JS strip-only）**：自研 TS 剥离器（`src/node-runtime/ts/strip-types.ts`，~1250 行），不引 amaro/SWC wasm。
+  - 类型跨度按位覆写成空白、**按 UTF-8 字节宽度补位**（1→` `、2→U+00A0、3→U+2002、4→`' '+U+FEFF`；`\n`/`\r`/`\t` 保留），从而字节长度与真 amaro 一致。
+  - 覆盖 `interface`/`type`/`declare`/`namespace`/`import type`/类型注解/类型参数与实参（含 `<` 比较回退）/`as`/`satisfies`/`!`/可选/参数属性/类字段/抽象成员/索引签名/类型谓词；不支持语法响亮抛 `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`。
+  - 差分探针 `tools/strip-ts-probe.cjs`（170 例）在真 Node v26.9.0 与 web-node 各跑一遍，**0 diff**；全仓库 227 个 `.ts` 扫描同样 **0 diff/0 hang**。
+  - 选 B 的依据：实测 WebContainer（StackBlitz）同类场景亦为纯 JS 自实现（详见 `docs/webcontainer-research.md` 第 8 节）；不 vendor `amaro`（会把 worker 从 2.47MB → ~6.3MB）。
 
 - [x] **M98 · `http`/`https` 报文级差分** ✅ 2026-09-22
   - 请求/响应全流程（keep-alive、pipeline、chunked、trailer 已在 M69 部分覆盖）的端到端差分；`https` 无 TLS 加密但语义对齐。
@@ -276,6 +279,26 @@
 
 - [ ] **M112 · 其他框架 / 工具链**
   - React（SWC / Babel）、Svelte、TypeScript 项目、Tailwind / PostCSS 管线。
+
+---
+
+## 阶段 G — 借鉴 WebContainer（2026-09-23 调研落地）
+
+> **来源**：`docs/webcontainer-research.md`（StackBlitz WebContainer 实测）。两条同领域已验证的工程手法，作为后续实现任务。
+> **与现有条目的关系**：M113 承接已完成的 M3.5d「子域名路由」（dev 侧已有，本条做静态托管补齐 + 每端口 DevServer SW）；M114 与阶段 E 的 M106 有重叠，但 M106 聚焦热点 binding → wasm，本条聚焦 **FS 的同步语义**（SAB + Atomics + FS-worker），是 M106 的前置/并行。
+
+- [ ] **M113 · 预览端口 → 子域名路由（静态托管跟进）**
+  - **对标**：WebContainer 把 `listen(8080)` **编进一个唯一子域名**（`<proj>--8080--<hash>.local-credentialless.webcontainer.io`），再在该域名注册一个 **DevServer Service Worker** 拦截所有请求、从内存 FS 供给。
+  - **为何优于路径式**：路径式 `/preview/<port>/` 在**站点根相对路径**（`/assets/x.js`）、**cookie 作用域**、**SW scope**、刷新/离线 上都会踩坑；子域名天然避开。
+  - **现状**：dev 侧已有 `<port>.localhost` 子域名路由（M3.5d）；静态托管（gh-pages）仍走路径式 `/preview/<port>/`（`src/ui/preview-url.ts` 已有子域名壳 `SUBDOMAIN_SHELL_PATH = '/__webnode__/'` 与 pop-out 分支）。
+  - **难点**：静态托管需要**通配 DNS**（当前只有 dev 中间件 `plugins/dev-subdomains.ts` 能供壳），需自定义域 + 每端口 DevServer SW。
+  - **验收**：静态托管下预览走子域名；站点根相对路径 / cookie / SW scope 均正确；pop-out 与嵌入两条路都通。
+
+- [ ] **M114 · 真·同步 `fs` 且不阻塞 UI（SAB + Atomics + FS-worker）**
+  - **对标**：WebContainer 用 **`SharedArrayBuffer` + `Atomics.wait`** 把主线程"接"到另一个 worker 里的内存 FS（实测：14 个 worker 的 `Runtime.evaluate` 全超时，正是主线程卡在 `Atomics.wait`）——于是浏览器里能提供**真·同步 `readFileSync`**。
+  - **现状**：web-node 在**同 realm 内**实现（单线程、简单、不阻塞 UI）；一旦要真并发/真同步就绕不开。
+  - **前置**：**跨源隔离（COOP/COEP）**→ 才能用 SAB（隔离路由已就绪 M3.5d）。
+  - **验收**：fs 同步调用在独立 worker 完成、主线程可阻塞等待；无 `Atomics.wait` 死锁；与现有 fs 语义差分 0 diff。
 
 ---
 

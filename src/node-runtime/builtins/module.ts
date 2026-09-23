@@ -1,6 +1,7 @@
 import type { BuiltinSpec, BuiltinInitContext, UserRequireFn } from './types';
 import { notImplemented } from '../errors';
 import { SourceMap } from './source-map';
+import { stripTypeScriptTypesCore, type StripTypeScriptErrors } from '../ts/strip-types';
 
 /**
  * `module` builtin — a structurally compatible subset of Node's module module.
@@ -213,13 +214,39 @@ export const moduleSpec: BuiltinSpec = {
           'Loader hooks are not available in web-node.',
         );
       };
-      /** `module.stripTypeScriptTypes(code, options)` — needs a TS transform. */
-      static stripTypeScriptTypes = (_code?: unknown, ..._rest: unknown[]): never => {
-        throw notImplemented(
-          'api',
-          'module.Module.stripTypeScriptTypes',
-          'Stripping TypeScript types needs the amaro transform, which is not bundled.',
-        );
+      /** `module.stripTypeScriptTypes(code, options)` — pure-JS strip-only mode. */
+      static stripTypeScriptTypes = (code?: unknown, options?: unknown): string => {
+        const codes = (
+          ctx.require('internal/errors') as { codes: Record<string, new (...a: unknown[]) => Error> }
+        ).codes;
+        const emitWarning = (ctx.require('process') as { emitWarning?: (...a: unknown[]) => void }).emitWarning;
+        emitWarning?.('stripTypeScriptTypes is an experimental feature and might change at any time', {
+          type: 'ExperimentalWarning',
+        });
+
+        if (typeof code !== 'string') {
+          throw new codes.ERR_INVALID_ARG_TYPE('code', 'string', code);
+        }
+        let opts = options;
+        if (opts === undefined) opts = {};
+        if (opts === null || typeof opts !== 'object') {
+          throw new codes.ERR_INVALID_ARG_TYPE('options', 'object', opts);
+        }
+        const o = opts as { mode?: unknown; sourceMap?: unknown; sourceUrl?: unknown };
+        const { sourceMap = false, sourceUrl = '', mode = 'strip' } = o;
+        if (mode !== 'strip') throw new codes.ERR_INVALID_ARG_VALUE('options.mode', mode, "must be one of: 'strip'");
+        if (typeof sourceUrl !== 'string') {
+          throw new codes.ERR_INVALID_ARG_TYPE('options.sourceUrl', 'string', sourceUrl);
+        }
+        if (sourceMap !== false && sourceMap !== undefined) {
+          throw new codes.ERR_INVALID_ARG_VALUE('options.sourceMap', sourceMap, 'must be one of: false, undefined');
+        }
+
+        const err: StripTypeScriptErrors = {
+          unsupported: (message) => new codes.ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX(message),
+          invalid: (message) => new codes.ERR_INVALID_TYPESCRIPT_SYNTAX(message),
+        };
+        return stripTypeScriptTypesCore(code, sourceUrl, err);
       };
       /** `module.findPackageJSON(packageJsonPath, base)` — needs the loader. */
       static findPackageJSON = (specifier: string, base?: string | URL): string => {

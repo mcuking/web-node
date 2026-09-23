@@ -89,6 +89,10 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_INVALID_CHAR: 'Invalid character in %s',
   ERR_NO_CRYPTO: 'Node.js is not compiled with OpenSSL crypto support',
   ERR_NO_TYPESCRIPT: 'Node.js is not compiled with TypeScript support',
+  ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX: '%s',
+  ERR_INVALID_TYPESCRIPT_SYNTAX: '%s',
+  ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING:
+    'Stripping types is currently unsupported for files under node_modules, for "%s"',
   ERR_WEBASSEMBLY_NOT_SUPPORTED:
     'WebAssembly is not supported in this environment, but is required for %s',
   ERR_FALSY_VALUE_REJECTION: 'Promise was rejected with falsy value',
@@ -196,6 +200,9 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_SOCKET_BAD_PORT: RangeError,
   ERR_NO_CRYPTO: Error,
   ERR_NO_TYPESCRIPT: Error,
+  ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX: SyntaxError,
+  ERR_INVALID_TYPESCRIPT_SYNTAX: SyntaxError,
+  ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING: Error,
   ERR_WEBASSEMBLY_NOT_SUPPORTED: Error,
   ERR_FALSY_VALUE_REJECTION: Error,
   ERR_INVALID_MIME_SYNTAX: TypeError,

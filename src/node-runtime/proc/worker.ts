@@ -403,6 +403,11 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
     }
 
     #scheduleSettle(delayMs = SETTLE_GRACE_MS): void {
+      // Before the worker has started, a settle check would see an unrefed
+      // worker port and declare the worker done — dropping anything the parent
+      // already queued (`stdin`, messages) before the entry ever ran. The start
+      // path schedules the first real check once the entry has run.
+      if (!this.#started) return;
       if (this.#settleTimer !== null || this.#exited) return;
       this.#settleTimer = nativeSetTimeout(() => {
         this.#settleTimer = null;

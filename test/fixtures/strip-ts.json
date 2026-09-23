@@ -1,0 +1,909 @@
+{
+    "results": [
+        {
+            "id": "c01-var-annotation",
+            "kind": "ok",
+            "out": "const x         = 1;"
+        },
+        {
+            "id": "c02-as-cast",
+            "kind": "ok",
+            "out": "const x = 1          ;"
+        },
+        {
+            "id": "c03-satisfies",
+            "kind": "ok",
+            "out": "const v = 1                 ;"
+        },
+        {
+            "id": "c04-return-type",
+            "kind": "ok",
+            "out": "function f(a        )         { return String(a); }"
+        },
+        {
+            "id": "c05-generic-fn",
+            "kind": "ok",
+            "out": "function f   (x   )    { return x; }"
+        },
+        {
+            "id": "c06-generic-call",
+            "kind": "ok",
+            "out": "const y = f        (\"a\");"
+        },
+        {
+            "id": "c07-interface-decl",
+            "kind": "ok",
+            "out": "                                     "
+        },
+        {
+            "id": "c08-type-alias",
+            "kind": "ok",
+            "out": "                       "
+        },
+        {
+            "id": "c09-class-field",
+            "kind": "ok",
+            "out": "class C { x         = 1; y          }"
+        },
+        {
+            "id": "c10-class-method",
+            "kind": "ok",
+            "out": "class C { m(a        )       {} }"
+        },
+        {
+            "id": "c11-access-modifiers",
+            "kind": "ok",
+            "out": "class C {         x         = 1;        y = 2;          z = 3; }"
+        },
+        {
+            "id": "c12-import-type",
+            "kind": "ok",
+            "out": "                             "
+        },
+        {
+            "id": "c13-import-named",
+            "kind": "ok",
+            "out": "import { A,        } from './a';"
+        },
+        {
+            "id": "c14-export-type",
+            "kind": "ok",
+            "out": "                  "
+        },
+        {
+            "id": "c15-array-annotation",
+            "kind": "ok",
+            "out": "let a                = [];"
+        },
+        {
+            "id": "c16-union-annotation",
+            "kind": "ok",
+            "out": "let u                  = 1;"
+        },
+        {
+            "id": "c17-tuple-annotation",
+            "kind": "ok",
+            "out": "let t                   = [1, \"a\"];"
+        },
+        {
+            "id": "c18-object-annotation",
+            "kind": "ok",
+            "out": "let o                           = { a: 1, b: \"x\" };"
+        },
+        {
+            "id": "c19-fn-type-annotation",
+            "kind": "ok",
+            "out": "let cb                     ;"
+        },
+        {
+            "id": "c20-assertion-angle",
+            "kind": "err",
+            "err": {
+                "name": "SyntaxError",
+                "code": "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX",
+                "message": "The angle-bracket syntax for type assertions, `<T>expr`, is not supported in type strip mode. Instead, use the 'as' syntax: `expr as T`.",
+                "ctor": "SyntaxError"
+            }
+        },
+        {
+            "id": "c21-non-null",
+            "kind": "ok",
+            "out": "const v = obj .x;"
+        },
+        {
+            "id": "c22-optional-param",
+            "kind": "ok",
+            "out": "function g(a         ) {}"
+        },
+        {
+            "id": "c23-default-param",
+            "kind": "ok",
+            "out": "function h(a         = 1) {}"
+        },
+        {
+            "id": "c24-rest-param",
+            "kind": "ok",
+            "out": "function r(...a          ) {}"
+        },
+        {
+            "id": "c25-type-param-constraint",
+            "kind": "ok",
+            "out": "function tc                  (x   ) {}"
+        },
+        {
+            "id": "c26-declare-stmt",
+            "kind": "ok",
+            "out": "                        "
+        },
+        {
+            "id": "c27-declare-fn",
+            "kind": "ok",
+            "out": "                                    "
+        },
+        {
+            "id": "c28-abstract-class",
+            "kind": "ok",
+            "out": "         class A {                     }"
+        },
+        {
+            "id": "c29-as-const",
+            "kind": "ok",
+            "out": "const a = [1, 2]         ;"
+        },
+        {
+            "id": "c30-export-default-type",
+            "kind": "ok",
+            "out": "                                        "
+        },
+        {
+            "id": "c31-comment-preserve",
+            "kind": "ok",
+            "out": "const x /* keep */          = 1;"
+        },
+        {
+            "id": "c32-string-like-type",
+            "kind": "ok",
+            "out": "const s = \"a: number\";"
+        },
+        {
+            "id": "c33-template-like-type",
+            "kind": "ok",
+            "out": "const t = `x: number = 1`;"
+        },
+        {
+            "id": "c34-regex-like-type",
+            "kind": "ok",
+            "out": "const r = /a: number/g;"
+        },
+        {
+            "id": "c35-multiline",
+            "kind": "ok",
+            "out": "const x         =\n  1;\nconst y         = \"z\";\n"
+        },
+        {
+            "id": "c36-generic-arrow",
+            "kind": "ok",
+            "out": "const f =     (x   )    => x;"
+        },
+        {
+            "id": "c37-nested-generics",
+            "kind": "ok",
+            "out": "let m                             = new Map();"
+        },
+        {
+            "id": "c38-index-signature",
+            "kind": "ok",
+            "out": "                                   "
+        },
+        {
+            "id": "c39-call-signature",
+            "kind": "ok",
+            "out": "                                 "
+        },
+        {
+            "id": "c40-constructor-sig",
+            "kind": "ok",
+            "out": "                                  "
+        },
+        {
+            "id": "c41-enum-in-strip",
+            "kind": "err",
+            "err": {
+                "name": "SyntaxError",
+                "code": "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX",
+                "message": "TypeScript enum is not supported in strip-only mode",
+                "ctor": "SyntaxError"
+            }
+        },
+        {
+            "id": "c42-namespace-in-strip",
+            "kind": "err",
+            "err": {
+                "name": "SyntaxError",
+                "code": "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX",
+                "message": "TypeScript namespace declaration is not supported in strip-only mode",
+                "ctor": "SyntaxError"
+            }
+        },
+        {
+            "id": "c43-import-equals",
+            "kind": "err",
+            "err": {
+                "name": "SyntaxError",
+                "code": "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX",
+                "message": "TypeScript import equals declaration is not supported in strip-only mode",
+                "ctor": "SyntaxError"
+            }
+        },
+        {
+            "id": "c44-param-property",
+            "kind": "err",
+            "err": {
+                "name": "SyntaxError",
+                "code": "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX",
+                "message": "TypeScript parameter property is not supported in strip-only mode",
+                "ctor": "SyntaxError"
+            }
+        },
+        {
+            "id": "c45-module-stmt",
+            "kind": "err",
+            "err": {
+                "name": "SyntaxError",
+                "code": "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX",
+                "message": "`module` keyword is not supported. Use `namespace` instead.",
+                "ctor": "SyntaxError"
+            }
+        },
+        {
+            "id": "c46-decorator",
+            "kind": "ok",
+            "out": "class C { @dec m() {} }"
+        },
+        {
+            "id": "c47-type-only-export-eq",
+            "kind": "err",
+            "err": {
+                "name": "SyntaxError",
+                "code": "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX",
+                "message": "TypeScript export assignment is not supported in strip-only mode",
+                "ctor": "SyntaxError"
+            }
+        },
+        {
+            "id": "c48-this-param",
+            "kind": "ok",
+            "out": "function f(            a        ) {}"
+        },
+        {
+            "id": "c49-instantiation-expr",
+            "kind": "ok",
+            "out": "const z = f        ;"
+        },
+        {
+            "id": "c50-ts-syntax-jsx-like",
+            "kind": "ok",
+            "out": "const a = b < c > d;"
+        },
+        {
+            "id": "c51-readonly-array",
+            "kind": "ok",
+            "out": "let ra                    = [];"
+        },
+        {
+            "id": "c52-keyof-type",
+            "kind": "ok",
+            "out": "let k          = \"x\";"
+        },
+        {
+            "id": "c53-conditional-type",
+            "kind": "ok",
+            "out": "                                     "
+        },
+        {
+            "id": "c54-mapped-type",
+            "kind": "ok",
+            "out": "                                     "
+        },
+        {
+            "id": "c55-template-literal-type",
+            "kind": "ok",
+            "out": "                       "
+        },
+        {
+            "id": "c56-typeof-type",
+            "kind": "ok",
+            "out": "let v                = 1;"
+        },
+        {
+            "id": "c57-import-meta",
+            "kind": "ok",
+            "out": "const u = import.meta.url;"
+        },
+        {
+            "id": "c58-global-augmentation",
+            "kind": "ok",
+            "out": "                                                 "
+        },
+        {
+            "id": "c59-overload-sig",
+            "kind": "ok",
+            "out": "                            \n                            \nfunction f(a     )       {}"
+        },
+        {
+            "id": "c60-opt-mode-strip",
+            "kind": "ok",
+            "out": "let x = 1;"
+        },
+        {
+            "id": "c61-opt-mode-transform",
+            "kind": "err",
+            "err": {
+                "name": "TypeError",
+                "code": "ERR_INVALID_ARG_VALUE",
+                "message": "The property 'options.mode' must be one of: 'strip'. Received 'transform'",
+                "ctor": "TypeError"
+            }
+        },
+        {
+            "id": "c62-opt-mode-bogus",
+            "kind": "err",
+            "err": {
+                "name": "TypeError",
+                "code": "ERR_INVALID_ARG_VALUE",
+                "message": "The property 'options.mode' must be one of: 'strip'. Received 'bogus'",
+                "ctor": "TypeError"
+            }
+        },
+        {
+            "id": "c63-opt-sourceurl",
+            "kind": "ok",
+            "out": "let x = 1;\n\n//# sourceURL=file:///x.ts"
+        },
+        {
+            "id": "c64-opt-sourceurl-empty",
+            "kind": "ok",
+            "out": "let x = 1;"
+        },
+        {
+            "id": "c65-opt-sourcemap-false",
+            "kind": "ok",
+            "out": "let x = 1;"
+        },
+        {
+            "id": "c66-opt-sourcemap-true",
+            "kind": "err",
+            "err": {
+                "name": "TypeError",
+                "code": "ERR_INVALID_ARG_VALUE",
+                "message": "The property 'options.sourceMap' must be one of: false, undefined. Received true",
+                "ctor": "TypeError"
+            }
+        },
+        {
+            "id": "c67-opt-empty-file",
+            "kind": "ok",
+            "out": ""
+        },
+        {
+            "id": "c68-opt-whitespace-only",
+            "kind": "ok",
+            "out": "   \n\t  "
+        },
+        {
+            "id": "c69-opt-comment-only",
+            "kind": "ok",
+            "out": "// just a comment\n"
+        },
+        {
+            "id": "c70-x-comment-before-type",
+            "kind": "ok",
+            "out": "let a /* c1 */                   = 1;"
+        },
+        {
+            "id": "c71-x-string-type-like",
+            "kind": "ok",
+            "out": "const s = \"interface A { x: number }\";"
+        },
+        {
+            "id": "c72-x-tpl-type-like",
+            "kind": "ok",
+            "out": "const s = `a: number = 1`;"
+        },
+        {
+            "id": "c73-x-regex-slash",
+            "kind": "ok",
+            "out": "const r = a / b / c;"
+        },
+        {
+            "id": "c74-x-div-chain",
+            "kind": "ok",
+            "out": "const r = (a + b) / c;"
+        },
+        {
+            "id": "c75-x-regex-after-return",
+            "kind": "ok",
+            "out": "function f() { return /x: number/; }"
+        },
+        {
+            "id": "c76-x-tpl-sub-1",
+            "kind": "ok",
+            "out": "const t = `a${b          }c`;"
+        },
+        {
+            "id": "c77-x-tpl-sub-2",
+            "kind": "ok",
+            "out": "const t = `x${fn        (\"a\")}y`;"
+        },
+        {
+            "id": "c78-x-tpl-sub-3",
+            "kind": "ok",
+            "out": "const t = `a${ {x:1} }b`;"
+        },
+        {
+            "id": "c79-x-conditional-type",
+            "kind": "ok",
+            "out": "                                                 "
+        },
+        {
+            "id": "c80-x-mapped-modifiers",
+            "kind": "ok",
+            "out": "                                               "
+        },
+        {
+            "id": "c81-x-tpl-literal-type",
+            "kind": "ok",
+            "out": "                                   "
+        },
+        {
+            "id": "c82-x-indexed-access",
+            "kind": "ok",
+            "out": "                          "
+        },
+        {
+            "id": "c83-x-fn-type-rest",
+            "kind": "ok",
+            "out": "                                     "
+        },
+        {
+            "id": "c84-x-ctor-type",
+            "kind": "ok",
+            "out": "                                   "
+        },
+        {
+            "id": "c85-x-union-fn",
+            "kind": "ok",
+            "out": "                             "
+        },
+        {
+            "id": "c86-x-arrow-async",
+            "kind": "ok",
+            "out": "const f = async (a        )                => {};"
+        },
+        {
+            "id": "c87-x-arrow-single",
+            "kind": "ok",
+            "out": "const f = (x        ) => x + 1;"
+        },
+        {
+            "id": "c88-x-arrow-noparen",
+            "kind": "ok",
+            "out": "const f = x => x;"
+        },
+        {
+            "id": "c89-x-arrow-tpl",
+            "kind": "ok",
+            "out": "const f =     (x   )    => x;"
+        },
+        {
+            "id": "c90-x-arrow-nested",
+            "kind": "ok",
+            "out": "const f = (cb                     ) => {};"
+        },
+        {
+            "id": "c91-x-arrow-obj-param",
+            "kind": "ok",
+            "out": "const f = ({a, b}                        ) => a + b;"
+        },
+        {
+            "id": "c92-x-class-static",
+            "kind": "ok",
+            "out": "class C { static x         = 1; static m()       {} }"
+        },
+        {
+            "id": "c93-x-class-private",
+            "kind": "ok",
+            "out": "class C { #x         = 1; #m()       {} }"
+        },
+        {
+            "id": "c94-x-class-computed",
+            "kind": "ok",
+            "out": "class C { [\"a\"]         = 1; }"
+        },
+        {
+            "id": "c95-x-class-getset",
+            "kind": "ok",
+            "out": "class C { get a()         { return 1 } set a(v        ) {} }"
+        },
+        {
+            "id": "c96-x-class-optional-method",
+            "kind": "ok",
+            "out": "class C {             }"
+        },
+        {
+            "id": "c97-x-class-overloads",
+            "kind": "ok",
+            "out": "class C {                                         m(a     ) {} }"
+        },
+        {
+            "id": "c98-x-class-seq",
+            "kind": "ok",
+            "out": "class C { a = 1\n; b         = 2\n; }"
+        },
+        {
+            "id": "c99-x-class-implements",
+            "kind": "ok",
+            "out": "class C                 { }"
+        },
+        {
+            "id": "c100-x-class-extends-generic",
+            "kind": "ok",
+            "out": "class C extends B         { }"
+        },
+        {
+            "id": "c101-x-class-expr-generic",
+            "kind": "ok",
+            "out": "const C = class    extends B    {};"
+        },
+        {
+            "id": "c102-x-declare-global",
+            "kind": "ok",
+            "out": "                                                 "
+        },
+        {
+            "id": "c103-x-declare-module",
+            "kind": "ok",
+            "out": "                                                "
+        },
+        {
+            "id": "c104-x-declare-const",
+            "kind": "ok",
+            "out": "                                   "
+        },
+        {
+            "id": "c105-x-namespace-empty",
+            "kind": "ok",
+            "out": "              "
+        },
+        {
+            "id": "c106-x-namespace-types",
+            "kind": "ok",
+            "out": "                                      "
+        },
+        {
+            "id": "c107-x-overload-fn",
+            "kind": "ok",
+            "out": "                            \n                            \nfunction f(a     )       {}"
+        },
+        {
+            "id": "c108-x-destructure-default",
+            "kind": "ok",
+            "out": "const { a = 1, b }                            = o;"
+        },
+        {
+            "id": "c109-x-array-destructure-type",
+            "kind": "ok",
+            "out": "const [a, b]                   = t;"
+        },
+        {
+            "id": "c110-x-forof-type",
+            "kind": "err",
+            "err": {
+                "name": "SyntaxError",
+                "code": "ERR_INVALID_TYPESCRIPT_SYNTAX",
+                "message": "The left-hand side of a 'for...of' statement cannot use a type annotation",
+                "ctor": "SyntaxError"
+            }
+        },
+        {
+            "id": "c111-x-catch-type",
+            "kind": "ok",
+            "out": "try {} catch (e         ) {}"
+        },
+        {
+            "id": "c112-x-switch",
+            "kind": "ok",
+            "out": "switch (x) { case 1: break; default: break; }"
+        },
+        {
+            "id": "c113-x-optional-chain",
+            "kind": "ok",
+            "out": "const v = a?.b?.c;"
+        },
+        {
+            "id": "c114-x-nonnull-chain",
+            "kind": "ok",
+            "out": "const v = a .b .c ;"
+        },
+        {
+            "id": "c115-x-as-const-arr",
+            "kind": "ok",
+            "out": "const a = [1, 2, 3]         ;"
+        },
+        {
+            "id": "c116-x-satisfies-obj",
+            "kind": "ok",
+            "out": "const c = { a: 1 }                                 ;"
+        },
+        {
+            "id": "c117-x-double-cast",
+            "kind": "ok",
+            "out": "const z = (x       )          ;"
+        },
+        {
+            "id": "c118-x-generic-call-complex",
+            "kind": "ok",
+            "out": "const m = new Map                       ();"
+        },
+        {
+            "id": "c119-x-call-typeargs-two",
+            "kind": "ok",
+            "out": "f      (x);"
+        },
+        {
+            "id": "c120-x-instantiation-only",
+            "kind": "ok",
+            "out": "const g = f        ;"
+        },
+        {
+            "id": "c121-x-comparison-not-typeargs",
+            "kind": "ok",
+            "out": "const b = x < y > z;"
+        },
+        {
+            "id": "c122-x-import-default",
+            "kind": "ok",
+            "out": "import def from \"./m\";"
+        },
+        {
+            "id": "c123-x-import-ns",
+            "kind": "ok",
+            "out": "import * as ns from \"./m\";"
+        },
+        {
+            "id": "c124-x-import-named-mixed",
+            "kind": "ok",
+            "out": "import def, { a,             } from \"./m\";"
+        },
+        {
+            "id": "c125-x-import-mixed-real",
+            "kind": "ok",
+            "out": "import { A,        } from \"./m\";"
+        },
+        {
+            "id": "c126-x-export-named",
+            "kind": "ok",
+            "out": "export { a, b };"
+        },
+        {
+            "id": "c127-x-export-type-named",
+            "kind": "ok",
+            "out": "export {         B };"
+        },
+        {
+            "id": "c128-x-export-star-from",
+            "kind": "ok",
+            "out": "export * from \"./m\";"
+        },
+        {
+            "id": "c129-x-export-star-as",
+            "kind": "ok",
+            "out": "export * as ns from \"./m\";"
+        },
+        {
+            "id": "c130-x-export-decl",
+            "kind": "ok",
+            "out": "export const x         = 1;"
+        },
+        {
+            "id": "c131-x-export-fn",
+            "kind": "ok",
+            "out": "export function f(a        )       {}"
+        },
+        {
+            "id": "c132-x-export-class-generic",
+            "kind": "ok",
+            "out": "export class C    {}"
+        },
+        {
+            "id": "c133-x-export-default-fn",
+            "kind": "ok",
+            "out": "export default function f(a        )       {}"
+        },
+        {
+            "id": "c134-x-export-default-class",
+            "kind": "ok",
+            "out": "export default class C    {}"
+        },
+        {
+            "id": "c135-x-decorator-class",
+            "kind": "ok",
+            "out": "@dec class C {}"
+        },
+        {
+            "id": "c136-x-decorator-member",
+            "kind": "ok",
+            "out": "class C { @dec x         = 1; @m() m2() {} }"
+        },
+        {
+            "id": "c137-x-multiline-real",
+            "kind": "ok",
+            "out": "                          \n                        \n                    \n \nexport function run(opts         )                {\n  return Promise.resolve();\n}\n"
+        },
+        {
+            "id": "c138-x-this-void",
+            "kind": "ok",
+            "out": "function f(            a        ) {}"
+        },
+        {
+            "id": "c139-x-typeof-import",
+            "kind": "ok",
+            "out": "let x                       = y;"
+        },
+        {
+            "id": "c140-x-keyof-typeof",
+            "kind": "ok",
+            "out": "let k                   = \"a\";"
+        },
+        {
+            "id": "c141-x-type-in-call",
+            "kind": "ok",
+            "out": "tag        `hello ${x          }`;"
+        },
+        {
+            "id": "c142-x-nested-obj-type-line",
+            "kind": "ok",
+            "out": "const o   \n            \n            \n  = { a: 1, b: \"x\" };"
+        },
+        {
+            "id": "c143-x-class-field-fn-type",
+            "kind": "ok",
+            "out": "class C { cb                      = () => {}; }"
+        },
+        {
+            "id": "c144-x-abstract-full",
+            "kind": "ok",
+            "out": "         class A {                                         }"
+        },
+        {
+            "id": "c145-x-optional-arrow-ret",
+            "kind": "ok",
+            "out": "const f = (a         )                     => undefined;"
+        },
+        {
+            "id": "c146-x-type-predicate",
+            "kind": "ok",
+            "out": "function is(v         )              { return true }"
+        },
+        {
+            "id": "c147-x-asserts-pred",
+            "kind": "ok",
+            "out": "function a(v         )                      {}"
+        },
+        {
+            "id": "c148-x-asserts-only",
+            "kind": "ok",
+            "out": "function a(v         )            {}"
+        },
+        {
+            "id": "c149-x-this-predicate",
+            "kind": "ok",
+            "out": "function f()            { return true }"
+        },
+        {
+            "id": "c150-x-unicode-2byte",
+            "kind": "ok",
+            "out": "const x   \u00a0  = 1;"
+        },
+        {
+            "id": "c151-x-unicode-3byte",
+            "kind": "ok",
+            "out": "                  \u2002   "
+        },
+        {
+            "id": "c152-x-unicode-4byte",
+            "kind": "ok",
+            "out": "const x    \ufeff  = 1;"
+        },
+        {
+            "id": "c153-x-unicode-mixed",
+            "kind": "ok",
+            "out": "                   \u00a0\u2002 \ufeff   "
+        },
+        {
+            "id": "c154-x-unicode-in-comment",
+            "kind": "ok",
+            "out": "const s = 1;                  \u2002  \ufeff \u00a0     "
+        },
+        {
+            "id": "c155-x-tab-in-blank",
+            "kind": "ok",
+            "out": "const x \t       = 1;"
+        },
+        {
+            "id": "c156-x-crlf-blank",
+            "kind": "ok",
+            "out": "             \r\n            \r\n "
+        },
+        {
+            "id": "c157-x-leading-union",
+            "kind": "ok",
+            "out": "                 "
+        },
+        {
+            "id": "c158-x-leading-union-obj",
+            "kind": "ok",
+            "out": "let x \n         \n                    \n                             \n         \n             = null;"
+        },
+        {
+            "id": "c159-x-class-index-sig",
+            "kind": "ok",
+            "out": "class C { pid        ;                         }"
+        },
+        {
+            "id": "c160-x-arrow-ret-fn-type",
+            "kind": "ok",
+            "out": "const f = (a        )                        => () => {};"
+        },
+        {
+            "id": "c161-x-obj-getter-method",
+            "kind": "ok",
+            "out": "const o = { get()          { return 1 } };"
+        },
+        {
+            "id": "c162-x-obj-getter",
+            "kind": "ok",
+            "out": "const o = { get x()         { return 1 } };"
+        },
+        {
+            "id": "c163-x-namespace-ident",
+            "kind": "ok",
+            "out": "namespace[key] = bound;"
+        },
+        {
+            "id": "c164-x-div-after-paren",
+            "kind": "ok",
+            "out": "const y = modPow(rhs, (p + 1n) / 4n, p);"
+        },
+        {
+            "id": "c165-x-as-in-array",
+            "kind": "ok",
+            "out": "const a = [view(source               )];"
+        },
+        {
+            "id": "c166-x-as-in-index",
+            "kind": "ok",
+            "out": "const v = arr[key          ];"
+        },
+        {
+            "id": "c167-x-paren-fn-type-in-union",
+            "kind": "ok",
+            "out": "                                               "
+        },
+        {
+            "id": "c168-x-objtype-in-union",
+            "kind": "ok",
+            "out": "                                                                      "
+        },
+        {
+            "id": "c169-x-optional-fn-field",
+            "kind": "ok",
+            "out": "class C { cb                      ; }"
+        },
+        {
+            "id": "c170-x-generic-static-arrow",
+            "kind": "ok",
+            "out": "class C { static make =    (x   )    => x; }"
+        }
+    ]
+}

@@ -106,7 +106,7 @@
 
 **在线 demo**：<https://mcuking.github.io/web-node/>
 
-**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **843 通过 / 2 预存 skip（78 files）** · `vite build` 绿（worker **2271.58KB** / index ~10.84KB / css ~4.06KB）
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **978 通过 / 2 预存 skip（111 files）** · `vite build` 绿（worker **2507.07KB** / index ~10.84KB / css ~4.06KB）
 
 ### 网络层怎么走通的（M3）
 
@@ -243,6 +243,33 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-23 · M97.1 `stripTypeScriptTypes`（纯 JS strip-only，阶段 B 收尾）
+
+**改了什么**：把 `module.stripTypeScriptTypes(source, options)` 真正实现出来——**纯 JS 自研 TS 剥离器**（不引 amaro/SWC wasm），只做 strip-only 模式（把类型跨度覆写成空白、保持字节偏移），不做 codegen/transform。
+
+- 新增 `src/node-runtime/ts/strip-types.ts`（~1250 行）：词法扫描器（注释/字符串/模板串/正则 vs 除法消歧/Unicode 标识符）+ 轻量 TS 感知语法漫游器 + 跨度覆写。覆盖 `interface`/`type`/`declare`/`namespace`/`import type`、类型注解、类型参数与类型实参（含 `<` 消歧的比较回退）、`as`/`satisfies`、非空断言 `!`、可选参数/可选成员、参数属性、`Readonly`/`public`/`private` 等修饰符、类字段/抽象成员/索引签名、类型谓词（`x is T`/`asserts x`/`this is T`）。
+- **关键：空档补位按 UTF-8 字节宽度**（这是让它逐字节对齐真 amaro 的核心）——1 字节 → `' '`、2 字节 → U+00A0、3 字节 → U+2002、4 字节（astral，如 emoji）→ `' ' + U+FEFF`（两个 UTF-16 单元、共 4 字节）；`\n`/`\r`/`\t`/`\f`/`\v` 原样保留。这样替换后的字符串**字节长度与原文一致**（源码映射偏移稳定）。
+- 不支持的语法**响亮抛** `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`（enum/namespace 含 runtime 成员、`import =`、参数属性、角度断言 `<T>expr` 等）；非法用法抛 `ERR_INVALID_TYPESCRIPT_SYNTAX`。两个码均为 `SyntaxError` 子类，形状对齐 `internal/errors`。
+- 接线：`src/node-runtime/builtins/module.ts` 导出 `Module.stripTypeScriptTypes`；`src/node-runtime/builtins/internal-shims.ts` 新增 `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`/`ERR_INVALID_TYPESCRIPT_SYNTAX`/`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`。
+- 参数校验对齐真 Node：`code` 必须 string（`ERR_INVALID_ARG_TYPE`）、`options` 必须 object、`mode !== 'strip'` 抛 `ERR_INVALID_ARG_VALUE`、`sourceUrl` 必须 string、`sourceMap` 只接受 false/undefined。
+
+**为什么**：路线选定 **B（纯 JS strip-only）**——实测 WebContainer 同类场景亦为纯 JS 自实现、运行时仅 ~1.1MB；引 amaro 会把 worker 从 2.47MB 抬到 ~6.3MB，体积不划算（见 `docs/webcontainer-research.md` 第八节）。
+
+**验证（差分语料硬证据）**：
+- `tools/strip-ts-probe.cjs` 在真 Node v26.9.0 与 web-node 上跑同一语料，逐字节比对 `__OBS__` JSON：**170/170 例 0 diff**（覆盖注释/字符串/模板串/正则/JSX 里“像类型”的字符、Unicode 宽度、CRLF、谓词、union 内对象类型、索引签名等边角）。fixture：`test/fixtures/strip-ts.json`；门禁：`test/strip-ts.test.ts`。
+- **全仓库 `.ts` 扫描**：对 `src/` 下 113 个 `.ts` 文件、以及全仓库 227 个 `.ts` 文件与真 Node 逐字节比对，**全部 0 diff、0 hang**。
+
+**开发中修掉的潜在 bug（都是 parser 死循环/错位）**：`matchingParenThenArrow` 的指数级回溯、`i++`/`i--` 在语句头未被消费、`[` 下标/数组被整体跳过导致内部 `as` 漏处理、`)` 之后把 `/` 误判为正则（吞调用）、“`|` 开头 union”、“`<` 比较回退”、导出 `interface`/`namespace` 标识符、对象字面量 `get()` 方法、类索引签名成员。
+
+**顺带修掉一个存量 flaky 测试（与 M97.1 无关，但拦门禁）**：`test/worker.test.ts` 的 “worker stdio” 用例在**全量并发**时偶挂（`messages` 为空）。
+- 根因：worker 未 `start()` 时，父侧 `postMessage`/`stdin` 会 `#touch()` 排定 4ms settle；若 worker 的 `start()`（`defer` 宏任务）在负载下被推迟超 4ms，settle 先跑——此时 worker 端 port 默认 `refed:false`，于是被判定“已完成”而 `#stop(0)`，**丢掉已排队的 stdin 帧**。
+- 修复：`#scheduleSettle` 在 `!this.#started` 时直接返回（首次真正检查由 `start()` 路径排定）。
+- 验证：改动前干净树 stash 后跑全量 **3 次挂 1 次**（确认存量）；修复后连续跑全量 **5/5 全绿**。
+
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **978 通过 / 2 skip（111 files）** · `vite build` 绿（worker **2507.07KB**，+37KB）。
+
+---
 
 ### 2026-09-22 · M98 `http`/`https` 报文级差分
 

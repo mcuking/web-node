@@ -404,10 +404,10 @@ describe('module surface', () => {
 
     expect(() => M._compile()).toThrowError(/not implemented/i);
     expect(() => M.load()).toThrowError(/not implemented/i);
-    // Still unimplemented: `runMain` and the TypeScript transform.
-    for (const call of [() => mod.runMain(), () => mod.stripTypeScriptTypes('const a: number = 1')]) {
-      expect(call).toThrowError(/not implemented/i);
-    }
+    // Still unimplemented: `runMain`.
+    expect(() => mod.runMain()).toThrowError(/not implemented/i);
+    // The TypeScript strip transform is implemented (strip-only mode).
+    expect(mod.stripTypeScriptTypes('const a: number = 1')).toBe('const a         = 1');
     // Loader-backed statics now delegate to the web-node loader.
     expect(mod._stat('/x')).toBe(-2);
     expect(mod._findPath('x', ['/'], false)).toBe(false);
