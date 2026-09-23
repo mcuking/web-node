@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-23T10:01:05.856Z",
+  "generatedAt": "2026-09-23T12:51:26.541Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -792,6 +792,13 @@
       "patches": []
     },
     {
+      "path": "zlib/iter.js",
+      "sha256": "979961ee12e7aa6db9492c787c1f95a2bc7ad11b6a0b83add86f5342a0ffe920",
+      "upstreamSha256": "979961ee12e7aa6db9492c787c1f95a2bc7ad11b6a0b83add86f5342a0ffe920",
+      "bytes": 1163,
+      "patches": []
+    },
+    {
       "path": "internal/streams/iter/types.js",
       "sha256": "ce46f861feb4165f43543330fe4b690ca7a8b4774f2402915943815361960cda",
       "upstreamSha256": "ce46f861feb4165f43543330fe4b690ca7a8b4774f2402915943815361960cda",
@@ -873,6 +880,13 @@
       "sha256": "a51b2eb61a6f325063e603fd1ab12ece9e4436d8557910005d7d172d02388c3d",
       "upstreamSha256": "a51b2eb61a6f325063e603fd1ab12ece9e4436d8557910005d7d172d02388c3d",
       "bytes": 26872,
+      "patches": []
+    },
+    {
+      "path": "internal/streams/iter/transform.js",
+      "sha256": "9df8f059622909758d6acafa41e2f3a8c1df26c098d1fdfee0bfe4f13fc51281",
+      "upstreamSha256": "9df8f059622909758d6acafa41e2f3a8c1df26c098d1fdfee0bfe4f13fc51281",
+      "bytes": 27839,
       "patches": []
     },
     {

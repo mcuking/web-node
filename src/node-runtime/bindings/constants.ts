@@ -1,5 +1,6 @@
 import type { BindingFactory } from './context';
 import { ERRNO } from '../vfs/types';
+import { ZLIB_CONSTANTS } from '../zlib-constants';
 
 const O_RDONLY = 0;
 const O_WRONLY = 1;
@@ -273,7 +274,7 @@ export const constantsBinding: BindingFactory = () => {
       UV_FS_O_TEMPORARY: 0,
     },
     crypto: {},
-    zlib: {},
+    zlib: ZLIB_CONSTANTS,
     dlopen: DLOPEN,
     trace: {},
     // `constants.internal` (`src/node_constants.cc`): how a module with no

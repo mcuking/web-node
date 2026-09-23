@@ -129,6 +129,7 @@ const FILES = [
   // milestone 38: the iterable streams API (`stream/iter`) + `stream/consumers`
   'stream/consumers.js',
   'stream/iter.js',
+  'zlib/iter.js',
   'internal/streams/iter/types.js',
   'internal/streams/iter/utils.js',
   'internal/streams/iter/webidl.js',
@@ -141,6 +142,7 @@ const FILES = [
   'internal/streams/iter/broadcast.js',
   'internal/streams/iter/share.js',
   'internal/streams/iter/classic.js',
+  'internal/streams/iter/transform.js',
   // milestone 49: the real VFS subsystem (MemoryProvider-backed) + the fs base
   'internal/fs/utils.js',
   'internal/vfs/errors.js',

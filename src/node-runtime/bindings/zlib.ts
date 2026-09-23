@@ -321,13 +321,275 @@ export function compressBound(srcLen: number): number {
  * 我们的 `builtins/zlib.ts` 直接用这些原语；把它挂进 REGISTRY 也让**将来 vendor
  * 真 `lib/zlib.js`**（它同样写 `internalBinding('zlib')`）能直接复用这一层。
  */
+// ---------------------------------------------------------------------------
+// Raw native-handle ABI (mirrors `src/node_zlib.cc`'s `CompressionStream`).
+//
+// vendored `lib/internal/streams/iter/transform.js` (used by `lib/zlib/iter.js`)
+// constructs bare handles and drives them directly:
+//
+//   const h = new binding.Zlib(mode);
+//   h.onerror = onError;
+//   h.init(windowBits, level, memLevel, strategy, writeState, processCallback, dictionary);
+//   h.write(flush, input, inOffset, inLen, out, outOffset, outLen);   // async
+//   h.writeSync(...);  h.reset();  h.params(level, strategy);  h.close();
+//
+// `writeState` is a caller-owned `Uint32Array(2)` the native side fills with
+// `[availOut, availIn]` after every write; the JS loop re-issues `write()` while
+// `availOut === 0` (the output buffer was exhausted). Compression here runs in
+// wasm, so this presents exactly that surface on top of the codecs above.
+// ---------------------------------------------------------------------------
+
+type RawHandleProcessCallback = () => void;
+type RawHandleOnError = (message: string, errno: number, code: string) => void;
+
+interface RawCodec {
+  push(chunk: Uint8Array, flush: number): Uint8Array;
+  reset(): void;
+  setParams(level: number, strategy: number): void;
+  close(): void;
+  readonly closed: boolean;
+  readonly finished: boolean;
+  readonly lastInputLeft: number;
+}
+
+/** Shared driving logic for the `binding.Zlib` / `binding.BrotliEncoder` / … handles. */
+class RawHandle {
+  #make: (() => RawCodec) | null = null;
+  #codec: RawCodec | null = null;
+  #writeState: Uint32Array | null = null;
+  #processCallback: RawHandleProcessCallback | null = null;
+  #pending: Uint8Array | null = null;
+  #pendingOff = 0;
+  #availIn = 0;
+  #writeInProgress = false;
+  #pendingClose = false;
+  #closed = false;
+
+  /** `onerror(message, errno, code)` — set by the caller; invoked *instead of* the write callback. */
+  onerror: RawHandleOnError | null = null;
+  /** Node keeps a reference to the in-flight input buffer here; mirror the slot. */
+  buffer: unknown = null;
+
+  /** Register the codec factory. Called from a subclass' `init`. */
+  protected _setup(make: () => RawCodec): void {
+    this.#make = make;
+  }
+
+  protected _install(writeState: Uint32Array, processCallback: RawHandleProcessCallback): void {
+    this.#writeState = writeState;
+    this.#processCallback = processCallback;
+  }
+
+  #ensureCodec(): RawCodec {
+    let codec = this.#codec;
+    if (!codec) {
+      if (!this.#make) throw new Error('zlib: handle used before init');
+      codec = this.#codec = this.#make();
+    }
+    return codec;
+  }
+
+  #emitError(err: unknown): void {
+    const e = err as { message?: string; errno?: number; code?: string } | null;
+    const message = e && typeof e.message === 'string' ? e.message : String(err);
+    const errno = e && typeof e.errno === 'number' ? e.errno : -1;
+    const code = e && typeof e.code === 'string' ? e.code : 'ERR_ZLIB_INITIALIZATION_FAILED';
+    this.#writeInProgress = false;
+    this.onerror?.(message, errno, code);
+    if (this.#pendingClose) this.close();
+  }
+
+  #pump(
+    input: Uint8Array | null,
+    inOff: number,
+    inLen: number,
+    out: Uint8Array,
+    outOff: number,
+    outLen: number,
+    flush: number,
+  ): void {
+    const codec = this.#ensureCodec();
+    // Feed the codec when there is input, or when a flush/finish was requested and
+    // the stream has not already reached its end. Drain-only re-entries from the
+    // caller's loop arrive with `inLen === 0`.
+    if (this.#pending === null && (inLen > 0 || (flush !== 0 && !codec.finished))) {
+      const chunk = input && inLen > 0 ? input.subarray(inOff, inOff + inLen) : EMPTY;
+      const produced = codec.push(chunk, flush);
+      this.#availIn = codec.lastInputLeft;
+      if (produced.byteLength > 0) {
+        this.#pending = produced;
+        this.#pendingOff = 0;
+      }
+    }
+    // Deliver as much as fits into the caller's output buffer.
+    let copied = 0;
+    while (copied < outLen && this.#pending !== null) {
+      const available = this.#pending.byteLength - this.#pendingOff;
+      const n = available < outLen - copied ? available : outLen - copied;
+      out.set(this.#pending.subarray(this.#pendingOff, this.#pendingOff + n), outOff + copied);
+      this.#pendingOff += n;
+      copied += n;
+      if (this.#pendingOff >= this.#pending.byteLength) {
+        this.#pending = null;
+        this.#pendingOff = 0;
+      }
+    }
+    const ws = this.#writeState;
+    if (ws) {
+      ws[0] = outLen - copied;
+      ws[1] = this.#availIn;
+    }
+  }
+
+  write(
+    flush: number,
+    input: Uint8Array | null,
+    inOff: number,
+    inLen: number,
+    out: Uint8Array,
+    outOff: number,
+    outLen: number,
+  ): void {
+    if (this.#closed) throw new Error('zlib binding closed');
+    this.#writeInProgress = true;
+    try {
+      this.#pump(input, inOff, inLen, out, outOff, outLen, flush);
+    } catch (err) {
+      this.#emitError(err);
+      return;
+    }
+    // Compression is synchronous in wasm; the callback still fires asynchronously
+    // so the caller's `await` behaves like Node's threadpool completion.
+    queueMicrotask(() => {
+      this.#writeInProgress = false;
+      this.#processCallback?.();
+      if (this.#pendingClose) this.close();
+    });
+  }
+
+  writeSync(
+    flush: number,
+    input: Uint8Array | null,
+    inOff: number,
+    inLen: number,
+    out: Uint8Array,
+    outOff: number,
+    outLen: number,
+  ): void {
+    if (this.#closed) throw new Error('zlib binding closed');
+    try {
+      this.#pump(input, inOff, inLen, out, outOff, outLen, flush);
+    } catch (err) {
+      // Node reports sync failures through `onerror` (and leaves `writeState` stale).
+      this.#emitError(err);
+    }
+  }
+
+  reset(): void {
+    if (this.#writeInProgress) {
+      throw new Error('Cannot reset zlib stream while a write is in progress');
+    }
+    try {
+      this.#codec?.reset();
+    } catch (err) {
+      this.#emitError(err);
+    }
+  }
+
+  params(level: number, strategy: number): void {
+    try {
+      this.#codec?.setParams(level, strategy);
+    } catch (err) {
+      this.#emitError(err);
+    }
+  }
+
+  close(): void {
+    if (this.#writeInProgress) {
+      this.#pendingClose = true;
+      return;
+    }
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#codec?.close();
+  }
+}
+
+/** `new binding.Zlib(mode)` — bare deflate/inflate/gzip/gunzip handle. */
+class ZlibStreamHandle extends RawHandle {
+  readonly #mode: number;
+  constructor(mode: number) {
+    super();
+    this.#mode = mode;
+  }
+
+  init(
+    windowBits: number,
+    level: number,
+    memLevel: number,
+    strategy: number,
+    writeState: Uint32Array,
+    processCallback: RawHandleProcessCallback,
+    dictionary?: Uint8Array | null,
+    rejectGarbageAfterEnd?: boolean,
+  ): void {
+    const mode = this.#mode;
+    const reject = rejectGarbageAfterEnd === true;
+    const dict = dictionary ?? null;
+    this._setup(() => new ZlibCodec({ mode, level, windowBits, memLevel, strategy, dictionary: dict, rejectGarbageAfterEnd: reject }));
+    this._install(writeState, processCallback);
+  }
+}
+
+/** `new binding.BrotliEncoder(mode)` / `binding.BrotliDecoder(mode)`. */
+function makeBrotliHandleCtor(mode: number): new (mode?: number) => RawHandle {
+  return class extends RawHandle {
+    init(
+      paramsArray: Uint32Array,
+      writeState: Uint32Array,
+      processCallback: RawHandleProcessCallback,
+      dictionary?: Uint8Array | null,
+    ): void {
+      const params = paramsArray ? new Int32Array(paramsArray) : undefined;
+      const dict = dictionary ?? null;
+      this._setup(() => new BrotliCodec({ mode, params, dictionary: dict }));
+      this._install(writeState, processCallback);
+    }
+  };
+}
+
+/** `new binding.ZstdCompress()` / `binding.ZstdDecompress()`. */
+function makeZstdHandleCtor(mode: number): new () => RawHandle {
+  return class extends RawHandle {
+    init(
+      paramsArray: Uint32Array,
+      pledgedSrcSize: number | undefined,
+      writeState: Uint32Array,
+      processCallback: RawHandleProcessCallback,
+      dictionary?: Uint8Array | null,
+    ): void {
+      const params = paramsArray ? new Int32Array(paramsArray) : undefined;
+      const dict = dictionary ?? null;
+      this._setup(() => new ZstdCodec({ mode, params, dictionary: dict, pledgedSrcSize }));
+      this._install(writeState, processCallback);
+    }
+  };
+}
+
 export function zlibBinding(_ctx: BindingContext): Record<string, unknown> {
   return {
-    Zlib: ZlibCodec,
-    BrotliEncoder: makeBrotliCtor(BROTLI_MODE.ENCODE),
-    BrotliDecoder: makeBrotliCtor(BROTLI_MODE.DECODE),
-    ZstdCompress: makeZstdCtor(ZSTD_MODE.COMPRESS),
-    ZstdDecompress: makeZstdCtor(ZSTD_MODE.DECOMPRESS),
+    // Raw native-handle surface (what vendored Node `lib/` code expects).
+    Zlib: ZlibStreamHandle,
+    BrotliEncoder: makeBrotliHandleCtor(BROTLI_MODE.ENCODE),
+    BrotliDecoder: makeBrotliHandleCtor(BROTLI_MODE.DECODE),
+    ZstdCompress: makeZstdHandleCtor(ZSTD_MODE.COMPRESS),
+    ZstdDecompress: makeZstdHandleCtor(ZSTD_MODE.DECOMPRESS),
+    // High-level codecs — used by our hand-ported `builtins/zlib.ts`.
+    ZlibCodec,
+    BrotliEncoderCodec: makeBrotliCtor(BROTLI_MODE.ENCODE),
+    BrotliDecoderCodec: makeBrotliCtor(BROTLI_MODE.DECODE),
+    ZstdCompressCodec: makeZstdCtor(ZSTD_MODE.COMPRESS),
+    ZstdDecompressCodec: makeZstdCtor(ZSTD_MODE.DECOMPRESS),
     crc32,
     adler32,
     zlibVersion,

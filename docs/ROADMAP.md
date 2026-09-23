@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-23（**阶段 H：M118 ✅ + M119 首个增量上线**——M118 brotli/zstd 换成真上游 C 编 wasm（差分 0 diff）；M119 确认 OpenSSL 3.5.8 可编 wasm 并把摘要路径切到它（2.29 MB 惰性资产）；阶段 H 进度 4/8，M119 进行中）
+> - **最后更新**：2026-09-23（**阶段 H：M101 ✅ 追加**——vendor 真 `internal/streams/iter/transform.js` + `lib/zlib/iter.js`，给 `internalBinding('zlib')` 补上原生 raw handle ABI，`zlib/iter` 差分 0 diff；阶段 H 进度 **5/8**，M119 进行中）
 
 ---
 
@@ -34,7 +34,7 @@
 
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
-| **H** | **native → WASM（主线，P0–P6）** | 8 | 4 | 4 |
+| **H** | **native → WASM（主线，P0–P6）** | 8 | 5 | 3 |
 | E | 启动与加载性能 | 1 | 0 | 1 |
 | F | 构建工具链（**用户愿景，最后做**） | 3 | 0 | 3 |
 | G | 预览与路由 | 1 | 0 | 1 |
@@ -43,10 +43,10 @@
 | C | 平台无对应物（**已解散**，条目已分流） | 2 | 2 | 0 |
 | D | 运行时常量小项（**已归档**） | 4 | 4 | 0 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **51** | **41** | **10**（+1 不做） |
+| **合计** | | **51** | **42** | **9**（+1 不做） |
 
-> **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M119 · M120 · M121；另含由阶段 C 移入的 **M101**。
-> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 128 个里程碑，剩余 10 个规划任务**。
+> **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 · M120 · M121。
+> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 129 个里程碑，剩余 9 个规划任务**。
 > 注：本表按**叶子任务**计数——M90（拆 M90.1–M90.9）、M92（拆 M92.1/M92.2）、M93（拆 M93.1–M93.4）、M93.4（拆 a–h）、M97（拆 M97.1）的**父项为拆分占位、不计入**。（旧表 A=22 系拆分前的陈旧值，本次一并修正为 26。）
 
 ---
@@ -84,9 +84,12 @@
   - **验收**：新差分装置 `tools/histogram-probe.cjs`（oracle `tools/histogram-oracle.mjs` → `test/fixtures/histogram.json`）在真 Node v26.9.0 与 web-node 各跑一遍，**逐字段 0 diff**（标量统计、分位、桶表、两样本检验、均值/分位 CI、EWMA、CBOR 导出重导入、错误形状、常量）；`tsc --noEmit` 净 · `vitest run` **1007 passed / 2 skipped（120 文件）** · `npm run build`（`wn_histogram-BIhNpcFt.wasm` **257.74 kB**、`runtime.worker-Cna1pydo.js` **679.75 kB**）；部署后线上资产全 **200**。
   - **两个有意偏离（写进文档）**：① **EWMA 方差的 1 ULP**：`ewma_variance` 递推 `v + α·d·d` 在 arm64 宿主被编译成 **FMA**，而 wasm 无 FMA 指令——最后一次加法不进位，导致 EWMA 导出 CBOR 的 `float64` 最后 1 字节差 1；探针对**统计量**取 10 位有效数字（libm 的 `erfc`/`lgamma`/`exp`/`log` 同理可能差 1 ULP），并对 EWMA 导出只比**非 EWMA 段的字节**（framing/计数逐字节相等）。② `monitorEventLoopDelay` 的**绝对延迟值**天然依赖环境（Node 用 libuv 定时器，这里用 unref 的 JS 定时器），故只锁契约与量级，不进字节差分。
 
-- [ ] **M101 · `stream/iter` 的 `transform`（wasm 解锁的 vendor）**  ← 由阶段 C 移入（2026-09-23）
-  - vendor 真 `lib/internal/streams/iter/transform.js`（顶层 `internalBinding('zlib')`）——zlib 绑定已随 **M116** 就绪，可直接 vendor。
-  - 验收：`stream/iter` 的 `transform` / `duplex` 助手可用；差分 **0 diff**。
+- [x] **M101 · `zlib/iter`（可迭代压缩）——vendor 真 `internal/streams/iter/transform.js`** ✅ 2026-09-23  ← 由阶段 C 移入
+  - **vendor 真源**：`lib/internal/streams/iter/transform.js` + `lib/zlib/iter.js`（MANIFEST 161 → 163，零 patch）。前者**裸调 `internalBinding('zlib')`** 造 handle（`new binding.Zlib(mode)`），再逐次 `write`/`writeSync` 驱动，从调用方拥有的 `Uint32Array(2)` 读回 `[availOut, availIn]` 并据此循环——这是 `src/node_zlib.cc` 的 `CompressionStream` 原生表面。
+  - **绑定补上 raw handle ABI**：`bindings/zlib.ts` 新增 `RawHandle` 基类 + `ZlibStreamHandle`/`BrotliEncoder`/`BrotliDecoder`/`ZstdCompress`/`ZstdDecompress`（暴露在原生键名下），把已验证的 codec 包成「一次 write ↔ 一次 deflate/inflate」的语义：`init(writeState, processCallback, …)` / 异步 `write` / `writeSync` / `reset` / `params` / `close`，失败经 `onerror(message, errno, code)` 报出（**不**调回调，与 C++ `EmitError` 一致）。原高层 codec 改挂 `*Codec` 键（`builtins/zlib.ts` 改用之）。
+  - **常量表归一**：把 `builtins/zlib.ts` 里那张 170 项的 zlib/brotli/zstd 常量表抽成 `zlib-constants.ts`，`internalBinding('constants').zlib` 从空 `{}` 改为它（之前是空表，vendored `transform.js` 读它取 `DEFLATE`/`GZIP`/`Z_BUF_ERROR`… 会全得 `undefined`）。
+  - **解锁**：`require('zlib/iter')` 的 16 个变换（`compressGzip`/`compressDeflate`/`compressBrotli`/`compressZstd` 及 `decompress*` 与全部 `*Sync`），可经 `stream/iter` 的 `pull`/`pullSync` 组合；`chunkSize`/`level`/`windowBits`/`params` 等参数全部生效。
+  - **验收**：新差分装置 `tools/zlib-iter-probe.cjs`（oracle `tools/zlib-iter-oracle.mjs`，真 Node 需 `--experimental-stream-iter` → `test/fixtures/zlib-iter.json`）真 Node v26.9.0 vs web-node **逐字段 0 diff**（同步/异步往返、压缩字节、`chunkSize` 不变性、参数矩阵、错误形状、链式变换、大输入）；`tsc --noEmit` 净 · `vitest run` **1021 passed / 2 skipped（122 文件）** · `npm run build`（worker **695.82 kB**）。
 
 - [x] **M118 · `brotli` / `zstd` → wasm（P3）** ✅ 2026-09-23
   - **真上游 C → wasm**：`deps/brotli`（上游 **1.2.0**，36 个 `.c`：common + dec + enc）与 `deps/zstd`（上游 **1.5.7**，27 个 `.c`）原封不动编成 wasm；薄封装 `native/src/wn_brotli.c`（`BrotliEncoderContext`/`BrotliDecoderContext` 的调用序列）与 `native/src/wn_zstd.c`（`ZstdCompressContext`/`ZstdDecompressContext`，含 pledged src size 核对）。产物 `wn_brotli.wasm` **847.4 KB**、`wn_zstd.wasm` **484.0 KB**（zstd 不开 `ZSTD_MULTITHREAD`——wasm32-wasip1 无线程）。

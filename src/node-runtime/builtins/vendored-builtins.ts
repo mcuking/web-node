@@ -938,6 +938,22 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     ],
   },
   {
+    id: 'internal/streams/iter/transform',
+    vendorPath: 'internal/streams/iter/transform.js',
+    origin: 'node-source',
+    // Bare zlib handles come from `internalBinding('zlib')`; the option
+    // constants from `internalBinding('constants').zlib` — neither is a module
+    // dep, so only the require() graph is listed here.
+    deps: [
+      'buffer',
+      'internal/errors',
+      'internal/streams/iter/types',
+      'internal/util',
+      'internal/util/types',
+      'internal/validators',
+    ],
+  },
+  {
     id: 'stream/consumers',
     aliases: ['node:stream/consumers'],
     vendorPath: 'stream/consumers.js',
@@ -964,6 +980,14 @@ export const vendoredBuiltins: BuiltinSpec[] = [
       'internal/streams/iter/broadcast',
       'internal/streams/iter/share',
     ],
+  },
+  {
+    id: 'zlib/iter',
+    aliases: ['node:zlib/iter'],
+    vendorPath: 'zlib/iter.js',
+    origin: 'node-source',
+    // Same `--experimental-stream-iter` gate as `stream/iter`; always available here.
+    deps: ['internal/util', 'internal/streams/iter/transform'],
   },
   {
     id: 'internal/async_hooks',

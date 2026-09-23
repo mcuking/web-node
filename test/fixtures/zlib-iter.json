@@ -1,0 +1,63 @@
+{
+  "syncRoundtrip": {
+    "gzip": "Hello, sync gzip!",
+    "deflate": "Hello, sync deflate!",
+    "brotli": "Hello, sync brotli!",
+    "zstd": "Hello, sync zstd!"
+  },
+  "syncLarge": {
+    "gzip": true,
+    "brotli": true
+  },
+  "syncBytes": {
+    "gzipHello": "28:1f8b0800000000000000cb48cdc9c957c8402701",
+    "deflateHello": "16:785ecb48cdc9c957c8402701680308b1",
+    "brotliHello": "13:1716000024406a1065eaf09c3e",
+    "zstdHello": "21:28b52ffd00586500003068656c6c6f200100994b",
+    "gzipEmpty": "20:1f8b080000000000000003000000000000000000",
+    "gzipFox": "119:1f8b0800000000000000edcae10181500006c055",
+    "deflateFox": "107:785eedcae10181500006c055be094cd302e42951",
+    "zstdFox": "63:28b52ffd0058b50100d40254686520717569636b"
+  },
+  "syncChunkSizeInvariant": {
+    "default": "107:785eedcae10181500006c055be094cd302e42951",
+    "small": "107:785eedcae10181500006c055be094cd302e42951",
+    "large": "107:785eedcae10181500006c055be094cd302e42951"
+  },
+  "syncOptions": {
+    "level1": "154:7801edd7cb1582401004c0543a02a32101c51544",
+    "level9": "107:78daedcae10181500006c055be094cd302e42951",
+    "level0": "13511:780101bc3443cb54686520717569636b2062726f",
+    "windowBits9": "107:1857edcae10181500006c055be094cd302e42951",
+    "brotliQuality11": "60:17bb34882c0e78d3d0955d9710bb172ba9cad092",
+    "zstdLevel9": "21:28b52ffd00606500003068656c6c6f200100994b"
+  },
+  "syncErrors": {
+    "brotliBadParam": "ERR_BROTLI_INVALID_PARAM",
+    "zstdBadParam": "ERR_ZSTD_INVALID_PARAM",
+    "brotliBadParamType": "ERR_INVALID_ARG_TYPE",
+    "deflateBadInput": "Z_DATA_ERROR",
+    "gzipBadInput": "Z_DATA_ERROR",
+    "chunkSizeTooSmall": "ERR_OUT_OF_RANGE"
+  },
+  "asyncRoundtrip": {
+    "gzip": "Hello, async gzip!",
+    "deflate": "Hello, async deflate!",
+    "brotli": "Hello, async brotli!",
+    "zstd": "Hello, async zstd!"
+  },
+  "asyncBytes": {
+    "gzipHello": "28:1f8b0800000000000000cb48cdc9c957c8402701",
+    "deflateHello": "16:785ecb48cdc9c957c8402701680308b1",
+    "brotliHello": "13:1716000024406a1065eaf09c3e",
+    "zstdHello": "21:28b52ffd00586500003068656c6c6f200100994b",
+    "gzipFox": "119:1f8b0800000000000000edcae10181500006c055",
+    "deflateFox": "107:785eedcae10181500006c055be094cd302e42951"
+  },
+  "asyncMatchesSync": {
+    "gzip": true,
+    "deflate": true
+  },
+  "asyncChained": "98:1f8b0800000000000000ab887b7bea2163630003",
+  "asyncLargeRoundtrip": true
+}

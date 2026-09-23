@@ -244,6 +244,22 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · M101 — `zlib/iter`（可迭代压缩）：vendor 真 `internal/streams/iter/transform.js` + `lib/zlib/iter.js`（阶段 H P1+）
+
+**里程碑**：把 Node 新的可迭代压缩 API `zlib/iter` 在页内跑起来。它是 `lib/zlib/iter.js` 一层薄壳，底下是 `lib/internal/streams/iter/transform.js`——后者**裸调 `internalBinding('zlib')` 造 handle**（`new binding.Zlib(mode)`），再逐次 `write`/`writeSync` 驱动，从**调用方拥有的 `Uint32Array(2)`** 读回 `[availOut, availIn]` 并据此循环（`availOut === 0` 就再下发一次）。这就是 `src/node_zlib.cc` 的 `CompressionStream` 原生表面——M116 的 wasm zlib 就绪后它才可能被 vendor。
+
+- **两个文件原样 vendor**（MANIFEST 161 → 163，零 patch）：`internal/streams/iter/transform.js`、`zlib/iter.js`（别名 `node:zlib/iter`）。
+- **绑定补上 raw handle ABI**：`bindings/zlib.ts` 新增 `RawHandle` 基类与五个子类（`ZlibStreamHandle` / `makeBrotliHandleCtor` / `makeZstdHandleCtor`），暴露在**原生键名**下（`Zlib`/`BrotliEncoder`/`BrotliDecoder`/`ZstdCompress`/`ZstdDecompress`）。它们把已验证的 codec 包成「一次 `write` ↔ 一次 deflate/inflate」的语义：
+  - `init(...)` 记下 `writeState` 与 `processCallback`（惰性建 codec）；`write` 是异步的（wasm 同步算完，回调走微任务，等价于 Node 的线程池完成），`writeSync` 同步；每次写完把 `writeState[0]=剩余输出空间`、`writeState[1]=剩余输入` 写回。
+  - 失败经 `onerror(message, errno, code)` 报出且**不**调回调（与 C++ `EmitError` 一致）；`close` 在写进行中则推迟到回调之后；`reset` 在写进行中报错。
+  - 高层 codec 改挂 **`*Codec`** 键（`ZlibCodec`/`BrotliEncoderCodec`/…），我们手写的 `builtins/zlib.ts` 改用之。
+- **常量表归一**：把 `builtins/zlib.ts` 里那张 **170 项** 的 zlib/brotli/zstd 常量表抽成 `src/node-runtime/zlib-constants.ts`，`internalBinding('constants').zlib` 从**空 `{}`** 改为它——vendored `transform.js` 会读它取 `DEFLATE`/`GZIP`/`Z_BUF_ERROR`/`BROTLI_PARAM_*`/`ZSTD_c_*`，此前会全得 `undefined`。
+- **解锁**：`require('zlib/iter')` 的 16 个变换（`compressGzip`/`compressDeflate`/`compressBrotli`/`compressZstd` 与 `decompress*` 及全部 `*Sync`），可经 `stream/iter` 的 `pull`/`pullSync` 组合；`chunkSize`/`level`/`windowBits`/`params`/`pledgedSrcSize` 全部生效。
+- **验收**：新差分装置 `tools/zlib-iter-probe.cjs`（oracle `tools/zlib-iter-oracle.mjs`——真 Node 需 `--experimental-stream-iter` → `test/fixtures/zlib-iter.json`）真 Node v26.9.0 vs web-node **逐字段 0 diff**（同步/异步往返、压缩字节、`chunkSize` 不变性、参数矩阵、错误形状、链式 `pull`、大输入）；门禁 `test/zlib-iter.test.ts`（2 例）。`tsc --noEmit` 净 · `vitest run` **1021 passed / 2 skipped（122 文件）** · build（worker **695.82 kB**；wasm 资产不变）。
+- **一处观察**：iter 变换的 deflate 输出**与 `chunkSize` 无关**（小/默认/大缓冲逐字节相同）——探针把它锁住；这正是「一次 write ↔ 一次 deflate」的语义，与 `lib/zlib.js` 的进程内循环等价。
+
+---
+
 ### 2026-09-23 · M119（首个增量）—— OpenSSL 子集编 wasm，摘要路径切到它（阶段 H P4）
 
 **里程碑**：把「热点 binding → wasm」里的 crypto 部分落地。先把最高风险的一步做了——**确认 OpenSSL 能编 wasm**，再交付第一个可用增量（摘要/HMAC）。
