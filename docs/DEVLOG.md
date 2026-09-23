@@ -244,6 +244,20 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · 架构重定向：native → WASM（对齐 WebContainer，阶段 H）
+
+**决策**：native 层从「JS 重写 / 平台 API 适配」转向「**真上游 C/C++ 编 wasm**」——目标 **B2（native 层全 WASM 化）+ 验收 B1（页内跑通 webpack/rspack + 差分 0 diff）**，技术路线 **甲（wasi-sdk 编真上游 C/C++；syscall 层不编 libuv，改用 SAB + `Atomics.wait` + FS-worker）**。
+
+- **设计文档**：`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`（接入缝 = `REGISTRY`；产物 = 带内容哈希的独立资产 + 惰性实例化；纯 C ABI，不引 Rust/wasm-bindgen）。
+- **阶段 H（M115–M121）**：P0 工具链/接入缝 → P1 `zlib`（取代 M99）→ P2 `histogram`（取代 M100）→ P3 `brotli`/`zstd` → P4 `crypto`（OpenSSL 子集，承接 M106）→ P5 同步 syscall（吸收 M114）→ P6 北极星（汇合 M108/M111）。
+- **资产盘点**（写入 ROADMAP）：既有 ~120 个里程碑**不白做**——① 地基（Realm/loader/`REGISTRY`/VFS/虚拟 TCP+npm/UI + 全部 vendored 真 `lib/` 源）与 native 层正交，**原样保留**；② `tools/*-probe.cjs` + `test/fixtures/*.json` 差分装置**直接作为 wasm 的验收闸门**（最值钱）；③ 被取代的纯 JS native 实现**不删**，留作兜底/语义参照；④ DEVLOG/MEMORY 里的语义坑全部留用。
+- **本机前置**：现无任何 wasm 编译链（无 emcc / wasi-sdk / wasm-ld / llvm / wabt；Apple clang 无 wasm backend）→ M115 首步装 wasi-sdk。
+- **风险**：OpenSSL→wasm 最重（5063 文件 / 246M）；体积需独立资产 + 惰性加载；wasi 整数/浮点边角行为需逐项验；P5 需线上 COOP/COEP。
+
+**性质**：规划/文档变更，无代码改动（未动实现）。
+
+---
+
 ### 2026-09-23 · M93.4h AES-GCM-SIV、ARIA CCM/GCM、SM4 CCM/GCM/XTS（cipher 全表 165 对齐）
 
 补齐最后 12 个模式名，`getCiphers()` **153 → 165**，与真 Node v26.9.0 **逐名 0 缺 0 余**（crypto 对称密码全表收官）。

@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-23（阶段 A **22/22 收官**：M93.4e `cfb1`/`cfb8`、M93.4f `wrap-inv`/`des3-wrap`、M93.4g `cbc-cts`、M93.4h `gcm-siv`/`aria-ccm/gcm`/`sm4-ccm/gcm/xts`；`getCiphers()` **111→165**，与真 Node **逐名全对齐**；阶段 D 4/4、M107 载荷拆分；合计 **44 / 33 / 11**）
+> - **最后更新**：2026-09-23（**架构方向变更**：新增**阶段 H — native → WASM（对齐 WebContainer 架构）**，目标 **B2 + 验收 B1**、路线**甲**，设计见 [`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`](superpowers/specs/2026-09-23-native-to-wasm-design.md)；阶段 A **22/22 收官**（M93.4e–h，`getCiphers()` **111→165** 逐名全对齐）；阶段 D 4/4、M107 载荷拆分；合计 **51 / 33 / 18**）
 
 ---
 
@@ -21,13 +21,29 @@
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | G | 借鉴 WebContainer（2026-09-23 调研落地） | 2 | 0 | 2 |
+| H | **native → WASM（对齐 WebContainer 架构）** | 7 | 0 | 7 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **44** | **33** | **11**（+1 不做） |
+| **合计** | | **51** | **33** | **18**（+1 不做） |
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 120 个里程碑，剩余 11 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
+> **2026-09-23 架构重定向**：阶段 C 的 M99/M100、阶段 E 的 M106、阶段 G 的 M114，其**实现方式改为「真上游 C/C++ → wasm」**，具体任务落到**阶段 H（M116/M117/M119/M120）**；阶段 F 的 M108/M111 由 **M121** 统一验收。上述条目保留原位并加注，不重复计数。
+
+> 加上已完成的 **M1–M87**，项目整体：**已完成 120 个里程碑，剩余 18 个规划任务**（含阶段 H 的 7 个 wasm 迁移任务，以及排最后的 webpack/rspack 构建工具链）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.4（26 → 30），同日晚 M90.5 又拆为 M90.5–M90.9（30 → 34）。
 > 注：M97 于 2026-09-22 拆出 M97.1（`stripTypeScriptTypes` 需要真 TS 解析器 / amaro wasm，代价大）（41 → 42）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
+
+---
+
+## 资产盘点：既往工作如何衔接 native→WASM（2026-09-23）
+
+> 架构从「JS 重写 native」转向「真上游 C/C++ 编 wasm」前，先盘点已有 ~120 个里程碑的**去留**。结论：**换发动机、留仪表盘**——不是推翻重来。
+
+| 类别 | 内容 | 处置 |
+|---|---|---|
+| **地基（继续用）** | Realm / loader / `internalBinding` 调度表（`REGISTRY`）、VFS（内存树 + OPFS）、虚拟 TCP + ServiceWorker 预览、子域名路由（M3.5d）、npm client、UI，以及 **M17–M56 那一大批 vendored 真 Node `lib/` 源码** | **原样保留**（与 native 层正交） |
+| **验收装置（最值钱）** | `tools/*-probe.cjs` + `*-oracle.mjs` + `test/fixtures/*.json`（M64–M98 + 阶段 A/B 攒下的差分语料，含 crypto 全套、http/net/fs/module…） | **原样保留，直接作为 wasm 的验收闸门**——wasm 版必须过同一套 probe，才能证明「0 diff」 |
+| **将被取代的实现（保留作 fallback/oracle）** | 纯 JS 重写的 native 原语：crypto（hash/cipher/kdf/非对称/PQC/ML-KEM）、zlib shim、string_decoder、buffer、v8 serdes … | **不删**：① 当前是 main 上可跑可部署的版本；② wasm 编不出来时的兜底；③ 语义参照 |
+| **语义知识** | `DEVLOG` / `MEMORY` 记的坑（SM4-XTS 的 GB 变体、GCM-SIV one-shot 报错、`internal/errors` 码表、libuv 形状错误消息…） | **保留**——正是 wasm 移植最易踩处 |
 
 ---
 
@@ -245,19 +261,22 @@
 
 ## 阶段 C — 平台无对应物的补齐（选择性，代价大）
 
-> 这些「真 Node 能、浏览器平台没有对应物」。当前是**响亮抛错**（正确姿态）。只有确有需求才做。
+> 这些「真 Node 能、浏览器平台没有对应物」。原策略是**响亮抛错**（正确姿态），确有需求才做。
+>
+> **2026-09-23 路线变更**：M99/M100 的实现方式由「**纯 JS 重写**」改为「**真上游 C/C++ 编 wasm**」，具体任务落到 **阶段 H**（M116 / M117）。M101 随之在 wasm zlib 就绪后重新评估。
 
-- [ ] **M99 · `zlib` 同步形式 + 编码参数**
+- [ ] **M99 · `zlib` 同步形式 + 编码参数**  ⤳ **改由 M116（wasm）实现**
   - `gzipSync`/`deflateSync`/… 与 `level`/`windowBits`/`memLevel`/`strategy`/`dictionary`/`flush()`。
-  - 需要**自研纯 JS deflate/inflate**（平台 `CompressionStream` 只有异步、无参数面）。
+  - ~~需要**自研纯 JS deflate/inflate**~~ ⇒ 改走「真 `deps/zlib` 编 wasm」（M116），平台 `CompressionStream`（仅异步、无参数面）降级为兜底。
   - 工作量：大。除非确实需要同步压缩，否则维持抛错。
 
-- [ ] **M100 · `perf_hooks` 直方图**
-  - `createHistogram`/`importHistogram`/`monitorEventLoopDelay`（需 JS 版 hdr_histogram + 统计检验）。
+- [ ] **M100 · `perf_hooks` 直方图**  ⤳ **改由 M117（wasm）实现**
+  - `createHistogram`/`importHistogram`/`monitorEventLoopDelay`。
+  - ~~需 JS 版 hdr_histogram + 统计检验~~ ⇒ 改走「真 `deps/histogram` 编 wasm」（M117）。
   - 工作量：中–大。
 
 - [ ] **M101 · `stream/iter` 的 `transform`**
-  - `internal/streams/iter/transform.js`（顶层 `internalBinding('zlib')`，native 绑定）——依赖上面 M99 的纯 JS zlib。
+  - `internal/streams/iter/transform.js`（顶层 `internalBinding('zlib')`，native 绑定）——依赖 zlib native 绑定（**wasm 就绪后可直接 vendor**）。
 
 ---
 
@@ -289,6 +308,7 @@
 - [ ] **M106 · 热点 binding → wasm**
   - 把热点（buffer/fs/crypto）替换为 wasm 实现；引入 **SharedArrayBuffer + Atomics** 做同步 syscall。
   - 前置：COOP/COEP 响应头（子域名隔离路由已就绪 M3.5d）。
+  - ⤳ **拆分承接（2026-09-23）**：crypto 部分 → **M119**；fs / 同步 syscall 部分 → **M120**。本条作为总纲保留。
 
 - [~] **M107 · 启动性能** 🚧 2026-09-23（**基准已立 + 载荷拆分已上线**）
   - 新增只读启动计时（`globalThis.__wnBoot`：`moduleEvalMs`/`workerSpawnMs`/`runtimeReadyMs`/`firstRunMs`）+ 基准工具 `tools/e2e-startup-bench.mjs`（CDP，可打本地或 Pages）。
@@ -302,7 +322,7 @@
 
 > 目标：这个浏览器 Node 环境能跑 **rspack / vite / webpack** 等前端构建工具。现状：**vite 已通**（M5c–M5f，build + dev + HMR）。
 
-- [ ] **M108 · 对齐异步 / tick 语义，跑通 webpack build**  ⚠️ 关键前置，建议排在 F 阶段首位
+- [ ] **M108 · 对齐异步 / tick 语义，跑通 webpack build**  ⚠️ 关键前置，建议排在 F 阶段首位  ⤳ **由 M121 统一验收（2026-09-23）**
   - 已定位阻塞点：webpack 5 能加载、能进 `compiler.run`，卡在 `enhanced-resolve` 的模块解析（回调不推进）。
   - 根因候选：① `fs` 回调的投递时机与真 Node 不一致；② 程序结束前 pending 的 **nextTick / microtask 未排空**；③ `CachedInputFileSystem` 的「缓存命中 → `process.nextTick`」路径在此语义下停摆。
   - 顺手已修：`browser` 字段替换目标的解析基准（`78f8a59`）。
@@ -313,7 +333,7 @@
 
 - [ ] **M110 · webpack watch / dev-server**
 
-- [ ] **M111 · rspack（wasm32-wasi + emnapi）**
+- [ ] **M111 · rspack（wasm32-wasi + emnapi）**  ⤳ **由 M121 统一验收；wasm 工具链与阶段 H 共用（2026-09-23）**
   - 现状：核心是 Rust napi 原生插件（`.node`）页面跑不了；但官方有 `@rspack/binding-wasm32-wasi`（2.2.6，基于 `@emnapi/core` + `@napi-rs/wasm-runtime`）。
   - 需要 **WASI 宿主 + 线程（SharedArrayBuffer / COOP-COEP）**。**先做一次性 spike 验证 wasm 能否在页内初始化**，再决定投入。
 
@@ -334,11 +354,50 @@
   - **难点**：静态托管需要**通配 DNS**（当前只有 dev 中间件 `plugins/dev-subdomains.ts` 能供壳），需自定义域 + 每端口 DevServer SW。
   - **验收**：静态托管下预览走子域名；站点根相对路径 / cookie / SW scope 均正确；pop-out 与嵌入两条路都通。
 
-- [ ] **M114 · 真·同步 `fs` 且不阻塞 UI（SAB + Atomics + FS-worker）**
+- [ ] **M114 · 真·同步 `fs` 且不阻塞 UI（SAB + Atomics + FS-worker）**  ⤳ **并入 M120（2026-09-23）**
   - **对标**：WebContainer 用 **`SharedArrayBuffer` + `Atomics.wait`** 把主线程"接"到另一个 worker 里的内存 FS（实测：14 个 worker 的 `Runtime.evaluate` 全超时，正是主线程卡在 `Atomics.wait`）——于是浏览器里能提供**真·同步 `readFileSync`**。
   - **现状**：web-node 在**同 realm 内**实现（单线程、简单、不阻塞 UI）；一旦要真并发/真同步就绕不开。
   - **前置**：**跨源隔离（COOP/COEP）**→ 才能用 SAB（隔离路由已就绪 M3.5d）。
   - **验收**：fs 同步调用在独立 worker 完成、主线程可阻塞等待；无 `Atomics.wait` 死锁；与现有 fs 语义差分 0 diff。
+
+---
+
+## 阶段 H — native → WASM（对齐 WebContainer 架构）
+
+> **架构目标（B2）**：`internalBinding()` 背后的 native 层，从「TS 手写 shim / 平台 API 适配」迁移为**真上游 C/C++ 源码编出的 WASM 模块**；JS 层改用 Node 自己的 `lib/` 真源码（即 WebContainer 的 `lib/` + `internal_bindings` 形态）。
+> **验收闸门（B1）**：① 现有差分装置 **0 diff**；② **北极星**：页内跑通 **webpack / rspack 生产构建**。
+> **技术路线（甲）**：能编真上游 C/C++ 的（zlib/histogram/brotli/zstd/ada/OpenSSL 子集）用 **wasi-sdk** 编；syscall 层**不编 libuv**，改用 **SAB + `Atomics.wait` + FS-worker**。
+> **设计文档**：[`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`](superpowers/specs/2026-09-23-native-to-wasm-design.md)。接入缝 = `REGISTRY`（把 `zlib`/`crypto` 从 `UNSUPPORTED_BINDINGS` 移回并指向 wasm）；产物 = 带内容哈希的独立资产 + 惰性实例化。
+
+- [ ] **M115 · wasm 工具链 + binding 接入缝（P0）**
+  - 装 **wasi-sdk**（clang + wasi-libc；本机现无任何 wasm 编译链，Apple clang 无 wasm backend）；打通「hello wasm → `REGISTRY` binding」的链路与构建脚本。
+  - 产物：一个桩 binding（导出函数 + 线性内存 + 薄 TS 适配器）在 worker 内 `fetch` + `instantiate` 成功并被 `internalBinding` 取到。
+  - 验收：桩 binding 走通（typecheck/vitest/build/部署全绿）。
+
+- [ ] **M116 · `zlib` → 真 `deps/zlib` 编 wasm（P1）**  ← 取代 M99 的纯 JS 方案
+  - 用真 `deps/zlib`（1.3.2.1-motley）编 wasm 实现 `zlib` binding；vendor 真 `lib/zlib.js`；解锁 `gzipSync`/`deflateSync`/… 与 `level`/`windowBits`/`memLevel`/`strategy`/`dictionary`/`flush()`。
+  - 验收：zlib 差分**0 diff**（含同步形式与全部编码参数）；M101 随之可 vendor。
+
+- [ ] **M117 · `perf_hooks` 直方图 → 真 `deps/histogram` 编 wasm（P2）**  ← 取代 M100 的纯 JS 方案
+  - 用真 `deps/histogram` 编 wasm；`createHistogram`/`importHistogram`/`monitorEventLoopDelay` + `Histogram`/`RecordableHistogram` 表面。
+  - 验收：与真 Node 差分 **0 diff**（含 `export()` 的 CBOR 字节、分位、`meanCI`、EWMA）。
+
+- [ ] **M118 · `brotli` / `zstd` → wasm（P3）**
+  - 用真 `deps/brotli`、`deps/zstd` 编 wasm；当前两者均抛错，编后解锁。
+  - 验收：差分 0 diff。
+
+- [ ] **M119 · `crypto` → OpenSSL 子集编 wasm（P4）**  ← 承接 M106 的 crypto 部分
+  - 用一个 OpenSSL 子集（`--no-asm` + 裁 provider；hash/hmac/cipher/kdf）编 wasm，对齐现有 crypto binding。
+  - 风险最高（5063 文件 / 246M）；**若编不动则退回「JS crypto 保留 + wasm 只补缺」并显式报告**。
+  - 验收：现有 crypto 差分**保持 0 diff**。
+
+- [ ] **M120 · 同步 syscall：SAB + `Atomics.wait` + FS-worker（P5）**  ← 吸收 M114、承接 M106 的 fs 部分
+  - 真·同步 `fs` 在独立 worker 完成、主线程可阻塞等待；前置跨源隔离（COOP/COEP）；与现有 fs 语义差分 0 diff。
+  - 验收：无 `Atomics.wait` 死锁；同步 `fs` 逐字节对齐。
+
+- [ ] **M121 · 页内跑通 webpack / rspack 生产构建（P6）**  ← **B1 北极星**，汇合 M108/M111
+  - 目标：这个浏览器 Node 环境能跑 **webpack / rspack** 生产构建；本 runtime 构建与宿主构建**产物一致**。
+  - 验收：页内产出 bundle；与现有差分装置兼容。
 
 ---
 
