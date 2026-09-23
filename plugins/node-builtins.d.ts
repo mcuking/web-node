@@ -9,6 +9,26 @@
 declare module 'node:fs' {
   export function readFileSync(path: string, encoding: 'utf8'): string;
   export function readFileSync(path: string): Uint8Array;
+  export interface Dirent {
+    name: string;
+    isDirectory(): boolean;
+  }
+  export function readdirSync(path: string, options: { withFileTypes: true }): Dirent[];
+}
+
+declare module 'node:path' {
+  export function join(...parts: string[]): string;
+  export function relative(from: string, to: string): string;
+  /** OS path separator (`\\` on Windows, `/` elsewhere). */
+  export const sep: string;
+}
+
+declare module 'node:crypto' {
+  export interface Hash {
+    update(data: string | Uint8Array): Hash;
+    digest(encoding: 'hex'): string;
+  }
+  export function createHash(algorithm: string): Hash;
 }
 
 declare module 'node:url' {

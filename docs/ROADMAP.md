@@ -260,11 +260,11 @@
   - 把热点（buffer/fs/crypto）替换为 wasm 实现；引入 **SharedArrayBuffer + Atomics** 做同步 syscall。
   - 前置：COOP/COEP 响应头（子域名隔离路由已就绪 M3.5d）。
 
-- [~] **M107 · 启动性能** 🚧 2026-09-23（**基准已立**）
+- [~] **M107 · 启动性能** 🚧 2026-09-23（**基准已立 + 载荷拆分已上线**）
   - 新增只读启动计时（`globalThis.__wnBoot`：`moduleEvalMs`/`workerSpawnMs`/`runtimeReadyMs`/`firstRunMs`）+ 基准工具 `tools/e2e-startup-bench.mjs`（CDP，可打本地或 Pages）。
-  - **基线**（本地 preview、冷缓存、连跑 2 次）：`moduleEval` 18–51ms · `runtimeReady` **110–155ms** · 导航到 ready 约 150ms。
-  - **热点定位**：`new NodeRuntime`（建 binding 表 + Realm，103 个 binding 逐工厂构造）实测只 **~10ms**；初次 `require('fs')` ~2ms；剩余 60–90ms 几乎全在 **worker 脚本（2.5MB）的 fetch + compile**。
-  - **下一步**：要再降得动 2.5MB 载荷（vendored 源拆分/懒解析）或上 V8 code cache/快照——因 `require` 必须同步，纯懒加载拆包会把 vendored 源重新拉回关键路径，需先做 spike。
+  - **基线**（本地 preview、冷缓存）：`runtimeReady` **110–155ms**；热点 = worker 脚本（2.5MB，93% 是 vendored 源）的 fetch+compile，而非 JS 初始化（`new NodeRuntime` 仅 ~10ms）。
+  - **载荷拆分**：vendored 源不再内联进 worker，改为 emit 为 `assets/vendored-sources.txt`（预加载、body 带内容哈希），worker `fetch`+`JSON.parse` 注入。**worker 2510.84→653.76KB**（gzip ~558→203KB），大载荷 gzip 347KB 且与 worker 引导并行（CDP 实测预加载 543ms < worker 脚本 594ms）；`runtimeReady` 95–154ms（无回退）。门禁 `test/vendored-bundle.test.ts` 锁住 bundle 与 eager glob 一致。
+  - **下一步**：要再降只能动 2.3MB 文本本身的体积（按需子集/懒加载，`require` 同步 => 需“ready 后再补”策略）或上 V8 code cache/快照。
 
 ---
 

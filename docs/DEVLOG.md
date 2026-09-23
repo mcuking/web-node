@@ -244,6 +244,37 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · M107 载荷拆分（vendored 源出 worker → 预加载资源）
+
+**问题**：worker bundle 2.5MB 里 **93%** 是 vendored Node 源文本（`import.meta.glob(..., { eager: true })` 把 160 个文件以字符串字面量内联）。浏览器必须先下载 + **按 JS 解析/编译** 这 2.3MB，才能跑第一行 runtime 代码。
+
+**改法**：把同一批（已去注释的）源文本改为**一个纯文本资源**，从 `index.html` 预加载，worker `fetch` + `JSON.parse` 后 `installVendored()` 注入。字节差不多，但大载荷与极小的 worker 引导**并行**下载，且**不再产生 JS 解析成本**。
+
+- `plugins/vendored-source.ts`：新增 `collectVendoredSources()` / `vendoredBundleText()` / `vendoredBundlePlugin()`（dev 中间件服务 + build `emitFile` 成 `assets/vendored-sources.txt` + `transformIndexHtml` 插入 `<link rel="preload" as="fetch">`）。文件名固定，URL 带**内容哈希**（`?v=<sha256前12位>`）以破缓存。
+- `src/node-runtime/vendored-sources.ts`（真实 eager glob）与 `vendored-sources.stub.ts`（空）：靠 `vite.config.ts` 的 `resolve.alias` 按 `mode` 切换——**test 用真实 glob，其余用 stub**。
+- `src/node-runtime/vendored.ts`：不再直接放 glob，新增 `installVendored()` / `vendoredLoaded()`。
+- `src/worker/runtime.worker.ts`：模块求值时就发起 `fetch(__VENDORED_URL__)`，`init` 构造 realm 前 `await`（`require` 必须同步）。
+- `vite.config.ts`：加 `define: { __VENDORED_URL__ }` 与 alias；`plugins/node-builtins.d.ts` 补 `node:path`/`crypto`/`readdirSync` 类型。
+- 门禁 `test/vendored-bundle.test.ts`：断言**发出的 bundle 与 eager glob 文件名、内容逐字节一致**（两者不能静默分叉）。
+
+**实测（本地 preview、冷缓存）**：
+
+| 指标 | 拆分前 | 拆分后 |
+| --- | --- | --- |
+| worker 原始 | 2510.84 KB | **653.76 KB** |
+| worker gzip | ~558 KB | **203 KB** |
+| vendored 资源 gzip | （内联在 worker 里） | **347 KB** |
+| 合计 gzip | ~558 KB | ~550 KB |
+| runtime ready | 110–155 ms | **95–154 ms** |
+
+网络时序（CDP，本地）：`vendored-sources.txt` 预加载在 **543ms** 发起，早于 worker 脚本（**594ms**）→ 确认真并行。
+
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **989 通过 / 2 skip（114 files）** · `vite build` 绿。
+
+**结论**：冷启动的网络字节基本不变，但**主 bundle 从 2.5MB 降到 654KB**，JS 解析成本大幅下降，且大载荷预加载并行。后续若仍要降，只能动 2.3MB 文本本身的体积（按需子集/懒加载）或上 V8 code cache。
+
+---
+
 ### 2026-09-23 · M107 启动基准（首个增量）
 
 **改了什么**：把冷启动做成**可测**的，并定下热点。

@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 import type { Plugin } from 'vite';
 import { codeMask } from '../src/node-runtime/loader/code-mask';
 
@@ -118,6 +119,80 @@ export function vendoredSourcePlugin(): Plugin {
         return null; // not a real file — let Vite deal with it
       }
       return `export default ${JSON.stringify(stripVendoredSource(src))};`;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Lazy vendored bundle (M107): keep the ~2.3 MB of source text out of the
+// worker's own JS graph.
+//
+// Before this, `import.meta.glob(..., { eager: true })` inlined every file as a
+// string literal in the 2.5 MB worker chunk, so the browser had to download,
+// *parse* and compile 2.3 MB of JS before a single line of the runtime ran.
+// Instead we emit the same (comment-stripped) sources as one plain-text asset,
+// preload it from the document head, and have the worker `fetch()` + JSON.parse
+// it. Same bytes, but the big payload downloads in parallel with the tiny worker
+// bootstrap and never costs a JS parse.
+// ---------------------------------------------------------------------------
+
+/** Output path (relative to `dist/`) of the emitted bundle. */
+export const VENDORED_ASSET_FILE = 'assets/vendored-sources.txt';
+
+function walkSources(dir: string, root: string, out: string[]): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) walkSources(full, root, out);
+    else if (entry.name.endsWith('.js')) out.push(relative(root, full).split(sep).join('/'));
+  }
+}
+
+/**
+ * Every vendored source, comment-stripped, keyed by `vendor/node-lib`-relative
+ * path — exactly the key the `?raw` glob produces at runtime.
+ */
+export function collectVendoredSources(root = 'vendor/node-lib'): Record<string, string> {
+  const rels: string[] = [];
+  walkSources(root, root, rels);
+  rels.sort();
+  const map: Record<string, string> = {};
+  for (const rel of rels) map[rel] = stripVendoredSource(readFileSync(join(root, rel), 'utf8'));
+  return map;
+}
+
+/** The serialised bundle (a JSON object) as it is shipped and fetched. */
+export function vendoredBundleText(root = 'vendor/node-lib'): string {
+  return JSON.stringify(collectVendoredSources(root));
+}
+
+/**
+ * Emit {@link VENDORED_ASSET_FILE} on build, serve it from the dev server, and
+ * preload it from `index.html`. `url` is the absolute URL (base-prefixed) the
+ * app and the worker fetch, already carrying a cache-busting content hash.
+ */
+export function vendoredBundlePlugin(json: string, url: string): Plugin {
+  return {
+    name: 'web-node:vendored-bundle',
+    configureServer(server) {
+      const pathname = url.split('?')[0];
+      server.middlewares.use((req, res, next) => {
+        const reqUrl = (req as unknown as { url?: string }).url || '';
+        if (reqUrl.split('?')[0] !== pathname) return next();
+        res.setHeader('Content-Type', 'application/json');
+        res.end(json);
+      });
+    },
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: VENDORED_ASSET_FILE, source: json });
+    },
+    transformIndexHtml() {
+      return [
+        {
+          tag: 'link',
+          attrs: { rel: 'preload', as: 'fetch', crossorigin: '', href: url },
+          injectTo: 'head-prepend',
+        },
+      ];
     },
   };
 }

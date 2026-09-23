@@ -1,10 +1,25 @@
 /// <reference lib="webworker" />
 import { NodeRuntime, ProcessExit } from '../node-runtime/runtime';
 import { MemoryVfs, OpfsPersistence } from '../node-runtime/vfs';
-import { VENDORED } from '../node-runtime/vendored';
+import { VENDORED, installVendored, vendoredLoaded } from '../node-runtime/vendored';
 import { DEMO_FILES } from '../demo-project';
 
 const decoder = new TextDecoder();
+
+/**
+ * Fetch the vendored-sources bundle (M107) and install it.
+ *
+ * The bundle is emitted as a plain-text asset and preloaded from `index.html`, so
+ * this request is usually already warm. In tests the sources are populated
+ * synchronously, so this resolves immediately. The promise starts at module-eval
+ * — as early as fetch can possibly go in the worker.
+ */
+const vendoredSourcesReady: Promise<void> = (async (): Promise<void> => {
+  if (vendoredLoaded()) return;
+  const res = await fetch(__VENDORED_URL__);
+  if (!res.ok) throw new Error(`vendored sources: HTTP ${res.status}`);
+  installVendored(await res.text());
+})();
 
 /**
  * Runtime worker.
@@ -138,6 +153,8 @@ async function serveVirtualRequest(
 }
 
 async function init(id: number): Promise<void> {
+  // Sources must be in place before the realm is built: `require` is synchronous.
+  await vendoredSourcesReady;
   const loaded = await persistence.load();
   const hasRestored = Boolean(loaded && loaded.entries.length > 0);
 
