@@ -685,6 +685,24 @@ const webZlib = require('stream/web');
 })();
 console.log('');
 
+// --- brotli / zstd (milestone 118) ---
+// Brotli (deps/brotli 1.2.0) and zstd (deps/zstd 1.5.7) are compiled to
+// WebAssembly as well, so the sync/streaming API, the codec parameters and the
+// dictionaries all behave exactly like Node's (byte-identical output).
+console.log('-- brotli / zstd (milestone 118) --');
+const fox = Buffer.from('The quick brown fox jumps over the lazy dog. '.repeat(300));
+const br = zlib.brotliCompressSync(fox);
+console.log('brotli fox  : ' + br.length + ':' + br.subarray(0, 12).toString('hex'));
+console.log('brotli rt   : ' + zlib.brotliDecompressSync(br).equals(fox));
+console.log('brotli q5   : ' + zlib.brotliCompressSync(fox, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } }).length);
+const zs = zlib.zstdCompressSync(fox);
+console.log('zstd fox    : ' + zs.length + ':' + zs.subarray(0, 12).toString('hex'));
+console.log('zstd rt     : ' + zlib.zstdDecompressSync(zs).equals(fox));
+console.log('zstd sum4   : ' + zlib.zstdCompressSync(fox, { params: { [zlib.constants.ZSTD_c_checksumFlag]: 1 } }).length);
+const zdict = Buffer.from('quick brown fox jumps');
+console.log('zstd dict   : ' + zlib.zstdDecompressSync(zlib.zstdCompressSync(fox, { dictionary: zdict }), { dictionary: zdict }).equals(fox));
+console.log('');
+
 // --- AES ciphers (milestone 47) ---
 // The symmetric half of node:crypto is here too: createCipheriv/
 // createDecipheriv over AES in ECB/CBC/CTR/CFB/OFB/GCM. Node's ciphers are
