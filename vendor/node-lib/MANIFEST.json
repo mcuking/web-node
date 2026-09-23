@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-22T02:16:52.362Z",
+  "generatedAt": "2026-09-23T10:01:05.856Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -1125,6 +1125,13 @@
       "sha256": "91c9af0602f8f474055e7d87d3138daa18d0cd2912c93940687d9db0af696f9a",
       "upstreamSha256": "91c9af0602f8f474055e7d87d3138daa18d0cd2912c93940687d9db0af696f9a",
       "bytes": 1713,
+      "patches": []
+    },
+    {
+      "path": "internal/histogram.js",
+      "sha256": "4a55f6befca8833c9b2f7ccc298a79258f90d8cadc8e6d705a54ed45b23c0a99",
+      "upstreamSha256": "4a55f6befca8833c9b2f7ccc298a79258f90d8cadc8e6d705a54ed45b23c0a99",
+      "bytes": 23153,
       "patches": []
     }
   ]

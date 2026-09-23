@@ -244,6 +244,17 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · M117 — `perf_hooks` 直方图换成**真 `deps/histogram` 编 wasm**（阶段 H P2）
+
+**里程碑**：把 `perf_hooks` 的直方图从 M35 时代的「load-only shim（一用即抛）」换成 **真 HdrHistogram**（`deps/histogram`，官方 C 实现）编出的 wasm，于是 `createHistogram`/`importHistogram`/`monitorEventLoopDelay`/`timerify({histogram})` 与 `Histogram`/`RecordableHistogram` 全量方法解锁。设计见 `docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`。
+
+- **真上游 C → wasm**：`native/build.mjs` 新增 `wn_histogram`（**首次上 C++**：`-std=c++20 -fno-exceptions -fno-rtti`，用 wasi-sdk 的 `clang++` + libc++）——编译 `deps/histogram/src/hdr_histogram.c` + `native/src/wn_histogram.cc`。后者**逐行移植 `src/histogram.cc` / `histogram-inl.h` 的算法**：标量统计（mean/stddev/skewness/kurtosis）、两样本检验（KS / Welch / Mann-Whitney / Cohen's d / Cliff's δ）、均值 CI 与分位 CI、EWMA 与 SLO 错误率、CBOR 导出/导入（稀疏 delta 编码）、linear/log/percentile 迭代，只把 V8/Node 胶水换成给 JS 的 C ABI（句柄 + scratch 缓冲）。产物 **257.7 KB**（libc++ 静态构造）。
+- **新增最小 WASI 宿主** `src/node-runtime/wasm/wasi.ts`：C++/stdio 模块会带 `clock_time_get`/`random_get`/`fd_write`/`fd_seek`/`fd_close` 等导入，`loader.instantiateWasm` 现在默认把它们接到这个宿主上（时钟→`performance.now()`、随机→`crypto.getRandomValues`、写 fd 默认丢弃且仅 `debug` 时打控制台）；调用方传入的 `imports` 优先。`wn_zlib` 无 imports，不受影响。
+- **JS 层**：`bindings/histogram.ts`（薄封装，把 C ABI 包成与 `internalBinding('performance').Histogram` **可观测等价**的 JS 类，接进 `performanceBinding` 的 `Histogram`/`createELDHistogram`）；**vendor 真 `lib/internal/histogram.js`**（vendored 树 160→161 文件，零 patch）；删掉 `internal/histogram` 的旧 shim。ELD 直方图用 **unref 过的** `timers` 定时器 / `setImmediate` 驱动（与 Node 一样不吊住事件循环）。
+- **验收**：新差分装置 `tools/histogram-probe.cjs`（oracle `tools/histogram-oracle.mjs` → `test/fixtures/histogram.json`）真 Node v26.9.0 vs web-node **逐字段 0 diff**；`tsc` 净 · `vitest run` **1007 passed / 2 skipped（120 文件）** · build（`wn_histogram-BIhNpcFt.wasm` 257.74 kB、`runtime.worker-Cna1pydo.js` 679.75 kB）· 部署后线上资产全 200。
+- **两个有意偏离（已写档）**：① **EWMA 方差的 1 ULP**——递推 `v + α·d·d` 在 arm64 宿主被编译成 **FMA**，wasm 无 FMA 指令，最后一次加法差 1 ULP（体现在 EWMA 导出 CBOR 的 `float64` 最后 1 字节）；同理 libm 的 `erfc`/`lgamma`/`exp`/`log` 也差 1 ULP。探针对**统计量**取 10 位有效数字，对 EWMA 导出只比**非 EWMA 段的字节**（framing/计数逐字节相等）。② `monitorEventLoopDelay` 的**绝对延迟值**天然依赖环境，故只锁契约与量级。
+
+---
 ### 2026-09-23 · M116 — `zlib` 换成**真 `deps/zlib` 编 wasm**（阶段 H P1）
 
 **里程碑**：把 `internalBinding('zlib')` 背后从「平台 `CompressionStream` 适配」（M45/M99）换成 **Node 自己那份 C zlib 编出的 wasm**，于是同步 API 与全部编码参数解锁。设计见 `docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`。

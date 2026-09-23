@@ -71,7 +71,7 @@ B2 下把它们**移回 `REGISTRY` 并指向 wasm**。
 |---|---|---|---|
 | **P0** | 装 wasi-sdk；打通「hello wasm → `REGISTRY` binding」 | — | 桩 binding 走通 |
 | **P1** | **`zlib`**：真 `deps/zlib`（1.3.2.1-motley）**编 wasm** + `builtins/zlib.ts`（`lib/zlib.js` 的 zlib 半边移植） | P0 | 差分 **0 diff**（含 `gzipSync`/`level`/`windowBits`）✅ 2026-09-23（M116） |
-| **P2** | **`histogram`**：真 `deps/histogram` | P0 | 差分 0 diff |
+| **P2** | **`histogram`**：真 `deps/histogram`（HdrHistogram）+ `wn_histogram.cc`（移植 `src/histogram.cc`）✅ 2026-09-23（M117） | P0 | 差分 0 diff |
 | **P3** | `brotli` / `zstd`（纯计算） | P0 | 差分 0 diff |
 | **P4** | **crypto → OpenSSL 子集**（hash/hmac/cipher/kdf） | P0 | 现有 crypto 差分 **保持 0 diff** |
 | **P5** | **同步 syscall**：SAB + `Atomics.wait` + FS-worker | P0 | 同步 `fs` 真逐字节 |

@@ -60,9 +60,11 @@ function findNodeSrc() {
 
 const sdk = findWasiSdk();
 const clang = join(sdk, 'bin', 'clang');
+const clangxx = join(sdk, 'bin', 'clang++');
 const sysroot = join(sdk, 'share', 'wasi-sysroot');
 const nodeSrc = findNodeSrc();
 const zlibDir = join(nodeSrc, 'deps', 'zlib');
+const histogramDir = join(nodeSrc, 'deps', 'histogram');
 
 /** 编译参数（wasi-sdk 34 / LLVM 23）。 */
 const COMMON = [
@@ -85,6 +87,17 @@ const COMMON = [
 const MODULES = {
   wn_stub: {
     sources: [join(srcDir, 'wn_stub.c')],
+  },
+  wn_histogram: {
+    // `native/src/wn_histogram.cc` 是薄包装（逐行移植 `src/histogram.cc` 的算法）；
+    // `deps/histogram/src/hdr_histogram.c` 是**原封不动的上游 HdrHistogram**。
+    // C++（libc++ 可用 std::vector/cmath），故需 `-std=c++20 -fno-exceptions -fno-rtti`。
+    lang: 'c++',
+    sources: [
+      join(srcDir, 'wn_histogram.cc'),
+      join(histogramDir, 'src', 'hdr_histogram.c'),
+    ],
+    include: [join(histogramDir, 'include'), join(histogramDir, 'src'), srcDir],
   },
   wn_zlib: {
     // `native/src/wn_zlib.c` 是薄包装；其余是**原封不动的上游 deps/zlib**。
@@ -122,13 +135,18 @@ function build(name) {
   if (!spec) throw new Error(`unknown module "${name}" (known: ${Object.keys(MODULES).join(', ')})`);
   const out = join(outDir, `${name}.wasm`);
   mkdirSync(outDir, { recursive: true });
+  const cxx = spec.lang === 'c++';
   const cflags = [
     ...COMMON,
+    // libc++ 在 wasm 上没有异常/RTTI；显式关掉，否则链接器找不到 __cxa_* 符号。
+    ...(cxx ? ['-std=c++20', '-fno-exceptions', '-fno-rtti', '-Wno-return-type-c-linkage'] : []),
     ...(spec.defines ?? []),
     ...(spec.include ?? []).flatMap((d) => ['-I', d]),
   ];
   process.stdout.write(`· ${name}: ${spec.sources.length} source(s) -> ${out}\n`);
-  execFileSync(clang, [...cflags, '-o', out, ...spec.sources], { stdio: 'inherit' });
+  execFileSync(cxx ? clangxx : clang, [...cflags, '-o', out, ...spec.sources], {
+    stdio: 'inherit',
+  });
   const bytes = readFileSync(out);
   process.stdout.write(`  ${(bytes.length / 1024).toFixed(1)} KB\n`);
   if (inspect) {
@@ -168,7 +186,7 @@ function main() {
     toolchain: clangVersion,
     sdk: resolve(sdk),
     nodeSrc: resolve(nodeSrc),
-    upstream: { zlib: zlibVersion },
+    upstream: { zlib: zlibVersion, histogram: 'hdr_histogram' },
     modules: Object.fromEntries(
       built.map((p) => [
         p.slice(p.lastIndexOf('/') + 1),

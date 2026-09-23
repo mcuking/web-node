@@ -12,8 +12,9 @@ import { NodeRuntime } from '../src/node-runtime/runtime';
  * It is now the real `lib/perf_hooks.js` plus the whole `internal/perf/*` group,
  * running on a JS `performance` binding (the browser's clock stands in for
  * `uv_hrtime`, and there is no V8 GC hook to observe). The histogram-backed
- * trio — `createHistogram`, `monitorEventLoopDelay`, `timerify` — has no
- * browser equivalent and throws a typed `NotImplementedError`.
+ * trio — `createHistogram`, `monitorEventLoopDelay`, `timerify`'s histogram
+ * option — rides on the **real `deps/histogram`** compiled to WebAssembly
+ * (milestone 117); see `test/histogram.test.ts` for the byte-level gate.
  *
  * Expected values were read off Node v26.9.0 (probe `/tmp/perf-oracle.mjs`).
  */
@@ -175,21 +176,41 @@ describe('perf_hooks: eventLoopUtilization and histograms', () => {
     expect(perf.eventLoopUtilization()).toEqual({ idle: 0, active: 0, utilization: 0 });
   });
 
-  it('throws a typed NotImplementedError for the histogram-backed APIs', () => {
+  it('backs the histogram API with the real deps/histogram', () => {
     const perf = boot()('perf_hooks');
-    expect(() => perf.createHistogram()).toThrowError(/not implemented/);
-    expect(() => perf.importHistogram(new Uint8Array(0))).toThrowError(/not implemented/);
-    expect(() => perf.monitorEventLoopDelay()).toThrowError(/not implemented/);
+    const h = perf.createHistogram();
+    h.record(5);
+    h.record(10);
+    h.record(15);
+    expect(h.count).toBe(3);
+    expect(h.min).toBe(5);
+    expect(h.max).toBe(15);
+    expect(h.percentile(50)).toBe(10);
+    // export/import round-trips through CBOR without losing anything.
+    const back = perf.importHistogram(h.export());
+    expect(back.count).toBe(3);
+    expect(back.max).toBe(15);
   });
 
-  it('timerify() works without a histogram and validates one that is passed', () => {
+  it('monitorEventLoopDelay() returns a working, disable-able histogram', () => {
+    const perf = boot()('perf_hooks');
+    const eld = perf.monitorEventLoopDelay({ resolution: 20 });
+    expect(eld.enable()).toBe(true);
+    expect(eld.disable()).toBe(true);
+  });
+
+  it('timerify() works without a histogram and accepts a real one', () => {
     const perf = boot()('perf_hooks');
     // Without `options.histogram` timerify never touches the histogram binding.
     const timed = perf.timerify((a: number, b: number) => a + b);
     expect(timed(2, 3)).toBe(5);
     expect(timed.name).toBe('timerified ');
-    // A histogram has to be a real RecordableHistogram; our stub's `isHistogram`
-    // reports false, so Node's own argument validation rejects it.
+    // A real RecordableHistogram is accepted and collects each call's duration.
+    const h = perf.createHistogram();
+    const timed2 = perf.timerify((a: number, b: number) => a + b, { histogram: h });
+    expect(timed2(4, 5)).toBe(9);
+    expect(h.count).toBe(1);
+    // A fake histogram is still rejected by Node's own argument validation.
     try {
       perf.timerify(() => 1, { histogram: { record: () => {} } });
       throw new Error('expected timerify to reject the fake histogram');

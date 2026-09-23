@@ -187,6 +187,21 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     ],
   },
   {
+    id: 'internal/histogram',
+    vendorPath: 'internal/histogram.js',
+    origin: 'node-source',
+    // milestone 117: the real class. `Histogram` comes from the `performance`
+    // binding (wasm-backed hdr_histogram); `internal/worker/js_transferable`
+    // gives it the clone/transfer plumbing.
+    deps: [
+      'internal/errors',
+      'internal/util',
+      'internal/util/types',
+      'internal/validators',
+      'internal/worker/js_transferable',
+    ],
+  },
+  {
     id: 'internal/event_target',
     vendorPath: 'internal/event_target.js',
     origin: 'node-source',

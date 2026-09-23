@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-23（**阶段 H 推进：M116 ✅**——真 `deps/zlib`（1.3.2.1-motley）编 wasm 上线，`zlib` 的同步形式与全部编码参数解锁，差分语料**对真 Node v26.9.0 0 diff**；阶段 A 22/22、阶段 D 4/4、M107 载荷拆分；合计 **51 / 35 / 16**）
+> - **最后更新**：2026-09-23（**阶段 H 推进：M117 ✅**——真 `deps/histogram`（HdrHistogram）编 wasm 上线，`createHistogram`/`importHistogram`/`monitorEventLoopDelay` 与全部统计量/检验/CBOR 导出解锁，差分语料**对真 Node v26.9.0 0 diff**（仅 EWMA 方差有 1 ULP 的 FMA 差别，已论述）；阶段 A 22/22、阶段 D 4/4、M107 载荷拆分；合计 **51 / 36 / 15**）
 
 ---
 
@@ -21,13 +21,13 @@
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | G | 借鉴 WebContainer（2026-09-23 调研落地） | 2 | 0 | 2 |
-| H | **native → WASM（对齐 WebContainer 架构）** | 7 | 2 | 5 |
+| H | **native → WASM（对齐 WebContainer 架构）** | 7 | 3 | 4 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **51** | **35** | **16**（+1 不做） |
+| **合计** | | **51** | **36** | **15**（+1 不做） |
 
 > **2026-09-23 架构重定向**：阶段 C 的 M99/M100、阶段 E 的 M106、阶段 G 的 M114，其**实现方式改为「真上游 C/C++ → wasm」**，具体任务落到**阶段 H（M116/M117/M119/M120）**；阶段 F 的 M108/M111 由 **M121** 统一验收。上述条目保留原位并加注，不重复计数。
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 122 个里程碑，剩余 16 个规划任务**（含阶段 H 的 wasm 迁移任务，以及排最后的 webpack/rspack 构建工具链）。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 123 个里程碑，剩余 15 个规划任务**（含阶段 H 的 wasm 迁移任务，以及排最后的 webpack/rspack 构建工具链）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.4（26 → 30），同日晚 M90.5 又拆为 M90.5–M90.9（30 → 34）。
 > 注：M97 于 2026-09-22 拆出 M97.1（`stripTypeScriptTypes` 需要真 TS 解析器 / amaro wasm，代价大）（41 → 42）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
@@ -387,9 +387,12 @@
   - **三个真 bug（都已修）**：① `wn_init_stream()` 在“已初始化”时返回的是 `h->err`（上一次操作的返回码），于是 `Z_STREAM_END` 之后的调用被误判为初始化失败而**跳过写入**，调用方看到陈旧的 `avail_out` → 把上一次的输出**又推了一遍**（异步 `gunzip` 出 2× 数据）；② `ZlibBase.prototype._final` 忘了调 `callback()`，writable 端永不 finish（流不结束）；③ `DeflateRaw` 的 `windowBits: 8` 需要按 Node 抬到 9。
   - **两个有意偏离（写进文档）**：① gzip 头第 9 字节（OS）在真 Node（macOS）是 `0x13`、wasm 无 OS 身份所以固定用 zlib 默认 `0x03`——探针把它归一（它是平台元数据，不是数据），并有定点测试锁 `0x03`；② **未**字面 vendor `lib/zlib.js`：它顶层 `require('internal/zip')`（14 文件 / 4271 行），代价不成比例；本步以 `builtins/zlib.ts`（同一份逻辑的移植）达到可观测等价，字面 vendor 待 `internal/zip` 一并搬时再做。
 
-- [ ] **M117 · `perf_hooks` 直方图 → 真 `deps/histogram` 编 wasm（P2）**  ← 取代 M100 的纯 JS 方案
-  - 用真 `deps/histogram` 编 wasm；`createHistogram`/`importHistogram`/`monitorEventLoopDelay` + `Histogram`/`RecordableHistogram` 表面。
-  - 验收：与真 Node 差分 **0 diff**（含 `export()` 的 CBOR 字节、分位、`meanCI`、EWMA）。
+- [x] **M117 · `perf_hooks` 直方图 → 真 `deps/histogram` 编 wasm（P2）** ✅ 2026-09-23  ← 取代 M100 的纯 JS 方案
+  - **真上游 C → wasm**：`native/build.mjs` 新增 `wn_histogram` 模块（支持 C++：`-std=c++20 -fno-exceptions -fno-rtti`）——把 `deps/histogram/src/hdr_histogram.c`（HdrHistogram 官方 C 实现）原封不动编进来，外加 `native/src/wn_histogram.cc`：**逐行移植 `src/histogram.cc` / `histogram-inl.h` 的全部算法**（均值/标准差/偏度/峰度、KS/Welch/Mann-Whitney/Cohen's d/Cliff's δ、均值 CI/分位 CI、EWMA 与 SLO 错误率、CBOR 导出/导入、linear/log/percentile 迭代），只是把 V8/Node 胶水换成给 JS 的 C ABI。产物 **257.7 KB**（libc++ 静态构造，非零 imports → 补了一个最小 WASI 宿主 `wasm/wasi.ts`）。
+  - **JS 层**：`bindings/histogram.ts`（薄封装：把 wasm C ABI 包成与 `internalBinding('performance').Histogram` **可观测等价**的 JS 类，接进 `performanceBinding` 的 `Histogram`/`createELDHistogram`）；**vendor 真 `lib/internal/histogram.js`**（161 个 vendored 文件，无 patch）；ELD 直方图用 **unref 过的**定时器/ `setImmediate` 驱动（与 Node 一样不吊住事件循环）。**删掉** M35 时代的 `internal/histogram` shim。
+  - **解锁**：`createHistogram()`（含 `lowest`/`highest`/`figures`/`halfLife`/`threshold`）、`importHistogram()`、`monitorEventLoopDelay()`（含 `samplePerIteration`）、`timerify(..., {histogram})`、`histogram.export()` 的 CBOR 与 `Histogram`/`RecordableHistogram` 全量方法（含 `countBigInt`/`percentilesBigInt`/`ccdf` 等）。
+  - **验收**：新差分装置 `tools/histogram-probe.cjs`（oracle `tools/histogram-oracle.mjs` → `test/fixtures/histogram.json`）在真 Node v26.9.0 与 web-node 各跑一遍，**逐字段 0 diff**（标量统计、分位、桶表、两样本检验、均值/分位 CI、EWMA、CBOR 导出重导入、错误形状、常量）；`tsc --noEmit` 净 · `vitest run` **1007 passed / 2 skipped（120 文件）** · `npm run build`（`wn_histogram-BIhNpcFt.wasm` **257.74 kB**、`runtime.worker-Cna1pydo.js` **679.75 kB**）；部署后线上资产全 **200**。
+  - **两个有意偏离（写进文档）**：① **EWMA 方差的 1 ULP**：`ewma_variance` 递推 `v + α·d·d` 在 arm64 宿主被编译成 **FMA**，而 wasm 无 FMA 指令——最后一次加法不进位，导致 EWMA 导出 CBOR 的 `float64` 最后 1 字节差 1；探针对**统计量**取 10 位有效数字（libm 的 `erfc`/`lgamma`/`exp`/`log` 同理可能差 1 ULP），并对 EWMA 导出只比**非 EWMA 段的字节**（framing/计数逐字节相等）。② `monitorEventLoopDelay` 的**绝对延迟值**天然依赖环境（Node 用 libuv 定时器，这里用 unref 的 JS 定时器），故只锁契约与量级，不进字节差分。
 
 - [ ] **M118 · `brotli` / `zstd` → wasm（P3）**
   - 用真 `deps/brotli`、`deps/zstd` 编 wasm；当前两者均抛错，编后解锁。

@@ -586,11 +586,12 @@ console.log('randomInt   : ' + (crypto.randomInt(1, 7) >= 1 ? 'in range (1..6)' 
 console.log('randomUUID  : ' + crypto.randomUUID().length + ' chars, ' + crypto.getHashes().length + ' hashes available');
 console.log('');
 
-// --- perf_hooks (milestone 35) ---
+// --- perf_hooks (milestone 35 / M117) ---
 // Node's real perf_hooks: the marks/measures/observers half runs on a JS
-// performance binding (the browser clock stands in for uv_hrtime). The
-// histogram-backed createHistogram/monitorEventLoopDelay need the native
-// hdr_histogram and throw.
+// performance binding (the browser clock stands in for uv_hrtime). Since M117
+// the histograms are real too: the native layer is Node's own deps/histogram
+// (HdrHistogram) compiled to WebAssembly, so createHistogram and
+// monitorEventLoopDelay work and export() yields Node-shaped CBOR.
 console.log('-- perf_hooks (milestone 35) --');
 const perfHooks = require('perf_hooks');
 const perf = perfHooks.performance;
@@ -603,7 +604,11 @@ console.log('measure     : ' + span.entryType + ' ' + span.name + ' in ' + span.
 console.log('marks       : ' + perf.getEntriesByType('mark').length + ' marks, ' + perf.getEntriesByType('measure').length + ' measure');
 console.log('isMark      : ' + (perf.getEntriesByName('start')[0] instanceof perfHooks.PerformanceMark));
 console.log('nodeTiming  : nodeStart=' + perf.nodeTiming.nodeStart + ' loopStart=' + perf.nodeTiming.loopStart);
-console.log('createHistogram() -> ' + (function () { try { perfHooks.createHistogram(); return 'ok'; } catch (err) { return err.code || err.name; } })());
+const hist = perfHooks.createHistogram();
+for (let i = 1; i <= 1000; i++) hist.record(i);
+console.log('histogram   : count=' + hist.count + ' min=' + hist.min + ' max=' + hist.max + ' mean=' + hist.mean + ' p99=' + hist.percentile(99));
+const histBack = perfHooks.importHistogram(hist.export());
+console.log('hist export : ' + hist.export().length + ' bytes of CBOR, reimport count=' + histBack.count);
 console.log('');
 
 // --- stream/web (milestone 36) ---

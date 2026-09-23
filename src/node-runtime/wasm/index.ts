@@ -11,6 +11,7 @@
  */
 import wnStubUrl from './artifacts/wn_stub.wasm?url';
 import wnZlibUrl from './artifacts/wn_zlib.wasm?url';
+import wnHistogramUrl from './artifacts/wn_histogram.wasm?url';
 import { instantiateWasm, type WasmExports } from './loader';
 import { installWasm, wasmLoaded } from './registry';
 
@@ -18,6 +19,7 @@ import { installWasm, wasmLoaded } from './registry';
 export const WASM_MODULES: Record<string, string> = {
   wn_stub: wnStubUrl,
   wn_zlib: wnZlibUrl,
+  wn_histogram: wnHistogramUrl,
 };
 
 export interface LoadWasmOptions {

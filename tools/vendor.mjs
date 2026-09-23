@@ -198,6 +198,10 @@ const FILES = [
   // `constants` is the deprecated umbrella over `internalBinding('constants')`
   // (os.dlopen/errno/priority/signals + fs + crypto), which we already build.
   'constants.js',
+  // milestone 117: the real `internal/histogram`. Its `Histogram` class comes
+  // from `internalBinding('performance')`, which now points at the wasm-backed
+  // hdr_histogram (native/src/wn_histogram.cc).
+  'internal/histogram.js',
 ];
 
 /**

@@ -1177,53 +1177,6 @@ export const internalProcessPermissionSpec: BuiltinSpec = {
 // `lib/internal/file.js` for `File`); they run on the JS `blob` binding
 // (`bindings/blob.ts`).
 
-// ---------------------------------------------------------------------------
-// internal/histogram
-// ---------------------------------------------------------------------------
-//
-// Node backs `createHistogram` / `monitorEventLoopDelay` / `timerify` with the
-// native `Histogram` (a CBOR-exporting hdr_histogram plus a set of statistical
-// tests). That is a substantial native surface with no browser equivalent, so
-// it is **not** implemented here. The module still loads — `perf_hooks` and
-// `internal/perf/timerify` destructure it at load time — but every histogram
-// constructor throws a typed `NotImplementedError` on use.
-
-const kDestroy = Symbol('kDestroy');
-const kHandle = Symbol('kHandle');
-const kSkipThrow = Symbol('kSkipThrow');
-
-function histogramUnsupported(what: string): never {
-  throw notImplemented('api', what, 'Histograms need the native hdr_histogram binding, which has no browser equivalent.');
-}
-
-/** Placeholder for `internal/histogram`'s native-backed `Histogram` class. */
-class UnsupportedHistogram {
-  constructor(skipThrowSymbol?: symbol) {
-    if (skipThrowSymbol === kSkipThrow) return;
-    histogramUnsupported('perf_hooks.createHistogram');
-  }
-}
-
-class UnsupportedRecordableHistogram extends UnsupportedHistogram {}
-
-export const internalHistogramSpec: BuiltinSpec = {
-  id: 'internal/histogram',
-  origin: 'web-node',
-  init: () => ({
-    Histogram: UnsupportedHistogram,
-    RecordableHistogram: UnsupportedRecordableHistogram,
-    ClonedHistogram: UnsupportedHistogram,
-    ClonedRecordableHistogram: UnsupportedRecordableHistogram,
-    isHistogram: (value: unknown): boolean =>
-      typeof value === 'object' && value !== null && kHandle in value,
-    kDestroy,
-    kHandle,
-    kSkipThrow,
-    createHistogram: () => histogramUnsupported('perf_hooks.createHistogram'),
-    importHistogram: () => histogramUnsupported('perf_hooks.importHistogram'),
-  }),
-};
-
 /**
  * `internal/process/task_queues`.
  *

@@ -1,6 +1,7 @@
 import type { BindingFactory } from './context';
 import { notImplemented } from '../errors';
 import { triggerUncaughtException } from './uncaught';
+import { createHistogramApi } from './histogram';
 import { ERRNO, ERRNO_DESC, VfsError } from '../vfs/types';
 
 /** `trace_events` binding: this runtime does not emit V8 trace events. */
@@ -222,6 +223,11 @@ export const performanceBinding: BindingFactory = (ctx) => {
   // events. We never see those events, so remember it and never call it.
   const observerCounts = new Array<number>(ENTRY_TYPE_COUNT).fill(0);
 
+  // The histogram half of this binding (milestone 117): `Histogram` and
+  // `createELDHistogram` are the wasm-backed hdr_histogram. `internal/histogram`
+  // and `internal/perf/event_loop_delay` read them straight from here.
+  const histogram = createHistogramApi(ctx);
+
   return {
     now: () => ctx.now(),
     timeOrigin: timeOriginMs,
@@ -237,11 +243,10 @@ export const performanceBinding: BindingFactory = (ctx) => {
     loopIdleTime: () => 0,
     uvMetricsInfo: () => [0, 0, 0],
     setupGarbageCollectionTracking: () => undefined,
-    // `monitorEventLoopDelay` builds its histogram from this handle; the
-    // histogram itself is not implemented (see `internal/histogram`).
-    createELDHistogram: () => {
-      throw notImplemented('api', 'perf_hooks.monitorEventLoopDelay');
-    },
+    // `monitorEventLoopDelay` builds its histogram from this handle.
+    createELDHistogram: (resolution: number, samplePerIteration: boolean) =>
+      histogram.createELDHistogram(resolution, samplePerIteration),
+    Histogram: histogram.Histogram,
   };
 };
 
