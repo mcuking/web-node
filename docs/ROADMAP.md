@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-23（**阶段 D 4/4 收尾**：M102 `net.BoundSocket` 虚拟绑定 / M103 `http.Agent#createSocket`+`createConnection` / M104 `url.fileURLToPath({windows:true})` / M105 `console`+`v8` 面收尾；合计 **44 / 31 / 13**）
+> - **最后更新**：2026-09-23（**阶段 D 4/4 收尾** + **M107 基准已立**：M102 `net.BoundSocket` 虚拟绑定 / M103 `http.Agent#createSocket`+`createConnection` / M104 `url.fileURLToPath({windows:true})` / M105 `console`+`v8` 面收尾；合计 **44 / 31 / 13**）
 
 ---
 
@@ -260,8 +260,11 @@
   - 把热点（buffer/fs/crypto）替换为 wasm 实现；引入 **SharedArrayBuffer + Atomics** 做同步 syscall。
   - 前置：COOP/COEP 响应头（子域名隔离路由已就绪 M3.5d）。
 
-- [ ] **M107 · 启动性能**
-  - 缩短冷启动（模块懒加载、预编译缓存、快照）——对标 WebContainer 的「毫秒级启动」。
+- [~] **M107 · 启动性能** 🚧 2026-09-23（**基准已立**）
+  - 新增只读启动计时（`globalThis.__wnBoot`：`moduleEvalMs`/`workerSpawnMs`/`runtimeReadyMs`/`firstRunMs`）+ 基准工具 `tools/e2e-startup-bench.mjs`（CDP，可打本地或 Pages）。
+  - **基线**（本地 preview、冷缓存、连跑 2 次）：`moduleEval` 18–51ms · `runtimeReady` **110–155ms** · 导航到 ready 约 150ms。
+  - **热点定位**：`new NodeRuntime`（建 binding 表 + Realm，103 个 binding 逐工厂构造）实测只 **~10ms**；初次 `require('fs')` ~2ms；剩余 60–90ms 几乎全在 **worker 脚本（2.5MB）的 fetch + compile**。
+  - **下一步**：要再降得动 2.5MB 载荷（vendored 源拆分/懒解析）或上 V8 code cache/快照——因 `require` 必须同步，纯懒加载拆包会把 vendored 源重新拉回关键路径，需先做 spike。
 
 ---
 

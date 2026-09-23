@@ -2,6 +2,25 @@ import { RuntimeClient } from '../client';
 import type { RuntimeInfo } from '../worker/runtime.worker';
 import { previewUrl as buildPreviewUrl, prefixPreviewUrl } from './preview-url';
 
+/**
+ * Cold-start timing (M107), in milliseconds since navigation start. Exposed
+ * read-only on `globalThis.__wnBoot` so `tools/e2e-startup-bench.mjs` can read
+ * the breakdown without patching the app.
+ */
+export interface BootTiming {
+  moduleEvalMs: number;
+  workerSpawnMs: number;
+  runtimeReadyMs: number;
+  firstRunMs: number;
+}
+const bootTiming: BootTiming = {
+  moduleEvalMs: performance.now(),
+  workerSpawnMs: 0,
+  runtimeReadyMs: 0,
+  firstRunMs: 0,
+};
+(globalThis as { __wnBoot?: BootTiming }).__wnBoot = bootTiming;
+
 const client = new RuntimeClient();
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -110,6 +129,7 @@ async function runEntry(entry: string, label: string, button: HTMLButtonElement)
   try {
     await client.run(entry);
     const ms = (performance.now() - started).toFixed(0);
+    if (!bootTiming.firstRunMs) bootTiming.firstRunMs = Math.round(performance.now());
     setStatus(`done in ${ms}ms`, 'ok');
     writeTerminal(`[exit 0 · ${ms}ms]\n`, 'sys');
   } catch (err) {
@@ -303,6 +323,7 @@ client.on('exit', (code) => {
 
 client.on('ready', (runtimeInfo) => {
   info = runtimeInfo;
+  bootTiming.runtimeReadyMs = Math.round(performance.now());
   bootEl.textContent = runtimeInfo.restored ? 'runtime ready (restored from OPFS)' : 'runtime ready (fresh project)';
   factsEl.textContent = [
     `${runtimeInfo.bindings.length} bindings`,

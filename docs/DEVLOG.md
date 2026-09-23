@@ -244,6 +244,30 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · M107 启动基准（首个增量）
+
+**改了什么**：把冷启动做成**可测**的，并定下热点。
+
+- `src/ui/main.ts` / `src/client/index.ts`：新增只读启动计时 `globalThis.__wnBoot`（`moduleEvalMs`/`workerSpawnMs`/`runtimeReadyMs`/`firstRunMs`，单位 = 距导航开始的毫秒）。
+- `tools/e2e-startup-bench.mjs`：CDP 基准工具，可打本地 preview 或线上 Pages，输出逐步耗时与均值。
+
+**实测（本地 preview、禁用缓存、连跑 2 次）**：
+
+| 阶段 | 耗时 |
+| --- | --- |
+| module eval | 18–51ms |
+| worker spawn | 18–51ms |
+| **runtime ready** | **110–155ms** |
+| 导航→ready（wall） | ≈ 150ms |
+| `new NodeRuntime`（建 binding 表 + Realm） | **~10ms** |
+| 首次 `require('fs')` | ~2ms |
+
+**结论**：启动已经很快；耗时几乎全在 **worker 脚本（2.5MB）的 fetch + compile**，而不是 JS 侧初始化（binding 表 + Realm 才 10ms）。下一步若要继续降，要么动 2.5MB 载荷（vendored 源拆分/懒解析——但 `require` 必须同步，纯懒加载会把源重新拉回关键路径，需先 spike），要么上 V8 code cache / 快照。
+
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **986 通过 / 2 skip** · `vite build` 绿（worker **2510.84KB**）。
+
+---
+
 ### 2026-09-23 · 阶段 D 收尾（M102–M105）
 
 **改了什么**（四个都是「用真 Node 差分验证」的小项）：

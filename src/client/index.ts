@@ -55,6 +55,9 @@ export class RuntimeClient {
   #listeners: Partial<RuntimeEvents> = {};
 
   constructor() {
+    // Boot timing handshake (M107): read by the page, harmless elsewhere.
+    const boot = (globalThis as { __wnBoot?: { workerSpawnMs: number } }).__wnBoot;
+    if (boot) boot.workerSpawnMs = Math.round(performance.now());
     this.#worker = new Worker(new URL('../worker/runtime.worker.ts', import.meta.url), { type: 'module' });
     this.#worker.onmessage = (event: MessageEvent) => this.#onMessage(event.data);
     this.#worker.onerror = (event) => {
