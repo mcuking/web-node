@@ -327,10 +327,14 @@ client.on('ready', (runtimeInfo) => {
   bootEl.textContent = runtimeInfo.restored ? 'runtime ready (restored from OPFS)' : 'runtime ready (fresh project)';
   factsEl.textContent = [
     `${runtimeInfo.bindings.length} bindings`,
+    `${runtimeInfo.wasmModules.length} wasm modules`,
     `${runtimeInfo.vendoredFiles.length} vendored node files`,
     runtimeInfo.persistSupported ? 'OPFS: on' : 'OPFS: unavailable',
   ].join('  ·  ');
   writeTerminal('web-node runtime ready.\n', 'ok');
+  if (runtimeInfo.wasmModules.length) {
+    writeTerminal('native→wasm modules: ' + runtimeInfo.wasmModules.join(', ') + '\n', 'sys');
+  }
   if (runtimeInfo.vendoredFiles.length) {
     writeTerminal('vendored from Node source:\n  ' + runtimeInfo.vendoredFiles.join('\n  ') + '\n', 'sys');
   }

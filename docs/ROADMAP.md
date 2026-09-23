@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-23（**架构方向变更**：新增**阶段 H — native → WASM（对齐 WebContainer 架构）**，目标 **B2 + 验收 B1**、路线**甲**，设计见 [`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`](superpowers/specs/2026-09-23-native-to-wasm-design.md)；阶段 A **22/22 收官**（M93.4e–h，`getCiphers()` **111→165** 逐名全对齐）；阶段 D 4/4、M107 载荷拆分；合计 **51 / 33 / 18**）
+> - **最后更新**：2026-09-23（**阶段 H 开工：M115 ✅**——wasm 工具链（wasi-sdk 34）+ `internalBinding()` 接入缝打通，桩 wasm 模块已上线并端到端验证；架构方向变更见下；阶段 A 22/22、阶段 D 4/4、M107 载荷拆分；合计 **51 / 34 / 17**）
 
 ---
 
@@ -21,13 +21,13 @@
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | G | 借鉴 WebContainer（2026-09-23 调研落地） | 2 | 0 | 2 |
-| H | **native → WASM（对齐 WebContainer 架构）** | 7 | 0 | 7 |
+| H | **native → WASM（对齐 WebContainer 架构）** | 7 | 1 | 6 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **51** | **33** | **18**（+1 不做） |
+| **合计** | | **51** | **34** | **17**（+1 不做） |
 
 > **2026-09-23 架构重定向**：阶段 C 的 M99/M100、阶段 E 的 M106、阶段 G 的 M114，其**实现方式改为「真上游 C/C++ → wasm」**，具体任务落到**阶段 H（M116/M117/M119/M120）**；阶段 F 的 M108/M111 由 **M121** 统一验收。上述条目保留原位并加注，不重复计数。
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 120 个里程碑，剩余 18 个规划任务**（含阶段 H 的 7 个 wasm 迁移任务，以及排最后的 webpack/rspack 构建工具链）。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 121 个里程碑，剩余 17 个规划任务**（含阶段 H 的 wasm 迁移任务，以及排最后的 webpack/rspack 构建工具链）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.4（26 → 30），同日晚 M90.5 又拆为 M90.5–M90.9（30 → 34）。
 > 注：M97 于 2026-09-22 拆出 M97.1（`stripTypeScriptTypes` 需要真 TS 解析器 / amaro wasm，代价大）（41 → 42）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
@@ -369,10 +369,14 @@
 > **技术路线（甲）**：能编真上游 C/C++ 的（zlib/histogram/brotli/zstd/ada/OpenSSL 子集）用 **wasi-sdk** 编；syscall 层**不编 libuv**，改用 **SAB + `Atomics.wait` + FS-worker**。
 > **设计文档**：[`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`](superpowers/specs/2026-09-23-native-to-wasm-design.md)。接入缝 = `REGISTRY`（把 `zlib`/`crypto` 从 `UNSUPPORTED_BINDINGS` 移回并指向 wasm）；产物 = 带内容哈希的独立资产 + 惰性实例化。
 
-- [ ] **M115 · wasm 工具链 + binding 接入缝（P0）**
-  - 装 **wasi-sdk**（clang + wasi-libc；本机现无任何 wasm 编译链，Apple clang 无 wasm backend）；打通「hello wasm → `REGISTRY` binding」的链路与构建脚本。
-  - 产物：一个桩 binding（导出函数 + 线性内存 + 薄 TS 适配器）在 worker 内 `fetch` + `instantiate` 成功并被 `internalBinding` 取到。
-  - 验收：桩 binding 走通（typecheck/vitest/build/部署全绿）。
+- [x] **M115 · wasm 工具链 + binding 接入缝（P0）** ✅ 2026-09-23
+  - **工具链**：装 **wasi-sdk 34.0**（`~/wasi-sdk-34.0`，clang 23.1.0-wasi-sdk + wasi-libc + wasm-ld；可用 `WASI_SDK_PATH` 覆盖）。构建入口 `native/build.mjs`（`npm run build:native [-- --inspect]`），产物写到 `src/node-runtime/wasm/artifacts/`（**提交进仓库**，部署/CI 不需工具链）并附 `manifest.json`（工具链版本 + sha256）。
+  - **桩模块** `native/src/wn_stub.c`：导出函数 + 线性内存 + `malloc`/`free` 三件事，用 `__attribute__((export_name(...)))` 精确导出（不给链接器传 `--export-all`，libc 符号不泄出）。
+  - **加载器** `src/node-runtime/wasm/`：`loader.ts`（`WebAssembly.Module` 同步编译 + reactor `_initialize`）、`registry.ts`（已实例化模块表）、`index.ts`（`WASM_MODULES` + `loadWasmModules()`）。资产走 `?url` → Vite 按内容哈希发到 `assets/`（**不内联进 worker bundle**，M107 的教训）。
+  - **接入缝**：`REGISTRY` 新增 `wn_stub`（`bindings/wn_stub.ts`）；worker 启动期 `wasmReady` 与 `vendoredSourcesReady` 并列 await（绑定表是**同步**构建的，wasm 必须在那之前预编译好）；`ready` 信息加 `wasmModules`，UI 显示。
+  - **验收**：门禁全绿——`tsc --noEmit` 净 · `vitest run` **997 passed / 2 skipped（119 文件）** · `npm run build`（`dist/assets/wn_stub-Kli7lsuY.wasm` 46.48 kB、`runtime.worker-CqufMlXm.js` **666.38 kB**）；部署 gh-pages 后线上资产全 **200**（含 wasm 46479 字节）；**页面端到端验证**：真实浏览器打开线上站点报告 `native→wasm modules: wn_stub`、`40 bindings · 1 wasm modules`。
+  - **两个关键坑**：① 目标名必须是 `--target=wasm32-wasip1`（`wasm32-wasi` 已弃用，且会让 clang 去查不存在的 multilib 目录 → `stdlib.h` 找不到）；② `--export-dynamic` 对非 PIE 可执行模块**不导出**任何符号，用源码里的 `export_name` 属性才可靠。
+  - **测试环境**：`npx vitest` 必须用 **fnm Node v26.9.0**——vendored 源里有 `using stack = new DisposableStack()`（Node 24+ 语法），v22.19.0 会在编译期报 `Unexpected identifier 'stack'`。
 
 - [ ] **M116 · `zlib` → 真 `deps/zlib` 编 wasm（P1）**  ← 取代 M99 的纯 JS 方案
   - 用真 `deps/zlib`（1.3.2.1-motley）编 wasm 实现 `zlib` binding；vendor 真 `lib/zlib.js`；解锁 `gzipSync`/`deflateSync`/… 与 `level`/`windowBits`/`memLevel`/`strategy`/`dictionary`/`flush()`。

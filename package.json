@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "deploy": "tools/deploy-pages.sh",
     "vendor": "node tools/vendor.mjs",
+    "build:native": "node native/build.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

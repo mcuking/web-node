@@ -244,6 +244,20 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · M115 — wasm 工具链 + `internalBinding()` 接入缝（阶段 H 开工）
+
+**里程碑**：native → WASM 迁移的 P0（设计见 `docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`）。目标是把 `internalBinding()` 背后那层从「JS 重写」换成「真上游 C/C++ 编 wasm」；本步先把**工具链与接入缝**打通。
+
+- **工具链**：wasi-sdk 34.0（`~/wasi-sdk-34.0`）→ `native/build.mjs`（`npm run build:native`），产物到 `src/node-runtime/wasm/artifacts/`（提交 + `manifest.json` 记工具链版本/sha256）。
+- **桩模块** `native/src/wn_stub.c`：导出函数 + 线性内存 + `malloc`/`free`；`__attribute__((export_name(...)))` 精确导出。
+- **加载器** `src/node-runtime/wasm/{loader,registry,index}.ts`：同步编译 + reactor `_initialize`；资产走 `?url` 按内容哈希发出（不内联 worker）。
+- **接入缝**：`REGISTRY` 加 `wn_stub`；worker 启动期 `wasmReady` 与 `vendoredSourcesReady` 并列 await；`ready` 信息加 `wasmModules`，UI 显示。
+- **验收**：`tsc` 净 · `vitest run` **997 passed / 2 skipped（119 文件）** · build（`wn_stub-Kli7lsuY.wasm` 46.48 kB、`runtime.worker` **666.38 kB**）· 部署后线上资产全 **200** · **真实浏览器端到端**：线上站点报告 `native→wasm modules: wn_stub`、`40 bindings · 1 wasm modules`。
+- **两个坑**：① `--target=wasm32-wasip1`（`wasm32-wasi` 已弃用且 sysroot 查错目录）；② `--export-dynamic` 对非 PIE 可执行模块不导出符号，用 `export_name` 属性。
+- **运行环境**：`npx vitest` 必须用 **Node v26.9.0**（vendored 源用 `using` 声明，v22 编译不过）。
+
+---
+
 ### 2026-09-23 · 架构重定向：native → WASM（对齐 WebContainer，阶段 H）
 
 **决策**：native 层从「JS 重写 / 平台 API 适配」转向「**真上游 C/C++ 编 wasm**」——目标 **B2（native 层全 WASM 化）+ 验收 B1（页内跑通 webpack/rspack + 差分 0 diff）**，技术路线 **甲（wasi-sdk 编真上游 C/C++；syscall 层不编 libuv，改用 SAB + `Atomics.wait` + FS-worker）**。

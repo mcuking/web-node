@@ -37,6 +37,7 @@ import { urlBinding, urlPatternBinding, encodingBinding } from './url';
 import { serdesBinding } from './serdes';
 import { heapUtilsBinding, profilerBinding, v8Binding } from './v8';
 import { contextifyBinding } from './contextify';
+import { wnStubBinding } from './wn_stub';
 
 /** The whitelist of internal bindings this runtime implements. */
 const REGISTRY: Record<string, BindingFactory> = {
@@ -79,6 +80,8 @@ const REGISTRY: Record<string, BindingFactory> = {
   heap_utils: heapUtilsBinding,
   profiler: profilerBinding,
   contextify: contextifyBinding,
+  // native → WASM 接入缝的冒烟 binding（M115）：真 C 源码编 wasm 后经此接入。
+  wn_stub: wnStubBinding,
 };
 
 /** Bindings Node internal code knows about but that we deliberately do not ship. */

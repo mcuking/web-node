@@ -5,6 +5,12 @@ declare module '*?raw' {
   export default src;
 }
 
+/** wasm 资产：`?url` 导入拿到构建产出的 URL（M115）。 */
+declare module '*.wasm?url' {
+  const url: string;
+  export default url;
+}
+
 /** Absolute (base-prefixed) URL of the emitted vendored-sources bundle (M107). */
 declare const __VENDORED_URL__: string;
 

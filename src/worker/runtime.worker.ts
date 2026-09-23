@@ -2,6 +2,7 @@
 import { NodeRuntime, ProcessExit } from '../node-runtime/runtime';
 import { MemoryVfs, OpfsPersistence } from '../node-runtime/vfs';
 import { VENDORED, installVendored, vendoredLoaded } from '../node-runtime/vendored';
+import { loadWasmModules, wasmModuleNames } from '../node-runtime/wasm';
 import { DEMO_FILES } from '../demo-project';
 
 const decoder = new TextDecoder();
@@ -20,6 +21,17 @@ const vendoredSourcesReady: Promise<void> = (async (): Promise<void> => {
   if (!res.ok) throw new Error(`vendored sources: HTTP ${res.status}`);
   installVendored(await res.text());
 })();
+
+/**
+ * Fetch + instantiate the native→WASM modules (M115).
+ *
+ * Same rule as the vendored sources: they must be in place before the realm is
+ * built, because the binding table is constructed synchronously and
+ * `internalBinding('zlib')` & co. read their exports at module-eval. The bytes
+ * arrive as separate hashed assets, so this costs a parallel download, not a JS
+ * parse. Starts at module-eval — as early as it can go.
+ */
+const wasmReady: Promise<void> = loadWasmModules();
 
 /**
  * Runtime worker.
@@ -66,6 +78,8 @@ export interface RuntimeInfo {
   restored: boolean;
   files: string[];
   bindings: string[];
+  /** 已加载的 native→WASM 模块（M115）。 */
+  wasmModules: string[];
   vendoredFiles: string[];
 }
 
@@ -153,8 +167,9 @@ async function serveVirtualRequest(
 }
 
 async function init(id: number): Promise<void> {
-  // Sources must be in place before the realm is built: `require` is synchronous.
-  await vendoredSourcesReady;
+  // Sources and wasm must be in place before the realm is built: `require` is
+  // synchronous, and so is the `internalBinding()` table.
+  await Promise.all([vendoredSourcesReady, wasmReady]);
   const loaded = await persistence.load();
   const hasRestored = Boolean(loaded && loaded.entries.length > 0);
 
@@ -188,6 +203,7 @@ async function init(id: number): Promise<void> {
       restored: hasRestored,
       files: listTree(v),
       bindings: runtime.realm.bindingIds,
+      wasmModules: wasmModuleNames(),
       vendoredFiles: Object.keys(VENDORED).sort(),
     },
   });
