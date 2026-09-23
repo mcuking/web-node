@@ -105,6 +105,7 @@ import { AesSiv } from './siv';
 import { Sm4 } from './sm4';
 import { AesWrap } from './wrap';
 import { Des3Wrap } from './des3-wrap';
+import { CbcCts } from './cbc-cts';
 import { AesXts } from './xts';
 
 export type { SyncCipher };
@@ -118,6 +119,7 @@ export interface BlockCipher {
 export type CipherMode =
   | 'ecb'
   | 'cbc'
+  | 'cbc-cts'
   | 'ctr'
   | 'cfb'
   | 'cfb1'
@@ -152,6 +154,7 @@ export interface CipherSpec {
   alias?: true;
   /** `*-wrap-inv`: use the AES inverse cipher as the key-wrap block function. */
   wrapInverse?: true;
+  /** `cbc-cts`: CBC with (NIST) ciphertext stealing. */
 }
 
 const SPECS: CipherSpec[] = [];
@@ -310,6 +313,25 @@ const SPECS: CipherSpec[] = [];
   ]) {
     const spec = SPECS.find((s) => s.name === base)!;
     SPECS.push({ ...spec, name: alias, alias: true });
+  }
+  // CBC with ciphertext stealing (NIST CTS). `getCipherInfo` reports mode
+  // `cbc` and no NID. OpenSSL exposes it only for AES and Camellia.
+  for (const prefix of ['aes', 'camellia'] as const) {
+    for (const keyLength of [16, 24, 32]) {
+      const bits = keyLength * 8;
+      const name = `${prefix}-${bits}-cbc-cts`;
+      SPECS.push({
+        name,
+        infoName: name,
+        mode: 'cbc-cts',
+        infoMode: 'cbc',
+        nid: 0,
+        keyLength,
+        blockSize: 16,
+        ivLength: 16,
+        family: prefix,
+      });
+    }
   }
   // AES-OCB (RFC 7253). A 1..15 byte IV; the tag length is mandatory.
   const ocb: Array<[number, number]> = [
@@ -478,7 +500,12 @@ export function createCipher(
   }
   if (spec.mode === 'ccm') return new AesCcm(key, iv as Uint8Array, encrypt, authTagLength, plaintextLength);
   if (spec.mode === 'ocb') return new AesOcb(key, iv as Uint8Array, encrypt, authTagLength);
-  if (spec.family === 'des3wrap') return new Des3Wrap(key, encrypt);  if (spec.mode === 'wrap') return new AesWrap(key, iv as Uint8Array, encrypt, spec.name.includes('-pad') ? 'wrap-pad' : 'wrap', spec.wrapInverse === true);
+  if (spec.family === 'des3wrap') return new Des3Wrap(key, encrypt);
+  if (spec.mode === 'cbc-cts') {
+    const cipher =
+      spec.family === 'camellia' ? new Camellia(key) : spec.family === 'aria' ? new Aria(key) : spec.family === 'sm4' ? new Sm4(key) : new AesKey(key);
+    return new CbcCts(cipher, iv as Uint8Array, encrypt);
+  }  if (spec.mode === 'wrap') return new AesWrap(key, iv as Uint8Array, encrypt, spec.name.includes('-pad') ? 'wrap-pad' : 'wrap', spec.wrapInverse === true);
   if (spec.mode === 'siv') return new AesSiv(key, encrypt);
   if (spec.mode === 'xts') return new AesXts(key, iv as Uint8Array, encrypt);
   if (spec.family === 'des') return new DesCipher(spec.mode as DesMode, key, iv, encrypt);

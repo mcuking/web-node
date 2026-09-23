@@ -1449,7 +1449,9 @@ export const cryptoSpec: BuiltinSpec = {
         const selectCipher = (want: 'cbc' | 'gcm'): CipherSpec => {
           const spec = resolveCipher(cipher!);
           if (spec !== undefined) {
-            if (spec.mode !== want) {
+            // CBC-CTS shares the plain-CBC block function as far as CMAC/GMAC care.
+            const matches = spec.mode === want || (want === 'cbc' && spec.mode === 'cbc-cts');
+            if (!matches) {
               throw coded('Error', 'ERR_OSSL_INVALID_MODE', 'error:1C80007D:Provider routines::invalid mode');
             }
             return spec;

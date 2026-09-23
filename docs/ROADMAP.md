@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-23（阶段 A **22/22 收官**：M90/M93.4 父项补勾 + M93.4e `cfb1`/`cfb8` + M93.4f `wrap-inv`/`des3-wrap`；`getCiphers()` **111→147**（真 Node 165，余 18）；阶段 D 4/4、M107 载荷拆分；合计 **44 / 33 / 11**）
+> - **最后更新**：2026-09-23（阶段 A **22/22 收官**：M93.4e `cfb1`/`cfb8`、M93.4f `wrap-inv`/`des3-wrap`、M93.4g `cbc-cts`；`getCiphers()` **111→153**（真 Node 165，余 12：gcm-siv/aria-ccm/gcm/sm4-ccm/gcm/xts）；阶段 D 4/4、M107 载荷拆分；合计 **44 / 33 / 11**）
 
 ---
 
@@ -144,7 +144,7 @@
   - 差分：`tools/crypto-ccm-probe.cjs` → `test/fixtures/crypto-ccm.json`（含 SP 800-38C 附录 C 例 1、16/24/32 密钥、tag 4–16、nonce 7–13、空 payload、全套错误面）——**0 diff**；`test/crypto-ccm.test.ts`。
   - 风险：中低。
 
-- [x] **M93.4 · 其余模式与密码**（拆为 M93.4a–M93.4e）
+- [x] **M93.4 · 其余模式与密码**（拆为 M93.4a–M93.4g）
   > **2026-09-22 拆分原因**：与 M93 同理——覆盖面过大（三种额外块密码 + 四种额外模式/包装），逐项验证无法混在一起。拆为：
 
   - [x] **M93.4a · Camellia** ✅ 2026-09-22
@@ -191,6 +191,13 @@
     - 语义细节：`des3-wrap` 用 **null/空 IV**（非空 IV → `ERR_CRYPTO_INVALID_IV`），空输入 → 空输出，输入非 8 字节倍数 → unsupported state，解密 <24 字节 → unsupported state。
     - 差分：`tools/crypto-wrap-inv-des3-probe.cjs` → `test/fixtures/crypto-wrap-inv-des3.json`（12 个 inv 名称的 info + 加密/回环/与正向模式差异、des3 的录制密文解密 + 随机回环 + 全套错误面）——**0 diff**；`test/crypto-wrap-inv-des3.test.ts`。
     - 仍缺（M93.4g+，18 个）：`aes-*-cbc-cts`、`aes-*-gcm-siv`、`aria-*-ccm`、`aria-*-gcm`、`camellia-*-cbc-cts`、`sm4-ccm`/`sm4-gcm`/`sm4-xts`。
+  - [x] **M93.4g · CBC 密文窃取（NIST CTS）** ✅ 2026-09-23
+    - 新增 `src/node-runtime/crypto/cbc-cts.ts`：按 OpenSSL 的 **NIST CTS**（`crypto/modes/cts128.c` 的 `CRYPTO_nistcts128_*`）逐块移植。与 RFC 2040/3962 不同：**允许输入为块大小整数倍**且**不交换最后两块**；末段明文与前一密文块异或后再加密，写回位置**偏移 `residue` 字节**（这个重叠写就是“窃取”）。
+    - 新增 `aes-{128,192,256}-cbc-cts`、`camellia-{128,192,256}-cbc-cts`（6）→ **`getCiphers()` 147 → 153**。
+    - **关键坑**：解密末段重建 C(n-1) 后必须用 **`decryptBlock`**（即 `D(ct_mid)`）而非 `encryptBlock`——加密方向匹配但解密方向会错。症状：密文完全对、明文乱掉。
+    - 语义（与真 Node 一致）：**一次性**模式——`update` 至少一个块且只允许一次（第二次 → “Trying to add data in unsupported state”）；`update` 一次性吐出全部输出；`final()` 仅关闭（返回空）；无 `update` 先 `final()` → “Unsupported state”；二次 `final()` → `ERR_CRYPTO_INVALID_STATE`/“Invalid state”；`getAuthTag()` → “Invalid state for operation getAuthTag”。`CMAC` 接受 `cbc-cts`（与普通 cbc 同值，已对齐）。
+    - 差分：`tools/crypto-cbc-cts-probe.cjs` → `test/fixtures/crypto-cbc-cts.json`（6 个名称 info；12 种长度含 16/17/18/20/31/32/33/47/48/49/64/1000 的加密+回环；一次性语义；全套错误面）——**0 diff**；`test/crypto-cbc-cts.test.ts`。
+    - 仍缺（M93.4h+，12 个）：`aes-*-gcm-siv`(3)、`aria-*-ccm`(3)、`aria-*-gcm`(3)、`sm4-ccm`/`sm4-gcm`/`sm4-xts`(3)。
 
 - [x] **M94 · `crypto.Certificate`** ✅ 2026-09-22
   - Node 已弃用的 `crypto.Certificate` 类（`verifySpkac`/`exportPublicKey`/`exportChallenge`）。由 `src/node-runtime/crypto/spkac.ts` 实现（NETSCAPE_SPKI 解析 + OpenSSL 风格 base64 解码 + 签名校验），在 builtin 里接成「可 new 也可直接调用」的函数 + 原型/静态三方法。

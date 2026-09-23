@@ -1,0 +1,109 @@
+{
+  "info": {
+    "aes-128-cbc-cts": {
+      "mode": "cbc",
+      "name": "aes-128-cbc-cts",
+      "keyLength": 16,
+      "blockSize": 16,
+      "ivLength": 16
+    },
+    "aes-192-cbc-cts": {
+      "mode": "cbc",
+      "name": "aes-192-cbc-cts",
+      "keyLength": 24,
+      "blockSize": 16,
+      "ivLength": 16
+    },
+    "aes-256-cbc-cts": {
+      "mode": "cbc",
+      "name": "aes-256-cbc-cts",
+      "keyLength": 32,
+      "blockSize": 16,
+      "ivLength": 16
+    },
+    "camellia-128-cbc-cts": {
+      "mode": "cbc",
+      "name": "camellia-128-cbc-cts",
+      "keyLength": 16,
+      "blockSize": 16,
+      "ivLength": 16
+    },
+    "camellia-192-cbc-cts": {
+      "mode": "cbc",
+      "name": "camellia-192-cbc-cts",
+      "keyLength": 24,
+      "blockSize": 16,
+      "ivLength": 16
+    },
+    "camellia-256-cbc-cts": {
+      "mode": "cbc",
+      "name": "camellia-256-cbc-cts",
+      "keyLength": 32,
+      "blockSize": 16,
+      "ivLength": 16
+    }
+  },
+  "cases": {
+    "aes128_16": "f13561fd5604d1935c9c69da7d196345|OK",
+    "aes128_17": "f150e541348f5e84d9b24c52c42090d529|OK",
+    "aes128_18": "f1352991ffb856a69e34aeb7e2f694117eb4|OK",
+    "aes128_20": "f13561fd1f3f1da0b4a0e1f4641c5902927b2725|OK",
+    "aes128_31": "f13561fd5604d1935c9c69da7d19637997fb221bb38f9d1a6e42b79a26603b|OK",
+    "aes128_32": "f13561fd5604d1935c9c69da7d19634537d7d7b466a34e0f820069a784714da3|OK",
+    "aes128_33": "f13561fd5604d1935c9c69da7d196345370f9a268cde7fe793ee541c58a2493c58|OK",
+    "aes128_47": "f13561fd5604d1935c9c69da7d19634537d7d7b466a34e0f820069a784714dae3c34b19f418bc1f446aad5da2251f2|OK",
+    "aes128_48": "f13561fd5604d1935c9c69da7d19634537d7d7b466a34e0f820069a784714da354020281ad9959b447a8347eccc21c50|OK",
+    "aes128_49": "f13561fd5604d1935c9c69da7d19634537d7d7b466a34e0f820069a784714da3549c74f8b92aa34008330b5397a7603047|OK",
+    "aes128_64": "f13561fd5604d1935c9c69da7d19634537d7d7b466a34e0f820069a784714da354020281ad9959b447a8347eccc21c50c67a478d9f1a08e2ff3a0e7e512399ca|OK",
+    "aes128_1000": "f13561fd5604d1935c9c69da7d19634537d7d7b466a34e0f820069a784714da354020281ad9959b447a8347eccc21c50c67a478d9f1a08e2ff3a0e7e512399ca8828e103f6d0f3db5fb213867381245cfdf72f93ed84088ae63131ef913e6a71187a4af22ddbead154a56f0a152aea03ed69b6306d01a411961be730a9a32c06f12eb1c87e1c8916735318b774b609b5ce50e1c82c63c181c55769e8237bf1c75fc102c69a2037b8f83bf2a37bd9f6a83781876d16ecb851e01b534d450dc339d1270348f44fcac2b39220234402953609ade480612eb354e6b10ba6960f21209bf0838a210b28d70e33a0206ee3f9dd9c6a63bd160958f3a892a21ebf6c280e33c6d7a5d301e09db78a35172a998a805726a66e9d460fce7cf8915cea0d3da52c731090fb3848407b59264ea78d1871443ef6af92f87b43a91f6580c5fee30fc67c6eaddc8812df55cb7650e25a52688983956d81be883c444a12578958230fd87783959c1f07eda3945f8f357a4062489f4e8117e315f5d88e9117efbb5a399b1461a515d42e49e69939001d7f7ca981497e52cd3bea9e850fb4c51efaceb261844ce29e16ff3d91f69663ce1bd9eff91f9504b7ecc720fd472567144fd1f933b880e3ea24156f3c0400024b2ddf2f8ab2eb20973b7daa57a1343d5394f2702c3c2d14cc6cb1208560720b91081338057ed563fffa0512306084913987590e704c44c266fd77246bb1221ebb447c16468cfdb4bb93282f4307cf12b646a057d83b6a10da4ee95ca31185af1ba9d5cecc8b965b0710efb6510709dc79f3e27fcec3aa7ebbfbefddea9d7542519f2c6e52371446062bc0e07346418a2d5501fa33791092dea4a9003fd4ac2d191d42f8ce408707943a7d6914309421c4136a4318085fe426637670fc6dd2afc28a8aef6617995244543ccf2abf9e36da78894314411b78a3d842b6bc4b6b2e65fa63d7e8cbf647cac04ebfe7da337ec5f692c796d5d2b2b67ffed1d240138e59f8035563a6e6a3d0a6dac330ff91f0b79a3e810e63995136100b4cbf78df52f15a4965a7d1a01fd6085f798a4a9f02512aa385b6a1aa01174bc5adb7aa4653791256eba66926a2184999981a83231bec26700b7122ba651d96750bbd866424f72b30b15da1ab2c941b1aa8235e3ae66915ef6b876199f4324e1f52555455f8ba2ccaf046a9d708770ce56246c4a28cc3c2acbbae65f6ef6b09a2c57838de3c10b94ac0df935bb25bc2211135022191ad4d1d77b21a61c4e9c036ac29ab43f07f6f4a8b7f227b50bfd07f0bd62dd71246c64afc6ba75e51d2fa24431fe2fb69365c34b9fac8b7f94cbf06f1f77b970a78d0becaa3f859e606824c3650246b0aca33936172170c5a8099b71433d056f11b25c65282dd7b7ebc34ec07|OK",
+    "camellia256_17": "b2b49e58e040e11e544b53fd205e79be11|OK",
+    "camellia192_33": "75ee33295659272789db1a8893fe00053240a34d29e8064207d796f439a5fa19bc|OK"
+  },
+  "oneshot": {
+    "aes128_16": "u=16 f=0 ct=f13561fd5604d1935c9c69da7d196345",
+    "aes128_33": "u=33 f=0 ct=f13561fd5604d1935c9c69da7d196345370f9a268cde7fe793ee541c58a2493c58",
+    "camellia128_17": "u=17 f=0 ct=af494b9cbf8bec928b0ca16fc55dd19da9",
+    "aes256_48": "u=48 f=0 ct=1248c62648fddf935f02769570e37a049b83505ef3e8593a0615e1ee06c7eeab955271512d0cd88f0a12f9a6c89bc52e",
+    "autoPadOff": "u=17 f=0 ct=f150e541348f5e84d9b24c52c42090d529"
+  },
+  "errors": {
+    "short15": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "empty": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "secondUpdate": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "finalOnly": {
+      "ok": false,
+      "name": "Error",
+      "message": "Unsupported state"
+    },
+    "secondFinal": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state"
+    },
+    "badIv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "getTag": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation getAuthTag"
+    }
+  }
+}

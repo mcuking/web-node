@@ -244,6 +244,25 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · M93.4g CBC 密文窃取（NIST CTS）
+
+补齐 AES/Camellia 的 `-cbc-cts`（真 Node 165 项，web-node 153）。
+
+- 新增 `src/node-runtime/crypto/cbc-cts.ts`：按 OpenSSL 的 **NIST CTS**（`crypto/modes/cts128.c` 的 `CRYPTO_nistcts128_encrypt/decrypt`）逐块移植。与 RFC 2040/3962 不同：**允许输入为块大小整数倍**且**不交换最后两块**；末段明文与前一密文块异或后再加密，写回位置**偏移 `residue` 字节**——这个重叠写就是“窃取”。
+- 新增 `aes-{128,192,256}-cbc-cts`、`camellia-{128,192,256}-cbc-cts`（6）→ **`getCiphers()` 147 → 153**。
+
+**关键坑**：解密末段重建 C(n-1) 后必须用 **`decryptBlock`**（即 `D(ct_mid)`）而非 `encryptBlock`——加密方向完全匹配、密文逐字节正确，但解密方向会用错；症状是“密文完全对、明文乱掉、且只在 residue≠0 时出现”。
+
+**语义**（与真 Node 一致）：一次性模式——`update` 至少一个块且只允许一次（第二次 → “Trying to add data in unsupported state”）；`update` 一次性吐出全部输出；`final()` 仅关闭（返回空）；无 `update` 先 `final()` → “Unsupported state”；二次 `final()` → `ERR_CRYPTO_INVALID_STATE`/“Invalid state”；`getAuthTag()` → “Invalid state for operation getAuthTag”。`CMAC` 接受 `cbc-cts`（与普通 cbc 同值，已对齐；`selectCipher` 的 cbc 分支容许 `-cbc-cts`）。
+
+**差分**：`tools/crypto-cbc-cts-probe.cjs` → `test/fixtures/crypto-cbc-cts.json`（6 个名称 info；12 种长度含 16/17/18/20/31/32/33/47/48/49/64/1000 的加密+回环；一次性语义；全套错误面）——**0 diff**；`test/crypto-cbc-cts.test.ts`。
+
+**门禁**：`tsc --noEmit` 干净 · `vitest run` **992 通过 / 2 skip（117 files）** · `vite build` 绿（worker **660.39KB**）。
+
+**余缺（M93.4h+，12）**：`aes-*-gcm-siv`、`aria-*-ccm`、`aria-*-gcm`、`sm4-ccm`/`sm4-gcm`/`sm4-xts`。
+
+---
+
 ### 2026-09-23 · M93.4f 逆 cipher 密钥包装 + DES3-CBC 包装
 
 补齐 SP 800-38F 的逆-cipher 包装与 CMS 的 3DES 包装（真 Node 165 项，web-node 147）。
