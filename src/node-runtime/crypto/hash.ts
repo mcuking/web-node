@@ -33,6 +33,8 @@ import { blake2s } from './blake2s';
 import { sm3 } from './sm3';
 import { ripemd160 } from './ripemd160';
 
+import { opensslDigest, opensslDigestSize, opensslReady } from '../bindings/openssl';
+
 export type DigestFn = (bytes: Uint8Array, outputLength?: number) => Uint8Array;
 
 export interface HashAlgo {
@@ -47,6 +49,8 @@ export interface HashAlgo {
   xof?: boolean;
   /** Output length used when a XOF is finalised without `options.outputLength`. */
   defaultOutputLength?: number;
+  /** OpenSSL `EVP_MD_fetch` name, when the wasi OpenSSL subset provides it. */
+  openssl?: string;
 }
 
 // --- shared helpers ----------------------------------------------------------
@@ -346,40 +350,43 @@ interface AlgoDef {
   aliases: string[];
   xof?: boolean;
   defaultOutputLength?: number;
+  /** OpenSSL `EVP_MD_fetch` name, when the wasi OpenSSL subset provides it. */
+  openssl?: string;
 }
 
 const DEFS: AlgoDef[] = [
-  { name: 'md5', blockSize: 64, digestSize: 16, hash: md5, aliases: ['RSA-MD5', 'md5WithRSAEncryption', 'ssl3-md5'] },
-  { name: 'sha1', blockSize: 64, digestSize: 20, hash: sha1, aliases: ['sha-1', 'sha1WithRSAEncryption', 'RSA-SHA1', 'RSA-SHA1-2', 'ssl3-sha1'] },
-  { name: 'sha224', blockSize: 64, digestSize: 28, hash: sha224, aliases: ['sha-224', 'sha2-224', 'sha224WithRSAEncryption', 'RSA-SHA224'] },
-  { name: 'sha256', blockSize: 64, digestSize: 32, hash: sha256, aliases: ['sha-256', 'sha2-256', 'sha256WithRSAEncryption', 'RSA-SHA256'] },
-  { name: 'sha384', blockSize: 128, digestSize: 48, hash: sha384, aliases: ['sha-384', 'sha2-384', 'sha384WithRSAEncryption', 'RSA-SHA384'] },
-  { name: 'sha512', blockSize: 128, digestSize: 64, hash: sha512, aliases: ['sha-512', 'sha2-512', 'sha512WithRSAEncryption', 'RSA-SHA512'] },
-  { name: 'sha-256/192', blockSize: 64, digestSize: 24, hash: sha256_192, aliases: ['sha2-256/192', 'sha256-192'] },
-  { name: 'sha-512/224', blockSize: 128, digestSize: 28, hash: sha512_224, aliases: ['sha2-512/224', 'sha512-224', 'RSA-SHA512/224', 'sha512-224WithRSAEncryption'] },
-  { name: 'sha-512/256', blockSize: 128, digestSize: 32, hash: sha512_256, aliases: ['sha2-512/256', 'sha512-256', 'RSA-SHA512/256', 'sha512-256WithRSAEncryption'] },
-  { name: 'md5-sha1', blockSize: 64, digestSize: 36, hash: md5sha1, aliases: [] },
+  { name: 'md5', blockSize: 64, digestSize: 16, hash: md5, openssl: 'MD5', aliases: ['RSA-MD5', 'md5WithRSAEncryption', 'ssl3-md5'] },
+  { name: 'sha1', blockSize: 64, digestSize: 20, hash: sha1, openssl: 'SHA1', aliases: ['sha-1', 'sha1WithRSAEncryption', 'RSA-SHA1', 'RSA-SHA1-2', 'ssl3-sha1'] },
+  { name: 'sha224', blockSize: 64, digestSize: 28, hash: sha224, openssl: 'SHA2-224', aliases: ['sha-224', 'sha2-224', 'sha224WithRSAEncryption', 'RSA-SHA224'] },
+  { name: 'sha256', blockSize: 64, digestSize: 32, hash: sha256, openssl: 'SHA2-256', aliases: ['sha-256', 'sha2-256', 'sha256WithRSAEncryption', 'RSA-SHA256'] },
+  { name: 'sha384', blockSize: 128, digestSize: 48, hash: sha384, openssl: 'SHA2-384', aliases: ['sha-384', 'sha2-384', 'sha384WithRSAEncryption', 'RSA-SHA384'] },
+  { name: 'sha512', blockSize: 128, digestSize: 64, hash: sha512, openssl: 'SHA2-512', aliases: ['sha-512', 'sha2-512', 'sha512WithRSAEncryption', 'RSA-SHA512'] },
+  { name: 'sha-256/192', blockSize: 64, digestSize: 24, hash: sha256_192, openssl: 'SHA2-256/192', aliases: ['sha2-256/192', 'sha256-192'] },
+  { name: 'sha-512/224', blockSize: 128, digestSize: 28, hash: sha512_224, openssl: 'SHA2-512-224', aliases: ['sha2-512/224', 'sha512-224', 'RSA-SHA512/224', 'sha512-224WithRSAEncryption'] },
+  { name: 'sha-512/256', blockSize: 128, digestSize: 32, hash: sha512_256, openssl: 'SHA2-512-256', aliases: ['sha2-512/256', 'sha512-256', 'RSA-SHA512/256', 'sha512-256WithRSAEncryption'] },
+  { name: 'md5-sha1', blockSize: 64, digestSize: 36, hash: md5sha1, openssl: 'MD5-SHA1', aliases: [] },
   // SHA-3 (FIPS 202).
-  { name: 'sha3-224', blockSize: 144, digestSize: 28, hash: (b) => keccakSha3_224(b), aliases: ['RSA-SHA3-224', 'id-rsassa-pkcs1-v1_5-with-sha3-224'] },
-  { name: 'sha3-256', blockSize: 136, digestSize: 32, hash: (b) => keccakSha3_256(b), aliases: ['RSA-SHA3-256', 'id-rsassa-pkcs1-v1_5-with-sha3-256'] },
-  { name: 'sha3-384', blockSize: 104, digestSize: 48, hash: (b) => keccakSha3_384(b), aliases: ['RSA-SHA3-384', 'id-rsassa-pkcs1-v1_5-with-sha3-384'] },
-  { name: 'sha3-512', blockSize: 72, digestSize: 64, hash: (b) => keccakSha3_512(b), aliases: ['RSA-SHA3-512', 'id-rsassa-pkcs1-v1_5-with-sha3-512'] },
+  { name: 'sha3-224', blockSize: 144, digestSize: 28, hash: (b) => keccakSha3_224(b), openssl: 'SHA3-224', aliases: ['RSA-SHA3-224', 'id-rsassa-pkcs1-v1_5-with-sha3-224'] },
+  { name: 'sha3-256', blockSize: 136, digestSize: 32, hash: (b) => keccakSha3_256(b), openssl: 'SHA3-256', aliases: ['RSA-SHA3-256', 'id-rsassa-pkcs1-v1_5-with-sha3-256'] },
+  { name: 'sha3-384', blockSize: 104, digestSize: 48, hash: (b) => keccakSha3_384(b), openssl: 'SHA3-384', aliases: ['RSA-SHA3-384', 'id-rsassa-pkcs1-v1_5-with-sha3-384'] },
+  { name: 'sha3-512', blockSize: 72, digestSize: 64, hash: (b) => keccakSha3_512(b), openssl: 'SHA3-512', aliases: ['RSA-SHA3-512', 'id-rsassa-pkcs1-v1_5-with-sha3-512'] },
   // Original Keccak padding (0x01), as exposed by OpenSSL.
-  { name: 'keccak-224', blockSize: 144, digestSize: 28, hash: (b) => keccak224(b), aliases: [] },
-  { name: 'keccak-256', blockSize: 136, digestSize: 32, hash: (b) => keccak256(b), aliases: [] },
-  { name: 'keccak-384', blockSize: 104, digestSize: 48, hash: (b) => keccak384(b), aliases: [] },
-  { name: 'keccak-512', blockSize: 72, digestSize: 64, hash: (b) => keccak512(b), aliases: [] },
+  { name: 'keccak-224', blockSize: 144, digestSize: 28, hash: (b) => keccak224(b), openssl: 'KECCAK-224', aliases: [] },
+  { name: 'keccak-256', blockSize: 136, digestSize: 32, hash: (b) => keccak256(b), openssl: 'KECCAK-256', aliases: [] },
+  { name: 'keccak-384', blockSize: 104, digestSize: 48, hash: (b) => keccak384(b), openssl: 'KECCAK-384', aliases: [] },
+  { name: 'keccak-512', blockSize: 72, digestSize: 64, hash: (b) => keccak512(b), openssl: 'KECCAK-512', aliases: [] },
   // XOFs.
-  { name: 'shake128', blockSize: 168, digestSize: 16, hash: (b, n) => shake128(b, n ?? 16), xof: true, defaultOutputLength: 16, aliases: ['shake-128'] },
-  { name: 'shake256', blockSize: 136, digestSize: 32, hash: (b, n) => shake256(b, n ?? 32), xof: true, defaultOutputLength: 32, aliases: ['shake-256'] },
+  { name: 'shake128', blockSize: 168, digestSize: 16, hash: (b, n) => shake128(b, n ?? 16), openssl: 'SHAKE-128', xof: true, defaultOutputLength: 16, aliases: ['shake-128'] },
+  { name: 'shake256', blockSize: 136, digestSize: 32, hash: (b, n) => shake256(b, n ?? 32), openssl: 'SHAKE-256', xof: true, defaultOutputLength: 32, aliases: ['shake-256'] },
+  // KMAC is a MAC, not a digest — no OpenSSL digest name (stays pure JS here).
   { name: 'keccak-kmac-128', blockSize: 168, digestSize: 32, hash: (b, n) => keccakKmac(128, b, n ?? 32), xof: true, defaultOutputLength: 32, aliases: ['keccak-kmac128'] },
   { name: 'keccak-kmac-256', blockSize: 136, digestSize: 64, hash: (b, n) => keccakKmac(256, b, n ?? 64), xof: true, defaultOutputLength: 64, aliases: ['keccak-kmac256'] },
   // BLAKE2 (unkeyed digests; BLAKE2b block 128, BLAKE2s block 64).
-  { name: 'blake2b512', blockSize: 128, digestSize: 64, hash: (b) => blake2b(b, 64), aliases: ['blake2b-512'] },
-  { name: 'blake2s256', blockSize: 64, digestSize: 32, hash: (b) => blake2s(b, 32), aliases: ['blake2s-256'] },
+  { name: 'blake2b512', blockSize: 128, digestSize: 64, hash: (b) => blake2b(b, 64), openssl: 'BLAKE2B-512', aliases: ['blake2b-512'] },
+  { name: 'blake2s256', blockSize: 64, digestSize: 32, hash: (b) => blake2s(b, 32), openssl: 'BLAKE2S-256', aliases: ['blake2s-256'] },
   // SM3 and RIPEMD-160.
-  { name: 'sm3', blockSize: 64, digestSize: 32, hash: sm3, aliases: ['RSA-SM3', 'sm3WithRSAEncryption'] },
-  { name: 'ripemd160', blockSize: 64, digestSize: 20, hash: ripemd160, aliases: ['ripemd', 'ripemd-160', 'rmd160', 'RSA-RIPEMD160', 'ripemd160WithRSA'] },
+  { name: 'sm3', blockSize: 64, digestSize: 32, hash: sm3, openssl: 'SM3', aliases: ['RSA-SM3', 'sm3WithRSAEncryption'] },
+  { name: 'ripemd160', blockSize: 64, digestSize: 20, hash: ripemd160, openssl: 'RIPEMD160', aliases: ['ripemd', 'ripemd-160', 'rmd160', 'RSA-RIPEMD160', 'ripemd160WithRSA'] },
 ];
 
 /** Collapse an OpenSSL digest spelling to a bare, alphanumeric tag. */
@@ -400,6 +407,7 @@ for (const def of DEFS) {
     hash: def.hash,
     xof: def.xof,
     defaultOutputLength: def.defaultOutputLength,
+    openssl: def.openssl,
   };
   LOOKUP.set(def.name, algo);
   LOOKUP.set(normalizeHashName(def.name), algo);
@@ -409,10 +417,47 @@ for (const def of DEFS) {
   }
 }
 
+/**
+ * Whether the OpenSSL subset knows this digest. Probed once per name
+ * (EVP_MD_fetch is itself cached by OpenSSL's provider store) so a name it
+ * cannot fetch silently keeps the pure-JS implementation.
+ */
+const OPENSSL_CAPS = new Map<string, boolean>();
+function opensslSupports(algo: HashAlgo): boolean {
+  const name = algo.openssl as string;
+  let ok = OPENSSL_CAPS.get(name);
+  if (ok === undefined) {
+    const size = opensslDigestSize(name);
+    ok = algo.xof === true ? size > 0 : size === algo.digestSize;
+    OPENSSL_CAPS.set(name, ok);
+  }
+  return ok;
+}
+
 /** Resolve a Node/OpenSSL digest name, or `undefined` when unsupported. */
 export function resolveHash(algorithm: unknown): HashAlgo | undefined {
   if (typeof algorithm !== 'string') return undefined;
-  return LOOKUP.get(algorithm.toLowerCase()) ?? LOOKUP.get(normalizeHashName(algorithm));
+  const base = LOOKUP.get(algorithm.toLowerCase()) ?? LOOKUP.get(normalizeHashName(algorithm));
+  if (base === undefined) return undefined;
+  // Prefer the wasi OpenSSL subset once it has been instantiated (M119); the
+  // pure-JS digests are byte-identical, so the fallback is invisible.
+  if (base.openssl === undefined || !opensslReady() || !opensslSupports(base)) return base;
+  const name = base.openssl;
+  if (base.xof) {
+    const fallback = base.hash;
+    const defaultLen = base.defaultOutputLength ?? 16;
+    return { ...base, hash: (b, n) => opensslDigest(name, b, n ?? defaultLen) ?? fallback(b, n) };
+  }
+  const fallback = base.hash;
+  return { ...base, hash: (b) => opensslDigest(name, b) ?? fallback(b) };
+}
+
+/** Which engine {@link resolveHash} would use right now (diagnostics/tests). */
+export function hashEngine(algorithm: string): 'openssl' | 'js' | 'unknown' {
+  const base = LOOKUP.get(algorithm.toLowerCase()) ?? LOOKUP.get(normalizeHashName(algorithm));
+  if (base === undefined) return 'unknown';
+  if (base.openssl === undefined || !opensslReady() || !opensslSupports(base)) return 'js';
+  return 'openssl';
 }
 
 /** `crypto.getHashes()` — every digest spelling we can actually compute. */

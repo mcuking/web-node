@@ -18,7 +18,16 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -67,6 +76,9 @@ const zlibDir = join(nodeSrc, 'deps', 'zlib');
 const histogramDir = join(nodeSrc, 'deps', 'histogram');
 const brotliDir = join(nodeSrc, 'deps', 'brotli');
 const zstdDir = join(nodeSrc, 'deps', 'zstd');
+const opensslSrcDir = join(nodeSrc, 'deps', 'openssl', 'openssl');
+/** OpenSSL must be configured+made, so it builds in a scratch dir (gitignored). */
+const opensslBuildDir = join(here, '.openssl-build');
 
 /** 编译参数（wasi-sdk 34 / LLVM 23）。 */
 const COMMON = [
@@ -208,10 +220,60 @@ const MODULES = {
     // 会把这一字节归一（它是平台元数据，不是数据）。
     defines: ['-DDYNAMIC_CRC_TABLE', '-DZLIB_CONST', '-DOS_CODE=3'],
   },
+  wn_openssl: {
+    // OpenSSL (M119). Unlike the other modules this is not a flat source list:
+    // OpenSSL ships no WASI target and must go through its own `Configure` +
+    // `make build_libs`. `ensureOpensslLibs()` does that in a scratch dir
+    // (`native/.openssl-build`) and hands back `libcrypto.a`, which is linked
+    // with the thin `native/src/wn_openssl.c` wrapper.
+    //
+    // Only a subset is built (no asm/shared/threads/sockets/engines) and
+    // `--gc-sections` + `-ffunction-sections` drop what the wrapper never
+    // reaches. The remainder is dominated by the default provider's algorithm
+    // registry — web-node's crypto surface is broad on purpose (AES/ChaCha/
+    // DES/Camellia/ARIA/SM4/OCB/SIV/XTS/ML-KEM/Argon2/blake2/cmac/gmac/kmac/
+    // X509/prime/DH all have to work).
+    openssl: true,
+    sources: [join(srcDir, 'wn_openssl.c')],
+    include: [join(opensslSrcDir, 'include'), srcDir],
+  },
 };
 
-const args = process.argv.slice(2);
-const inspect = args.includes('--inspect');
+/**
+ * Configure + build the wasi OpenSSL subset once, into `native/.openssl-build`.
+ * Cached via a marker file so repeat `npm run build:native` runs stay fast.
+ */
+function ensureOpensslLibs() {
+  const marker = join(opensslBuildDir, '.wn-built');
+  const lib = join(opensslBuildDir, 'libcrypto.a');
+  if (existsSync(marker) && existsSync(lib)) return lib;
+  if (!existsSync(join(opensslSrcDir, 'Configure'))) {
+    throw new Error(
+      `OpenSSL source not found at ${opensslSrcDir}. Set NODE_SRC to a Node checkout with deps/openssl.`,
+    );
+  }
+  process.stdout.write('· wn_openssl: configuring + building the wasi OpenSSL subset (once)\n');
+  rmSync(opensslBuildDir, { recursive: true, force: true });
+  mkdirSync(opensslBuildDir, { recursive: true });
+  cpSync(opensslSrcDir, opensslBuildDir, { recursive: true });
+  copyFileSync(
+    join(here, 'openssl', '99-wasi.conf'),
+    join(opensslBuildDir, 'Configurations', '99-wasi.conf'),
+  );
+  const env = { ...process.env, PATH: `${join(sdk, 'bin')}:${process.env.PATH ?? ''}` };
+  const prefix = join(opensslBuildDir, 'out');
+  execFileSync('perl', ['./Configure', 'wasm32-wasip1', `--prefix=${prefix}`], {
+    cwd: opensslBuildDir,
+    env,
+    stdio: 'inherit',
+  });
+  const jobs = Math.max(2, Number(process.env.WN_JOBS ?? 0) || 8);
+  execFileSync('make', [`-j${jobs}`, 'build_libs'], { cwd: opensslBuildDir, env, stdio: 'inherit' });
+  writeFileSync(marker, `${new Date().toISOString()}\n`);
+  return lib;
+}
+
+const args = process.argv.slice(2);const inspect = args.includes('--inspect');
 const only = args.filter((a) => !a.startsWith('--'));
 
 function build(name) {
@@ -219,6 +281,34 @@ function build(name) {
   if (!spec) throw new Error(`unknown module "${name}" (known: ${Object.keys(MODULES).join(', ')})`);
   const out = join(outDir, `${name}.wasm`);
   mkdirSync(outDir, { recursive: true });
+  if (spec.openssl) {
+    const libcrypto = ensureOpensslLibs();
+    process.stdout.write(`· ${name}: 1 source + libcrypto.a -> ${out}\n`);
+    execFileSync(
+      clang,
+      [
+        ...COMMON,
+        ...(spec.defines ?? []),
+        ...(spec.include ?? []).flatMap((d) => ['-I', d]),
+        '-Wl,--gc-sections',
+        '-o',
+        out,
+        ...spec.sources,
+        libcrypto,
+      ],
+      { stdio: 'inherit' },
+    );
+    const bytes = readFileSync(out);
+    process.stdout.write(`  ${(bytes.length / 1024).toFixed(1)} KB\n`);
+    if (inspect) {
+      const mod = new WebAssembly.Module(bytes);
+      const exports = WebAssembly.Module.exports(mod).map((i) => `${i.name}:${i.kind}`).sort();
+      const imports = WebAssembly.Module.imports(mod).map((i) => `${i.module}.${i.name}:${i.kind}`).sort();
+      process.stdout.write(`  exports:\n    ${exports.join('\n    ')}\n`);
+      process.stdout.write(`  imports:\n    ${imports.join('\n    ') || '(none)'}\n`);
+    }
+    return out;
+  }
   const cxx = spec.lang === 'c++';
   const cflags = [
     ...COMMON,
@@ -286,11 +376,26 @@ function main() {
   } catch {
     /* ignore */
   }
+  let opensslVersion = 'unknown';
+  try {
+    const dat = readFileSync(join(opensslSrcDir, 'VERSION.dat'), 'utf8');
+    const num = (k) => new RegExp(`^${k}=(.+)$`, 'm').exec(dat)?.[1]?.trim();
+    const parts = [num('MAJOR'), num('MINOR'), num('PATCH')].filter(Boolean);
+    if (parts.length === 3) opensslVersion = parts.join('.');
+  } catch {
+    /* ignore */
+  }
   const manifest = {
     toolchain: clangVersion,
     sdk: resolve(sdk),
     nodeSrc: resolve(nodeSrc),
-    upstream: { zlib: zlibVersion, brotli: brotliVersion, zstd: zstdVersion, histogram: 'hdr_histogram' },
+    upstream: {
+      zlib: zlibVersion,
+      brotli: brotliVersion,
+      zstd: zstdVersion,
+      histogram: 'hdr_histogram',
+      openssl: opensslVersion,
+    },
     modules: Object.fromEntries(
       built.map((p) => [
         p.slice(p.lastIndexOf('/') + 1),

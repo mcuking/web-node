@@ -2,6 +2,7 @@
 import { NodeRuntime, ProcessExit } from '../node-runtime/runtime';
 import { MemoryVfs, OpfsPersistence } from '../node-runtime/vfs';
 import { VENDORED, installVendored, vendoredLoaded } from '../node-runtime/vendored';
+import { loadWasmModule } from '../node-runtime/wasm/lazy';
 import { loadWasmModules, wasmModuleNames } from '../node-runtime/wasm';
 import { DEMO_FILES } from '../demo-project';
 
@@ -32,6 +33,15 @@ const vendoredSourcesReady: Promise<void> = (async (): Promise<void> => {
  * parse. Starts at module-eval — as early as it can go.
  */
 const wasmReady: Promise<void> = loadWasmModules();
+
+/**
+ * Big native→WASM modules are **not** awaited at boot (M119): the OpenSSL
+ * subset is ~2.3 MB and would undo M107's startup work. They stream in after
+ * `wasmReady` resolves and light up the fast paths (`crypto/hash.ts`) as soon
+ * as they land — the pure-JS fallbacks stay correct meanwhile. Failures are
+ * swallowed on purpose: a missing lazy module is a slowdown, not a bug.
+ */
+void wasmReady.then(() => loadWasmModule('wn_openssl'));
 
 /**
  * Runtime worker.

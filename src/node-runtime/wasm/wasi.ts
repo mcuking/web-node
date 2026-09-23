@@ -15,6 +15,8 @@
 
 const ESUCCESS = 0;
 const EBADF = 8;
+const ENOENT = 44;
+const ENOTSUP = 58;
 
 /** iovec 数组元素大小（ptr u32 + len u32）。 */
 const IOVEC_SIZE = 8;
@@ -47,6 +49,14 @@ export function createWasiStub(options: WasiStubOptions = {}): WasiStub {
 
   const ok = (): number => ESUCCESS;
 
+  /** Zero-fill a `filestat` (64 bytes): dev/ino/nlink/size/atim/mtim/ctim. */
+  const applyFilestat = (ptr: number, filetype: number, size: number): void => {
+    const dv = view();
+    for (let i = 0; i < 64; i++) dv.setUint8(ptr + i, 0);
+    dv.setUint8(ptr + 16, filetype);
+    dv.setBigUint64(ptr + 32, BigInt(size), true);
+  };
+
   return {
     imports: {
       // 往 fd 写字节。默认丢弃（没有文件系统可写）；debug 时打到控制台。
@@ -73,6 +83,49 @@ export function createWasiStub(options: WasiStubOptions = {}): WasiStub {
         return ok();
       },
       fd_close: (_fd: number): number => ok(),
+      // File-descriptor flags (O_APPEND etc.) have no meaning for the sinks we
+      // expose, so report them as unsupported rather than silently accepting.
+      fd_fdstat_set_flags: (_fd: number, _flags: number): number => ENOTSUP,
+      // There is no real filesystem behind these descriptors.
+      fd_read: (_fd: number, _iovs: number, _iovsLen: number, _nread: number): number => EBADF,
+      fd_readdir: (
+        _fd: number,
+        _buf: number,
+        _bufLen: number,
+        _cookie: bigint,
+        outUsed: number,
+      ): number => {
+        view().setUint32(outUsed, 0, true);
+        return EBADF;
+      },
+      fd_filestat_get: (fd: number, ptr: number): number => {
+        applyFilestat(ptr, fd <= 2 ? 2 : 4, 0);
+        return ok();
+      },
+      path_open: (
+        _fd: number,
+        _dirflags: number,
+        _path: number,
+        _pathLen: number,
+        _oflags: number,
+        _fsRightsBase: bigint,
+        _fsRightsInheriting: bigint,
+        _fdflags: number,
+        outFd: number,
+      ): number => {
+        view().setUint32(outFd, 0, true);
+        return ENOENT;
+      },
+      path_filestat_get: (
+        _fd: number,
+        _flags: number,
+        _path: number,
+        _pathLen: number,
+        outPtr: number,
+      ): number => {
+        applyFilestat(outPtr, 0, 0);
+        return ENOENT;
+      },
       fd_fdstat_get: (fd: number, ptr: number): number => {
         // fdstat：只要 filestat 是零填的，libc 就当成一个普通字符设备/文件。
         const dv = view();

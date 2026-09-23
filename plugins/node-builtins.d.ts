@@ -27,8 +27,12 @@ declare module 'node:crypto' {
   export interface Hash {
     update(data: string | Uint8Array): Hash;
     digest(encoding: 'hex'): string;
+    digest(): Uint8Array;
   }
-  export function createHash(algorithm: string): Hash;
+  export type Hmac = Hash;
+  export function createHash(algorithm: string, options?: { outputLength?: number }): Hash;
+  export function createHmac(algorithm: string, key: Uint8Array | string): Hmac;
+  export function getHashes(): string[];
 }
 
 declare module 'node:url' {
