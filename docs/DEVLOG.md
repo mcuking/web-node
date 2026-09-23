@@ -244,6 +244,21 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · M119（首个增量）—— OpenSSL 子集编 wasm，摘要路径切到它（阶段 H P4）
+
+**里程碑**：把「热点 binding → wasm」里的 crypto 部分落地。先把最高风险的一步做了——**确认 OpenSSL 能编 wasm**，再交付第一个可用增量（摘要/HMAC）。
+
+- **可行性（退险）**：OPENSSL **3.5.8**（来自 `~/Downloads/node/deps/openssl/openssl`）用 wasi-sdk 编出 `libcrypto.a` **5.75 MB** / `libssl.a` 0.85 MB，**0 error**；链接出薄模块 `wn_openssl.wasm` **2.29 MB**，SHA-256/MD5/HMAC-SHA256 与真 Node **逐字节一致**。OpenSSL 本身没有 WASI target，所以新增自包含 target `native/openssl/99-wasi.conf`：`bn_ops=SIXTY_FOUR_BIT_LONG`、`thread_scheme=(none)`、`dso_scheme=undef`、`disable=[asm async engine dso shared threads sock ui-console legacy module tests apps docs secure-memory]`。
+- **构建集成**：`native/build.mjs` 新增 `wn_openssl`。它不是一个源文件清单，而是跑 OpenSSL 自己的 `Configure` + `make -j build_libs`，在 `native/.openssl-build`（gitignore）里干活并缓存（marker 文件），然后把该目录里的 `libcrypto.a` 与 `native/src/wn_openssl.c` 链在一起。
+- **三个真坑（已写档在 `99-wasi.conf` 的注释里）**：① **必须 `no-secure-memory`** —— 否则 `crypto/mem_sec.c` 要 `mmap/mprotect/mlock/PROT_NONE`，WASI 没有；② **自定义 target 里不能写 `obj_extension => ".o"`** —— OpenSSL 由 `depext = $target{obj_extension} || '.d'` 推导**依赖文件**后缀，写了它就变成 `-MMD -MF x.o.tmp` + `cmp`/`mv`，**用依赖清单覆盖每一个 `.o`**（表现为 `libcrypto.a` 只有 1.2 MB、wasm-ld 报 “neither Wasm object file nor LLVM bitcode”；`file <obj>` 是 ASCII text 就是它）；③ **`getpid` WASI 没有** —— `threads_none.o`/`rand_unix.o` 会引用它，给个 `int getpid(void){return 1;}` 桩即可（OpenSSL 只拿它做 DRBG fork 检测）。
+- **ABI**：`native/src/wn_openssl.c` 走**通用名**接口（`EVP_MD_fetch` 按名字取），所以 C 表面很小：`wn_openssl_version` / `wn_digest(_size|_xof)` / `wn_digest_new|update|final(|_xof)|copy|free` / `wn_hmac(_new|update|final|free)` / `wn_openssl_last_error`。句柄就是 wasm32 指针，JS 视为不透明。
+- **JS 接入**：新增 `src/node-runtime/bindings/openssl.ts`（薄封装 + 能力探测）与 `src/node-runtime/wasm/lazy.ts`（**惰性**模块表）。**`wn_openssl` 刻意不进启动期 `WASM_MODULES`**：2.29 MB 会在启动时白等，直接炋掉 M107 的成果；改成 `wasmReady` 落了之后后台 `loadWasmModule('wn_openssl')`，失败也吞掉（只是性能回退，不是正确性问题）。`crypto/hash.ts` 在模块就绪后把 `md5/sha1/sha2/sha3/keccak/blake2b-512/blake2s-256/sm3/ripemd160/md5-sha1/shake128/256` 的摘要实现换成 OpenSSL（HMAC 建在摘要上，一并受益），**未就绪、名字取不到、或大小不符则原地回退纯 JS** —— 两边逐字节相同，对调用者不可见。新增 `hashEngine()` 供测试/诊断看当前走哪个引擎。
+- **WASI 宿主补齐**：`wasm/wasi.ts` 补 `fd_fdstat_set_flags`（→`ENOTSUP`）、`fd_read`/`fd_readdir`（→`EBADF`）、`fd_filestat_get`、`path_open`/`path_filestat_get`（→`ENOENT`）的诚实桩（OpenSSL 只在试图读配置文件/目录时才会走到，正常加密路径不触发）。
+- **验收**：新增 `test/openssl.test.ts`（8 条：版本号与宿主一致、大小表、输入长度矩阵逐字节摘要、XOF 任意长、HMAC 多密钥、未知算法必须返回 `null` 而不是错值、引擎确实切到 openssl 且字节不变、`getHashes()` 全表仍能跑）；`tsc --noEmit` 净 · `vitest run` **1019 passed / 2 skipped（121 文件）** · build（`wn_openssl-BcuQYucn.wasm` 2294.89 kB **独立资产**、`runtime.worker-D87_McF5.js` 693.10 kB）。
+- **剩余（后续增量）**：cipher（AES/ChaCha/DES/Camellia/ARIA/SM4/OCB/SIV/XTS/CCM/CBC-CTS）、KDF（pbkdf2/hkdf/scrypt/argon2）、非对称（RSA/EC/DH/ML-KEM）、X509/SPKAC 仍在纯 JS。
+
+---
+
 ### 2026-09-23 · M118 — `brotli` / `zstd` 换成**真 `deps/brotli` / `deps/zstd` 编 wasm**（阶段 H P3）
 
 **里程碑**：把 `zlib` 的 brotli/zstd 半边从「响亮抛错」换成**真上游 C 编出的 wasm**（`deps/brotli` 1.2.0、`deps/zstd` 1.5.7），于是 `brotliCompress(Sync)`/`zstdCompress(Sync)` 与其解码器、四个流类、全部 `BROTLI_PARAM_*`/`ZSTD_c_*`/`ZSTD_d_*` 参数、字典、`pledgedSrcSize`，乃至 `stream/web` 的 `CompressionStream('brotli')` 全部解锁。设计见 `docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`。

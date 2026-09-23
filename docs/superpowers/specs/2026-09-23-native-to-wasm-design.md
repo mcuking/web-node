@@ -76,7 +76,7 @@ B2 下把它们**移回 `REGISTRY` 并指向 wasm**。
 | **P1+** | **`stream/iter` 的 `transform`**：vendor 真 `lib/internal/streams/iter/transform.js`（顶层 `internalBinding('zlib')`，M116 后就绪） | P1 | 差分 **0 diff** |
 | **P2** | **`histogram`**：真 `deps/histogram`（HdrHistogram）+ `wn_histogram.cc`（移植 `src/histogram.cc`）✅ 2026-09-23（M117） | P0 | 差分 0 diff |
 | **P3** | `brotli` / `zstd`（纯计算） | P0 | 差分 0 diff ✅ 2026-09-23（M118） |
-| **P4** | **crypto → OpenSSL 子集**（hash/hmac/cipher/kdf） | P0 | 现有 crypto 差分 **保持 0 diff** |
+| **P4** | **crypto → OpenSSL 子集**（hash/hmac/cipher/kdf）——🚧 2026-09-23（M119）可行性已退险，**摘要/HMAC 已切**；cipher/KDF/非对称待迁 | P0 | 现有 crypto 差分 **保持 0 diff** ✅（摘要） |
 | **P5** | **同步 syscall**：SAB + `Atomics.wait` + FS-worker | P0 | 同步 `fs` 真逐字节 |
 | **P6** | 页内跑通 **webpack / rspack** | P1–P5 | **B1 北极星** |
 
@@ -97,9 +97,8 @@ B2 下把它们**移回 `REGISTRY` 并指向 wasm**。
 
 ## 6. 风险与退路
 
-1. **OpenSSL → wasm 最重**（5063 文件 / 246M）：需 `--no-asm` + 裁 provider。若编不动，P4 退回
-   「JS crypto 保留 + wasm 只补缺」，并**显式报告**而非硬上。
-2. **体积**：OpenSSL wasm 可能数 MB，与当前 665KB worker 冲突 → **必须独立资产 + 惰性加载**（§3.2）。
+1. **OpenSSL → wasm 最重**（5063 文件 / 246M）：需 `--no-asm` + 裁 provider。**2026-09-23 实测：能编**（3.5.8 → `libcrypto.a` 5.75 MB，薄模块 2.29 MB，逐字节对齐），见 `native/openssl/99-wasi.conf` 与 DEVLOG 的 M119 条目。若某个增量真的编不动/链不上，该增量退为「JS crypto 保留 + wasm 只补缺」并**显式报告**，而非硬上。
+2. **体积**：OpenSSL wasm 确为 **2.29 MB**（实测）→ **独立资产 + 惰性加载**（§3.2），不进 worker 启动路径（M119 已按此实现）。
 3. **0 diff 边界**：同一份 C 代码数值应一致，但 wasi 的整数/浮点边角行为要逐项验。
 4. **SAB / COEP**：P5 需跨源隔离；dev 已配，线上 gh-pages 需确认 COOP/COEP 头。
 
