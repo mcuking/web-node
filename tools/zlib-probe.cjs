@@ -232,6 +232,117 @@ zlib.gunzip(Buffer.from('not gzip'), (e) => {
   done();
 });
 
+// --- brotli (M118) ----------------------------------------------------------
+
+const C = zlib.constants;
+
+out.brotli = {
+  hello: hex(zlib.brotliCompressSync(HELLO)),
+  empty: hex(zlib.brotliCompressSync(EMPTY)),
+  fox: brief(zlib.brotliCompressSync(FOX)),
+  head: hex(zlib.brotliCompressSync(FOX).subarray(0, 16)),
+  string: hex(zlib.brotliCompressSync('hello hello hello hello')),
+  roundtrip: zlib.brotliDecompressSync(zlib.brotliCompressSync(FOX)).equals(FOX),
+  roundtripEmpty: zlib.brotliDecompressSync(zlib.brotliCompressSync(EMPTY)).equals(EMPTY),
+  isTransform: zlib.BrotliCompress.prototype instanceof require('stream').Transform,
+};
+
+const brotliParam = (key, value) => brief(zlib.brotliCompressSync(FOX, { params: { [key]: value } }));
+out.brotliQuality = [0, 1, 5, 9, 11].map((q) => q + '=' + brotliParam(C.BROTLI_PARAM_QUALITY, q));
+out.brotliMode = [C.BROTLI_MODE_GENERIC, C.BROTLI_MODE_TEXT, C.BROTLI_MODE_FONT].map((m) => m + '=' + brotliParam(C.BROTLI_PARAM_MODE, m));
+out.brotliLgwin = [10, 16, 22].map((w) => w + '=' + brotliParam(C.BROTLI_PARAM_LGWIN, w));
+out.brotliSizeHint = brotliParam(C.BROTLI_PARAM_SIZE_HINT, FOX.length);
+out.brotliDisableLiteral = brotliParam(C.BROTLI_PARAM_DISABLE_LITERAL_CONTEXT_MODELING, 1);
+
+{
+  const dict = Buffer.from('quick brown fox jumps');
+  const withDict = zlib.brotliCompressSync(FOX, { dictionary: dict });
+  out.brotliDictLen = withDict.length;
+  out.brotliDictRoundtrip = zlib.brotliDecompressSync(withDict, { dictionary: dict }).equals(FOX);
+}
+
+out.brotliErrors = {
+  badParam: errOf(() => zlib.brotliCompressSync(HELLO, { params: { 999: 1 } })),
+  badParamType: errOf(() => zlib.brotliCompressSync(HELLO, { params: { [C.BROTLI_PARAM_QUALITY]: 'x' } })),
+  badDecode: errOf(() => zlib.brotliDecompressSync(Buffer.from('not brotli'))),
+  truncated: errOf(() => zlib.brotliDecompressSync(zlib.brotliCompressSync(FOX).subarray(0, 10))),
+};
+
+async1();
+zlib.brotliCompress(FOX, (e, b) => { out.brotliAsync = e ? 'ERR ' + e.code : brief(b); done(); });
+
+async1();
+{
+  const g = zlib.createBrotliCompress();
+  const parts = [];
+  g.on('data', (c) => parts.push(c));
+  g.on('end', () => {
+    out.brotliStream = {
+      equalsSync: Buffer.concat(parts).equals(zlib.brotliCompressSync(FOX)),
+      len: Buffer.concat(parts).length,
+    };
+    done();
+  });
+  g.on('error', (e) => { out.brotliStream = 'ERR ' + e.code; done(); });
+  for (let i = 0; i < FOX.length; i += 977) g.write(FOX.subarray(i, i + 977));
+  g.end();
+}
+
+// --- zstd (M118) ------------------------------------------------------------
+
+out.zstd = {
+  hello: hex(zlib.zstdCompressSync(HELLO)),
+  empty: hex(zlib.zstdCompressSync(EMPTY)),
+  fox: brief(zlib.zstdCompressSync(FOX)),
+  head: hex(zlib.zstdCompressSync(FOX).subarray(0, 16)),
+  string: hex(zlib.zstdCompressSync('hello hello hello hello')),
+  roundtrip: zlib.zstdDecompressSync(zlib.zstdCompressSync(FOX)).equals(FOX),
+  roundtripEmpty: zlib.zstdDecompressSync(zlib.zstdCompressSync(EMPTY)).equals(EMPTY),
+  isTransform: zlib.ZstdCompress.prototype instanceof require('stream').Transform,
+};
+
+const zstdParam = (key, value) => brief(zlib.zstdCompressSync(FOX, { params: { [key]: value } }));
+out.zstdLevel = [1, 3, 10, 19].map((l) => l + '=' + zstdParam(C.ZSTD_c_compressionLevel, l));
+out.zstdChecksum = [0, 1].map((c) => c + '=' + zstdParam(C.ZSTD_c_checksumFlag, c));
+out.zstdWindowLog = [10, 18, 23].map((w) => w + '=' + zstdParam(C.ZSTD_c_windowLog, w));
+out.zstdStrategy = [C.ZSTD_fast, C.ZSTD_btultra2].map((s) => s + '=' + zstdParam(C.ZSTD_c_strategy, s));
+out.zstdPledge = brief(zlib.zstdCompressSync(FOX, { pledgedSrcSize: FOX.length }));
+
+{
+  const dict = Buffer.from('quick brown fox jumps');
+  const withDict = zlib.zstdCompressSync(FOX, { dictionary: dict });
+  out.zstdDictLen = withDict.length;
+  out.zstdDictRoundtrip = zlib.zstdDecompressSync(withDict, { dictionary: dict }).equals(FOX);
+}
+
+out.zstdErrors = {
+  badParam: errOf(() => zlib.zstdCompressSync(HELLO, { params: { 999: 1 } })),
+  badParamType: errOf(() => zlib.zstdCompressSync(HELLO, { params: { [C.ZSTD_c_compressionLevel]: 'x' } })),
+  badDecode: errOf(() => zlib.zstdDecompressSync(Buffer.from('not zstd'))),
+  truncated: errOf(() => zlib.zstdDecompressSync(zlib.zstdCompressSync(FOX).subarray(0, 10))),
+  pledgedWrong: errOf(() => zlib.zstdCompressSync(HELLO, { pledgedSrcSize: 999 })),
+};
+
+async1();
+zlib.zstdCompress(FOX, (e, b) => { out.zstdAsync = e ? 'ERR ' + e.code : brief(b); done(); });
+
+async1();
+{
+  const g = zlib.createZstdCompress();
+  const parts = [];
+  g.on('data', (c) => parts.push(c));
+  g.on('end', () => {
+    out.zstdStream = {
+      equalsSync: Buffer.concat(parts).equals(zlib.zstdCompressSync(FOX)),
+      len: Buffer.concat(parts).length,
+    };
+    done();
+  });
+  g.on('error', (e) => { out.zstdStream = 'ERR ' + e.code; done(); });
+  for (let i = 0; i < FOX.length; i += 977) g.write(FOX.subarray(i, i + 977));
+  g.end();
+}
+
 // rejectGarbageAfterEnd
 out.rejectGarbage = errOf(() => zlib.gunzipSync(Buffer.concat([zlib.gzipSync(HELLO), Buffer.from([1, 2, 3])]), { rejectGarbageAfterEnd: true }));
 // Trailing NUL padding is allowed (a new member would have to start with a non-zero byte).

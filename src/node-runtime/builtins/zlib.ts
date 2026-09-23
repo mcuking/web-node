@@ -14,8 +14,10 @@ import { notImplemented } from '../errors';
  *
  * The JS layer below is a close port of Node's own `lib/zlib.js` (`ZlibBase` /
  * `Zlib` / `processChunk(Sync)` / the convenience helpers), driving the wasm codec
- * instead of a native handle. Brotli and zstd have no codec here and throw, as do
- * the zip-archive helpers (native-only in Node).
+ * instead of a native handle. **Brotli** (M118) and **zstd** (M118) run on the real
+ * `deps/brotli` / `deps/zstd` compiled to wasm, so `brotliCompressSync` /
+ * `zstdCompressSync` and their streaming forms are live too; only the zip-archive
+ * helpers (native-only in Node) still throw.
  */
 
 // --- modes (mirror node_zlib_mode) ------------------------------------------
@@ -73,6 +75,18 @@ interface ZlibCodecLike {
     strategy: number;
     dictionary?: Uint8Array | null;
     rejectGarbageAfterEnd?: boolean;
+  }) => ZlibCodecLike;
+  BrotliEncoder: new (mode: number, opts?: { params?: Int32Array; dictionary?: Uint8Array | null }) => ZlibCodecLike;
+  BrotliDecoder: new (mode: number, opts?: { params?: Int32Array; dictionary?: Uint8Array | null }) => ZlibCodecLike;
+  ZstdCompress: new (opts?: {
+    params?: Int32Array;
+    dictionary?: Uint8Array | null;
+    pledgedSrcSize?: number | bigint;
+  }) => ZlibCodecLike;
+  ZstdDecompress: new (opts?: {
+    params?: Int32Array;
+    dictionary?: Uint8Array | null;
+    pledgedSrcSize?: number | bigint;
   }) => ZlibCodecLike;
   crc32(data: Uint8Array | string, value: number): number;
   zlibVersion(): string;
@@ -317,7 +331,7 @@ export const zlibSpec: BuiltinSpec = {
       codes: Record<string, new (...args: any[]) => Error & { code?: string }>;
       genericNodeError: (message: string, props?: Record<string, unknown>) => Error;
     };
-    const { ERR_INVALID_ARG_TYPE, ERR_OUT_OF_RANGE, ERR_BUFFER_TOO_LARGE } = errors.codes;
+    const { ERR_INVALID_ARG_TYPE, ERR_OUT_OF_RANGE, ERR_BUFFER_TOO_LARGE, ERR_BROTLI_INVALID_PARAM, ERR_ZSTD_INVALID_PARAM } = errors.codes;
     const validators = ctx.require('internal/validators') as {
       checkRangesOrGetDefault: (value: unknown, name: string, min: number, max: number, def?: number) => number;
       validateFunction: (value: unknown, name: string) => void;
@@ -596,6 +610,147 @@ export const zlibSpec: BuiltinSpec = {
       }
     };
 
+    // --- brotli / zstd (M118) ----------------------------------------------
+
+    const BROTLI_ENCODE = 8;
+    const BROTLI_DECODE = 9;
+    const ZSTD_COMPRESS = 10;
+    const ZSTD_DECOMPRESS = 11;
+    const BROTLI_OPERATION_PROCESS = 0;
+    const BROTLI_OPERATION_FLUSH = 1;
+    const BROTLI_OPERATION_FINISH = 2;
+    const ZSTD_e_continue = 0;
+    const ZSTD_e_flush = 1;
+    const ZSTD_e_end = 2;
+
+    const brotliDefaultOpts = {
+      flush: BROTLI_OPERATION_PROCESS,
+      finishFlush: BROTLI_OPERATION_FINISH,
+      fullFlush: BROTLI_OPERATION_FLUSH,
+    };
+    const zstdDefaultOpts = { flush: ZSTD_e_continue, finishFlush: ZSTD_e_end, fullFlush: ZSTD_e_flush };
+
+    const kMaxBrotliParam = Math.max(
+      ...Object.entries(constants).map(([key, value]) => (key.startsWith('BROTLI_PARAM_') ? (value as number) : 0)),
+    );
+    const kMaxZstdCParam = Math.max(
+      ...Object.entries(constants).map(([key, value]) => (key.startsWith('ZSTD_c_') ? (value as number) : 0)),
+    );
+    const kMaxZstdDParam = Math.max(
+      ...Object.entries(constants).map(([key, value]) => (key.startsWith('ZSTD_d_') ? (value as number) : 0)),
+    );
+
+    /** `opts.params` → 「索引 → 值」数组（`-1` = 未设置），校验对齐 `lib/zlib.js`。 */
+    function collectParams(
+      opts: ZlibOptions | undefined,
+      max: number,
+      invalid: new (key: unknown) => Error,
+    ): Int32Array {
+      const arr = new Int32Array(max + 1).fill(-1);
+      const params = opts?.params as Record<string, unknown> | undefined;
+      if (params) {
+        for (const origKey of Object.keys(params)) {
+          const key = +origKey;
+          if (Number.isNaN(key) || key < 0 || key > max || arr[key] !== -1) {
+            throw new invalid(origKey);
+          }
+          const value = params[origKey];
+          if (typeof value !== 'number' && typeof value !== 'boolean') {
+            throw new ERR_INVALID_ARG_TYPE('options.params[key]', 'number', value);
+          }
+          arr[key] = value as number;
+        }
+      }
+      return arr;
+    }
+
+    /** brotli 字典：非法类型直接报错（zstd 则静默忽略——与 Node 一致）。 */
+    function brotliDictionary(opts: ZlibOptions | undefined): Uint8Array | null {
+      const dictionary = opts?.dictionary;
+      if (dictionary === undefined) return null;
+      if (isArrayBufferView(dictionary)) return dictionary as Uint8Array;
+      if (isAnyArrayBuffer(dictionary)) return new Uint8Array(dictionary as ArrayBuffer);
+      throw new ERR_INVALID_ARG_TYPE(
+        'options.dictionary',
+        ['Buffer', 'TypedArray', 'DataView', 'ArrayBuffer'],
+        dictionary,
+      );
+    }
+
+    function zstdDictionary(opts: ZlibOptions | undefined): Uint8Array | null {
+      const dictionary = opts?.dictionary;
+      if (dictionary === undefined) return null;
+      if (isArrayBufferView(dictionary)) return dictionary as Uint8Array;
+      if (isAnyArrayBuffer(dictionary)) return new Uint8Array(dictionary as ArrayBuffer);
+      return null;
+    }
+
+    function Brotli(this: ZlibInstance, opts: ZlibOptions | undefined, mode: number): void {
+      const params = collectParams(opts, kMaxBrotliParam, ERR_BROTLI_INVALID_PARAM);
+      const dictionary = brotliDictionary(opts);
+      const handle =
+        mode === BROTLI_DECODE
+          ? new binding.BrotliDecoder(mode, { params, dictionary })
+          : new binding.BrotliEncoder(mode, { params, dictionary });
+      this._codec = handle;
+      ZlibBase.call(this, opts, mode, handle, brotliDefaultOpts);
+    }
+    Object.setPrototypeOf(Brotli.prototype, Zlib.prototype);
+    Object.setPrototypeOf(Brotli, Zlib);
+
+    function BrotliCompressCtor(this: ZlibInstance, opts?: ZlibOptions): unknown {
+      if (!(this instanceof (BrotliCompressCtor as unknown as new () => ZlibInstance))) {
+        return deprecateInstantiation(BrotliCompressCtor, 'DEP0184', opts);
+      }
+      Brotli.call(this, opts, BROTLI_ENCODE);
+    }
+    Object.setPrototypeOf(BrotliCompressCtor.prototype, Brotli.prototype);
+    Object.setPrototypeOf(BrotliCompressCtor, Brotli);
+    Object.defineProperty(BrotliCompressCtor, 'name', { value: 'BrotliCompress', configurable: true });
+
+    function BrotliDecompressCtor(this: ZlibInstance, opts?: ZlibOptions): unknown {
+      if (!(this instanceof (BrotliDecompressCtor as unknown as new () => ZlibInstance))) {
+        return deprecateInstantiation(BrotliDecompressCtor, 'DEP0184', opts);
+      }
+      Brotli.call(this, opts, BROTLI_DECODE);
+    }
+    Object.setPrototypeOf(BrotliDecompressCtor.prototype, Brotli.prototype);
+    Object.setPrototypeOf(BrotliDecompressCtor, Brotli);
+    Object.defineProperty(BrotliDecompressCtor, 'name', { value: 'BrotliDecompress', configurable: true });
+
+    function Zstd(this: ZlibInstance, opts: ZlibOptions | undefined, mode: number, maxParam: number): void {
+      const invalid = ERR_ZSTD_INVALID_PARAM;
+      const params = collectParams(opts, maxParam, invalid);
+      const dictionary = zstdDictionary(opts);
+      const pledgedSrcSize = opts?.pledgedSrcSize as number | bigint | undefined;
+      const handle =
+        mode === ZSTD_COMPRESS
+          ? new binding.ZstdCompress({ params, dictionary, pledgedSrcSize })
+          : new binding.ZstdDecompress({ params, dictionary, pledgedSrcSize });
+      this._codec = handle;
+      ZlibBase.call(this, opts, mode, handle, zstdDefaultOpts);
+    }
+
+    function ZstdCompressCtor(this: ZlibInstance, opts?: ZlibOptions): unknown {
+      if (!(this instanceof (ZstdCompressCtor as unknown as new () => ZlibInstance))) {
+        return deprecateInstantiation(ZstdCompressCtor, 'DEP0184', opts);
+      }
+      Zstd.call(this, opts, ZSTD_COMPRESS, kMaxZstdCParam);
+    }
+    Object.setPrototypeOf(ZstdCompressCtor.prototype, ZlibBase.prototype);
+    Object.setPrototypeOf(ZstdCompressCtor, ZlibBase);
+    Object.defineProperty(ZstdCompressCtor, 'name', { value: 'ZstdCompress', configurable: true });
+
+    function ZstdDecompressCtor(this: ZlibInstance, opts?: ZlibOptions): unknown {
+      if (!(this instanceof (ZstdDecompressCtor as unknown as new () => ZlibInstance))) {
+        return deprecateInstantiation(ZstdDecompressCtor, 'DEP0184', opts);
+      }
+      Zstd.call(this, opts, ZSTD_DECOMPRESS, kMaxZstdDParam);
+    }
+    Object.setPrototypeOf(ZstdDecompressCtor.prototype, ZlibBase.prototype);
+    Object.setPrototypeOf(ZstdDecompressCtor, ZlibBase);
+    Object.defineProperty(ZstdDecompressCtor, 'name', { value: 'ZstdDecompress', configurable: true });
+
     // --- one-shot helpers ---------------------------------------------------
 
     function zlibBufferSync(engine: ZlibInstance, buffer: unknown): Uint8Array | { buffer: Uint8Array; engine: ZlibInstance } {
@@ -712,8 +867,6 @@ export const zlibSpec: BuiltinSpec = {
       });
     };
 
-    const NO_BROTLI = 'The host ships no brotli codec.';
-    const NO_ZSTD = 'The host ships no zstd codec.';
     const NO_ZIP = 'Zip archive support is not implemented.';
 
     const defineZipSurface = (
@@ -809,23 +962,23 @@ export const zlibSpec: BuiltinSpec = {
       gunzipSync: createConvenienceMethod(Gunzip, true),
       unzipSync: createConvenienceMethod(Unzip, true),
       crc32,
-      // No platform codec exists for these, and the zip helpers are native-only.
-      createBrotliCompress: lose('createBrotliCompress', NO_BROTLI),
-      createBrotliDecompress: lose('createBrotliDecompress', NO_BROTLI),
-      brotliCompress: lose('brotliCompress', NO_BROTLI),
-      brotliCompressSync: lose('brotliCompressSync', NO_BROTLI),
-      brotliDecompress: lose('brotliDecompress', NO_BROTLI),
-      brotliDecompressSync: lose('brotliDecompressSync', NO_BROTLI),
-      BrotliCompress: loseClass('BrotliCompress', NO_BROTLI, Transform),
-      BrotliDecompress: loseClass('BrotliDecompress', NO_BROTLI, Transform),
-      createZstdCompress: lose('createZstdCompress', NO_ZSTD),
-      createZstdDecompress: lose('createZstdDecompress', NO_ZSTD),
-      zstdCompress: lose('zstdCompress', NO_ZSTD),
-      zstdCompressSync: lose('zstdCompressSync', NO_ZSTD),
-      zstdDecompress: lose('zstdDecompress', NO_ZSTD),
-      zstdDecompressSync: lose('zstdDecompressSync', NO_ZSTD),
-      ZstdCompress: loseClass('ZstdCompress', NO_ZSTD, Transform),
-      ZstdDecompress: loseClass('ZstdDecompress', NO_ZSTD, Transform),
+      // brotli / zstd: the real upstream codecs, compiled to wasm (M118).
+      BrotliCompress: BrotliCompressCtor as unknown as new (opts?: ZlibOptions) => ZlibInstance,
+      BrotliDecompress: BrotliDecompressCtor as unknown as new (opts?: ZlibOptions) => ZlibInstance,
+      brotliCompress: createConvenienceMethod(BrotliCompressCtor as unknown as new (opts?: ZlibOptions) => ZlibInstance, false),
+      brotliCompressSync: createConvenienceMethod(BrotliCompressCtor as unknown as new (opts?: ZlibOptions) => ZlibInstance, true),
+      brotliDecompress: createConvenienceMethod(BrotliDecompressCtor as unknown as new (opts?: ZlibOptions) => ZlibInstance, false),
+      brotliDecompressSync: createConvenienceMethod(BrotliDecompressCtor as unknown as new (opts?: ZlibOptions) => ZlibInstance, true),
+      createBrotliCompress: ((options?: ZlibOptions): ZlibInstance => new (BrotliCompressCtor as unknown as new (o?: ZlibOptions) => ZlibInstance)(options)),
+      createBrotliDecompress: ((options?: ZlibOptions): ZlibInstance => new (BrotliDecompressCtor as unknown as new (o?: ZlibOptions) => ZlibInstance)(options)),
+      ZstdCompress: ZstdCompressCtor as unknown as new (opts?: ZlibOptions) => ZlibInstance,
+      ZstdDecompress: ZstdDecompressCtor as unknown as new (opts?: ZlibOptions) => ZlibInstance,
+      zstdCompress: createConvenienceMethod(ZstdCompressCtor as unknown as new (opts?: ZlibOptions) => ZlibInstance, false),
+      zstdCompressSync: createConvenienceMethod(ZstdCompressCtor as unknown as new (opts?: ZlibOptions) => ZlibInstance, true),
+      zstdDecompress: createConvenienceMethod(ZstdDecompressCtor as unknown as new (opts?: ZlibOptions) => ZlibInstance, false),
+      zstdDecompressSync: createConvenienceMethod(ZstdDecompressCtor as unknown as new (opts?: ZlibOptions) => ZlibInstance, true),
+      createZstdCompress: ((options?: ZlibOptions): ZlibInstance => new (ZstdCompressCtor as unknown as new (o?: ZlibOptions) => ZlibInstance)(options)),
+      createZstdDecompress: ((options?: ZlibOptions): ZlibInstance => new (ZstdDecompressCtor as unknown as new (o?: ZlibOptions) => ZlibInstance)(options)),
       createZipArchive: lose('createZipArchive', NO_ZIP),
       createZipArchiveSync: lose('createZipArchiveSync', NO_ZIP),
       zipFiles: lose('zipFiles', NO_ZIP),
@@ -864,6 +1017,8 @@ interface ZlibOptions {
   info?: boolean;
   maxOutputLength?: number;
   rejectGarbageAfterEnd?: boolean;
+  params?: Record<string | number, number | boolean>;
+  pledgedSrcSize?: number | bigint;
   encoding?: string | null;
   objectMode?: boolean;
   writableObjectMode?: boolean;

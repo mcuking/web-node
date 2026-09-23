@@ -4,12 +4,30 @@
   "nodeSrc": "/Users/tangjianghong/Downloads/node",
   "upstream": {
     "zlib": "1.3.2.1-motley",
+    "brotli": "1.2.0",
+    "zstd": "1.5.7",
     "histogram": "hdr_histogram"
   },
   "modules": {
+    "wn_stub.wasm": {
+      "bytes": 46479,
+      "sha256": "2b5c8738648c1f751f4de26659f97f1e2c0e8e7ab4de446eae4f4dd3e0dd343f"
+    },
     "wn_histogram.wasm": {
       "bytes": 257743,
       "sha256": "05cbbf3c4976b2a089b1c1de032f20df99d920b44d22e3dae04fc6dbfa90a7cb"
+    },
+    "wn_brotli.wasm": {
+      "bytes": 847421,
+      "sha256": "eb413fb239caf93234abb76282762439867ff378e6213ab491703dd8901c5035"
+    },
+    "wn_zstd.wasm": {
+      "bytes": 484031,
+      "sha256": "a146acee32396fb00f21aa45882dd61bbceffa6d68627453024323da92ac9c4b"
+    },
+    "wn_zlib.wasm": {
+      "bytes": 108777,
+      "sha256": "4427a36322c4ade53010c77c37ad16564ba271c94e1766ad4d3ea4129a4a2688"
     }
   }
 }

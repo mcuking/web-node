@@ -238,9 +238,9 @@
   "dictRawInflate": true,
   "dictWrong": "Error|Z_NEED_DICT|2",
   "async": {
-    "gzip": "119:1f8b0800000000000000edcae10181500006c055",
     "deflate9": "107:78daedcae10181500006c055be094cd302e42951",
     "gunzip": true,
+    "gzip": "119:1f8b0800000000000000edcae10181500006c055",
     "inflateRaw": true
   },
   "unzip": {
@@ -265,9 +265,87 @@
     "badValue": "RangeError|ERR_OUT_OF_RANGE||The value of \"value\" is out of range. It must be >= 0 && <= 4294967295. Received -1",
     "asyncBad": "Error|Z_DATA_ERROR|-3|incorrect header check"
   },
+  "brotli": {
+    "hello": "1b1600f88d946ede445586966c206f214f1ce038",
+    "empty": "3b",
+    "fox": "60:1bbb34882c0e78d3d0955d9710bb172ba9cad092",
+    "head": "1bbb34882c0e78d3d0955d9710bb172b",
+    "string": "1b1600f88d946ede445586966c206f214f1ce038",
+    "roundtrip": true,
+    "roundtripEmpty": true,
+    "isTransform": true
+  },
+  "brotliQuality": [
+    "0=118:8b5d1a0080aaaaaaeaff74a5c3496f273d5c4c55",
+    "1=73:8b5d1a0080aaaaaaeaff74a5c3496f273d5c4c55",
+    "5=53:1bbb340044db46a92e245b3214c553916772f2e7",
+    "9=53:1bbb340044db46a92e245b3214c553916772f2e7",
+    "11=60:1bbb34882c0e78d3d0955d9710bb172ba9cad092"
+  ],
+  "brotliMode": [
+    "0=60:1bbb34882c0e78d3d0955d9710bb172ba9cad092",
+    "1=60:1bbb34882c0e78d3d0955d9710bb172ba9cad092",
+    "2=60:1bbb34882c0e78d3d0955d9710bb172ba9cad092"
+  ],
+  "brotliLgwin": [
+    "10=61:a1d8a5416471c09b86aeecba84d8bd5849558696",
+    "16=60:62970691c5016f1abab2eb1262f7622555195a92",
+    "22=60:1bbb34882c0e78d3d0955d9710bb172ba9cad092"
+  ],
+  "brotliSizeHint": "60:1bbb34882c0e78d3d0955d9710bb172ba9cad092",
+  "brotliDisableLiteral": "50:1bbb3488049ef947a40f28a340da4e680bbe1cb0",
+  "brotliDictLen": 47,
+  "brotliDictRoundtrip": true,
+  "brotliErrors": {
+    "badParam": "RangeError|ERR_BROTLI_INVALID_PARAM||999 is not a valid Brotli parameter",
+    "badParamType": "TypeError|ERR_INVALID_ARG_TYPE||The \"options.params[key]\" property must be of type number. Received type string ('x')",
+    "badDecode": "Error|ERR__ERROR_FORMAT_PADDING_2|-15|Decompression failed",
+    "truncated": "Error|Z_BUF_ERROR|-5|unexpected end of file"
+  },
+  "zstd": {
+    "hello": "28b52ffd20176500003068656c6c6f200100994b11",
+    "empty": "28b52ffd2000010000",
+    "fox": "64:28b52ffd60bc33b50100d4025468652071756963",
+    "head": "28b52ffd60bc33b50100d40254686520",
+    "string": "28b52ffd20176500003068656c6c6f200100994b11",
+    "roundtrip": true,
+    "roundtripEmpty": true,
+    "isTransform": true
+  },
+  "zstdLevel": [
+    "1=64:28b52ffd60bc33b50100d4025468652071756963",
+    "3=64:28b52ffd60bc33b50100d4025468652071756963",
+    "10=64:28b52ffd60bc33b50100d4025468652071756963",
+    "19=64:28b52ffd60bc33b50100d4025468652071756963"
+  ],
+  "zstdChecksum": [
+    "0=64:28b52ffd60bc33b50100d4025468652071756963",
+    "1=68:28b52ffd64bc33b50100d4025468652071756963"
+  ],
+  "zstdWindowLog": [
+    "10=220:28b52ffd4000bc33b40100d40254686520717569",
+    "18=64:28b52ffd60bc33b50100d4025468652071756963",
+    "23=64:28b52ffd60bc33b50100d4025468652071756963"
+  ],
+  "zstdStrategy": [
+    "1=64:28b52ffd60bc33b50100d4025468652071756963",
+    "9=64:28b52ffd60bc33b50100d4025468652071756963"
+  ],
+  "zstdPledge": "64:28b52ffd60bc33b50100d4025468652071756963",
+  "zstdDictLen": 45,
+  "zstdDictRoundtrip": true,
+  "zstdErrors": {
+    "badParam": "RangeError|ERR_ZSTD_INVALID_PARAM||999 is not a valid zstd parameter",
+    "badParamType": "TypeError|ERR_INVALID_ARG_TYPE||The \"options.params[key]\" property must be of type number. Received type string ('x')",
+    "badDecode": "Error|ZSTD_error_prefix_unknown|10|Unknown frame descriptor",
+    "truncated": "Error|Z_BUF_ERROR|-5|unexpected end of file",
+    "pledgedWrong": "Error|ZSTD_error_srcSize_wrong|72|Src size is incorrect"
+  },
   "rejectGarbage": "TypeError|ERR_TRAILING_JUNK_AFTER_STREAM_END||Trailing junk found after the end of the compressed stream",
   "allowGarbage": "hello hello hello hello",
   "badTrailing": "Error|Z_DATA_ERROR|-3|incorrect header check",
+  "zstdAsync": "63:28b52ffd0058b50100d40254686520717569636b",
+  "brotliAsync": "60:1bbb34882c0e78d3d0955d9710bb172ba9cad092",
   "streamEqualsSync": true,
   "streamFlushRoundtrip": true,
   "streamFlushLen": 17,
@@ -276,8 +354,16 @@
     "len": 123,
     "smallerThanLevel1": true
   },
+  "streamClosedAfterClose": true,
   "streamChunked": "119:1f8b0800000000000000edcae10181500006c055",
   "streamChunkedEqualsSync": true,
+  "zstdStream": {
+    "equalsSync": false,
+    "len": 72
+  },
   "streamOneByte": "hello hello hello hello",
-  "streamClosedAfterClose": true
+  "brotliStream": {
+    "equalsSync": true,
+    "len": 60
+  }
 }

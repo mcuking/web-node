@@ -74,17 +74,17 @@ function trailingJunkError(): Error {
   return err;
 }
 
-function ex(): WasmExports {
-  return wasmModule('wn_zlib');
+function ex(name: string = 'wn_zlib'): WasmExports {
+  return wasmModule(name);
 }
 
-function memory(): WebAssembly.Memory {
-  return ex().memory as WebAssembly.Memory;
+function memory(name: string = 'wn_zlib'): WebAssembly.Memory {
+  return ex(name).memory as WebAssembly.Memory;
 }
 
 /** 读 wasm 线性内存里以 NUL 结尾的字符串。 */
-function readCString(ptr: number): string {
-  const bytes = new Uint8Array(memory().buffer);
+function readCString(ptr: number, name: string = 'wn_zlib'): string {
+  const bytes = new Uint8Array(memory(name).buffer);
   let end = ptr;
   while (bytes[end] !== 0) end++;
   return new TextDecoder().decode(bytes.subarray(ptr, end));
@@ -324,11 +324,465 @@ export function compressBound(srcLen: number): number {
 export function zlibBinding(_ctx: BindingContext): Record<string, unknown> {
   return {
     Zlib: ZlibCodec,
+    BrotliEncoder: makeBrotliCtor(BROTLI_MODE.ENCODE),
+    BrotliDecoder: makeBrotliCtor(BROTLI_MODE.DECODE),
+    ZstdCompress: makeZstdCtor(ZSTD_MODE.COMPRESS),
+    ZstdDecompress: makeZstdCtor(ZSTD_MODE.DECOMPRESS),
     crc32,
     adler32,
     zlibVersion,
     compressBound,
-    modes: ZLIB_MODE,
+    modes: { ...ZLIB_MODE, ...BROTLI_MODE, ...ZSTD_MODE },
     codes: Z,
   };
+}
+
+// ---------------------------------------------------------------------------
+// brotli / zstd（M118）—— 与 ZlibCodec 同形的 codec（`push(chunk, flush)`）
+// ---------------------------------------------------------------------------
+
+/** `enum node_zlib_mode` 里 brotli/zstd 的取值。 */
+export const BROTLI_MODE = { ENCODE: 8, DECODE: 9 } as const;
+export const ZSTD_MODE = { COMPRESS: 10, DECOMPRESS: 11 } as const;
+
+/** brotli 的 operation（`encode.h`）与 zstd 的 end directive（`zstd.h`）。 */
+const BROTLI_OPERATION_PROCESS = 0;
+const BROTLI_OPERATION_FINISH = 2;
+const ZSTD_E_CONTINUE = 0;
+const ZSTD_E_END = 2;
+
+/** brotli 解码结果（`decode.h`）。 */
+const BROTLI_DECODER_RESULT_SUCCESS = 1;
+const BROTLI_DECODER_RESULT_ERROR = 0;
+const BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT = 2;
+
+/** 把原生错误码包装成 Node 形状的错误（`Error` + `code` + `errno`）。 */
+function codecError(message: string, code: string, errno: number): Error {
+  const err = new Error(message) as Error & { code?: string; errno?: number };
+  err.code = code;
+  err.errno = errno;
+  return err;
+}
+
+/**
+ * 一套可增长的 wasm 内存缓冲（输入/输出各一），供 brotli/zstd codec 搬运字节。
+ * 缓冲区由 wasm 侧 `malloc`，所以 JS 只持有偏移，每次读都重取视图。
+ */
+class CodecBuffers {
+  inPtr = 0;
+  inCap = 0;
+  outPtr = 0;
+  outCap = 0;
+
+  constructor(private readonly alloc: (n: number) => number, private readonly dealloc: (p: number) => void, private readonly memory: () => WebAssembly.Memory) {}
+
+  ensureIn(size: number): number {
+    if (size <= this.inCap && this.inPtr !== 0) return this.inPtr;
+    if (this.inPtr !== 0) this.dealloc(this.inPtr);
+    this.inCap = Math.max(size, 1024);
+    this.inPtr = this.alloc(this.inCap);
+    if (this.inPtr === 0) throw new Error('zlib: out of memory');
+    return this.inPtr;
+  }
+
+  ensureOut(size: number): number {
+    if (size <= this.outCap && this.outPtr !== 0) return this.outPtr;
+    if (this.outPtr !== 0) this.dealloc(this.outPtr);
+    this.outCap = Math.max(size, 16384);
+    this.outPtr = this.alloc(this.outCap);
+    if (this.outPtr === 0) throw new Error('zlib: out of memory');
+    return this.outPtr;
+  }
+
+  bytes(): Uint8Array {
+    return new Uint8Array(this.memory().buffer);
+  }
+
+  free(): void {
+    if (this.inPtr !== 0) this.dealloc(this.inPtr);
+    if (this.outPtr !== 0) this.dealloc(this.outPtr);
+    this.inPtr = this.outPtr = 0;
+    this.inCap = this.outCap = 0;
+  }
+}
+
+export interface BrotliCodecOptions {
+  mode: number; // 8 = encode, 9 = decode
+  /** 索引 → 参数值；`-1` 表示未设置（与 `lib/zlib.js` 的数组一致）。 */
+  params?: Int32Array;
+  dictionary?: Uint8Array | null;
+}
+
+/** brotli 流（编码或解码）。逐条对齐 `BrotliEncoderContext` / `BrotliDecoderContext`。 */
+export class BrotliCodec {
+  #h = 0;
+  #encode: boolean;
+  #buf: CodecBuffers;
+  #closed = false;
+  #finished = false;
+  #lastInputLeft = 0;
+
+  constructor(opts: BrotliCodecOptions, outCap = 16384) {
+    const e = ex('wn_brotli');
+    const mem = (): WebAssembly.Memory => memory('wn_brotli');
+    this.#buf = new CodecBuffers(
+      (n) => (e.wn_alloc as (n: number) => number)(n),
+      (p) => (e.wn_dealloc as (p: number) => void)(p),
+      mem,
+    );
+    this.#encode = opts.mode === BROTLI_MODE.ENCODE;
+    this.#h = (this.#encode
+      ? (e.wn_brotli_enc_new as () => number)()
+      : (e.wn_brotli_dec_new as () => number)()) as number;
+    if (!this.#h) throw new Error('zlib: failed to allocate brotli stream');
+
+    // 字典先装（Node 在 `Init` 里做，且必须在参数之前/之后都无副作用）。
+    const dict = opts.dictionary && opts.dictionary.byteLength > 0 ? opts.dictionary : null;
+    if (dict) {
+      const p = this.#buf.ensureIn(dict.byteLength);
+      this.#buf.bytes().set(dict, p);
+      const ok = this.#encode
+        ? (e.wn_brotli_enc_set_dict as (h: number, p: number, n: number) => number)(this.#h, p, dict.byteLength)
+        : (e.wn_brotli_dec_set_dict as (h: number, p: number, n: number) => number)(this.#h, p, dict.byteLength);
+      if (!ok) throw codecError('Failed to attach brotli dictionary', 'ERR_ZLIB_DICTIONARY_LOAD_FAILED', -1);
+    }
+
+    const params = opts.params;
+    if (params) {
+      for (let key = 0; key < params.length; key++) {
+        const value = params[key];
+        if (value === -1) continue;
+        const ok = this.#encode
+          ? (e.wn_brotli_enc_set_param as (h: number, k: number, v: number) => number)(this.#h, key, value)
+          : (e.wn_brotli_dec_set_param as (h: number, k: number, v: number) => number)(this.#h, key, value);
+        if (!ok) {
+          throw codecError(
+            this.#encode ? 'Initialization failed' : 'Initialization failed',
+            'ERR_ZLIB_INITIALIZATION_FAILED',
+            -1,
+          );
+        }
+      }
+    }
+  }
+
+  setParams(): void {
+    // 对齐 Node：brotli 的 `params()` 目前是 no-op。
+  }
+
+  push(chunk: Uint8Array, flush: number): Uint8Array {
+    if (this.#closed) throw new Error('zlib binding closed');
+    const e = ex('wn_brotli');
+    const outCap = this.#buf.ensureOut(Math.max(this.#buf.outCap, 16384));
+    const inPtr = this.#buf.ensureIn(chunk.byteLength);
+    if (chunk.byteLength > 0) this.#buf.bytes().set(chunk, inPtr);
+
+    const write = this.#encode
+      ? (e.wn_brotli_enc_write as (h: number, ip: number, il: number, op: number, ol: number, f: number) => number)
+      : (e.wn_brotli_dec_write as (h: number, ip: number, il: number, op: number, ol: number, f: number) => number);
+    const availInOf = this.#encode
+      ? (e.wn_brotli_enc_avail_in as (h: number) => number)
+      : (e.wn_brotli_dec_avail_in as (h: number) => number);
+    const availOutOf = this.#encode
+      ? (e.wn_brotli_enc_avail_out as (h: number) => number)
+      : (e.wn_brotli_dec_avail_out as (h: number) => number);
+
+    const parts: Uint8Array[] = [];
+    let total = 0;
+    let inOff = 0;
+    let inLen = chunk.byteLength;
+    let availInAfter = 0;
+    let lastOk = 1;
+
+    for (;;) {
+      lastOk = write(this.#h, inPtr + inOff, inLen, outCap, this.#buf.outCap, flush);
+      const availOut = availOutOf(this.#h);
+      availInAfter = availInOf(this.#h);
+      this.#lastInputLeft = availInAfter;
+      const have = this.#buf.outCap - availOut;
+      if (have > 0) {
+        parts.push(this.#buf.bytes().slice(outCap, outCap + have));
+        total += have;
+      }
+      if (availOut === 0) {
+        inOff += inLen - availInAfter;
+        inLen = availInAfter;
+        continue;
+      }
+      break;
+    }
+
+    if (this.#encode) {
+      this.#finished = (e.wn_brotli_enc_is_finished as (h: number) => number)(this.#h) === 1;
+      // `BrotliEncoderContext::GetErrorInfo`：`last_result_ === false` 即失败。
+      if (lastOk === 0) {
+        throw codecError('Compression failed', 'ERR_BROTLI_COMPRESSION_FAILED', -1);
+      }
+    } else {
+      const result = (e.wn_brotli_dec_result as (h: number) => number)(this.#h);
+      if (result === BROTLI_DECODER_RESULT_SUCCESS) {
+        this.#finished = true;
+      } else if (result === BROTLI_DECODER_RESULT_ERROR) {
+        const code = (e.wn_brotli_dec_error_code as (h: number) => number)(this.#h);
+        const ptr = (e.wn_brotli_dec_error_string as (h: number) => number)(this.#h);
+        throw codecError('Decompression failed', 'ERR_' + readCString(ptr, 'wn_brotli'), code);
+      } else if (flush === BROTLI_OPERATION_FINISH && result === BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
+        // 与 Node 一致：brotli 自己没有这个码，借用 zlib 的 `Z_BUF_ERROR`。
+        throw codecError('unexpected end of file', 'Z_BUF_ERROR', Z.Z_BUF_ERROR);
+      }
+    }
+
+    if (total === 0) return EMPTY;
+    if (parts.length === 1) return parts[0];
+    const joined = new Uint8Array(total);
+    let at = 0;
+    for (const part of parts) {
+      joined.set(part, at);
+      at += part.byteLength;
+    }
+    return joined;
+  }
+
+  reset(): void {
+    if (this.#closed) throw new Error('zlib binding closed');
+    const e = ex('wn_brotli');
+    const ok = this.#encode
+      ? (e.wn_brotli_enc_reset as (h: number) => number)(this.#h)
+      : (e.wn_brotli_dec_reset as (h: number) => number)(this.#h);
+    if (!ok) throw codecError('Initialization failed', 'ERR_ZLIB_INITIALIZATION_FAILED', -1);
+    this.#finished = false;
+  }
+
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    const e = ex('wn_brotli');
+    if (this.#encode) (e.wn_brotli_enc_free as (h: number) => void)(this.#h);
+    else (e.wn_brotli_dec_free as (h: number) => void)(this.#h);
+    this.#h = 0;
+    this.#buf.free();
+  }
+
+  get closed(): boolean {
+    return this.#closed;
+  }
+  get finished(): boolean {
+    return this.#finished;
+  }
+  get lastInputLeft(): number {
+    return this.#lastInputLeft;
+  }
+}
+
+/** brotli 的 `new binding.BrotliEncoder(mode)` / `new binding.BrotliDecoder(mode)` 形状。 */
+function makeBrotliCtor(mode: number): new (mode?: number, opts?: Omit<BrotliCodecOptions, 'mode'>) => BrotliCodec {
+  return class extends BrotliCodec {
+    constructor(_mode?: number, opts: Omit<BrotliCodecOptions, 'mode'> = {}) {
+      super({ mode, ...opts });
+    }
+  } as unknown as new (mode?: number, opts?: Omit<BrotliCodecOptions, 'mode'>) => BrotliCodec;
+}
+
+export interface ZstdCodecOptions {
+  mode: number; // 10 = compress, 11 = decompress
+  params?: Int32Array;
+  dictionary?: Uint8Array | null;
+  pledgedSrcSize?: number | bigint;
+}
+
+/** zstd 流（压缩或解压）。逐条对齐 `ZstdCompressContext` / `ZstdDecompressContext`。 */
+export class ZstdCodec {
+  #h = 0;
+  #compress: boolean;
+  #buf: CodecBuffers;
+  #closed = false;
+  #finished = false;
+  #lastInputLeft = 0;
+  #pledgedKnown = false;
+  #pledged = 0;
+
+  constructor(opts: ZstdCodecOptions, outCap = 16384) {
+    const e = ex('wn_zstd');
+    const mem = (): WebAssembly.Memory => memory('wn_zstd');
+    this.#buf = new CodecBuffers(
+      (n) => (e.wn_alloc as (n: number) => number)(n),
+      (p) => (e.wn_dealloc as (p: number) => void)(p),
+      mem,
+    );
+    this.#compress = opts.mode === ZSTD_MODE.COMPRESS;
+    this.#h = (this.#compress
+      ? (e.wn_zstd_c_new as () => number)()
+      : (e.wn_zstd_d_new as () => number)()) as number;
+    if (!this.#h) throw new Error('zlib: failed to allocate zstd stream');
+
+    if (this.#compress) {
+      const pledged = opts.pledgedSrcSize;
+      if (pledged === undefined) {
+        (e.wn_zstd_c_set_pledged as (h: number, u: number, lo: number, hi: number) => number)(this.#h, 1, 0, 0);
+      } else {
+        const value = BigInt(pledged as number);
+        const lo = Number(value & 0xffffffffn) >>> 0;
+        const hi = Number((value >> 32n) & 0xffffffffn) >>> 0;
+        this.#pledgedKnown = true;
+        this.#pledged = Number(value);
+        (e.wn_zstd_c_set_pledged as (h: number, u: number, lo: number, hi: number) => number)(this.#h, 0, lo, hi);
+      }
+      const ok = (e.wn_zstd_c_reset as (h: number) => number)(this.#h);
+      if (!ok) throw codecError('Could not initialize zstd instance', 'ERR_ZLIB_INITIALIZATION_FAILED', -1);
+      if (this.#pledgedKnown) {
+        // `reset()` 会重置 pledged，这里恢复用户的设置。
+        const value = BigInt(this.#pledged);
+        (e.wn_zstd_c_set_pledged as (h: number, u: number, lo: number, hi: number) => number)(
+          this.#h,
+          0,
+          Number(value & 0xffffffffn) >>> 0,
+          Number((value >> 32n) & 0xffffffffn) >>> 0,
+        );
+        (e.wn_zstd_c_reset as (h: number) => number)(this.#h);
+      }
+    }
+
+    const dict = opts.dictionary && opts.dictionary.byteLength > 0 ? opts.dictionary : null;
+    if (dict) {
+      const p = this.#buf.ensureIn(dict.byteLength);
+      this.#buf.bytes().set(dict, p);
+      const ok = this.#compress
+        ? (e.wn_zstd_c_set_dict as (h: number, p: number, n: number) => number)(this.#h, p, dict.byteLength)
+        : (e.wn_zstd_d_set_dict as (h: number, p: number, n: number) => number)(this.#h, p, dict.byteLength);
+      if (!ok) throw codecError('Failed to load zstd dictionary', 'ERR_ZLIB_DICTIONARY_LOAD_FAILED', -1);
+    }
+
+    const params = opts.params;
+    if (params) {
+      for (let key = 0; key < params.length; key++) {
+        const value = params[key];
+        if (value === -1) continue;
+        const ok = this.#compress
+          ? (e.wn_zstd_c_set_param as (h: number, k: number, v: number) => number)(this.#h, key, value)
+          : (e.wn_zstd_d_set_param as (h: number, k: number, v: number) => number)(this.#h, key, value);
+        if (!ok) throw codecError('Setting parameter failed', 'ERR_ZSTD_PARAM_SET_FAILED', -1);
+      }
+    }
+  }
+
+  setParams(): void {
+    // 对齐 Node：zstd 的 `params()` 目前是 no-op。
+  }
+
+  push(chunk: Uint8Array, flush: number): Uint8Array {
+    if (this.#closed) throw new Error('zlib binding closed');
+    const e = ex('wn_zstd');
+    const outCap = this.#buf.ensureOut(Math.max(this.#buf.outCap, 16384));
+    const inPtr = this.#buf.ensureIn(chunk.byteLength);
+    if (chunk.byteLength > 0) this.#buf.bytes().set(chunk, inPtr);
+
+    const write = this.#compress
+      ? (e.wn_zstd_c_write as (h: number, ip: number, il: number, op: number, ol: number, f: number) => number)
+      : (e.wn_zstd_d_write as (h: number, ip: number, il: number, op: number, ol: number, f: number) => number);
+    const availInOf = this.#compress
+      ? (e.wn_zstd_c_avail_in as (h: number) => number)
+      : (e.wn_zstd_d_avail_in as (h: number) => number);
+    const availOutOf = this.#compress
+      ? (e.wn_zstd_c_avail_out as (h: number) => number)
+      : (e.wn_zstd_d_avail_out as (h: number) => number);
+
+    const parts: Uint8Array[] = [];
+    let total = 0;
+    let inOff = 0;
+    let inLen = chunk.byteLength;
+    let availInAfter = 0;
+    let availOutAfter = 0;
+
+    for (;;) {
+      write(this.#h, inPtr + inOff, inLen, outCap, this.#buf.outCap, flush);
+      const availOut = availOutOf(this.#h);
+      availInAfter = availInOf(this.#h);
+      this.#lastInputLeft = availInAfter;
+      const have = this.#buf.outCap - availOut;
+      if (have > 0) {
+        parts.push(this.#buf.bytes().slice(outCap, outCap + have));
+        total += have;
+      }
+      availOutAfter = availOut;
+      if (availOut === 0) {
+        inOff += inLen - availInAfter;
+        inLen = availInAfter;
+        continue;
+      }
+      break;
+    }
+
+    const errorCode = this.#compress
+      ? (e.wn_zstd_c_error_code as (h: number) => number)(this.#h)
+      : (e.wn_zstd_d_error_code as (h: number) => number)(this.#h);
+    if (errorCode !== 0) {
+      const msgPtr = this.#compress
+        ? (e.wn_zstd_c_error_string as (h: number) => number)(this.#h)
+        : (e.wn_zstd_d_error_string as (h: number) => number)(this.#h);
+      const namePtr = this.#compress
+        ? (e.wn_zstd_c_error_name as (h: number) => number)(this.#h)
+        : (e.wn_zstd_d_error_name as (h: number) => number)(this.#h);
+      throw codecError(readCString(msgPtr, 'wn_zstd'), readCString(namePtr, 'wn_zstd'), errorCode);
+    }
+
+    if (!this.#compress) {
+      const complete = (e.wn_zstd_d_frame_complete as (h: number) => number)(this.#h) === 1;
+      this.#finished = complete;
+      // `ZstdDecompressContext::GetErrorInfo` 的兜底：声明结束时输入已尽、输出还有余量，
+      // 却没走完一帧 → 借 zlib 的 `Z_BUF_ERROR`。
+      if (flush === ZSTD_E_END && !complete && availInAfter === 0 && availOutAfter > 0) {
+        throw codecError('unexpected end of file', 'Z_BUF_ERROR', Z.Z_BUF_ERROR);
+      }
+    } else {
+      this.#finished = flush === ZSTD_E_END && availInAfter === 0 && total > 0;
+    }
+
+    if (total === 0) return EMPTY;
+    if (parts.length === 1) return parts[0];
+    const joined = new Uint8Array(total);
+    let at = 0;
+    for (const part of parts) {
+      joined.set(part, at);
+      at += part.byteLength;
+    }
+    return joined;
+  }
+
+  reset(): void {
+    if (this.#closed) throw new Error('zlib binding closed');
+    const e = ex('wn_zstd');
+    const ok = this.#compress
+      ? (e.wn_zstd_c_reset as (h: number) => number)(this.#h)
+      : (e.wn_zstd_d_reset as (h: number) => number)(this.#h);
+    if (!ok) throw codecError('Could not initialize zstd instance', 'ERR_ZLIB_INITIALIZATION_FAILED', -1);
+    this.#finished = false;
+  }
+
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    const e = ex('wn_zstd');
+    if (this.#compress) (e.wn_zstd_c_free as (h: number) => void)(this.#h);
+    else (e.wn_zstd_d_free as (h: number) => void)(this.#h);
+    this.#h = 0;
+    this.#buf.free();
+  }
+
+  get closed(): boolean {
+    return this.#closed;
+  }
+  get finished(): boolean {
+    return this.#finished;
+  }
+  get lastInputLeft(): number {
+    return this.#lastInputLeft;
+  }
+}
+
+function makeZstdCtor(mode: number): new (opts?: Omit<ZstdCodecOptions, 'mode'>) => ZstdCodec {
+  return class extends ZstdCodec {
+    constructor(opts: Omit<ZstdCodecOptions, 'mode'> = {}) {
+      super({ mode, ...opts });
+    }
+  } as unknown as new (opts?: Omit<ZstdCodecOptions, 'mode'>) => ZstdCodec;
 }

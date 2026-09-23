@@ -182,7 +182,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 下一步（从这里继续）
 
-> **固定路线图在 [`docs/ROADMAP.md`](ROADMAP.md)**——正序、带编号、可勾选（当前剩余 25 个规划任务）。下面这份是历史 backlog（多数已 ✅），保留作决策痕迹。
+> **固定路线图在 [`docs/ROADMAP.md`](ROADMAP.md)**——正序、带编号、可勾选（当前剩余 **10** 个规划任务，主线是**阶段 H：native → WASM**——M115/M116/M117/M118 ✅，下一步 **M119**（`crypto` → OpenSSL 子集编 wasm））。下面这份是历史 backlog（多数已 ✅），保留作决策痕迹。
 
 按优先级：
 
@@ -243,6 +243,20 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-23 · M118 — `brotli` / `zstd` 换成**真 `deps/brotli` / `deps/zstd` 编 wasm**（阶段 H P3）
+
+**里程碑**：把 `zlib` 的 brotli/zstd 半边从「响亮抛错」换成**真上游 C 编出的 wasm**（`deps/brotli` 1.2.0、`deps/zstd` 1.5.7），于是 `brotliCompress(Sync)`/`zstdCompress(Sync)` 与其解码器、四个流类、全部 `BROTLI_PARAM_*`/`ZSTD_c_*`/`ZSTD_d_*` 参数、字典、`pledgedSrcSize`，乃至 `stream/web` 的 `CompressionStream('brotli')` 全部解锁。设计见 `docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`。
+
+- **真上游 C → wasm**：`native/build.mjs` 新增 `wn_brotli`（36 个 `.c`：common + dec + enc，清单照抄 `deps/brotli/brotli.gyp`）与 `wn_zstd`（27 个 `.c`，照抄 `deps/zstd/zstd.gyp`）。两者都是纯 C（`clang`，非 `clang++`）。**`wn_zstd` 故意不开 `ZSTD_MULTITHREAD`**（wasm32-wasip1 没有线程；多线程压缩本来就是可选的，Node 的绑定也不暴露它），`-DZSTD_DISABLE_ASM` 与 `-DXXH_NAMESPACE=ZSTD_` 与 Node 一致。产物 `wn_brotli.wasm` **847.4 KB**（只导入 `proc_exit`）、`wn_zstd.wasm` **484.0 KB**（零导入）。
+- **薄封装**：`native/src/wn_brotli.c`（照搬 `src/node_zlib.cc` 的 `BrotliEncoderContext`/`BrotliDecoderContext`：写入前后偏移、参数设置、字典装载时机、`Z_BUF_ERROR` 兜底、错误码/文案）与 `native/src/wn_zstd.c`（`ZstdCompressContext`/`ZstdDecompressContext`，含 **pledged src size 的消耗量核对** → `ZSTD_error_srcSize_wrong`、解码侧 `frame_complete_`、`ZstdStrerror` 的全张码名表）。ABI 与 wn_zlib 一致；变长输入/输出走 `wn_alloc`/`wn_dealloc` 的 wasm 内存缓冲。
+- **JS 层**：`bindings/zlib.ts` 新增 `BrotliCodec`/`ZstdCodec`（与 `ZlibCodec` 同形的 `push(chunk, flush)`）；**每个 codec 用自己的 wasm 模块**（`ex('wn_brotli')` / `ex('wn_zstd')`，各自的 `memory()` 与 `readCString`）——否则会去 `wn_zlib` 里找不存在的导出。`builtins/zlib.ts` 新增 `BrotliCompress`/`BrotliDecompress`/`ZstdCompress`/`ZstdDecompress` 四个类与 `brotliCompress(Sync)`/`brotliDecompress(Sync)`/`zstdCompress(Sync)`/`zstdDecompress(Sync)`/`createBrotli*`/`createZstd*`；`collectParams`/字典装载（zstd 对非法字典静默忽略，与 Node 一致）/错误码逐条对齐 `lib/zlib.js`。`wasm/index.ts` 登记 `wn_brotli`/`wn_zstd` 两个资产（走 `?url`，按内容哈希发到 `assets/`，不内联进 worker）。
+- **解锁**：`brotliCompressSync`/`brotliDecompressSync`/`zstdCompressSync`/`zstdDecompressSync`、四个 `Transform` 流类、全部参数（quality/mode/lgwin/…、compressionLevel/checksumFlag/windowLog/strategy/…）、预设字典、`pledgedSrcSize`，以及 `stream/web` 的 `CompressionStream`/`DecompressionStream('brotli')`；**仅 zip 存档助手仍响亮抛错**。
+- **验收**：差分装置 `tools/zlib-probe.cjs` 扩出 brotli/zstd 观测块（真 Node oracle → `test/fixtures/zlib.json`，**56 个观测键**），真 Node v26.9.0 vs web-node **逐字段 0 diff**（含参数矩阵、字典、`file://` 流式与异步、错误形状）；`tsc --noEmit` 净 · `vitest run` **1011 passed / 2 skipped（120 文件）** · build（`wn_brotli-Bawm2DuK.wasm` 847.42 kB、`wn_zstd-B6qdSrAh.wasm` 484.03 kB、`runtime.worker-3ryhQ9rh.js` **689.29 kB**）。
+- **两处无意偏离（都是与 Node 一致的观察结果，不是缺陷）**：① `zstd` 的**流式**输出与**一次性**输出不同（`zstdStream` 长度 72 vs `64`）——因为流式先以 `ZSTD_e_continue` 写、再以 `ZSTD_e_end` 收尾，帧头不带 content size；真 Node 也如此（探针把它当作 oracle 锁住）。② brotli 解压错误码形如 `ERR__ERROR_FORMAT_PADDING_2`（Node 在 brotli 自带的 `_ERROR_*` 名前面再拼一个 `ERR_`）。
+- **顺带**：修了 `test/stub-fidelity.test.ts`（Brotli/Zstd 不再是抛错桩）与 `test/webstreams.test.ts`（`CompressionStream('brotli')` 现在可用，改为验一个非法格式仍被 enum 拒），以及 `vendored-builtins.ts` 里「只有 brotli 格式抛错」的注释。另：`test/histogram.test.ts` 的 ELD 用例有一个断言 `h.min >= resolution` 过定——web-node 的 ELD 用 **JS 定时器**（Node 用 libuv 定时器，从不提前触发），`min` 会略低于 `resolution`（实测 ~4.6ms/5ms），本属 M117 已写档的「环境相关偏离」，改为锁契约（`min > 0`）。
+
+---
 
 ### 2026-09-23 · 路线图重规划——按 native→WASM 主线重排阶段（文档，无代码）
 

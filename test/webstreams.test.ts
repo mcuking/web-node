@@ -89,7 +89,7 @@ describe('stream/web: exports', () => {
       return out;
     };
 
-    for (const format of ['gzip', 'deflate', 'deflate-raw'] as const) {
+    for (const format of ['gzip', 'deflate', 'deflate-raw', 'brotli'] as const) {
       const cs = new W.CompressionStream(format);
       const writer = cs.writable.getWriter();
       void writer.write(data);
@@ -104,10 +104,10 @@ describe('stream/web: exports', () => {
     }
   });
 
-  it('throws a typed NotImplementedError for the brotli codec', () => {
+  it('rejects an unknown compression format like Node does', () => {
     const W = boot()('stream/web');
-    // The platform ships no brotli codec, so only that format is unavailable.
-    expect(() => new W.CompressionStream('brotli')).toThrowError(/not implemented/);
+    // The enum converter only accepts deflate / deflate-raw / gzip / brotli.
+    expect(() => new W.CompressionStream('lzma')).toThrowError(/enum|valid/i);
   });
 });
 

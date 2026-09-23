@@ -127,6 +127,8 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_INCOMPATIBLE_OPTION_PAIR: 'Option "%s" cannot be used in combination with option "%s"',
   ERR_INVALID_CURSOR_POS: 'Cannot set cursor row without setting its column',
   ERR_INVALID_FD: '"fd" must be a positive integer: %s',
+  ERR_BROTLI_INVALID_PARAM: '%s is not a valid Brotli parameter',
+  ERR_ZSTD_INVALID_PARAM: '%s is not a valid zstd parameter',
   ERR_INVALID_FD_TYPE: 'Unsupported fd type: %s',
   ERR_TTY_INIT_FAILED: 'TTY initialization failed',
   ERR_CONTEXT_NOT_INITIALIZED: 'context used is not initialized',
@@ -162,6 +164,8 @@ export const ERROR_CODES: Record<string, string> = {
  */
 const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_INVALID_ARG_TYPE: TypeError,
+  ERR_BROTLI_INVALID_PARAM: RangeError,
+  ERR_ZSTD_INVALID_PARAM: RangeError,
   ERR_ASYNC_CALLBACK: TypeError,
   ERR_ASYNC_TYPE: TypeError,
   ERR_INVALID_ASYNC_ID: RangeError,

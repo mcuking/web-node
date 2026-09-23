@@ -728,9 +728,9 @@ export const vendoredBuiltins: BuiltinSpec[] = [
     id: 'internal/webstreams/compression',
     vendorPath: 'internal/webstreams/compression.js',
     origin: 'node-source',
-    // Requires `zlib` lazily. Now that `zlib` is a real module, the whole
-    // CompressionStream/DecompressionStream surface works; only the `brotli`
-    // format throws (no browser codec).
+    // Requires `zlib` lazily. Now that `zlib` is a real module (and brotli/zstd
+    // landed in M118), the whole CompressionStream/DecompressionStream surface
+    // works — including the `brotli` format.
     deps: [
       'internal/errors',
       'internal/util',

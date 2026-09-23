@@ -94,7 +94,7 @@ describe('dns.Resolver query surface', () => {
 });
 
 describe('zlib stub classes look like Node', () => {
-  it('Brotli/Zstd classes extend Transform but throw from the constructor', () => {
+  it('Brotli/Zstd classes extend Transform and are usable (M118)', () => {
     const { req } = boot();
     const zlib = req('zlib');
     const { Transform } = req('stream');
@@ -104,11 +104,12 @@ describe('zlib stub classes look like Node', () => {
       expect(Ctor.name).toBe(name);
       expect(Ctor.prototype).toBeInstanceOf(Transform);
       expect(typeof Ctor.prototype.pipe).toBe('function');
-      expect(() => new Ctor()).toThrowError(/not implemented/i);
+      expect(() => new Ctor()).not.toThrow();
     }
     // Zip classes are plain classes (no codec), still throwing and named.
     expect(zlib.ZipBuffer.name).toBe('ZipBuffer');
     expect(typeof zlib.ZipBuffer).toBe('function');
+    expect(() => new zlib.ZipBuffer()).toThrowError(/not implemented/i);
   });
 
   it('carries the full ZlibBase surface (accessors + methods)', () => {

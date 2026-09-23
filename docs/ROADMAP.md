@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-23（**阶段重规划**——确认 native → WASM 主线后，把因该路线**已完成 / 已吸收**的阶段条目就地结清，并按**叶子任务**重算进度；详见下节。阶段 H 进度：M115/M116/M117 ✅、**M118 进行中**）
+> - **最后更新**：2026-09-23（**阶段 H 推进：M118 ✅**——`brotli`/`zstd` 换成真 `deps/brotli`(1.2.0) / `deps/zstd`(1.5.7) 编 wasm，`brotli(De)Compress(Sync)`/`zstd(De)Compress(Sync)`/`createBrotli*`/`createZstd*` 与 `CompressionStream('brotli')` 全部解锁，差分语料**对真 Node v26.9.0 0 diff**；阶段 H 进度 4/8）
 
 ---
 
@@ -34,7 +34,7 @@
 
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
-| **H** | **native → WASM（主线，P0–P6）** | 8 | 3 | 5 |
+| **H** | **native → WASM（主线，P0–P6）** | 8 | 4 | 4 |
 | E | 启动与加载性能 | 1 | 0 | 1 |
 | F | 构建工具链（**用户愿景，最后做**） | 3 | 0 | 3 |
 | G | 预览与路由 | 1 | 0 | 1 |
@@ -43,10 +43,10 @@
 | C | 平台无对应物（**已解散**，条目已分流） | 2 | 2 | 0 |
 | D | 运行时常量小项（**已归档**） | 4 | 4 | 0 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **51** | **40** | **10**（+1 不做） |
+| **合计** | | **51** | **41** | **10**（+1 不做） |
 
-> **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · **M118（进行中）** · M119 · M120 · M121；另含由阶段 C 移入的 **M101**。
-> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 127 个里程碑，剩余 10 个规划任务**。
+> **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M119 · M120 · M121；另含由阶段 C 移入的 **M101**。
+> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 128 个里程碑，剩余 10 个规划任务**。
 > 注：本表按**叶子任务**计数——M90（拆 M90.1–M90.9）、M92（拆 M92.1/M92.2）、M93（拆 M93.1–M93.4）、M93.4（拆 a–h）、M97（拆 M97.1）的**父项为拆分占位、不计入**。（旧表 A=22 系拆分前的陈旧值，本次一并修正为 26。）
 
 ---
@@ -88,9 +88,11 @@
   - vendor 真 `lib/internal/streams/iter/transform.js`（顶层 `internalBinding('zlib')`）——zlib 绑定已随 **M116** 就绪，可直接 vendor。
   - 验收：`stream/iter` 的 `transform` / `duplex` 助手可用；差分 **0 diff**。
 
-- [ ] **M118 · `brotli` / `zstd` → wasm（P3）**
-  - 用真 `deps/brotli`、`deps/zstd` 编 wasm；当前两者均抛错，编后解锁。
-  - 验收：差分 0 diff。
+- [x] **M118 · `brotli` / `zstd` → wasm（P3）** ✅ 2026-09-23
+  - **真上游 C → wasm**：`deps/brotli`（上游 **1.2.0**，36 个 `.c`：common + dec + enc）与 `deps/zstd`（上游 **1.5.7**，27 个 `.c`）原封不动编成 wasm；薄封装 `native/src/wn_brotli.c`（`BrotliEncoderContext`/`BrotliDecoderContext` 的调用序列）与 `native/src/wn_zstd.c`（`ZstdCompressContext`/`ZstdDecompressContext`，含 pledged src size 核对）。产物 `wn_brotli.wasm` **847.4 KB**、`wn_zstd.wasm` **484.0 KB**（zstd 不开 `ZSTD_MULTITHREAD`——wasm32-wasip1 无线程）。
+  - **JS 层**：`bindings/zlib.ts` 新增 `BrotliCodec` / `ZstdCodec`（与 `ZlibCodec` 同形的 `push(chunk, flush)`；输入/输出缓冲放进 wasm 线性内存，用 `*_avail_in/out` 取剩余量），`builtins/zlib.ts` 新增 `BrotliCompress(Decompress)` / `ZstdCompress(Decompress)` / `createBrotli*` / `createZstd*` 与一次性便利方法；`collectParams`/字典装载/错误码对齐 `lib/zlib.js`。
+  - **解锁**：`brotliCompress(Sync)` / `brotliDecompress(Sync)` / `zstdCompress(Sync)` / `zstdDecompress(Sync)`、四个流类、全部 `BROTLI_PARAM_*`/`ZSTD_c_*`/`ZSTD_d_*` 参数、字典、`pledgedSrcSize`、`stream/web` 的 `CompressionStream('brotli')`；仅 zip 存档助手仍响亮抛错。
+  - **验收**：差分装置扩到 `tools/zlib-probe.cjs`（+ oracle → `test/fixtures/zlib.json`，**56 个观测键**），真 Node v26.9.0 vs web-node **逐字段 0 diff**（含参数、字典、流式、异步、错误形状、`stream/web` brotli）；`tsc --noEmit` 净 · `vitest run` **1011 passed / 2 skipped（120 文件）** · build（worker **689.29 kB**）。
 
 - [ ] **M119 · `crypto` → OpenSSL 子集编 wasm（P4）**  ← 承接 M106 的 crypto 部分
   - 用一个 OpenSSL 子集（`--no-asm` + 裁 provider；hash/hmac/cipher/kdf）编 wasm，对齐现有 crypto binding。

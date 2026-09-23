@@ -1,10 +1,12 @@
 /**
- * `zlib` — deflate/gzip over the **real zlib**, compiled to WebAssembly (M116).
+ * `zlib` — deflate/gzip/brotli/zstd over the **real upstream codecs**, compiled to
+ * WebAssembly (M116 + M118).
  *
- * Node's zlib is a native binding over the C zlib. Here the same upstream C source
- * (`deps/zlib`) is built with wasi-sdk and reached through `internalBinding('zlib')`,
- * so — unlike the previous `CompressionStream` shim — the synchronous API and every
- * codec parameter are available, and every byte must match Node v26.9.0.
+ * Node's zlib is a native binding over the C zlib/brotli/zstd. Here the same upstream
+ * C sources (`deps/zlib`, `deps/brotli`, `deps/zstd`) are built with wasi-sdk and
+ * reached through `internalBinding('zlib')`, so — unlike the previous
+ * `CompressionStream` shim — the synchronous API and every codec parameter are
+ * available, and every byte must match Node v26.9.0.
  *
  * The gate is a shared observation program (`tools/zlib-probe.cjs`) run both on a
  * real Node oracle (which produced `test/fixtures/zlib.json`) and inside web-node:
@@ -261,24 +263,125 @@ describe('zlib', () => {
     expect(r.codes).toBe(expected.codes);
   });
 
-  it('keeps brotli/zstd/zip opt-in by throwing, never silently producing nothing', async () => {
+  it('compresses and decompresses brotli exactly like Node', async () => {
+    const result = await evaluate(`
+      const C = zlib.constants;
+      const brief = (b) => b.length + ':' + Buffer.from(b).toString('hex').slice(0, 40);
+      const fox = Buffer.from('The quick brown fox jumps over the lazy dog. '.repeat(300));
+      const hello = Buffer.from('hello hello hello hello');
+      const dict = Buffer.from('quick brown fox jumps');
+      const withDict = zlib.brotliCompressSync(fox, { dictionary: dict });
+      __report({
+        hello: zlib.brotliCompressSync(hello).toString('hex'),
+        empty: zlib.brotliCompressSync(Buffer.alloc(0)).toString('hex'),
+        string: zlib.brotliCompressSync('hello hello hello hello').toString('hex'),
+        fox: brief(zlib.brotliCompressSync(fox)),
+        head: Buffer.from(zlib.brotliCompressSync(fox).subarray(0, 16)).toString('hex'),
+        quality11: brief(zlib.brotliCompressSync(fox, { params: { [C.BROTLI_PARAM_QUALITY]: 11 } })),
+        lgwin22: brief(zlib.brotliCompressSync(fox, { params: { [C.BROTLI_PARAM_LGWIN]: 22 } })),
+        roundtrip: zlib.brotliDecompressSync(zlib.brotliCompressSync(fox)).equals(fox),
+        roundtripEmpty: zlib.brotliDecompressSync(zlib.brotliCompressSync(Buffer.alloc(0))).equals(Buffer.alloc(0)),
+        dictLen: withDict.length,
+        dictRoundtrip: zlib.brotliDecompressSync(withDict, { dictionary: dict }).equals(fox),
+      });`);
+    const b = expected.brotli as Record<string, unknown>;
+    const quality = expected.brotliQuality as string[];
+    const lgwin = expected.brotliLgwin as string[];
+    expect(result).toEqual({
+      hello: b.hello,
+      empty: b.empty,
+      string: b.string,
+      fox: b.fox,
+      head: b.head,
+      quality11: (quality.find((x) => x.startsWith('11=')) as string).slice(3),
+      lgwin22: (lgwin.find((x) => x.startsWith('22=')) as string).slice(3),
+      roundtrip: b.roundtrip,
+      roundtripEmpty: b.roundtripEmpty,
+      dictLen: expected.brotliDictLen,
+      dictRoundtrip: expected.brotliDictRoundtrip,
+    });
+  }, 20000);
+
+  it('reports brotli decode failures exactly like Node', async () => {
+    const result = await evaluate(`
+      const err = (fn) => { try { fn(); return 'no-error'; } catch (e) { return [e.name, e.code, e.errno, e.message].join('|'); } };
+      __report({
+        badParam: err(() => zlib.brotliCompressSync(Buffer.from('x'), { params: { 999: 1 } })),
+        badParamType: err(() => zlib.brotliCompressSync(Buffer.from('x'), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 'x' } })),
+        badDecode: err(() => zlib.brotliDecompressSync(Buffer.from('not brotli'))),
+        truncated: err(() => zlib.brotliDecompressSync(zlib.brotliCompressSync(Buffer.from('x'.repeat(2000))).subarray(0, 10))),
+      });`);
+    expect(result).toEqual(expected.brotliErrors);
+  }, 20000);
+
+  it('compresses and decompresses zstd exactly like Node', async () => {
+    const result = await evaluate(`
+      const C = zlib.constants;
+      const brief = (b) => b.length + ':' + Buffer.from(b).toString('hex').slice(0, 40);
+      const fox = Buffer.from('The quick brown fox jumps over the lazy dog. '.repeat(300));
+      const hello = Buffer.from('hello hello hello hello');
+      const dict = Buffer.from('quick brown fox jumps');
+      const withDict = zlib.zstdCompressSync(fox, { dictionary: dict });
+      __report({
+        hello: zlib.zstdCompressSync(hello).toString('hex'),
+        empty: zlib.zstdCompressSync(Buffer.alloc(0)).toString('hex'),
+        string: zlib.zstdCompressSync('hello hello hello hello').toString('hex'),
+        fox: brief(zlib.zstdCompressSync(fox)),
+        head: Buffer.from(zlib.zstdCompressSync(fox).subarray(0, 16)).toString('hex'),
+        level19: brief(zlib.zstdCompressSync(fox, { params: { [C.ZSTD_c_compressionLevel]: 19 } })),
+        checksum1: brief(zlib.zstdCompressSync(fox, { params: { [C.ZSTD_c_checksumFlag]: 1 } })),
+        pledged: brief(zlib.zstdCompressSync(fox, { pledgedSrcSize: fox.length })),
+        roundtrip: zlib.zstdDecompressSync(zlib.zstdCompressSync(fox)).equals(fox),
+        roundtripEmpty: zlib.zstdDecompressSync(zlib.zstdCompressSync(Buffer.alloc(0))).equals(Buffer.alloc(0)),
+        dictLen: withDict.length,
+        dictRoundtrip: zlib.zstdDecompressSync(withDict, { dictionary: dict }).equals(fox),
+      });`);
+    const z = expected.zstd as Record<string, unknown>;
+    const level = expected.zstdLevel as string[];
+    const checksum = expected.zstdChecksum as string[];
+    expect(result).toEqual({
+      hello: z.hello,
+      empty: z.empty,
+      string: z.string,
+      fox: z.fox,
+      head: z.head,
+      level19: (level.find((x) => x.startsWith('19=')) as string).slice(3),
+      checksum1: (checksum.find((x) => x.startsWith('1=')) as string).slice(2),
+      pledged: expected.zstdPledge,
+      roundtrip: z.roundtrip,
+      roundtripEmpty: z.roundtripEmpty,
+      dictLen: expected.zstdDictLen,
+      dictRoundtrip: expected.zstdDictRoundtrip,
+    });
+  }, 20000);
+
+  it('reports zstd decode failures exactly like Node', async () => {
+    const result = await evaluate(`
+      const err = (fn) => { try { fn(); return 'no-error'; } catch (e) { return [e.name, e.code, e.errno, e.message].join('|'); } };
+      __report({
+        badParam: err(() => zlib.zstdCompressSync(Buffer.from('x'), { params: { 999: 1 } })),
+        badParamType: err(() => zlib.zstdCompressSync(Buffer.from('x'), { params: { [zlib.constants.ZSTD_c_compressionLevel]: 'x' } })),
+        badDecode: err(() => zlib.zstdDecompressSync(Buffer.from('not zstd'))),
+        truncated: err(() => zlib.zstdDecompressSync(zlib.zstdCompressSync(Buffer.from('x'.repeat(2000))).subarray(0, 10))),
+        pledgedWrong: err(() => zlib.zstdCompressSync(Buffer.from('x'), { pledgedSrcSize: 999 })),
+      });`);
+    expect(result).toEqual(expected.zstdErrors);
+  }, 20000);
+
+  it('keeps the zip archive helpers opt-in by throwing, never silently producing nothing', async () => {
     const result = await evaluate(`
       const err = (fn) => { try { fn(); return 'no-error'; } catch (e) { return /not implemented/i.test(e.message) ? 'not-implemented' : e.name + ':' + e.message; } };
-      const zlib2 = require('zlib');
-      const { Transform } = require('stream');
       __report({
-        brotliCompress: err(() => zlib2.brotliCompressSync(Buffer.from('x'))),
-        brotliCtor: err(() => new zlib2.BrotliCompress()),
-        zstdSync: err(() => zlib2.zstdCompressSync(Buffer.from('x'))),
-        zipFile: err(() => new zlib2.ZipFile()),
-        brotliIsTransform: zlib2.BrotliCompress.prototype instanceof Transform,
+        zipFile: err(() => new zlib.ZipFile()),
+        zipBuffer: err(() => new zlib.ZipBuffer()),
+        zipEntry: err(() => new zlib.ZipEntry()),
+        createZipArchive: err(() => zlib.createZipArchive()),
       });`);
     expect(result).toEqual({
-      brotliCompress: 'not-implemented',
-      brotliCtor: 'not-implemented',
-      zstdSync: 'not-implemented',
       zipFile: 'not-implemented',
-      brotliIsTransform: true,
+      zipBuffer: 'not-implemented',
+      zipEntry: 'not-implemented',
+      createZipArchive: 'not-implemented',
     });
   });
 });

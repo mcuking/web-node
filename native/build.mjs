@@ -65,6 +65,8 @@ const sysroot = join(sdk, 'share', 'wasi-sysroot');
 const nodeSrc = findNodeSrc();
 const zlibDir = join(nodeSrc, 'deps', 'zlib');
 const histogramDir = join(nodeSrc, 'deps', 'histogram');
+const brotliDir = join(nodeSrc, 'deps', 'brotli');
+const zstdDir = join(nodeSrc, 'deps', 'zstd');
 
 /** 编译参数（wasi-sdk 34 / LLVM 23）。 */
 const COMMON = [
@@ -98,6 +100,88 @@ const MODULES = {
       join(histogramDir, 'src', 'hdr_histogram.c'),
     ],
     include: [join(histogramDir, 'include'), join(histogramDir, 'src'), srcDir],
+  },
+  wn_brotli: {
+    // `native/src/wn_brotli.c` 是薄封装；其余是**原封不动的上游 deps/brotli**
+    // （1.2.0），清单照抄 `deps/brotli/brotli.gyp`（common + dec + enc）。
+    sources: [
+      join(srcDir, 'wn_brotli.c'),
+      join(brotliDir, 'c/common/constants.c'),
+      join(brotliDir, 'c/common/context.c'),
+      join(brotliDir, 'c/common/dictionary.c'),
+      join(brotliDir, 'c/common/platform.c'),
+      join(brotliDir, 'c/common/shared_dictionary.c'),
+      join(brotliDir, 'c/common/transform.c'),
+      join(brotliDir, 'c/dec/bit_reader.c'),
+      join(brotliDir, 'c/dec/decode.c'),
+      join(brotliDir, 'c/dec/huffman.c'),
+      join(brotliDir, 'c/dec/prefix.c'),
+      join(brotliDir, 'c/dec/state.c'),
+      join(brotliDir, 'c/dec/static_init.c'),
+      join(brotliDir, 'c/enc/backward_references.c'),
+      join(brotliDir, 'c/enc/backward_references_hq.c'),
+      join(brotliDir, 'c/enc/bit_cost.c'),
+      join(brotliDir, 'c/enc/block_splitter.c'),
+      join(brotliDir, 'c/enc/brotli_bit_stream.c'),
+      join(brotliDir, 'c/enc/cluster.c'),
+      join(brotliDir, 'c/enc/command.c'),
+      join(brotliDir, 'c/enc/compound_dictionary.c'),
+      join(brotliDir, 'c/enc/compress_fragment.c'),
+      join(brotliDir, 'c/enc/compress_fragment_two_pass.c'),
+      join(brotliDir, 'c/enc/dictionary_hash.c'),
+      join(brotliDir, 'c/enc/encode.c'),
+      join(brotliDir, 'c/enc/encoder_dict.c'),
+      join(brotliDir, 'c/enc/entropy_encode.c'),
+      join(brotliDir, 'c/enc/fast_log.c'),
+      join(brotliDir, 'c/enc/histogram.c'),
+      join(brotliDir, 'c/enc/literal_cost.c'),
+      join(brotliDir, 'c/enc/memory.c'),
+      join(brotliDir, 'c/enc/metablock.c'),
+      join(brotliDir, 'c/enc/static_dict.c'),
+      join(brotliDir, 'c/enc/static_dict_lut.c'),
+      join(brotliDir, 'c/enc/static_init.c'),
+      join(brotliDir, 'c/enc/utf8_util.c'),
+    ],
+    include: [join(brotliDir, 'c/include'), join(brotliDir, 'c'), srcDir],
+  },
+  wn_zstd: {
+    // `native/src/wn_zstd.c` 是薄封装；其余是**原封不动的上游 deps/zstd**
+    // （1.5.7），清单照抄 `deps/zstd/zstd.gyp`。
+    //
+    // **故意不开 `ZSTD_MULTITHREAD`**：wasm32-wasip1 没有线程，而多线程压缩
+    // 本来就是可选的（Node 的 zlib 绑定也不暴露它）。`ZSTD_DISABLE_ASM` 与
+    // Node 一致（wasm 上没有 amd64 汇编变体）。
+    sources: [
+      join(srcDir, 'wn_zstd.c'),
+      join(zstdDir, 'lib/common/debug.c'),
+      join(zstdDir, 'lib/common/entropy_common.c'),
+      join(zstdDir, 'lib/common/error_private.c'),
+      join(zstdDir, 'lib/common/fse_decompress.c'),
+      join(zstdDir, 'lib/common/pool.c'),
+      join(zstdDir, 'lib/common/threading.c'),
+      join(zstdDir, 'lib/common/xxhash.c'),
+      join(zstdDir, 'lib/common/zstd_common.c'),
+      join(zstdDir, 'lib/compress/fse_compress.c'),
+      join(zstdDir, 'lib/compress/hist.c'),
+      join(zstdDir, 'lib/compress/huf_compress.c'),
+      join(zstdDir, 'lib/compress/zstd_compress.c'),
+      join(zstdDir, 'lib/compress/zstd_compress_literals.c'),
+      join(zstdDir, 'lib/compress/zstd_compress_sequences.c'),
+      join(zstdDir, 'lib/compress/zstd_compress_superblock.c'),
+      join(zstdDir, 'lib/compress/zstd_double_fast.c'),
+      join(zstdDir, 'lib/compress/zstd_fast.c'),
+      join(zstdDir, 'lib/compress/zstd_lazy.c'),
+      join(zstdDir, 'lib/compress/zstd_ldm.c'),
+      join(zstdDir, 'lib/compress/zstd_opt.c'),
+      join(zstdDir, 'lib/compress/zstd_preSplit.c'),
+      join(zstdDir, 'lib/compress/zstdmt_compress.c'),
+      join(zstdDir, 'lib/decompress/huf_decompress.c'),
+      join(zstdDir, 'lib/decompress/zstd_ddict.c'),
+      join(zstdDir, 'lib/decompress/zstd_decompress.c'),
+      join(zstdDir, 'lib/decompress/zstd_decompress_block.c'),
+    ],
+    include: [join(zstdDir, 'lib'), srcDir],
+    defines: ['-DXXH_NAMESPACE=ZSTD_', '-DZSTD_DISABLE_ASM'],
   },
   wn_zlib: {
     // `native/src/wn_zlib.c` 是薄包装；其余是**原封不动的上游 deps/zlib**。
@@ -182,11 +266,31 @@ function main() {
   } catch {
     /* ignore */
   }
+  let brotliVersion = 'unknown';
+  try {
+    const header = readFileSync(join(brotliDir, 'c/common/version.h'), 'utf8');
+    const major = /#define BROTLI_VERSION_MAJOR (\d+)/.exec(header)?.[1];
+    const minor = /#define BROTLI_VERSION_MINOR (\d+)/.exec(header)?.[1];
+    const patch = /#define BROTLI_VERSION_PATCH (\d+)/.exec(header)?.[1];
+    if (major && minor && patch) brotliVersion = `${major}.${minor}.${patch}`;
+  } catch {
+    /* ignore */
+  }
+  let zstdVersion = 'unknown';
+  try {
+    const header = readFileSync(join(zstdDir, 'lib/zstd.h'), 'utf8');
+    const major = /#define ZSTD_VERSION_MAJOR\s+(\d+)/.exec(header)?.[1];
+    const minor = /#define ZSTD_VERSION_MINOR\s+(\d+)/.exec(header)?.[1];
+    const release = /#define ZSTD_VERSION_RELEASE\s+(\d+)/.exec(header)?.[1];
+    if (major && minor && release) zstdVersion = `${major}.${minor}.${release}`;
+  } catch {
+    /* ignore */
+  }
   const manifest = {
     toolchain: clangVersion,
     sdk: resolve(sdk),
     nodeSrc: resolve(nodeSrc),
-    upstream: { zlib: zlibVersion, histogram: 'hdr_histogram' },
+    upstream: { zlib: zlibVersion, brotli: brotliVersion, zstd: zstdVersion, histogram: 'hdr_histogram' },
     modules: Object.fromEntries(
       built.map((p) => [
         p.slice(p.lastIndexOf('/') + 1),
