@@ -244,6 +244,26 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · M93.4h AES-GCM-SIV、ARIA CCM/GCM、SM4 CCM/GCM/XTS（cipher 全表 165 对齐）
+
+补齐最后 12 个模式名，`getCiphers()` **153 → 165**，与真 Node v26.9.0 **逐名 0 缺 0 余**（crypto 对称密码全表收官）。
+
+- 新增 `src/node-runtime/crypto/gcm-siv.ts`：按 OpenSSL `cipher_aes_gcm_siv{,_polyval,_hw}.c` 实现 **RFC 8452 AES-GCM-SIV**。先从 nonce 用 AES-ECB 派生每消息密钥（`msg_auth_key` = `E(K,LE32(0)‖N)[0..8] ‖ E(K,LE32(1)‖N)[0..8]`，`msg_enc_key` 从 counter 2 起每 8 字节一丰）；POLYVAL 通过 GHASH 在**字节反转**操作数上算（key 字节反转后乘 x，每块输入也反转、输出再反转）；tag 再经 AES-ECB 并置 `counter[15] |= 0x80`，CTR32（前 4 字节**小端**计数器）出密文。**解密先跑 CTR，再对恢复出的明文重算 tag**。
+- `ccm.ts`：`AesCcm` 改为接受任意块密码（新增 `CcmBlockCipher` 接口 + 构造末参 `block?`）；`xts.ts`：`AesXts` 改为接受块密码构造器、可选 tweak 加倍函数与是否查重键。
+- 新增名称：`aes-{128,192,256}-gcm-siv`、`aria-{128,192,256}-ccm`、`aria-{128,192,256}-gcm`、`sm4-ccm`/`sm4-gcm`/`sm4-xts`（12）。
+
+**关键坑 1（SM4-XTS ≠ AES-XTS）**：SM4-XTS 用 OpenSSL 的 **GB 变体**（`crypto/modes/xts128gb.c`，经 `cipher_sm4_xts.c` 调用）——tweak 加倍是**大端右移**、反馈常量 `0xe1` 进**最高字节**；AES-XTS 才是 IEEE 1619（小端左移、`0x87` 进最低字节）。症状：**单块对、多块从第二块起全错、且回环仍 OK**（自洽但与 OpenSSL 不符，很容易漏）。故 `xts.ts` 导出 `gbTweakDbl` 并让 sm4 分支传入。另：SM4-XTS **不做**重键检查（AES-XTS 才查）。
+
+**关键坑 2（GCM-SIV one-shot 与 CTS/XTS 不同）**：三者的 `Final()` 在无先导 `update()` 时都报错，但消息不同——GCM-SIV 是 **AEAD**，Node `CipherBase::Final` 的 `isGcmSivMode` 返回 “Unsupported state or unable to authenticate data”；CTS/XTS 是 “Unsupported state”。另 `final()` 二次 → `ERR_CRYPTO_INVALID_STATE`/“Invalid state”；`getAuthTag()` 在 final 前 → “Invalid state for operation getAuthTag”；`setAuthTag` 非 16 字节 → `ERR_CRYPTO_INVALID_AUTH_TAG`/“Invalid authentication tag length: N”。
+
+**差分**：`tools/crypto-gcm-siv-aead-probe.cjs` → `test/fixtures/crypto-gcm-siv-aead.json`（12 名称 info；GCM-SIV 多长度加解密+回环；ARIA/SM4 CCM/GCM 回环；SM4-XTS 5 种长度；GCM-SIV/CCM/XTS 全套错误面）——**0 diff**；`test/crypto-gcm-siv-aead.test.ts`。
+
+**连带修正**：`test/cipher.test.ts`（原以 `aes-128-gcm-siv` 当“未实现”示例 → 改为断言 `getCiphers().length === 165`）、`test/crypto.test.ts`（移除该例）、`test/crypto-mac.test.ts`（注释更新；aria-ccm 的 CMAC 仍报 invalid mode，与真 Node 一致）。
+
+**门禁**：`tsc --noEmit` 干净 · `vitest run` **993 通过 / 2 skip（118 files）** · `vite build` 绿（worker **664.99KB**）。
+
+---
+
 ### 2026-09-23 · M93.4g CBC 密文窃取（NIST CTS）
 
 补齐 AES/Camellia 的 `-cbc-cts`（真 Node 165 项，web-node 153）。

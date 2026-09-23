@@ -66,7 +66,7 @@ function xorBlock(a: Uint8Array, b: Uint8Array): void {
 }
 
 /** CBC-MAC over the formatted input (B0, AAD blocks, payload blocks). */
-function computeMac(aes: AesKey, blocks: Uint8Array[]): Uint8Array {
+function computeMac(aes: CcmBlockCipher, blocks: Uint8Array[]): Uint8Array {
   const state = new Uint8Array(16);
   for (const block of blocks) {
     xorBlock(state, block);
@@ -90,8 +90,13 @@ export interface CcmOptions {
   plaintextLength?: number;
 }
 
+/** A minimal 128-bit block cipher: just the forward direction (CCM never decrypts). */
+export interface CcmBlockCipher {
+  encryptBlock(block: Uint8Array): void;
+}
+
 export class AesCcm {
-  #aes: AesKey;
+  #aes: CcmBlockCipher;
   #nonce: Uint8Array;
   #tagLength: number;
   #encrypt: boolean;
@@ -103,8 +108,8 @@ export class AesCcm {
   #expectedTag: Uint8Array | null = null;
   #computedTag: Uint8Array | null = null;
 
-  constructor(key: Uint8Array, iv: Uint8Array, encrypt: boolean, tagLength: number, plaintextLength?: number) {
-    this.#aes = new AesKey(key);
+  constructor(key: Uint8Array, iv: Uint8Array, encrypt: boolean, tagLength: number, plaintextLength?: number, block?: CcmBlockCipher) {
+    this.#aes = block ?? new AesKey(key);
     this.#nonce = iv.slice();
     this.#tagLength = tagLength;
     this.#encrypt = encrypt;

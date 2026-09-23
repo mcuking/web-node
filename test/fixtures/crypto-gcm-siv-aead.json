@@ -1,0 +1,209 @@
+{
+  "info": {
+    "aes-128-gcm-siv": {
+      "mode": "gcm-siv",
+      "name": "aes-128-gcm-siv",
+      "keyLength": 16,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "aes-192-gcm-siv": {
+      "mode": "gcm-siv",
+      "name": "aes-192-gcm-siv",
+      "keyLength": 24,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "aes-256-gcm-siv": {
+      "mode": "gcm-siv",
+      "name": "aes-256-gcm-siv",
+      "keyLength": 32,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "aria-128-ccm": {
+      "mode": "ccm",
+      "name": "aria-128-ccm",
+      "nid": 1120,
+      "keyLength": 16,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "aria-192-ccm": {
+      "mode": "ccm",
+      "name": "aria-192-ccm",
+      "nid": 1121,
+      "keyLength": 24,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "aria-256-ccm": {
+      "mode": "ccm",
+      "name": "aria-256-ccm",
+      "nid": 1122,
+      "keyLength": 32,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "aria-128-gcm": {
+      "mode": "gcm",
+      "name": "aria-128-gcm",
+      "nid": 1123,
+      "keyLength": 16,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "aria-192-gcm": {
+      "mode": "gcm",
+      "name": "aria-192-gcm",
+      "nid": 1124,
+      "keyLength": 24,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "aria-256-gcm": {
+      "mode": "gcm",
+      "name": "aria-256-gcm",
+      "nid": 1125,
+      "keyLength": 32,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "sm4-ccm": {
+      "mode": "ccm",
+      "name": "sm4-ccm",
+      "keyLength": 16,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "sm4-gcm": {
+      "mode": "gcm",
+      "name": "sm4-gcm",
+      "keyLength": 16,
+      "blockSize": 1,
+      "ivLength": 12
+    },
+    "sm4-xts": {
+      "mode": "xts",
+      "name": "sm4-xts",
+      "keyLength": 32,
+      "blockSize": 1,
+      "ivLength": 16
+    }
+  },
+  "aead": {
+    "siv128_20": "6e0d0424f43ea11e393ba4f42791ea38634f760e|tag=c13f1695f904a1425157692241620c14|OK",
+    "siv128_0": "|tag=51a6a134bcf72a897c69769234a8e2a2|OK",
+    "siv128_16": "d7d03df60f730cdc1c63ec38c97b0b57|tag=14110e6fd9edaba0626f8b8a12cea6a0|OK",
+    "siv128_31": "052b8d7529bd775bfedaeb96a2c64b4cc0570ca0e44ccbccc1ba700cefb285|tag=ac824377136473f88dab5d069613c7a2|OK",
+    "siv192_20": "bb08f47f2819f8daff86f67c8828dc7edd14df70|tag=4a87d66644e4f359eee88f1bd6a58655|OK",
+    "siv256_20": "800b503fd8d7b4507cb61cb5ae15b6c170ebc426|tag=2f02c12dd5d27d3c723a996fce794846|OK",
+    "siv256_48": "63b8c5e8979aad8561bd334461cb6745640273d2245740c8f9af81d98b06d74c6d4207a7f19bc2a3caa201ff637d1aff|tag=db0b44258ea1f3424df4776c8bd278df|OK",
+    "ariccm128_20": "dbaa556bf2031d9ee5f6ade1998197e3684f78a5|tag=3abe59a7ec7bda5b3502963a8365bf5d|OK",
+    "ariccm192_20": "7c9f895b21226e7cb69d3006e606de218844d883|tag=d2a654af1464404619c348f983859245|OK",
+    "ariccm256_20": "2b50b55f9a3122a7754867566bb0e0767df299e7|tag=d9dcc72066134a2196bb392939e8521a|OK",
+    "ariccm256_0": "|tag=59f0188935f54dc6708181083ed24ccd|OK",
+    "arigcm128_20": "8216e16b3ef803e18f91414d215f321eaef63ddd|tag=870eff9526075e8a3b1537e57b588ced|OK",
+    "arigcm192_20": "f0cfaef9c6b9c5d272f48e6f82f4fbd6a741da3d|tag=68d87ba84174ed955b27bdadfdc60913|OK",
+    "arigcm256_20": "a40ee76484be5f459bb7549541a5b1fdbe6c365e|tag=b654c07f4b265cf57e7a6a1b017be137|OK",
+    "arigcm256_33": "a40ee76484be5f459bb7549541a5b1fdbe6c365e6b1902f85892569534bd426e01|tag=6c1645ce1104c2e3a893ae2313c965a5|OK",
+    "sm4ccm_20": "7aff635df7de7681b32cf5b0731695f9e4b46348|tag=07644488c28be3d62108e1b42e4a5f8e|OK",
+    "sm4ccm_7": "7aff635df7de76|tag=0c4a51fea121608025296ec7b4e86e0a|OK",
+    "sm4gcm_20": "b0069697b17dd4fbdd6fe103b6da920960ea7ec1|tag=ab3bc59272e1cf01dc8c909b300eca20|OK",
+    "sm4gcm_0": "|tag=8c9bdc0c1caf0a70d6d65b133bb235be|OK"
+  },
+  "xts": {
+    "sm4_16": "9132d999276f4eb2db694845c21a5387|OK",
+    "sm4_17": "2b444679ed4d857fe7ed5d00219420c791|OK",
+    "sm4_32": "9132d999276f4eb2db694845c21a538716256ea2527397e3012bcd526c9cf5e7|OK",
+    "sm4_48": "9132d999276f4eb2db694845c21a538716256ea2527397e3012bcd526c9cf5e739ec983cf341fb7dcc963f559f7d6c0e|OK",
+    "sm4_64": "9132d999276f4eb2db694845c21a538716256ea2527397e3012bcd526c9cf5e739ec983cf341fb7dcc963f559f7d6c0e9535b385359091a54a566e5628745d50|OK"
+  },
+  "sivSemantics": {
+    "twoUpdates": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "finalOnly": {
+      "ok": false,
+      "name": "Error",
+      "message": "Unsupported state or unable to authenticate data"
+    },
+    "getTagBeforeFinal": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation getAuthTag"
+    },
+    "twoFinals": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state"
+    },
+    "badIvLength": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "badTagLength": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_AUTH_TAG",
+      "message": "Invalid authentication tag length: 12"
+    },
+    "setAuthTagLength": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_AUTH_TAG",
+      "message": "Invalid authentication tag length: 12"
+    },
+    "decryptNoTag": {
+      "ok": false,
+      "name": "Error",
+      "message": "Unsupported state or unable to authenticate data"
+    },
+    "decryptBadTag": {
+      "ok": false,
+      "name": "Error",
+      "message": "Unsupported state or unable to authenticate data"
+    }
+  },
+  "errors": {
+    "xtsShort": {
+      "ok": false,
+      "name": "Error",
+      "message": "Trying to add data in unsupported state"
+    },
+    "xtsBadIv": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_IV",
+      "message": "Invalid initialization vector"
+    },
+    "xtsSameKeys": {
+      "ok": true,
+      "value": "ok"
+    },
+    "ccmMissingPtLen": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_MISSING_ARGS",
+      "message": "options.plaintextLength required for CCM mode with AAD"
+    },
+    "ccmNoTagLen": {
+      "ok": false,
+      "name": "TypeError",
+      "code": "ERR_CRYPTO_INVALID_AUTH_TAG",
+      "message": "authTagLength required for aria-128-ccm"
+    },
+    "ccmTagBeforeFinal": {
+      "ok": false,
+      "name": "Error",
+      "code": "ERR_CRYPTO_INVALID_STATE",
+      "message": "Invalid state for operation getAuthTag"
+    }
+  }
+}

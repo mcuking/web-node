@@ -134,7 +134,8 @@ describe('crypto.createMac unit surface', () => {
     expect(
       crypto.createMac('cmac', new Uint8Array(16).fill(1), { cipher: 'aes-128-cbc-cts' }).update('data').final('hex'),
     ).toBe('f3346600cd81405c757d154341c4ee75');
-    // A known-but-unimplemented cipher stays loud.
+    // A known-but-unsupported cipher stays loud: CCM cannot back CMAC, exactly
+    // as OpenSSL's provider reports its "invalid mode".
     expect(() => crypto.createMac('cmac', new Uint8Array(16).fill(1), { cipher: 'aria-128-ccm' })).toThrowError(
       /invalid mode/i,
     );

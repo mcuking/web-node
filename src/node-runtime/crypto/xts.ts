@@ -12,17 +12,41 @@
  */
 import { AesKey } from './aes';
 
+/** The block-cipher surface XTS needs: forward (tweak encryption) and inverse. */
+export interface XtsBlockCipher {
+  encryptBlock(block: Uint8Array): void;
+  decryptBlock(block: Uint8Array): void;
+}
+
+export type XtsCipherCtor = new (key: Uint8Array) => XtsBlockCipher;
+export type XtsTweakDbl = (tweak: Uint8Array) => Uint8Array;
+
 /**
- * Advances the XTS tweak: multiply by α in GF(2^128) modulo
+ * Advances the standard XTS tweak: multiply by α in GF(2^128) modulo
  * x^128 + x^7 + x^2 + x + 1, with the tweak treated as a little-endian value
  * (so the carry flows from the last byte towards the first, unlike GCM/SIV).
  */
-function tweakDbl(b: Uint8Array): Uint8Array {
+function defaultTweakDbl(b: Uint8Array): Uint8Array {
   const out = new Uint8Array(16);
   const carry = b[15] >> 7;
   for (let i = 15; i > 0; i--) out[i] = ((b[i] << 1) | (b[i - 1] >> 7)) & 0xff;
   out[0] = (b[0] << 1) & 0xff;
   if (carry) out[0] ^= 0x87;
+  return out;
+}
+
+/**
+ * The "GB" tweak doubling used by SM4-XTS (OpenSSL `crypto/modes/xts128gb.c`).
+ * Unlike the IEEE 1619 rule this treats the 16-byte tweak as a big-endian value
+ * and shifts it *right*, feeding the reduction constant `0xe1` back into the
+ * most-significant byte.
+ */
+export function gbTweakDbl(b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(16);
+  const carry = b[15] & 1;
+  for (let i = 15; i > 0; i--) out[i] = ((b[i] >> 1) | ((b[i - 1] & 1) << 7)) & 0xff;
+  out[0] = b[0] >> 1;
+  if (carry) out[0] ^= 0xe1;
   return out;
 }
 
@@ -37,33 +61,45 @@ function invalidState(operation: string): Error {
 }
 
 export class AesXts {
-  #k1: AesKey;
-  #k2: AesKey;
+  #k1: XtsBlockCipher;
+  #k2: XtsBlockCipher;
   #encrypt: boolean;
   #iv: Uint8Array;
   #done = false;
+  #tweakDbl: (tweak: Uint8Array) => Uint8Array;
 
-  constructor(key: Uint8Array, iv: Uint8Array, encrypt: boolean) {
+  constructor(
+    key: Uint8Array,
+    iv: Uint8Array,
+    encrypt: boolean,
+    BlockCipher: XtsCipherCtor = AesKey,
+    checkDuplicateKeys = true,
+    tweakDbl: (tweak: Uint8Array) => Uint8Array = defaultTweakDbl,
+  ) {
     const half = key.length / 2;
     const key1 = key.subarray(0, half);
     const key2 = key.subarray(half);
-    // OpenSSL refuses key halves that are equal (a known weak-key footgun).
-    let same = true;
-    for (let i = 0; i < half; i++) {
-      if (key1[i] !== key2[i]) {
-        same = false;
-        break;
+    // AES-XTS refuses key halves that are equal (a known weak-key footgun);
+    // OpenSSL does not apply that check to SM4-XTS.
+    if (checkDuplicateKeys) {
+      let same = true;
+      for (let i = 0; i < half; i++) {
+        if (key1[i] !== key2[i]) {
+          same = false;
+          break;
+        }
+      }
+      if (same) {
+        const error = new Error('error:1C800095:Provider routines::xts duplicated keys');
+        (error as { code?: string }).code = 'ERR_OSSL_XTS_DUPLICATED_KEYS';
+        throw error;
       }
     }
-    if (same) {
-      const error = new Error('error:1C800095:Provider routines::xts duplicated keys');
-      (error as { code?: string }).code = 'ERR_OSSL_XTS_DUPLICATED_KEYS';
-      throw error;
-    }
-    this.#k1 = new AesKey(key1);
-    this.#k2 = new AesKey(key2);
+    this.#k1 = new BlockCipher(key1);
+    this.#k2 = new BlockCipher(key2);
     this.#encrypt = encrypt;
     this.#iv = new Uint8Array(iv.subarray(0, 16));
+    this.#tweakDbl = tweakDbl;
   }
 
   update(input: Uint8Array): Uint8Array {
@@ -90,7 +126,7 @@ export class AesXts {
       scratch = block;
       offset += 16;
       if (offset === len) return out;
-      tweak = tweakDbl(tweak);
+      tweak = this.#tweakDbl(tweak);
     }
     // Ciphertext stealing: `offset` marks a trailing partial block (1..15).
     const r = len - offset;
@@ -127,11 +163,11 @@ export class AesXts {
       out.set(block, offset);
       offset += 16;
       if (offset === len) return out;
-      tweak = tweakDbl(tweak);
+      tweak = this.#tweakDbl(tweak);
     }
     // `offset` is the start of the final full block; `tweak` is its
     // (T_{m-1}); the partial block sits at `offset + 16`.
-    const tweak1 = tweakDbl(tweak);
+    const tweak1 = this.#tweakDbl(tweak);
     const block = new Uint8Array(16);
     for (let j = 0; j < 16; j++) block[j] = input[offset + j] ^ tweak1[j];
     this.#k1.decryptBlock(block);

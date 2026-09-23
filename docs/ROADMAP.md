@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-23（阶段 A **22/22 收官**：M93.4e `cfb1`/`cfb8`、M93.4f `wrap-inv`/`des3-wrap`、M93.4g `cbc-cts`；`getCiphers()` **111→153**（真 Node 165，余 12：gcm-siv/aria-ccm/gcm/sm4-ccm/gcm/xts）；阶段 D 4/4、M107 载荷拆分；合计 **44 / 33 / 11**）
+> - **最后更新**：2026-09-23（阶段 A **22/22 收官**：M93.4e `cfb1`/`cfb8`、M93.4f `wrap-inv`/`des3-wrap`、M93.4g `cbc-cts`、M93.4h `gcm-siv`/`aria-ccm/gcm`/`sm4-ccm/gcm/xts`；`getCiphers()` **111→165**，与真 Node **逐名全对齐**；阶段 D 4/4、M107 载荷拆分；合计 **44 / 33 / 11**）
 
 ---
 
@@ -144,7 +144,7 @@
   - 差分：`tools/crypto-ccm-probe.cjs` → `test/fixtures/crypto-ccm.json`（含 SP 800-38C 附录 C 例 1、16/24/32 密钥、tag 4–16、nonce 7–13、空 payload、全套错误面）——**0 diff**；`test/crypto-ccm.test.ts`。
   - 风险：中低。
 
-- [x] **M93.4 · 其余模式与密码**（拆为 M93.4a–M93.4g）
+- [x] **M93.4 · 其余模式与密码**（拆为 M93.4a–M93.4h）
   > **2026-09-22 拆分原因**：与 M93 同理——覆盖面过大（三种额外块密码 + 四种额外模式/包装），逐项验证无法混在一起。拆为：
 
   - [x] **M93.4a · Camellia** ✅ 2026-09-22
@@ -198,6 +198,14 @@
     - 语义（与真 Node 一致）：**一次性**模式——`update` 至少一个块且只允许一次（第二次 → “Trying to add data in unsupported state”）；`update` 一次性吐出全部输出；`final()` 仅关闭（返回空）；无 `update` 先 `final()` → “Unsupported state”；二次 `final()` → `ERR_CRYPTO_INVALID_STATE`/“Invalid state”；`getAuthTag()` → “Invalid state for operation getAuthTag”。`CMAC` 接受 `cbc-cts`（与普通 cbc 同值，已对齐）。
     - 差分：`tools/crypto-cbc-cts-probe.cjs` → `test/fixtures/crypto-cbc-cts.json`（6 个名称 info；12 种长度含 16/17/18/20/31/32/33/47/48/49/64/1000 的加密+回环；一次性语义；全套错误面）——**0 diff**；`test/crypto-cbc-cts.test.ts`。
     - 仍缺（M93.4h+，12 个）：`aes-*-gcm-siv`(3)、`aria-*-ccm`(3)、`aria-*-gcm`(3)、`sm4-ccm`/`sm4-gcm`/`sm4-xts`(3)。
+  - [x] **M93.4h · AES-GCM-SIV、ARIA CCM/GCM、SM4 CCM/GCM/XTS（cipher 全表 165 对齐）** ✅ 2026-09-23
+    - 新增 `src/node-runtime/crypto/gcm-siv.ts`：按 OpenSSL `cipher_aes_gcm_siv{,_polyval,_hw}.c` 实现 **RFC 8452 AES-GCM-SIV**。先从 nonce 用 AES-ECB 派生每消息密钥（`msg_auth_key` = `E(K,LE32(0)‖N)[0..8]‖E(K,LE32(1)‖N)[0..8]`、`msg_enc_key` 从 counter 2 起每 8 字节一半）；POLYVAL 用 GHASH 在**字节反转**操作数上算（key 字节反转后乘 x）；tag 再经 AES-ECB 并置 `counter[15] |= 0x80`，CTR32（前 4 字节**小端**计数器）出密文。**解密先跑 CTR 再重算 tag**。
+    - `AesCcm` 改为接受任意块密码（新增 `CcmBlockCipher` 接口 + 构造末参 `block?`），ARIA/SM4 的 CCM 走各自 family 的块函数；`AesXts` 改为接受块密码构造器 + 可选 tweak 加倍函数 + 是否查重键。
+    - **关键坑（SM4-XTS 与 AES-XTS 不同）**：SM4-XTS 用 OpenSSL 的 **GB 变体**（`crypto/modes/xts128gb.c`，见 `cipher_sm4_xts.c`）——tweak 加倍是**大端右移**、反馈常量 `0xe1` 进**最高字节**；AES-XTS 才是 IEEE 1619（小端左移、`0x87` 进最低字节）。症状：单块对、多块从第二块起全错。故 `xts.ts` 导出 `gbTweakDbl` 并让 sm4 分支传入。另：SM4-XTS **不做**重键检查（AES-XTS 才查）。
+    - **关键坑（GCM-SIV one-shot）**：与 CTS/XTS 同为一次性模式，但它是 **AEAD**，`Final()` 在无先导 `update()` 时返回“Unsupported state or unable to authenticate data”（Node `CipherBase::Final` 的 `isGcmSivMode` 检查），而非 CTS/XTS 的“Unsupported state”。
+    - 新增名称：`aes-{128,192,256}-gcm-siv`(3)、`aria-{128,192,256}-ccm`(3)、`aria-{128,192,256}-gcm`(3)、`sm4-ccm`/`sm4-gcm`/`sm4-xts`(3) → **`getCiphers()` 153 → 165**，与真 Node **逐名 0 缺 0 余**。
+    - 差分：`tools/crypto-gcm-siv-aead-probe.cjs` → `test/fixtures/crypto-gcm-siv-aead.json`（12 名称 info；GCM-SIV 多长度加解密+回环；ARIA/SM4 CCM/GCM 回环；SM4-XTS 5 种长度；GCM-SIV/CCM/XTS 全套错误面）——**0 diff**；`test/crypto-gcm-siv-aead.test.ts`。
+    - 连带修正：`test/cipher.test.ts`（原以 `aes-128-gcm-siv` 当“未实现”示例 → 改为断言 `getCiphers().length === 165`）、`test/crypto.test.ts`（移除该例）、`test/crypto-mac.test.ts`（注释更新，aria-ccm 的 CMAC 仍报 invalid mode）。
 
 - [x] **M94 · `crypto.Certificate`** ✅ 2026-09-22
   - Node 已弃用的 `crypto.Certificate` 类（`verifySpkac`/`exportPublicKey`/`exportChallenge`）。由 `src/node-runtime/crypto/spkac.ts` 实现（NETSCAPE_SPKI 解析 + OpenSSL 风格 base64 解码 + 签名校验），在 builtin 里接成「可 new 也可直接调用」的函数 + 原型/静态三方法。

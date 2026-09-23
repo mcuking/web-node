@@ -101,12 +101,13 @@ import { CfbFeedback } from './cfb';
 import { ChaCha20Cipher, ChaCha20Poly1305, isValidTagLength, type SyncCipher } from './chacha20';
 import { DesCipher, DesEde, type DesMode } from './des';
 import { AesOcb } from './ocb';
+import { AesGcmSiv } from './gcm-siv';
 import { AesSiv } from './siv';
 import { Sm4 } from './sm4';
 import { AesWrap } from './wrap';
 import { Des3Wrap } from './des3-wrap';
 import { CbcCts } from './cbc-cts';
-import { AesXts } from './xts';
+import { AesXts, gbTweakDbl } from './xts';
 
 export type { SyncCipher };
 
@@ -126,6 +127,7 @@ export type CipherMode =
   | 'cfb8'
   | 'ofb'
   | 'gcm'
+  | 'gcm-siv'
   | 'ccm'
   | 'ocb'
   | 'wrap'
@@ -314,6 +316,31 @@ const SPECS: CipherSpec[] = [];
     const spec = SPECS.find((s) => s.name === base)!;
     SPECS.push({ ...spec, name: alias, alias: true });
   }
+  // ARIA and SM4 AEAD modes. ARIA's CCM/GCM carry OpenSSL NIDs; SM4's report
+  // none. Both use a 12-byte IV and a stream-style block size, like AES-GCM.
+  const aeadFamilies: Array<{ prefix: 'aria' | 'sm4'; sizes: number[]; ccm: number[]; gcm: number[] }> = [
+    { prefix: 'aria', sizes: [16, 24, 32], ccm: [1120, 1121, 1122], gcm: [1123, 1124, 1125] },
+    { prefix: 'sm4', sizes: [16], ccm: [0], gcm: [0] },
+  ];
+  for (const { prefix, sizes, ccm, gcm } of aeadFamilies) {
+    sizes.forEach((keyLength, index) => {
+      const bits = keyLength * 8;
+      const label = prefix === 'sm4' ? prefix : `${prefix}-${bits}`;
+      SPECS.push({ name: `${label}-ccm`, infoName: `${label}-ccm`, mode: 'ccm', nid: ccm[index], keyLength, blockSize: 1, ivLength: 12, family: prefix });
+      SPECS.push({ name: `${label}-gcm`, infoName: `${label}-gcm`, mode: 'gcm', nid: gcm[index], keyLength, blockSize: 1, ivLength: 12, family: prefix });
+    });
+  }
+  // SM4-XTS (IEEE 1619 over SM4). A 32-byte key and a 16-byte IV, no NID, and
+  // no duplicated-key guard (OpenSSL applies that to AES-XTS only).
+  SPECS.push({ name: 'sm4-xts', infoName: 'sm4-xts', mode: 'xts', nid: 0, keyLength: 32, blockSize: 1, ivLength: 16, family: 'sm4' });
+  // AES-GCM-SIV (RFC 8452): a 12-byte nonce, a fixed 16-byte tag, no NID.
+  for (const [keyLength, bits] of [
+    [16, 128],
+    [24, 192],
+    [32, 256],
+  ] as Array<[number, number]>) {
+    SPECS.push({ name: `aes-${bits}-gcm-siv`, infoName: `aes-${bits}-gcm-siv`, mode: 'gcm-siv', nid: 0, keyLength, blockSize: 1, ivLength: 12 });
+  }
   // CBC with ciphertext stealing (NIST CTS). `getCipherInfo` reports mode
   // `cbc` and no NID. OpenSSL exposes it only for AES and Camellia.
   for (const prefix of ['aes', 'camellia'] as const) {
@@ -498,8 +525,12 @@ export function createCipher(
   if (spec.mode === 'chacha20-poly1305') {
     return new ChaCha20Poly1305(key, iv as Uint8Array, encrypt, authTagLength);
   }
-  if (spec.mode === 'ccm') return new AesCcm(key, iv as Uint8Array, encrypt, authTagLength, plaintextLength);
+  if (spec.mode === 'ccm') {
+    const block = spec.family === 'aria' ? new Aria(key) : spec.family === 'sm4' ? new Sm4(key) : undefined;
+    return new AesCcm(key, iv as Uint8Array, encrypt, authTagLength, plaintextLength, block);
+  }
   if (spec.mode === 'ocb') return new AesOcb(key, iv as Uint8Array, encrypt, authTagLength);
+  if (spec.mode === 'gcm-siv') return new AesGcmSiv(key, iv as Uint8Array, encrypt);
   if (spec.family === 'des3wrap') return new Des3Wrap(key, encrypt);
   if (spec.mode === 'cbc-cts') {
     const cipher =
@@ -507,7 +538,10 @@ export function createCipher(
     return new CbcCts(cipher, iv as Uint8Array, encrypt);
   }  if (spec.mode === 'wrap') return new AesWrap(key, iv as Uint8Array, encrypt, spec.name.includes('-pad') ? 'wrap-pad' : 'wrap', spec.wrapInverse === true);
   if (spec.mode === 'siv') return new AesSiv(key, encrypt);
-  if (spec.mode === 'xts') return new AesXts(key, iv as Uint8Array, encrypt);
+  if (spec.mode === 'xts') {
+    if (spec.family === 'sm4') return new AesXts(key, iv as Uint8Array, encrypt, Sm4, false, gbTweakDbl);
+    return new AesXts(key, iv as Uint8Array, encrypt);
+  }
   if (spec.family === 'des') return new DesCipher(spec.mode as DesMode, key, iv, encrypt);
   if (spec.family === 'camellia') return new Cipheriv(spec, key, iv, encrypt, authTagLength, new Camellia(key));
   if (spec.family === 'aria') return new Cipheriv(spec, key, iv, encrypt, authTagLength, new Aria(key));

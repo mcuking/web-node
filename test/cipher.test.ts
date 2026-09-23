@@ -400,12 +400,12 @@ describe('cipher error behaviour matches Node', () => {
     return 'no-throw';
   };
 
-  it('rejects unknown and unimplemented ciphers distinctly', () => {
+  it('rejects unknown ciphers and covers every OpenSSL-known name', () => {
     expect(codeOf(() => crypto.createCipheriv('aes-999-cbc', KEYS[128], IV16))).toBe('ERR_CRYPTO_UNKNOWN_CIPHER');
-    // Known to OpenSSL but not implemented here → a loud, typed error, not "unknown".
-    expect(codeOf(() => crypto.createCipheriv('aes-128-gcm-siv', KEYS[128], IV12))).toBe(
-      'ERR_WEB_NODE_NOT_IMPLEMENTED',
-    );
+    // M93.4h completed the cipher list: every name OpenSSL exposes is now
+    // implemented, so the loud NotImplementedError path can no longer be
+    // reached with a known cipher (1:1 with real Node's 165).
+    expect(crypto.getCiphers().length).toBe(165);
   });
 
   it('validates the key and IV', () => {
