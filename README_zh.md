@@ -275,81 +275,8 @@ runtime 交给 Vite 一个 HMR 服务器对象，其 `send()` 走该通道而非
 
 ## 里程碑
 
-| 里程碑 | 内容 | 状态 |
-|---|---|---|
-| M1 | 纯 JS 运行层 | ✅ |
-| M2 | 虚拟文件系统 | ✅ |
-| M3 | 网络（虚拟 TCP + SW 桥 + 预览） | ✅ |
-| S | stream 前置 | ✅ |
-| M4 | npm client | ✅ |
-| M3.5a | keep-alive（持久连接 + pipelining + 连接池） | ✅ |
-| M3.5b | 浏览器侧真流式（SW 直转 ReadableStream） | ✅ |
-| M3.5c | https（http 同名壳） | ✅ |
-| M3.5d | 子域名路由（`<port>.localhost`） | ✅ 完成（dev server） |
-| M5 | 真实构建工具 —— esbuild WASM：安装→初始化→打包→写回 | ✅ |
-| M5b | 真实打包器 —— rollup WASM：ESM 图 + tree-shaking → VFS | ✅ |
-| M5c | 真实构建工具链 —— Vite 本体：production build → VFS | ✅ |
-| M5d | Vite dev server 在页内跑通（按需转换 + 预览） | ✅ |
-| M5e | Vite HMR 在页内跑通（走 BroadcastChannel，非 WebSocket） | ✅ |
-| M5f | HMR 收尾（CSS `css-update` + 按端口隔离通道） | ✅ |
-| M6 | npm 收尾（lockfile + 完整性校验 + peer 自动安装） | ✅ |
-| M7 | `child_process` + 受控 spawn 面（fork/exec/spawn + mini-shell） | ✅ |
-| M7 | npm `.bin` shim + 生命周期脚本 | ✅ |
-| M8 | stream 收尾（字节精确 `read(n)` + objectMode 分离 + `autoDestroy`） | ✅ |
-| M9 | Buffer 共享内存（`slice`/`subarray`、`from(ArrayBuffer)` 视图） | ✅ |
-| M10 | 扩大 vendoring —— 真源码 `internal/streams/state.js` 接管 hwm | ✅ |
-| M11 | 修 stream 核心 bug + 真源码 `Readable.from` | ✅ |
-| M12 | 对齐流状态形状（`_readableState`/`_writableState`）+ 真谓词 | ✅ |
-| M13 | vendor `internal/streams/destroy.js`（真 `destroy`/`_undestroy` + `[kState]` 位域）+ `finished()` 接真谓词 | ✅ |
-| M14 | vendor `internal/streams/end-of-stream.js` —— `finished()`/`eos()` 就是真源码（options + AbortSignal） | ✅ |
-| M15 | vendor 真 `events.js`（换掉自研 EventEmitter）+ 真 `stream.addAbortSignal` | ✅ |
-| M16 | **整套 stream 换真源码**（`lib/stream.js` + `internal/streams/*`：Writable/Duplex/Transform/PassThrough/pipeline/compose/duplexPair/operators + `stream/promises`），删除手写 stream | ✅ |
-| M17 | **真 `async_hooks`**（`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` 落在自研 JS `async_wrap` 绑定上）；tick/timer 是真 async resource，hook 会触发、`AsyncLocalStorage` 能跨异步边界传 store | ✅ |
-| M18 | **真框架**——@vitejs/plugin-vue 在页内编译 **Vue 3 SFC**；`vite build` 出生产 Vue bundle，dev server 在预览里跑真实可交互应用（含 HMR） | ✅ |
-| M19 | **更多 vendored 真源码**——`punycode.js`、`domain.js`、`diagnostics_channel.js`（跑在真 `async_hooks` 上，配一个小 JS binding） | ✅ |
-| M20 | **真 `string_decoder`**——把 native 解码状态机（`src/string_decoder.cc`）用 JS 逐字节重写；`lib/string_decoder.js` 换真源码 | ✅ |
-| M21 | **真 `internal/util/types`** + 对齐 `src/node_types.cc` 的 `types` binding；`util.types` 指向真模块 | ✅ |
-| M22 | **真 `internal/util/inspect.js`**——`util.inspect`/`format`/`formatWithOptions` 就是真源码；`console` 走真 `formatWithOptions` | ✅ |
-| M23 | **真断言栈**——`lib/assert.js` + `internal/assert/*` + `internal/util/comparisons` + 真 `internal/validators.js`；堆栈帧通过 `sourceURL` 显示真文件名 | ✅ |
-| M24 | **整套 `util` 换真源码**（`lib/util.js` + `lib/internal/util.js`）：`promisify`/`callbackify`/`styleText`/`parseArgs`/`diff`/`MIMEType`/`parseEnv` | ✅ |
-| M25 | **真 Web EventTarget 栈**——`internal/event_target.js` + `internal/webidl.js`：真 `EventTarget`/`Event`/`CustomEvent`/`defineEventHandler` | ✅ |
-| M26 | **真 `AbortController`/`AbortSignal`**——`internal/abort_controller.js` 建在真 EventTarget 上（`timeout`/`any`/`throwIfAborted`） | ✅ |
-| M27 | **真 `console`**——`lib/console.js` + `internal/console/*` + `internal/cli_table`：真 `Console` 与 `table`/`count`/`group`/`time` | ✅ |
-| M28 | **真 `os`**——`lib/os.js` 站在对齐 `src/node_os.cc` 的静态 `os` binding 上 | ✅ |
-| M29 | **真 `timers`**——`lib/timers.js` + `internal/timers.js` + `timers/promises.js`，`timers` binding 内置一个代替 libuv 的驱动 | ✅ |
-| M30 | **真 `worker_threads` 消息传递**——`internal/worker/io.js`：真 `MessageChannel`/`MessagePort`/`BroadcastChannel`，`messaging` binding 用 JS 重实现 `src/node_messaging.cc` | ✅ |
-| M31 | **真 `readline`**——`lib/readline.js` + `internal/readline/*`：真行编辑器、按键解码、ANSI 光标函数与历史环 | ✅ |
-| M32 | **worker 减重**——构建期剥离 vendored 注释（保留行号/列号与 MIT 声明）：worker 1259KB → 1028KB（gzip 315 → 237KB） | ✅ |
-| M33 | **真 glob**——`internal/fs/glob.js` + 随包的 `internal/deps/minimatch`：`path.matchesGlob`、`fs.glob`/`globSync`/`promises.glob` | ✅ |
-| M34 | **`crypto` 同步面**——纯 JS 的 MD5/SHA-1/SHA-2/HMAC/PBKDF2/HKDF/scrypt，逐一对照 Node 的 OpenSSL 输出 | ✅ |
-| M35 | **真 `perf_hooks`** + 整个 `internal/perf/*` 组，跑在 JS `performance` binding 上（需 native hdr_histogram 的直方图抛错） | ✅ |
-| M36 | **真 WHATWG streams**——`stream/web.js` + `internal/webstreams/*`，`Readable.toWeb`/`Writable.toWeb`/`Duplex.toWeb` 双向打通 | ✅ |
-| M37 | **真 `Blob`/`File`**——`internal/blob.js` + `internal/file.js` 跑在 JS `blob` binding 上；全局可用，并带 `fs.openAsBlob` 与 `URL.createObjectURL` 存储 | ✅ |
-| M38 | **真 `stream/iter`**（新的 iterable-streams API）与 **`stream/consumers`**（`text`/`json`/`buffer`/`bytes`/`arrayBuffer`/`blob`） | ✅ |
-| M39 | **npm 深化**——根级 `overrides`/`resolutions`、`file:`/`link:` 说明符、有界并发下载 | ✅ |
-| M40 | **`fork()` IPC**——双向真通道（`child.send`/`process.send`）、默认 JSON 序列化、开着通道保活、`node nope.js` 像真 Node 一样 exit 1 | ✅ |
-| M41 | **Buffer slab 池化**——小于 `Buffer.poolSize` 一半（64 KiB）的分配共享一块对齐 slab，`.byteOffset`/`.buffer.byteLength` 与 Node 对齐 | ✅ |
-| M42 | **`util.inspect` / ICU 保真度**——`async function*` 既是 generator 又是 async（输出 `[AsyncGeneratorFunction: x]`）；`icu.getStringWidth` 按真实 Unicode 列宽度量，`console.table`/CJK 折行与 Node 一致 | ✅ |
-| M43 | **真 `process` 表面**——逐键对照 Node v26.9.0（`getBuiltinModule`/`getActiveResourcesInfo`/`loadEnvFile`/未捕获异常捕获三件套/`reallyExit` 等）；timer/nextTick 回调抛出的异常现在统一经 `process._fatalException` 路由 | ✅ |
-| M44 | **宿主 `fetch` 计入退出判定**——在飞的宿主请求会吊住子进程（不再丢输出）；纯微任务 promise（WebCrypto、`Blob.arrayBuffer`）不计数，与 Node 一致 | ✅ |
-| M45 | **真 `zlib`**——deflate/gzip 的流式与一次性形式跑在平台 `CompressionStream`/`DecompressionStream` 上，与 Node v26.9.0 逐字节一致；同步形式与编码参数显式抛 `NotImplementedError`（不静默忽略） | ✅ |
-| M46 | **宿主 `WebSocket` 计入退出判定**（M44 的姊妹缺口），并修一个 loader 顶层词法声明与注入沙箱全局冲突的 bug | ✅ |
-| M47 | **`crypto` 对称密码**——AES-128/192/256 的 ECB/CBC/CTR/CFB/OFB/GCM，纯 JS，逐字节对齐 OpenSSL；未实现的 cipher 抛类型化 `NotImplementedError` | ✅ |
-| M48 | **真 `Buffer`**——vendor `lib/buffer.js` + `lib/internal/buffer.js`，删手写 `buffer.ts`；`buffer` binding 扩成完整 JS 实现 | ✅ |
-| M49 | **真 `vfs` 子系统**——`lib/internal/vfs/*` + `lib/internal/fs/utils.js`；`vfs` 模块可用（完整 `MemoryProvider`）；`uv` binding 换成真 85 条 `UV_ERRNO_MAP` | ✅ |
-| M50 | **真 `fs/promises`**——`lib/fs/promises.js` + `lib/internal/fs/promises.js`；`fs` binding 补齐整张 async/promise 面 | ✅ |
-| M51 | **真回调式 `fs`**——`lib/fs.js`（4083 行）；`fs.watch`/`fs.promises.watch` 经 VFS 投影走真 watchers 代码 | ✅ |
-| M51b | **`fs.opendir`/`Dir` + `fs.watchFile`**——真 `fs_dir` binding + 复刻 libuv `uv_fs_poll` 的 `StatWatcher` 轮询实现 | ✅ |
-| M52 | **真 `internal/fs/streams.js`**——`fs.ReadStream`/`fs.WriteStream` 换真源码（惰性加载，顶层 `require('fs')` 回环自然解除） | ✅ |
-| M53 | **真 `url`**——vendor `lib/url.js`（legacy parse/format/resolve + WHATWG 重导出）；`internal/url` 改成宿主 URL 桥，新增 `url`/`url_pattern`/`encoding_binding` binding | ✅ |
-| M54 | **真 `v8`**——vendor `lib/v8.js`；`serialize`/`deserialize` 与 `Serializer`/`Deserializer` 跑在新的 `serdes` binding 上（用 JS 重写 V8 结构化克隆线格式（版本 15），与真 Node v26.9.0 的 115 条差分语料逐字节一致）；堆快照/`queryObjects`/profiler 一律抛错 | ✅ |
-| M55 | **真 `tty`**——vendor `lib/tty.js` + `lib/internal/tty.js`，新增 `tty_wrap` binding（`isTTY` 恒 false、`TTY` 构造即抛）：`isatty` 与 `getColorDepth`/`hasColors` 是真实现，`ReadStream`/`WriteStream` 抛错而不假装终端；`internal/util/colors` 的 `FORCE_COLOR` 惰性路径（之前指向未注册模块、会炸）从此可用，`util.styleText` 会真的上色。57 条颜色深度 + 10 条 `hasColors` 语料与真 Node v26.9.0 全等 | ✅ |
-| M56 | **真 `vm`**——vendor `lib/vm.js` + `lib/internal/vm.js`，新增 `contextify` binding：沙箱对象**本身就是**上下文（标 Node 的 contextify 符号），脚本跑在它上面的 `with` scope 里，所以 `createContext`/`isContext`/`Script`/`compileFunction`/`runIn*Context` 都是真的，且新上下文里 `process`/`require`/`Buffer`/`setTimeout` 保持 `undefined`。59 条行为与真 Node v26.9.0 全等 | ✅ |
-| M57 | **真 `Worker`**——协作式工作器：同一事件循环上的第二个模块注册表，拥有自己的 `process`/`worker_threads` 视图与与父侧的**真** `MessageChannel`。`workerData`、消息往返、`online`/`message`/`error`/`exit` 生命周期、`terminate()` 与构造校验均与 Node 对齐（包括退出后 `threadId === -1`、`postMessage` 为 no-op）。唯一要紧的偏离是**无真并行**（已写明），需原生线程的东西（`eval`/worker 标准 IO/`resourceLimits`/剖析/嵌套 `Worker`）全部响亮报错。15 条行为与真 Node v26.9.0 全等 | ✅ |
-| M58 | **补齐 `internal/errors` 码表**——把 vendored/`src` 树里所有 `ERR_*` 引用与 shim 表对了一遍，发现 **9 个码被 `internal/errors` 解构引用但表里从未定义**，于是 `codes.X` 是 `undefined`、`new` 在罕至路径上报 “is not a constructor”。9 个码已逐字（对齐 `lib/internal/errors.js` 与 `src/node_errors.h`）补齐，并有结构回归门测试（每个被引用的码都必须是构造函数，扫到 76 个）与差分语料（真 Node 经 `--expose-internals` 直取 `internal/errors` 逐字段比对，10/10 一致）兵护 | ✅ |
-| M59 | **真 worker 标准 IO**——`worker.stdin`/`stdout`/`stderr` 三个 getter 以前都抛错，而 Node 从不（`stdin` 默认 null，仅 `stdin: true` 时是流；`stdout`/`stderr` 总是可读流、默认只是转发到父进程）。现为经**第二条 MessageChannel** 传输的真流：worker 侧 `process.stdout/stderr/stdin` 是真流、其 `console` 绑到自己的 stdout/stderr、转发行为与 Node 一致，未 `end()` 的 `worker.stdin` 会 ref 住 worker；顺带用静默期修复了“worker 可能在在途消息送达前先退出”的竞态 | ✅ |
-| M60 | **修正 SystemError 基底错误码**——Node 用 `E(code, msg, SystemError)` 声明的码（`ERR_FS_CP_*`、`ERR_FS_EISDIR`、`ERR_SYSTEM_ERROR`）本应从**上下文对象**拼消息且 `name='SystemError'`；表里只登记了 `ERR_TTY_INIT_FAILED`，其余丢了名字与 `: syscall returned code (message) path => dest` 后缀。11 个码现已全部正确，并带上 `HideStackFramesError` 伴生类；一条新的全量消息文案差分还抓出 3 处真实文案错误（两个 `ERR_FS_CP_*` 互换了文案） | ✅ |
-| M61 | **补齐 `internalBinding` 表面**——Node 内部只经 `internalBinding(id)` 取宿主能力，名字没定义就 `undefined`、调用点报 “is not a function”（与 M58 同类）。扫出 5 处真缺失并补上：`util.markPromiseAsHandled`（`internal/streams/iter/*` 调用）、`uv.UV_ENOSPC` 及整张 `UV_E*` 表（`internal/fs/watchers`）、`v8.kSampling*`、`constants.internal`（`internal/vfs/setup`）、`process_methods.dlopenBinary`；`uv` 改为从 `ERRNO` 生成整张常量表（88 值逐值对齐真 Node），并新增一条遍历 vendored 树的结构金门卫 | ✅ |
+任务清单在 [`docs/ROADMAP.md`](docs/ROADMAP.md)——一份固定、可追溯、带复选框的
+「已做 / 还剩什么」列表；变更记录写在 [`docs/DEVLOG.md`](docs/DEVLOG.md)。
 
 ## Vendored 真源码现状
 

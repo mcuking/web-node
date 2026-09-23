@@ -70,7 +70,7 @@ B2 下把它们**移回 `REGISTRY` 并指向 wasm**。
 | 步 | 内容 | 依赖 | 验收 |
 |---|---|---|---|
 | **P0** | 装 wasi-sdk；打通「hello wasm → `REGISTRY` binding」 | — | 桩 binding 走通 |
-| **P1** | **`zlib`**：真 `deps/zlib` 编 wasm + vendor 真 `lib/zlib.js` | P0 | 差分 **0 diff**（含 `gzipSync`/`level`/`windowBits`） |
+| **P1** | **`zlib`**：真 `deps/zlib`（1.3.2.1-motley）**编 wasm** + `builtins/zlib.ts`（`lib/zlib.js` 的 zlib 半边移植） | P0 | 差分 **0 diff**（含 `gzipSync`/`level`/`windowBits`）✅ 2026-09-23（M116） |
 | **P2** | **`histogram`**：真 `deps/histogram` | P0 | 差分 0 diff |
 | **P3** | `brotli` / `zstd`（纯计算） | P0 | 差分 0 diff |
 | **P4** | **crypto → OpenSSL 子集**（hash/hmac/cipher/kdf） | P0 | 现有 crypto 差分 **保持 0 diff** |

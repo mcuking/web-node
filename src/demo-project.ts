@@ -650,11 +650,10 @@ const nodeStream = require('stream');
 })();
 console.log('');
 
-// --- zlib (milestone 45) ---
-// zlib is a real module now. The codec is the platform's CompressionStream /
-// DecompressionStream, so the streaming and one-shot async forms match Node
-// byte for byte with the default options; the sync forms have no platform
-// counterpart and throw a typed error instead of guessing.
+// --- zlib (milestone 45 / M116) ---
+// zlib is the real thing now: Node's own C zlib (deps/zlib) compiled to
+// WebAssembly, driven through internalBinding('zlib'). So the sync API and the
+// codec parameters behave exactly like Node's.
 console.log('-- zlib (milestone 45) --');
 const zlib = require('zlib');
 zlib.gzip(Buffer.from('hello hello hello hello'), function (err, gz) {
@@ -665,6 +664,9 @@ zlib.gzip(Buffer.from('hello hello hello hello'), function (err, gz) {
   });
 });
 console.log('crc32       : ' + zlib.crc32('hello'));
+console.log('gzipSync    : ' + zlib.gzipSync('x').toString('hex'));
+console.log('deflate L9  : ' + zlib.deflateSync(Buffer.from('hello hello hello hello'), { level: 9 }).toString('hex'));
+console.log('zlib version: ' + (zlib.constants.ZLIB_VERNUM === 4897 ? '1.3.2.1' : String(zlib.constants.ZLIB_VERNUM)));
 const webZlib = require('stream/web');
 (async function () {
   const cs = new webZlib.CompressionStream('deflate');
@@ -676,7 +678,6 @@ const webZlib = require('stream/web');
   for (;;) { const r = await reader.read(); if (r.done) break; chunks.push(Buffer.from(r.value)); }
   console.log('CS deflate  : ' + Buffer.concat(chunks).toString('hex'));
 })();
-try { zlib.gzipSync('x'); } catch (e) { console.log('gzipSync    : ' + e.code); }
 console.log('');
 
 // --- AES ciphers (milestone 47) ---

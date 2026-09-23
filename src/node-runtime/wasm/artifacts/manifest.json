@@ -1,10 +1,14 @@
 {
   "toolchain": "clang version 23.1.0-wasi-sdk (https://github.com/llvm/llvm-project 895aa2c896ada719451be2e3673c83da8ddf1141)",
   "sdk": "/Users/tangjianghong/Downloads/wasi-sdk-34.0",
+  "nodeSrc": "/Users/tangjianghong/Downloads/node",
+  "upstream": {
+    "zlib": "1.3.2.1-motley"
+  },
   "modules": {
-    "wn_stub.wasm": {
-      "bytes": 46479,
-      "sha256": "2b5c8738648c1f751f4de26659f97f1e2c0e8e7ab4de446eae4f4dd3e0dd343f"
+    "wn_zlib.wasm": {
+      "bytes": 108777,
+      "sha256": "4427a36322c4ade53010c77c37ad16564ba271c94e1766ad4d3ea4129a4a2688"
     }
   }
 }

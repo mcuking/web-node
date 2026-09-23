@@ -2,34 +2,20 @@ import type { BuiltinInitContext, BuiltinSpec } from './types';
 import { notImplemented } from '../errors';
 
 /**
- * `zlib` — deflate/gzip, backed by the platform's own codec.
+ * `zlib` — deflate/gzip/inflate, backed by the **real zlib** (M116).
  *
- * Node's zlib is a native binding over the C zlib. A browser has no such
- * binding, but it *does* ship the same codec behind the WHATWG Compression
- * Streams API (`CompressionStream` / `DecompressionStream`). So this module is
- * a thin, faithful adapter over those: the bytes are produced by the platform's
- * zlib/libdeflate, not by a reimplementation, and for the default options the
- * output is byte-identical to Node's (verified against v26.9.0 — gzip, zlib and
- * raw deflate all match).
+ * Node's zlib is a native binding over the C zlib. Here the same upstream C source
+ * (`deps/zlib`, zlib 1.3.2.1-motley) is compiled to WebAssembly with wasi-sdk and
+ * reached through `internalBinding('zlib')` — so every byte of deflate/gzip output
+ * is produced by the same codec Node uses, and, unlike the previous
+ * `CompressionStream`-based shim, the **synchronous API and every codec parameter
+ * are available**: `gzipSync`/`inflateSync`/…, and `level`/`windowBits`/`memLevel`/
+ * `strategy`/`dictionary` are honored (verified byte-for-byte against v26.9.0).
  *
- * Two consequences of "the platform owns the codec" are worth stating plainly:
- *
- *  - The platform's stream is **async only**. Node's `gzipSync`/`inflateSync`
- *    family has no counterpart here, so those throw a typed error rather than
- *    block. The async, callback and stream forms — the ones tooling actually
- *    uses — are all present.
- *  - The platform exposes **no codec parameters**. Compressing with a specific
- *    `level`/`windowBits`/`memLevel`/`strategy`/`dictionary` cannot be honored,
- *    so asking for one throws instead of silently producing a differently-sized
- *    stream. `chunkSize`/`maxOutputLength` are structural, not codec parameters,
- *    and are honored.
- *
- * Brotli and zstd have no browser codec and throw on use, as does the `zlib`
- * binding itself (we never reach for it).
- *
- * This also puts the vendored `internal/webstreams/compression.js` back in
- * business: its `CompressionStream`/`DecompressionStream` reach for
- * `zlib.createDeflate()` & friends, which now exist.
+ * The JS layer below is a close port of Node's own `lib/zlib.js` (`ZlibBase` /
+ * `Zlib` / `processChunk(Sync)` / the convenience helpers), driving the wasm codec
+ * instead of a native handle. Brotli and zstd have no codec here and throw, as do
+ * the zip-archive helpers (native-only in Node).
  */
 
 // --- modes (mirror node_zlib_mode) ------------------------------------------
@@ -41,66 +27,228 @@ const GUNZIP = 4;
 const DEFLATERAW = 5;
 const INFLATERAW = 6;
 const UNZIP = 7;
+const BROTLI_ENCODE = 8;
+const BROTLI_DECODE = 9;
+const ZSTD_COMPRESS = 10;
+const ZSTD_DECOMPRESS = 11;
 
-/** The zlib format string the platform codec expects for a mode. */
-const FORMAT: Record<number, string> = {
-  [DEFLATE]: 'deflate',
-  [INFLATE]: 'deflate',
-  [GZIP]: 'gzip',
-  [GUNZIP]: 'gzip',
-  [DEFLATERAW]: 'deflate-raw',
-  [INFLATERAW]: 'deflate-raw',
-};
+const Z_NO_FLUSH = 0;
+const Z_PARTIAL_FLUSH = 1;
+const Z_SYNC_FLUSH = 2;
+const Z_FULL_FLUSH = 3;
+const Z_FINISH = 4;
+const Z_BLOCK = 5;
 
-const COMPRESS_MODES = new Set([DEFLATE, GZIP, DEFLATERAW]);
+const Z_MIN_CHUNK = 64;
+const Z_MAX_CHUNK = Infinity;
+const Z_DEFAULT_CHUNK = 16384;
+const Z_MIN_MEMLEVEL = 1;
+const Z_MAX_MEMLEVEL = 9;
+const Z_DEFAULT_MEMLEVEL = 8;
+const Z_MIN_LEVEL = -1;
+const Z_MAX_LEVEL = 9;
+const Z_DEFAULT_COMPRESSION = -1;
+const Z_DEFAULT_STRATEGY = 0;
+const Z_DEFAULT_WINDOWBITS = 15;
+const Z_MIN_WINDOWBITS = 8;
+const Z_MAX_WINDOWBITS = 15;
+const Z_FIXED = 4;
 
-// --- constants (values from `zlib.constants`, minus the brotli/zstd sets) ----
+/** The `zlib` binding surface (real zlib compiled to wasm, see `bindings/zlib.ts`). */
+interface ZlibCodecLike {
+  push(chunk: Uint8Array, flush: number): Uint8Array;
+  reset(): void;
+  setParams(level: number, strategy: number): void;
+  close(): void;
+  readonly closed: boolean;
+  readonly finished: boolean;
+  /** Input bytes left unconsumed by the last `push` (trailing junk). */
+  readonly lastInputLeft: number;
+}interface ZlibBinding {
+  Zlib: new (opts: {
+    mode: number;
+    level: number;
+    windowBits: number;
+    memLevel: number;
+    strategy: number;
+    dictionary?: Uint8Array | null;
+    rejectGarbageAfterEnd?: boolean;
+  }) => ZlibCodecLike;
+  crc32(data: Uint8Array | string, value: number): number;
+  zlibVersion(): string;
+}
 
 const constants: Record<string, number> = {
-  Z_NO_FLUSH: 0,
-  Z_PARTIAL_FLUSH: 1,
-  Z_SYNC_FLUSH: 2,
-  Z_FULL_FLUSH: 3,
-  Z_FINISH: 4,
-  Z_BLOCK: 5,
-  Z_OK: 0,
-  Z_STREAM_END: 1,
-  Z_NEED_DICT: 2,
-  Z_ERRNO: -1,
-  Z_STREAM_ERROR: -2,
-  Z_DATA_ERROR: -3,
-  Z_MEM_ERROR: -4,
-  Z_BUF_ERROR: -5,
-  Z_VERSION_ERROR: -6,
-  Z_NO_COMPRESSION: 0,
-  Z_BEST_SPEED: 1,
-  Z_BEST_COMPRESSION: 9,
-  Z_DEFAULT_COMPRESSION: -1,
-  Z_FILTERED: 1,
-  Z_HUFFMAN_ONLY: 2,
-  Z_RLE: 3,
-  Z_FIXED: 4,
-  Z_DEFAULT_STRATEGY: 0,
-  ZLIB_VERNUM: 4897,
-  DEFLATE: 1,
-  INFLATE: 2,
-  GZIP: 3,
-  GUNZIP: 4,
-  DEFLATERAW: 5,
-  INFLATERAW: 6,
-  UNZIP: 7,
-  Z_MIN_WINDOWBITS: 8,
-  Z_MAX_WINDOWBITS: 15,
-  Z_DEFAULT_WINDOWBITS: 15,
-  Z_MIN_CHUNK: 64,
-  Z_MAX_CHUNK: Infinity,
-  Z_DEFAULT_CHUNK: 16384,
-  Z_MIN_MEMLEVEL: 1,
-  Z_MAX_MEMLEVEL: 9,
-  Z_DEFAULT_MEMLEVEL: 8,
-  Z_MIN_LEVEL: -1,
-  Z_MAX_LEVEL: 9,
-  Z_DEFAULT_LEVEL: -1,
+  "BROTLI_DECODE": 8,
+  "BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES": -30,
+  "BROTLI_DECODER_ERROR_ALLOC_CONTEXT_MAP": -25,
+  "BROTLI_DECODER_ERROR_ALLOC_CONTEXT_MODES": -21,
+  "BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_1": -26,
+  "BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_2": -27,
+  "BROTLI_DECODER_ERROR_ALLOC_TREE_GROUPS": -22,
+  "BROTLI_DECODER_ERROR_DICTIONARY_NOT_SET": -19,
+  "BROTLI_DECODER_ERROR_FORMAT_BLOCK_LENGTH_1": -9,
+  "BROTLI_DECODER_ERROR_FORMAT_BLOCK_LENGTH_2": -10,
+  "BROTLI_DECODER_ERROR_FORMAT_CL_SPACE": -6,
+  "BROTLI_DECODER_ERROR_FORMAT_CONTEXT_MAP_REPEAT": -8,
+  "BROTLI_DECODER_ERROR_FORMAT_DICTIONARY": -12,
+  "BROTLI_DECODER_ERROR_FORMAT_DISTANCE": -16,
+  "BROTLI_DECODER_ERROR_FORMAT_EXUBERANT_META_NIBBLE": -3,
+  "BROTLI_DECODER_ERROR_FORMAT_EXUBERANT_NIBBLE": -1,
+  "BROTLI_DECODER_ERROR_FORMAT_HUFFMAN_SPACE": -7,
+  "BROTLI_DECODER_ERROR_FORMAT_PADDING_1": -14,
+  "BROTLI_DECODER_ERROR_FORMAT_PADDING_2": -15,
+  "BROTLI_DECODER_ERROR_FORMAT_RESERVED": -2,
+  "BROTLI_DECODER_ERROR_FORMAT_SIMPLE_HUFFMAN_ALPHABET": -4,
+  "BROTLI_DECODER_ERROR_FORMAT_SIMPLE_HUFFMAN_SAME": -5,
+  "BROTLI_DECODER_ERROR_FORMAT_TRANSFORM": -11,
+  "BROTLI_DECODER_ERROR_FORMAT_WINDOW_BITS": -13,
+  "BROTLI_DECODER_ERROR_INVALID_ARGUMENTS": -20,
+  "BROTLI_DECODER_ERROR_UNREACHABLE": -31,
+  "BROTLI_DECODER_NEEDS_MORE_INPUT": 2,
+  "BROTLI_DECODER_NEEDS_MORE_OUTPUT": 3,
+  "BROTLI_DECODER_NO_ERROR": 0,
+  "BROTLI_DECODER_PARAM_DISABLE_RING_BUFFER_REALLOCATION": 0,
+  "BROTLI_DECODER_PARAM_LARGE_WINDOW": 1,
+  "BROTLI_DECODER_RESULT_ERROR": 0,
+  "BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT": 2,
+  "BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT": 3,
+  "BROTLI_DECODER_RESULT_SUCCESS": 1,
+  "BROTLI_DECODER_SUCCESS": 1,
+  "BROTLI_DEFAULT_MODE": 0,
+  "BROTLI_DEFAULT_QUALITY": 11,
+  "BROTLI_DEFAULT_WINDOW": 22,
+  "BROTLI_ENCODE": 9,
+  "BROTLI_LARGE_MAX_WINDOW_BITS": 30,
+  "BROTLI_MAX_INPUT_BLOCK_BITS": 24,
+  "BROTLI_MAX_QUALITY": 11,
+  "BROTLI_MAX_WINDOW_BITS": 24,
+  "BROTLI_MIN_INPUT_BLOCK_BITS": 16,
+  "BROTLI_MIN_QUALITY": 0,
+  "BROTLI_MIN_WINDOW_BITS": 10,
+  "BROTLI_MODE_FONT": 2,
+  "BROTLI_MODE_GENERIC": 0,
+  "BROTLI_MODE_TEXT": 1,
+  "BROTLI_OPERATION_EMIT_METADATA": 3,
+  "BROTLI_OPERATION_FINISH": 2,
+  "BROTLI_OPERATION_FLUSH": 1,
+  "BROTLI_OPERATION_PROCESS": 0,
+  "BROTLI_PARAM_DISABLE_LITERAL_CONTEXT_MODELING": 4,
+  "BROTLI_PARAM_LARGE_WINDOW": 6,
+  "BROTLI_PARAM_LGBLOCK": 3,
+  "BROTLI_PARAM_LGWIN": 2,
+  "BROTLI_PARAM_MODE": 0,
+  "BROTLI_PARAM_NDIRECT": 8,
+  "BROTLI_PARAM_NPOSTFIX": 7,
+  "BROTLI_PARAM_QUALITY": 1,
+  "BROTLI_PARAM_SIZE_HINT": 5,
+  "DEFLATE": 1,
+  "DEFLATERAW": 5,
+  "GUNZIP": 4,
+  "GZIP": 3,
+  "INFLATE": 2,
+  "INFLATERAW": 6,
+  "UNZIP": 7,
+  "ZLIB_VERNUM": 4897,
+  "ZSTD_CLEVEL_DEFAULT": 3,
+  "ZSTD_COMPRESS": 10,
+  "ZSTD_DECOMPRESS": 11,
+  "ZSTD_btlazy2": 6,
+  "ZSTD_btopt": 7,
+  "ZSTD_btultra": 8,
+  "ZSTD_btultra2": 9,
+  "ZSTD_c_chainLog": 103,
+  "ZSTD_c_checksumFlag": 201,
+  "ZSTD_c_compressionLevel": 100,
+  "ZSTD_c_contentSizeFlag": 200,
+  "ZSTD_c_dictIDFlag": 202,
+  "ZSTD_c_enableLongDistanceMatching": 160,
+  "ZSTD_c_hashLog": 102,
+  "ZSTD_c_jobSize": 401,
+  "ZSTD_c_ldmBucketSizeLog": 163,
+  "ZSTD_c_ldmHashLog": 161,
+  "ZSTD_c_ldmHashRateLog": 164,
+  "ZSTD_c_ldmMinMatch": 162,
+  "ZSTD_c_minMatch": 105,
+  "ZSTD_c_nbWorkers": 400,
+  "ZSTD_c_overlapLog": 402,
+  "ZSTD_c_searchLog": 104,
+  "ZSTD_c_strategy": 107,
+  "ZSTD_c_targetLength": 106,
+  "ZSTD_c_windowLog": 101,
+  "ZSTD_d_windowLogMax": 100,
+  "ZSTD_dfast": 2,
+  "ZSTD_e_continue": 0,
+  "ZSTD_e_end": 2,
+  "ZSTD_e_flush": 1,
+  "ZSTD_error_GENERIC": 1,
+  "ZSTD_error_checksum_wrong": 22,
+  "ZSTD_error_corruption_detected": 20,
+  "ZSTD_error_dictionaryCreation_failed": 34,
+  "ZSTD_error_dictionary_corrupted": 30,
+  "ZSTD_error_dictionary_wrong": 32,
+  "ZSTD_error_dstBuffer_null": 74,
+  "ZSTD_error_dstSize_tooSmall": 70,
+  "ZSTD_error_frameParameter_unsupported": 14,
+  "ZSTD_error_frameParameter_windowTooLarge": 16,
+  "ZSTD_error_init_missing": 62,
+  "ZSTD_error_literals_headerWrong": 24,
+  "ZSTD_error_maxSymbolValue_tooLarge": 46,
+  "ZSTD_error_maxSymbolValue_tooSmall": 48,
+  "ZSTD_error_memory_allocation": 64,
+  "ZSTD_error_noForwardProgress_destFull": 80,
+  "ZSTD_error_noForwardProgress_inputEmpty": 82,
+  "ZSTD_error_no_error": 0,
+  "ZSTD_error_parameter_combination_unsupported": 41,
+  "ZSTD_error_parameter_outOfBound": 42,
+  "ZSTD_error_parameter_unsupported": 40,
+  "ZSTD_error_prefix_unknown": 10,
+  "ZSTD_error_srcSize_wrong": 72,
+  "ZSTD_error_stabilityCondition_notRespected": 50,
+  "ZSTD_error_stage_wrong": 60,
+  "ZSTD_error_tableLog_tooLarge": 44,
+  "ZSTD_error_version_unsupported": 12,
+  "ZSTD_error_workSpace_tooSmall": 66,
+  "ZSTD_fast": 1,
+  "ZSTD_greedy": 3,
+  "ZSTD_lazy": 4,
+  "ZSTD_lazy2": 5,
+  "Z_BEST_COMPRESSION": 9,
+  "Z_BEST_SPEED": 1,
+  "Z_BLOCK": 5,
+  "Z_BUF_ERROR": -5,
+  "Z_DATA_ERROR": -3,
+  "Z_DEFAULT_CHUNK": 16384,
+  "Z_DEFAULT_COMPRESSION": -1,
+  "Z_DEFAULT_LEVEL": -1,
+  "Z_DEFAULT_MEMLEVEL": 8,
+  "Z_DEFAULT_STRATEGY": 0,
+  "Z_DEFAULT_WINDOWBITS": 15,
+  "Z_ERRNO": -1,
+  "Z_FILTERED": 1,
+  "Z_FINISH": 4,
+  "Z_FIXED": 4,
+  "Z_FULL_FLUSH": 3,
+  "Z_HUFFMAN_ONLY": 2,
+  "Z_MAX_CHUNK": Infinity,
+  "Z_MAX_LEVEL": 9,
+  "Z_MAX_MEMLEVEL": 9,
+  "Z_MAX_WINDOWBITS": 15,
+  "Z_MEM_ERROR": -4,
+  "Z_MIN_CHUNK": 64,
+  "Z_MIN_LEVEL": -1,
+  "Z_MIN_MEMLEVEL": 1,
+  "Z_MIN_WINDOWBITS": 8,
+  "Z_NEED_DICT": 2,
+  "Z_NO_COMPRESSION": 0,
+  "Z_NO_FLUSH": 0,
+  "Z_OK": 0,
+  "Z_PARTIAL_FLUSH": 1,
+  "Z_RLE": 3,
+  "Z_STREAM_END": 1,
+  "Z_STREAM_ERROR": -2,
+  "Z_SYNC_FLUSH": 2,
+  "Z_VERSION_ERROR": -6,
 };
 
 /** The zlib return codes Node exposes as `zlib.codes` (bidirectional). */
@@ -117,486 +265,28 @@ const codes: Record<string | number, string | number> = {
 };
 for (const key of Object.keys(codes)) codes[codes[key] as number] = key;
 
-const ZLIB_ERRNO: Record<string, number> = {
-  Z_OK: 0,
-  Z_STREAM_END: 1,
-  Z_NEED_DICT: 2,
-  Z_ERRNO: -1,
-  Z_STREAM_ERROR: -2,
-  Z_DATA_ERROR: -3,
-  Z_MEM_ERROR: -4,
-  Z_BUF_ERROR: -5,
-  Z_VERSION_ERROR: -6,
-};
-
-/**
- * A zlib failure, shaped like Node's `genericNodeError(message, { errno, code })`
- * (`name` is plain `Error`, `code` is the `Z_*` string, `errno` its number).
- *
- * The message is best-effort: the platform codec is the only one that knows the
- * precise reason, so its message is preferred and a per-code default stands in
- * when it is empty (the platform often reports just the code).
- */
-function zlibError(code: string, message?: string): Error {
-  const err = new Error(message && message.length > 0 ? message : (ERROR_MESSAGE[code] ?? 'zlib error')) as Error & {
-    code?: string;
-    errno?: number;
-  };
-  err.code = code;
-  err.errno = ZLIB_ERRNO[code] ?? ZLIB_ERRNO.Z_DATA_ERROR;
-  return err;
-}
-
-const ERROR_MESSAGE: Record<string, string> = {
-  Z_DATA_ERROR: 'incorrect header check',
-  Z_BUF_ERROR: 'unexpected end of file',
-  Z_MEM_ERROR: 'out of memory',
-  Z_STREAM_ERROR: 'stream error',
-};
-
-/** Normalize whatever the platform threw into a Node-shaped zlib error. */
-function asZlibError(cause: unknown): Error {
-  if (cause instanceof Error) {
-    const code = typeof (cause as unknown as { code?: unknown }).code === 'string'
-      ? (cause as unknown as { code: string }).code
-      : 'Z_DATA_ERROR';
-    if (code.startsWith('Z_')) return zlibError(code, cause.message);
-  }
-  return zlibError('Z_DATA_ERROR', cause instanceof Error ? cause.message : undefined);
-}
-
-// --- option handling ---------------------------------------------------------
-
-/**
- * Codec parameters the platform cannot honor. Any of these with a non-default
- * value is a hard error: silently ignoring `level` would hand back a stream of
- * the wrong size, which is worse than refusing.
- */
-const CODEC_OPTIONS: Record<string, number> = {
-  level: constants.Z_DEFAULT_COMPRESSION,
-  windowBits: constants.Z_DEFAULT_WINDOWBITS,
-  memLevel: constants.Z_DEFAULT_MEMLEVEL,
-  strategy: constants.Z_DEFAULT_STRATEGY,
-  flush: constants.Z_NO_FLUSH,
-  finishFlush: constants.Z_FINISH,
-};
-
-function checkOptions(mode: number, opts: Record<string, unknown> | undefined | null): void {
-  if (!opts) return;
-  for (const [name, dflt] of Object.entries(CODEC_OPTIONS)) {
-    const value = opts[name];
-    if (value === undefined || value === dflt) continue;
-    // `windowBits: 0` is the documented "read the window size from the stream"
-    // sentinel on the inflate side, and is what Node itself defaults to there.
-    if (name === 'windowBits' && value === 0 && !COMPRESS_MODES.has(mode)) continue;
-    throw notImplemented(
-      'api',
-      `zlib ${name}`,
-      `The platform's CompressionStream has no codec parameters, so \`${name}\` cannot be honored. Omit it for byte-identical default output.`,
-    );
-  }
-  if (opts.dictionary !== undefined && opts.dictionary !== null) {
-    throw notImplemented('api', 'zlib dictionary', 'A preset dictionary has no counterpart in the platform codec.');
-  }
-  if (opts.params !== undefined && opts.params !== null) {
-    throw notImplemented('api', 'zlib params()', 'Adjusting codec parameters mid-stream is not supported.');
-  }
-  for (const name of ['portable', 'charf', 'func']) {
-    if (opts[name] !== undefined) {
-      throw notImplemented('api', `zlib ${name}`, 'This option only exists on the native zlib binding.');
-    }
-  }
-}
-
-function maxOutputLengthOf(opts: Record<string, unknown> | undefined | null): number {
-  const value = opts?.maxOutputLength;
-  if (value === undefined) return Number.MAX_SAFE_INTEGER;
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-    const err = new RangeError(
-      `The value of "options.maxOutputLength" is out of range. It must be a non-negative integer. Received ${String(value)}`,
-    ) as RangeError & { code?: string };
-    err.code = 'ERR_OUT_OF_RANGE';
-    throw err;
-  }
-  return value;
-}
-
-function toBuffer(Buffer: BufferCtor, input: string | Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Array {
-  if (typeof input === 'string') return Buffer.from(input);
-  if (ArrayBuffer.isView(input)) {
-    if (input instanceof Uint8Array) return input;
-    return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
-  }
-  if (input instanceof ArrayBuffer) return new Uint8Array(input);
-  throw Object.assign(
-    new TypeError(
-      `The "buffer" argument must be of type string or an instance of Buffer, TypedArray, DataView, or ArrayBuffer. Received ${describe(input)}`,
-    ),
-    { code: 'ERR_INVALID_ARG_TYPE' },
-  );
-}
-
-function describe(value: unknown): string {
-  if (value === null) return 'null';
-  const type = typeof value;
-  if (type === 'object') return 'an instance of Object';
-  if (type === 'number' || type === 'bigint' || type === 'boolean' || type === 'symbol' || type === 'function') {
-    return `type ${type} (${String(value)})`;
-  }
-  return `type ${type}`;
-}
-
-function validateFunction(fn: unknown, name: string): void {
-  if (typeof fn !== 'function') {
-    throw Object.assign(
-      new TypeError(`The "${name}" argument must be of type function. Received ${describe(fn)}`),
-      { code: 'ERR_INVALID_ARG_TYPE' },
-    );
-  }
-}
-
-// --- host codec --------------------------------------------------------------
-
-interface HostPair {
-  writable: { getWriter(): { write(chunk: Uint8Array): Promise<void>; close(): Promise<void>; abort?(reason?: unknown): Promise<void> } };
-  readable: { getReader(): { read(): Promise<{ value?: Uint8Array; done: boolean }>; cancel(reason?: unknown): Promise<void> } };
-}
-
-type FormatCtor = new (format: string) => HostPair;
-
-function platformCtor(compress: boolean): FormatCtor | undefined {
-  const g = globalThis as unknown as Record<string, unknown>;
-  const ctor = compress ? g.CompressionStream : g.DecompressionStream;
-  return typeof ctor === 'function' ? (ctor as FormatCtor) : undefined;
-}
-
-function requirePlatform(compress: boolean, mode: number): FormatCtor {
-  const ctor = platformCtor(compress);
-  if (!ctor) {
-    throw notImplemented(
-      'api',
-      `zlib ${compress ? 'compression' : 'decompression'}`,
-      `The host has no ${compress ? 'CompressionStream' : 'DecompressionStream'}; zlib needs it as its codec.`,
-    );
-  }
-  if (!FORMAT[mode] && mode !== UNZIP) throw notImplemented('api', 'zlib mode');
-  return ctor;
-}
-
 type BufferCtor = {
   from(input: string | ArrayBuffer | ArrayBufferView): Uint8Array;
   concat(list: readonly Uint8Array[], totalLength?: number): Uint8Array;
   alloc(size: number): Uint8Array;
+  allocUnsafe(size: number): Uint8Array;
+  isBuffer(value: unknown): boolean;
+  byteLength(input: string, encoding?: string): number;
 };
 
-// --- the stream --------------------------------------------------------------
-
-interface StreamOpts extends Record<string, unknown> {
-  /** Node-only: reject data after the compressed stream ends. */
-  rejectGarbageAfterEnd?: boolean;
-}
-
-/**
- * The shape of a Node `Transform` we build on. Kept structural so this file does
- * not have to import the vendored `stream` types.
- */
+/** Structural shape of a Node `Transform` (kept local to avoid a cycle). */
+type TransformCtor = new (opts?: Record<string, unknown>) => TransformLike;
 interface TransformLike {
   push(chunk: Uint8Array): boolean;
   destroy(error?: Error): void;
+  write(chunk: unknown, encoding?: unknown, cb?: unknown): boolean;
+  on(event: string, listener: (...args: unknown[]) => void): void;
+  once(event: string, listener: (...args: unknown[]) => void): void;
   readonly destroyed: boolean;
+  readonly writableEnded: boolean;
+  readonly writableFinished: boolean;
+  readonly writableLength: number;
 }
-type TransformCtor = new (opts?: Record<string, unknown>) => TransformLike & {
-  on(event: string, listener: (...args: unknown[]) => void): void;
-  _transform(chunk: Uint8Array, encoding: string, callback: (error?: Error) => void): void;
-  _flush(callback: (error?: Error) => void): void;
-  _destroy(error: Error | null, callback: (error: Error | null) => void): void;
-};
-
-function makeZlibClass(
-  Base: TransformCtor,
-  mode: number,
-  Buffer: BufferCtor,
-  className: string,
-): new (opts?: StreamOpts) => unknown {
-  class WebNodeZlib extends Base {
-    #writer: ReturnType<HostPair['writable']['getWriter']> | undefined;
-    #reader: ReturnType<HostPair['readable']['getReader']> | undefined;
-    #drain: Promise<void> | undefined;
-    #failure: Error | undefined;
-    #started = false;
-    #pending: Uint8Array[] = [];
-    #nread = 0;
-    #maxOutputLength: number;
-    #buffer: BufferCtor;
-    #closed = false;
-
-    constructor(opts?: StreamOpts) {
-      super(opts as Record<string, unknown> | undefined);
-      checkOptions(mode, opts ?? undefined);
-      this.#maxOutputLength = maxOutputLengthOf(opts ?? undefined);
-      this.#buffer = Buffer;
-      // UNZIP cannot choose a codec until it has sniffed the header; every other
-      // mode knows its format up front.
-      if (mode !== UNZIP) this.#open(FORMAT[mode]);
-    }
-
-    #open(format: string): void {
-      const compress = COMPRESS_MODES.has(mode);
-      const ctor = requirePlatform(compress, mode);
-      const pair = new ctor(format);
-      this.#writer = pair.writable.getWriter();
-      const reader = pair.readable.getReader();
-      this.#reader = reader;
-      this.#started = true;
-      this.#drain = (async (): Promise<void> => {
-        for (;;) {
-          let chunk: { value?: Uint8Array; done: boolean };
-          try {
-            chunk = await reader.read();
-          } catch (cause) {
-            this.#fail(asZlibError(cause));
-            return;
-          }
-          if (chunk.done) return;
-          if (this.destroyed) return;
-          if (chunk.value && chunk.value.byteLength > 0) {
-            this.#nread += chunk.value.byteLength;
-            if (this.#nread > this.#maxOutputLength) {
-              this.#fail(
-                Object.assign(new Error(`Cannot create a Buffer larger than ${this.#maxOutputLength} bytes`), {
-                  code: 'ERR_BUFFER_TOO_LARGE',
-                }),
-              );
-              return;
-            }
-            this.push(this.#buffer.from(chunk.value));
-          }
-        }
-      })();
-    }
-
-    #fail(error: Error): void {
-      if (this.#failure) return;
-      this.#failure = error;
-      this.destroy(error);
-    }
-
-    /** Sniff gzip vs zlib the way Node's UNZIP mode does. */
-    #sniff(parts: Uint8Array[]): void {
-      let b0: number | undefined;
-      let b1: number | undefined;
-      for (const part of parts) {
-        for (let i = 0; i < part.byteLength; i++) {
-          if (b0 === undefined) b0 = part[i];
-          else {
-            b1 = part[i];
-            break;
-          }
-        }
-        if (b1 !== undefined) break;
-      }
-      const gzip = b0 === 0x1f && b1 === 0x8b;
-      this.#open(gzip ? 'gzip' : 'deflate');
-    }
-
-    _transform(chunk: Uint8Array, _encoding: string, callback: (error?: Error) => void): void {
-      if (chunk.byteLength === 0) {
-        callback();
-        return;
-      }
-      if (this.#started) {
-        this.#writeAll([chunk], callback);
-        return;
-      }
-      // UNZIP holds the first bytes back until the header can be sniffed.
-      if (this.#pending.length === 0 && chunk.byteLength < 2) {
-        this.#pending.push(chunk);
-        callback();
-        return;
-      }
-      const parts = [...this.#pending, chunk];
-      this.#pending = [];
-      this.#sniff(parts);
-      this.#writeAll(parts, callback);
-    }
-
-    #writeAll(chunks: Uint8Array[], callback: (error?: Error) => void): void {
-      const writer = this.#writer;
-      if (!writer) {
-        callback();
-        return;
-      }
-      const write = async (): Promise<void> => {
-        for (const chunk of chunks) {
-          if (chunk.byteLength > 0) await writer.write(chunk);
-        }
-      };
-      write().then(
-        () => callback(),
-        (cause) => {
-          const error = asZlibError(cause);
-          this.#failure = error;
-          callback(error);
-        },
-      );
-    }
-
-    _flush(callback: (error?: Error) => void): void {
-      if (!this.#started) {
-        // No input at all: still spin up a decoder so it errors like Node does.
-        this.#open('deflate');
-      }
-      const writer = this.#writer;
-      const drain = this.#drain;
-      if (!writer) {
-        callback(this.#failure);
-        return;
-      }
-      writer.close().then(
-        async () => {
-          await drain;
-          callback(this.#failure);
-        },
-        (cause) => {
-          this.#failure ??= asZlibError(cause);
-          callback(this.#failure);
-        },
-      );
-    }
-
-    _destroy(error: Error | null, callback: (error: Error | null) => void): void {
-      const writer = this.#writer;
-      const reader = this.#reader;
-      this.#writer = undefined;
-      this.#reader = undefined;
-      this.#closed = true;
-      try {
-        // Tear the host codec down so its machinery stops holding onto memory.
-        if (writer) void Promise.resolve(writer.abort?.(error ?? undefined)).catch(() => {});
-        if (reader) void Promise.resolve(reader.cancel(error ?? undefined)).catch(() => {});
-      } catch {
-        /* the stream is going away regardless */
-      }
-      callback(error ?? this.#failure ?? null);
-    }
-
-    // --- Zlib base surface (Node's internal/zlib.js `ZlibBase`) -------------
-    /** `!this._handle` in Node; here, `true` once destroyed. */
-    get _closed(): boolean {
-      return this.#closed;
-    }
-
-    /** Node asserts the handle is still open, then resets the codec state. */
-    reset(): undefined {
-      if (this.#closed) throw new Error('zlib binding closed');
-      return undefined;
-    }
-
-    /**
-     * Node writes a special flush-carrying zero-length buffer through the
-     * transform. The platform codec has no partial flush, so only the default
-     * full flush (and `Z_NO_FLUSH`) is honoured; anything else refuses loudly.
-     */
-    flush(kind?: unknown, callback?: unknown): undefined {
-      const stream = this as unknown as {
-        write(chunk: Uint8Array, encoding: string, cb?: (e?: Error) => void): boolean;
-        once(event: string, fn: (...a: unknown[]) => void): void;
-        readonly writableFinished: boolean;
-        readonly writableEnded: boolean;
-      };
-      const finishFlush = constants.Z_FINISH;
-      const noFlush = constants.Z_NO_FLUSH;
-      if (typeof kind === 'function' || (kind === undefined && !callback)) {
-        callback = kind;
-        kind = finishFlush;
-      }
-      const k = kind === undefined ? finishFlush : kind;
-      if (k !== finishFlush && k !== noFlush) {
-        throw notImplemented(
-          'api',
-          'zlib flush(kind)',
-          'The platform codec exposes no partial flush; only the full flush is supported.',
-        );
-      }
-      const cb = typeof callback === 'function' ? (callback as (e?: Error) => void) : undefined;
-      if (stream.writableFinished) {
-        if (cb) queueMicrotask(() => cb());
-      } else if (stream.writableEnded) {
-        if (cb) stream.once('end', cb as (...a: unknown[]) => void);
-      } else {
-        stream.write(this.#buffer.alloc(0), '', cb);
-      }
-      return undefined;
-    }
-
-    /** Node: `finished(this, callback); this.destroy();`. */
-    close(callback?: unknown): void {
-      const cb = typeof callback === 'function' ? (callback as (e?: Error) => void) : undefined;
-      if (cb) {
-        const stream = this as unknown as {
-          once(event: string, fn: (...a: unknown[]) => void): void;
-        };
-        let done = false;
-        stream.once('close', () => {
-          if (!done) {
-            done = true;
-            cb();
-          }
-        });
-        stream.once('error', (err: unknown) => {
-          if (!done) {
-            done = true;
-            cb(err as Error);
-          }
-        });
-      }
-      (this as unknown as { destroy(): void }).destroy();
-    }
-
-    /** Adjusting codec parameters mid-stream has no platform counterpart. */
-    params(_level?: unknown, _strategy?: unknown, _callback?: unknown): never {
-      throw notImplemented('api', 'zlib params()', 'Adjusting codec parameters mid-stream is not supported.');
-    }
-
-    /** Legacy synchronous codec path; our codec is asynchronous only. */
-    _processChunk(_chunk?: unknown, _flushFlag?: unknown, _cb?: unknown): never {
-      throw notImplemented('api', 'zlib _processChunk()', 'The platform codec is asynchronous.');
-    }
-
-  }
-  Object.defineProperty(WebNodeZlib, 'name', { value: className });
-  return WebNodeZlib as unknown as new (opts?: StreamOpts) => unknown;
-}
-
-// --- one-shot helpers --------------------------------------------------------
-
-interface ZlibStreamLike {
-  on(event: string, listener: (...args: unknown[]) => void): void;
-  end(chunk?: unknown): void;
-  close(): void;
-}
-
-function zlibBuffer(
-  engine: ZlibStreamLike,
-  buffer: unknown,
-  callback: (error: Error | null, result?: Uint8Array) => void,
-  Buffer: BufferCtor,
-): void {
-  validateFunction(callback, 'callback');
-  let chunks: Uint8Array[] | null = null;
-  let nread = 0;
-  engine.on('data', (chunk: unknown) => {
-    const bytes = chunk as Uint8Array;
-    if (!chunks) chunks = [bytes];
-    else chunks.push(bytes);
-    nread += bytes.byteLength;
-  });
-  engine.on('error', (error: unknown) => callback(asZlibError(error)));
-  engine.on('end', () => callback(null, Buffer.concat(chunks ?? [], nread)));
-  engine.end(buffer);
-}
-
-// --- module ------------------------------------------------------------------
 
 export const zlibSpec: BuiltinSpec = {
   id: 'zlib',
@@ -614,86 +304,386 @@ export const zlibSpec: BuiltinSpec = {
   },
   deps: ['stream', 'buffer'],
   init: (ctx: BuiltinInitContext): Record<string, unknown> => {
-    const { Transform } = ctx.require('stream') as { Transform: TransformCtor };
-    const { Buffer } = ctx.require('buffer') as { Buffer: BufferCtor };
-    const stringArg = (value: string | Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Array => toBuffer(Buffer, value);
+    const binding = ctx.internalBinding('zlib') as unknown as ZlibBinding;
+    const { Transform, finished } = ctx.require('stream') as {
+      Transform: TransformCtor;
+      finished: (stream: unknown, cb: (err?: Error | null) => void) => void;
+    };
+    const TransformCall = Transform as unknown as {
+      call: (thisArg: unknown, opts?: Record<string, unknown>) => void;
+    };
+    const { Buffer, kMaxLength } = ctx.require('buffer') as { Buffer: BufferCtor; kMaxLength: number };
+    const errors = ctx.require('internal/errors') as {
+      codes: Record<string, new (...args: any[]) => Error & { code?: string }>;
+      genericNodeError: (message: string, props?: Record<string, unknown>) => Error;
+    };
+    const { ERR_INVALID_ARG_TYPE, ERR_OUT_OF_RANGE, ERR_BUFFER_TOO_LARGE } = errors.codes;
+    const validators = ctx.require('internal/validators') as {
+      checkRangesOrGetDefault: (value: unknown, name: string, min: number, max: number, def?: number) => number;
+      validateFunction: (value: unknown, name: string) => void;
+      validateUint32: (value: unknown, name: string) => void;
+      validateFiniteNumber: (value: unknown, name: string) => boolean;
+      validateBoolean: (value: unknown, name: string) => void;
+    };
+    const types = ctx.require('internal/util/types') as {
+      isArrayBufferView: (value: unknown) => value is ArrayBufferView;
+      isUint8Array: (value: unknown) => value is Uint8Array;
+    };
+    const { checkRangesOrGetDefault, validateFunction, validateUint32, validateFiniteNumber, validateBoolean } =
+      validators;
+    const { isArrayBufferView } = types;
+    const { deprecateInstantiation } = ctx.require('internal/util') as {
+      deprecateInstantiation: (target: unknown, code: string, ...args: unknown[]) => never;
+    };
+    const nextTick = (fn: (...fnArgs: any[]) => void, ...fnArgs: any[]): void => ctx.binding.nextTick(fn as (...a: unknown[]) => void, ...fnArgs);
 
-    // Node's async one-shot helpers only rewrap views/ArrayBuffers; anything
-    // else (a string, or an invalid type) is handed straight to the stream,
-    // which is what raises the `chunk` TypeError a caller actually sees.
-    const coerceInput = (input: unknown): unknown => {
-      if (ArrayBuffer.isView(input)) {
-        if (input instanceof Uint8Array) return input;
-        return Buffer.from(
-          new Uint8Array(input.buffer as ArrayBuffer, input.byteOffset, input.byteLength),
-        );
+    const isAnyArrayBuffer = (value: unknown): value is ArrayBuffer =>
+      value instanceof ArrayBuffer ||
+      (typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer);
+
+    const genericNodeError = errors.genericNodeError;
+
+    // --- the actual codec, behind internalBinding('zlib') --------------------
+
+    function Zlib(this: ZlibInstance, opts: ZlibOptions | undefined, mode: number): void {
+      let windowBits = Z_DEFAULT_WINDOWBITS;
+      let level = Z_DEFAULT_COMPRESSION;
+      let memLevel = Z_DEFAULT_MEMLEVEL;
+      let strategy = Z_DEFAULT_STRATEGY;
+      let dictionary: Uint8Array | ArrayBuffer | ArrayBufferView | undefined;
+      let dict: Uint8Array | null = null;
+
+      if (opts) {
+        if (
+          (opts.windowBits == null || opts.windowBits === 0) &&
+          (mode === INFLATE || mode === GUNZIP || mode === UNZIP)
+        ) {
+          windowBits = 0;
+        } else {
+          const min = Z_MIN_WINDOWBITS + (mode === GZIP ? 1 : 0);
+          windowBits = checkRangesOrGetDefault(opts.windowBits, 'options.windowBits', min, Z_MAX_WINDOWBITS, Z_DEFAULT_WINDOWBITS);
+        }
+        level = checkRangesOrGetDefault(opts.level, 'options.level', Z_MIN_LEVEL, Z_MAX_LEVEL, Z_DEFAULT_COMPRESSION);
+        memLevel = checkRangesOrGetDefault(opts.memLevel, 'options.memLevel', Z_MIN_MEMLEVEL, Z_MAX_MEMLEVEL, Z_DEFAULT_MEMLEVEL);
+        strategy = checkRangesOrGetDefault(opts.strategy, 'options.strategy', Z_DEFAULT_STRATEGY, Z_FIXED, Z_DEFAULT_STRATEGY);
+        dictionary = opts.dictionary;
+        if (dictionary !== undefined) {
+          if (isArrayBufferView(dictionary)) {
+            dict = dictionary instanceof Uint8Array
+              ? dictionary
+              : new Uint8Array((dictionary as ArrayBufferView).buffer, (dictionary as ArrayBufferView).byteOffset, (dictionary as ArrayBufferView).byteLength);
+          } else if (isAnyArrayBuffer(dictionary)) {
+            dict = new Uint8Array(dictionary);
+          } else {
+            throw new ERR_INVALID_ARG_TYPE('options.dictionary', ['Buffer', 'TypedArray', 'DataView', 'ArrayBuffer'], dictionary);
+          }
+        }
       }
-      if (input instanceof ArrayBuffer) return Buffer.from(input);
-      return input;
+
+      this._codec = new binding.Zlib({
+        mode,
+        level,
+        windowBits,
+        memLevel,
+        strategy,
+        dictionary: dict,
+        rejectGarbageAfterEnd: opts?.rejectGarbageAfterEnd === true,
+      });
+      ZlibBase.call(this, opts, mode, this._codec, zlibDefaultOpts);
+
+      this._level = level;
+      this._strategy = strategy;
+      this._mode = mode;
+    }
+    Object.setPrototypeOf(Zlib.prototype, ZlibBase.prototype);
+    Object.setPrototypeOf(Zlib, ZlibBase);
+
+    const zlibDefaultOpts = { flush: Z_NO_FLUSH, finishFlush: Z_FINISH, fullFlush: Z_FULL_FLUSH };
+
+    // --- ZlibBase -----------------------------------------------------------
+
+    function ZlibBase(this: ZlibInstance, opts: ZlibOptions | undefined, mode: number, handle: unknown, defaults: { flush: number; finishFlush: number; fullFlush: number }): void {
+      let chunkSize = Z_DEFAULT_CHUNK;
+      let maxOutputLength = kMaxLength;
+      let { flush, finishFlush, fullFlush } = defaults;
+
+      if (opts) {
+        const cs = opts.chunkSize;
+        if (!validateFiniteNumber(cs, 'options.chunkSize')) {
+          chunkSize = Z_DEFAULT_CHUNK;
+        } else if ((cs as number) < Z_MIN_CHUNK) {
+          throw new ERR_OUT_OF_RANGE('options.chunkSize', `>= ${Z_MIN_CHUNK}`, cs);
+        }
+        flush = checkRangesOrGetDefault(opts.flush, 'options.flush', Z_NO_FLUSH, Z_BLOCK, flush);
+        finishFlush = checkRangesOrGetDefault(opts.finishFlush, 'options.finishFlush', Z_NO_FLUSH, Z_BLOCK, finishFlush);
+        maxOutputLength = checkRangesOrGetDefault(opts.maxOutputLength, 'options.maxOutputLength', 1, kMaxLength, kMaxLength);
+        if (opts.rejectGarbageAfterEnd !== undefined) {
+          validateBoolean(opts.rejectGarbageAfterEnd, 'options.rejectGarbageAfterEnd');
+        }
+        if (opts.encoding || opts.objectMode || opts.writableObjectMode) {
+          opts = { ...opts, encoding: null, objectMode: false, writableObjectMode: false } as ZlibOptions;
+        }
+      }
+
+      TransformCall.call(this, { autoDestroy: true, ...(opts as Record<string, unknown>) });
+      this.bytesWritten = 0;
+      this._outBuffer = Buffer.allocUnsafe(chunkSize);
+      this._outOffset = 0;
+      this._chunkSize = chunkSize;
+      this._defaultFlushFlag = flush;
+      this._finishFlushFlag = finishFlush;
+      this._defaultFullFlushFlag = fullFlush;
+      this._info = opts?.info;
+      this._maxOutputLength = maxOutputLength;
+      this._rejectGarbageAfterEnd = opts?.rejectGarbageAfterEnd === true;
+    }
+    Object.setPrototypeOf(ZlibBase.prototype, Transform.prototype);
+    Object.setPrototypeOf(ZlibBase, Transform);
+
+    Object.defineProperty(ZlibBase.prototype, '_closed', {
+      configurable: true,
+      enumerable: true,
+      get(this: ZlibInstance): boolean {
+        return !this._codec || this._codec.closed;
+      },
+    });
+
+    ZlibBase.prototype.reset = function reset(this: ZlibInstance): void {
+      if (!this._codec || this._codec.closed) throw new Error('zlib binding closed');
+      return this._codec.reset();
     };
 
-    const CLASSES: Record<number, string> = {
-      [DEFLATE]: 'Deflate',
-      [INFLATE]: 'Inflate',
-      [GZIP]: 'Gzip',
-      [GUNZIP]: 'Gunzip',
-      [DEFLATERAW]: 'DeflateRaw',
-      [INFLATERAW]: 'InflateRaw',
-      [UNZIP]: 'Unzip',
+    // Node keeps `_final` a no-op so the `prefinish` path drives `_flush`, but the
+    // callback must still be invoked or the writable side never finishes.
+    ZlibBase.prototype._flush = function _flush(this: ZlibInstance, callback: (error?: Error) => void): void {
+      this._transform(Buffer.alloc(0), '', callback);
     };
 
-    const ctorFor: Record<number, new (opts?: StreamOpts) => unknown> = {};
-    for (const [modeStr, className] of Object.entries(CLASSES)) {
-      ctorFor[Number(modeStr)] = makeZlibClass(Transform, Number(modeStr), Buffer, className);
+    ZlibBase.prototype._final = function _final(callback: () => void): void {
+      callback();
+    };
+
+    // `flush()` inserts a pseudo-buffer carrying the flush flag through `.write()`.
+    const kFlushFlag = Symbol('kFlushFlag');
+    const flushiness: number[] = [];
+    const kFlushFlagList = [Z_NO_FLUSH, Z_BLOCK, Z_PARTIAL_FLUSH, Z_SYNC_FLUSH, Z_FULL_FLUSH, Z_FINISH];
+    for (let i = 0; i < kFlushFlagList.length; i++) flushiness[kFlushFlagList[i]] = i;
+    const maxFlush = (a: number, b: number): number => (flushiness[a] > flushiness[b] ? a : b);
+    const kFlushBuffers: Uint8Array[] = [];
+    {
+      const dummy = new ArrayBuffer(0);
+      for (const flushFlag of kFlushFlagList) {
+        const buf = Buffer.from(dummy) as unknown as Record<symbol, number>;
+        buf[kFlushFlag] = flushFlag;
+        kFlushBuffers[flushFlag] = buf as unknown as Uint8Array;
+      }
     }
 
-    // `zlib.gzip(buf, cb)` style helpers: validate the callback first (Node
-    // does), then run the stream and collect its output.
-    const convenience = (mode: number, sync: boolean) => {
+    ZlibBase.prototype.flush = function flush(this: ZlibInstance, kind?: unknown, callback?: unknown): void {
+      if (typeof kind === 'function' || (kind === undefined && !callback)) {
+        callback = kind;
+        kind = this._defaultFullFlushFlag;
+      }
+      const k = checkRangesOrGetDefault(kind, 'kind', Z_NO_FLUSH, Z_BLOCK, this._defaultFullFlushFlag);
+      const cb = typeof callback === 'function' ? (callback as () => void) : undefined;
+      if (this.writableFinished) {
+        if (cb) nextTick(cb);
+      } else if (this.writableEnded) {
+        if (cb) this.once('end', cb);
+      } else {
+        this.write(kFlushBuffers[k], '', callback);
+      }
+    };
+
+    ZlibBase.prototype.close = function close(this: ZlibInstance, callback?: (err?: Error | null) => void): void {      if (callback) finished(this, callback);
+      this.destroy();
+    };
+
+    ZlibBase.prototype._destroy = function _destroy(this: ZlibInstance, err: Error | null, callback: (error: Error | null) => void): void {
+      closeCodec(this);
+      callback(err);
+    };
+
+    ZlibBase.prototype._transform = function _transform(this: ZlibInstance, chunk: Uint8Array, _encoding: string, cb: (error?: Error) => void): void {
+      let flushFlag = this._defaultFlushFlag;
+      const carried = (chunk as unknown as Record<symbol, number>)[kFlushFlag];
+      if (typeof carried === 'number') flushFlag = carried;
+      if (this.writableEnded && this.writableLength === chunk.byteLength) {
+        flushFlag = maxFlush(flushFlag, this._finishFlushFlag);
+      }
+      processChunk(this, chunk, flushFlag, cb);
+    };
+
+    // Node keeps this on `ZlibBase.prototype` for backwards compatibility.
+    ZlibBase.prototype._processChunk = function _processChunk(
+      this: ZlibInstance,
+      chunk: Uint8Array,
+      flushFlag: number,
+      cb?: (error?: Error) => void,
+    ): Uint8Array | undefined {
+      if (typeof cb === 'function') {
+        processChunk(this, chunk, flushFlag, cb);
+        return undefined;
+      }
+      return processChunkSync(this, chunk, flushFlag);
+    };
+
+    // --- processChunk / processChunkSync ------------------------------------
+
+    function closeCodec(self: ZlibInstance): void {
+      self._codec?.close();
+      self._codec = undefined;
+    }
+
+    function onCodecError(self: ZlibInstance, err: Error): void {
+      self.destroy(err);
+    }
+
+    function processChunk(self: ZlibInstance, chunk: Uint8Array, flushFlag: number, cb: (error?: Error) => void): void {
+      const codec = self._codec;
+      if (!codec) {
+        nextTick(cb);
+        return;
+      }
+      let out: Uint8Array;
+      try {
+        out = codec.push(chunk, flushFlag);
+      } catch (err) {
+        onCodecError(self, err as Error);
+        return;
+      }
+      self.bytesWritten += chunk.byteLength - codec.lastInputLeft;
+      if (out.byteLength > 0) self.push(Buffer.from(out));
+      nextTick(cb);
+    }
+
+    function processChunkSync(self: ZlibInstance, chunk: Uint8Array, flushFlag: number): Uint8Array {
+      const codec = self._codec;
+      if (!codec) throw new Error('zlib binding closed');
+      const out = codec.push(chunk, flushFlag);
+      if (out.byteLength > self._maxOutputLength) {
+        closeCodec(self);
+        throw new ERR_BUFFER_TOO_LARGE(self._maxOutputLength);
+      }
+      self.bytesWritten = chunk.byteLength - codec.lastInputLeft;
+      closeCodec(self);
+      return Buffer.from(out);
+    }
+
+    /** `zlib.flush()`-driven parameter change (Node's `paramsAfterFlushCallback`). */
+    function paramsAfterFlushCallback(this: ZlibInstance, level: number, strategy: number, callback?: () => void): void {
+      if (!this._codec || this._codec.closed) throw new Error('zlib binding closed');
+      this._codec.setParams(level, strategy);
+      if (!this.destroyed) {
+        this._level = level;
+        this._strategy = strategy;
+        if (callback) callback();
+      }
+    }
+
+    (Zlib.prototype as ZlibInstance).params = function params(
+      this: ZlibInstance,
+      level: unknown,
+      strategy: unknown,
+      callback?: () => void,
+    ): void {
+      const l = checkRangesOrGetDefault(level, 'level', Z_MIN_LEVEL, Z_MAX_LEVEL);
+      const s = checkRangesOrGetDefault(strategy, 'strategy', Z_DEFAULT_STRATEGY, Z_FIXED);
+      if (this._level !== l || this._strategy !== s) {
+        this.flush(Z_SYNC_FLUSH, paramsAfterFlushCallback.bind(this, l, s, callback));
+      } else {
+        nextTick(callback as (...a: unknown[]) => void);
+      }
+    };
+
+    // --- one-shot helpers ---------------------------------------------------
+
+    function zlibBufferSync(engine: ZlibInstance, buffer: unknown): Uint8Array | { buffer: Uint8Array; engine: ZlibInstance } {
+      if (typeof buffer === 'string') {
+        buffer = Buffer.from(buffer);
+      } else if (!isArrayBufferView(buffer)) {
+        if (isAnyArrayBuffer(buffer)) {
+          buffer = Buffer.from(buffer);
+        } else {
+          throw new ERR_INVALID_ARG_TYPE('buffer', ['string', 'Buffer', 'TypedArray', 'DataView', 'ArrayBuffer'], buffer);
+        }
+      }
+      const result = processChunkSync(engine, buffer as Uint8Array, engine._finishFlushFlag);
+      if (engine._info) return { buffer: result, engine };
+      return result;
+    }
+
+    function zlibBuffer(
+      engine: ZlibInstance,
+      buffer: unknown,
+      callback: (error: Error | null, result?: Uint8Array) => void,
+    ): void {
+      validateFunction(callback, 'callback');
+      let chunks: Uint8Array[] | null = null;
+      let nread = 0;
+      engine.on('data', (chunk: unknown) => {
+        const bytes = chunk as Uint8Array;
+        if (!chunks) chunks = [bytes];
+        else chunks.push(bytes);
+        nread += bytes.byteLength;
+      });
+      engine.on('error', (error: unknown) => callback(error as Error));
+      engine.on('end', () => callback(null, Buffer.concat(chunks ?? [], nread)));
+      (engine as unknown as { end(chunk: unknown): void }).end(buffer);
+    }
+
+    // --- class wrappers -----------------------------------------------------
+
+    function defineCtor(mode: number, className: string, preprocess?: (opts: ZlibOptions) => ZlibOptions): new (opts?: ZlibOptions) => ZlibInstance {
+      function Ctor(this: ZlibInstance, opts?: ZlibOptions): unknown {
+        if (!(this instanceof (Ctor as unknown as new () => ZlibInstance))) {
+          return deprecateInstantiation(Ctor, 'DEP0184', opts);
+        }
+        if (preprocess && opts) opts = preprocess(opts);
+        (Zlib as unknown as (this: ZlibInstance, o: ZlibOptions | undefined, m: number) => void).call(this, opts, mode);
+      }
+      Object.defineProperty(Ctor, 'name', { value: className, configurable: true });
+      Object.setPrototypeOf(Ctor.prototype, Zlib.prototype);
+      Object.setPrototypeOf(Ctor, Zlib);
+      return Ctor as unknown as new (opts?: ZlibOptions) => ZlibInstance;
+    }
+
+    const Deflate = defineCtor(DEFLATE, 'Deflate');
+    const Inflate = defineCtor(INFLATE, 'Inflate');
+    const Gzip = defineCtor(GZIP, 'Gzip');
+    const Gunzip = defineCtor(GUNZIP, 'Gunzip');
+    const DeflateRaw = defineCtor(DEFLATERAW, 'DeflateRaw', (opts) => (opts.windowBits === 8 ? { ...opts, windowBits: 9 } : opts));
+    const InflateRaw = defineCtor(INFLATERAW, 'InflateRaw');
+    const Unzip = defineCtor(UNZIP, 'Unzip');
+
+    const createProperty = (ctor: new (opts?: ZlibOptions) => ZlibInstance, name: string): { value: (options?: ZlibOptions) => ZlibInstance } => ({
+      value: Object.defineProperty((options?: ZlibOptions): ZlibInstance => new ctor(options), 'name', { value: name }),
+    });
+
+    const createConvenienceMethod = (ctor: new (opts?: ZlibOptions) => ZlibInstance, sync: boolean) => {
       if (sync) {
-        return (): never => {
-          throw notImplemented(
-            'api',
-            'zlib sync API',
-            'The platform codec is asynchronous; use the callback or stream form instead.',
-          );
+        return function syncBufferWrapper(buffer: unknown, opts?: ZlibOptions): unknown {
+          return zlibBufferSync(new ctor(opts), buffer);
         };
       }
-      return (
-        buffer: string | Uint8Array | ArrayBuffer | ArrayBufferView,
-        opts: StreamOpts | ((error: Error | null, result?: Uint8Array) => void),
+      return function asyncBufferWrapper(
+        buffer: unknown,
+        opts?: ZlibOptions | ((error: Error | null, result?: Uint8Array) => void),
         callback?: (error: Error | null, result?: Uint8Array) => void,
-      ): undefined => {
+      ): void {
         if (typeof opts === 'function') {
           callback = opts;
           opts = {};
         }
-        const done = callback;
-        validateFunction(done, 'callback');
-        const Ctor = ctorFor[mode];
-        const engine = new Ctor(opts) as ZlibStreamLike;
-        zlibBuffer(engine, coerceInput(buffer), done as (error: Error | null, result?: Uint8Array) => void, Buffer);
-        return undefined;
+        return zlibBuffer(new ctor(opts as ZlibOptions), buffer, callback as (error: Error | null, result?: Uint8Array) => void);
       };
     };
 
-    const make = (mode: number) => (opts?: StreamOpts): unknown => new (ctorFor[mode])(opts);
-
-    const crc32 = (input: string | Uint8Array | ArrayBuffer | ArrayBufferView, value = 0): number => {
-      const bytes = stringArg(input);
-      let crc = (value ^ 0xffffffff) >>> 0;
-      for (let i = 0; i < bytes.byteLength; i++) {
-        crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ bytes[i]) & 0xff];
-      }
-      return (crc ^ 0xffffffff) >>> 0;
-    };
+    // --- stubs for what the host has no codec for ---------------------------
 
     const lose = (name: string, why: string) => (): never => {
       throw notImplemented('api', `zlib ${name}`, why);
     };
-    // Stub classes still extend the real stream.Transform (so the prototype and
-    // statics — pipe/read/write/Duplex/… — are present for feature detection)
-    // but throw from the constructor.
     const loseClass = (name: string, why: string, base?: TransformCtor) => {
       const Parent = (base ?? Object) as new (opts?: Record<string, unknown>) => object;
       const cls = class extends (Parent as new (opts?: Record<string, unknown>) => object) {
@@ -704,24 +694,15 @@ export const zlibSpec: BuiltinSpec = {
       };
       if (base) defineZlibBaseSurface(cls.prototype, why);
       Object.defineProperty(cls, 'name', { value: name, configurable: true });
-      return cls as unknown as new (opts?: StreamOpts) => never;
+      return cls as unknown as new (opts?: ZlibOptions) => never;
     };
 
-    /**
-     * The `ZlibBase` members Node's codec classes carry
-     * (`internal/zlib.js`). For stub classes (no instance can exist) each entry
-     * point throws the same way; only the shape matters for feature detection.
-     */
     const defineZlibBaseSurface = (proto: object, why: string): void => {
-      const lose = (member: string) => (): never => {
+      const loseMember = (member: string) => (): never => {
         throw notImplemented('api', `zlib ${member}`, why);
       };
       for (const member of ['_flush', '_processChunk', 'close', 'flush', 'params', 'reset']) {
-        Object.defineProperty(proto, member, {
-          value: lose(member),
-          writable: true,
-          configurable: true,
-        });
+        Object.defineProperty(proto, member, { value: loseMember(member), writable: true, configurable: true });
       }
       Object.defineProperty(proto, '_closed', {
         get: (): never => {
@@ -730,13 +711,11 @@ export const zlibSpec: BuiltinSpec = {
         configurable: true,
       });
     };
+
     const NO_BROTLI = 'The host ships no brotli codec.';
     const NO_ZSTD = 'The host ships no zstd codec.';
     const NO_ZIP = 'Zip archive support is not implemented.';
 
-    // Zip archive classes: native-only in Node. We expose the full member
-    // surface (methods + accessors + statics) so feature detection matches, but
-    // every entry point throws — there is no archive backend.
     const defineZipSurface = (
       ctor: unknown,
       methods: readonly string[],
@@ -771,6 +750,7 @@ export const zlibSpec: BuiltinSpec = {
         });
       }
     };
+
     const ZipBuffer = loseClass('ZipBuffer', NO_ZIP);
     const ZipEntry = loseClass('ZipEntry', NO_ZIP);
     const ZipFile = loseClass('ZipFile', NO_ZIP);
@@ -792,37 +772,42 @@ export const zlibSpec: BuiltinSpec = {
       ['comment', 'writable'],
       ['open', 'openSync'],
     );
-    return {
+
+    // --- crc32 --------------------------------------------------------------
+
+    function crc32(data: unknown, value: unknown = 0): number {
+      if (typeof data !== 'string' && !isArrayBufferView(data)) {
+        throw new ERR_INVALID_ARG_TYPE('data', ['Buffer', 'TypedArray', 'DataView', 'string'], data);
+      }
+      validateUint32(value, 'value');
+      const v = (value as number) + 0; // coerce -0 to +0
+      return binding.crc32(data as Uint8Array | string, v);
+    }
+
+    const api: Record<string, unknown> = {
       constants,
       codes,
-      createDeflate: make(DEFLATE),
-      createInflate: make(INFLATE),
-      createDeflateRaw: make(DEFLATERAW),
-      createInflateRaw: make(INFLATERAW),
-      createGzip: make(GZIP),
-      createGunzip: make(GUNZIP),
-      createUnzip: make(UNZIP),
-      Deflate: ctorFor[DEFLATE],
-      Inflate: ctorFor[INFLATE],
-      DeflateRaw: ctorFor[DEFLATERAW],
-      InflateRaw: ctorFor[INFLATERAW],
-      Gzip: ctorFor[GZIP],
-      Gunzip: ctorFor[GUNZIP],
-      Unzip: ctorFor[UNZIP],
-      deflate: convenience(DEFLATE, false),
-      inflate: convenience(INFLATE, false),
-      deflateRaw: convenience(DEFLATERAW, false),
-      inflateRaw: convenience(INFLATERAW, false),
-      gzip: convenience(GZIP, false),
-      gunzip: convenience(GUNZIP, false),
-      unzip: convenience(UNZIP, false),
-      deflateSync: convenience(DEFLATE, true),
-      inflateSync: convenience(INFLATE, true),
-      deflateRawSync: convenience(DEFLATERAW, true),
-      inflateRawSync: convenience(INFLATERAW, true),
-      gzipSync: convenience(GZIP, true),
-      gunzipSync: convenience(GUNZIP, true),
-      unzipSync: convenience(UNZIP, true),
+      Deflate,
+      Inflate,
+      DeflateRaw,
+      InflateRaw,
+      Gzip,
+      Gunzip,
+      Unzip,
+      deflate: createConvenienceMethod(Deflate, false),
+      inflate: createConvenienceMethod(Inflate, false),
+      deflateRaw: createConvenienceMethod(DeflateRaw, false),
+      inflateRaw: createConvenienceMethod(InflateRaw, false),
+      gzip: createConvenienceMethod(Gzip, false),
+      gunzip: createConvenienceMethod(Gunzip, false),
+      unzip: createConvenienceMethod(Unzip, false),
+      deflateSync: createConvenienceMethod(Deflate, true),
+      inflateSync: createConvenienceMethod(Inflate, true),
+      deflateRawSync: createConvenienceMethod(DeflateRaw, true),
+      inflateRawSync: createConvenienceMethod(InflateRaw, true),
+      gzipSync: createConvenienceMethod(Gzip, true),
+      gunzipSync: createConvenienceMethod(Gunzip, true),
+      unzipSync: createConvenienceMethod(Unzip, true),
       crc32,
       // No platform codec exists for these, and the zip helpers are native-only.
       createBrotliCompress: lose('createBrotliCompress', NO_BROTLI),
@@ -850,16 +835,65 @@ export const zlibSpec: BuiltinSpec = {
       ZipEntry,
       ZipFile,
     };
+
+    // `create*` are accessor-like read-only properties, as in Node.
+    Object.defineProperties(api, {
+      createDeflate: createProperty(Deflate, 'createDeflate'),
+      createInflate: createProperty(Inflate, 'createInflate'),
+      createDeflateRaw: createProperty(DeflateRaw, 'createDeflateRaw'),
+      createInflateRaw: createProperty(InflateRaw, 'createInflateRaw'),
+      createGzip: createProperty(Gzip, 'createGzip'),
+      createGunzip: createProperty(Gunzip, 'createGunzip'),
+      createUnzip: createProperty(Unzip, 'createUnzip'),
+    });
+
+    return api;
   },
 };
 
-/** CRC-32 (IEEE 802.3) lookup table, built once. */
-const CRC_TABLE = ((): Uint32Array => {
-  const table = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    table[n] = c >>> 0;
-  }
-  return table;
-})();
+/** Options accepted by the zlib streams (mirrors Node's). */
+interface ZlibOptions {
+  flush?: number;
+  finishFlush?: number;
+  chunkSize?: number;
+  windowBits?: number;
+  level?: number;
+  memLevel?: number;
+  strategy?: number;
+  dictionary?: Uint8Array | ArrayBuffer | ArrayBufferView;
+  info?: boolean;
+  maxOutputLength?: number;
+  rejectGarbageAfterEnd?: boolean;
+  encoding?: string | null;
+  objectMode?: boolean;
+  writableObjectMode?: boolean;
+  [key: string]: unknown;
+}
+
+/** The `Transform`-shaped stream Node's zlib classes are. */
+interface ZlibInstance extends TransformLike {
+  _codec?: ZlibCodecLike;
+  _outBuffer: Uint8Array;
+  _outOffset: number;
+  _chunkSize: number;
+  _defaultFlushFlag: number;
+  _finishFlushFlag: number;
+  _defaultFullFlushFlag: number;
+  _maxOutputLength: number;
+  _rejectGarbageAfterEnd: boolean;
+  _info?: boolean;
+  _level: number;
+  _strategy: number;
+  _mode: number;
+  bytesWritten: number;
+  reset(): void;
+  flush(kind?: unknown, callback?: unknown): void;
+  close(callback?: (err?: Error | null) => void): void;
+  params(level: unknown, strategy: unknown, callback?: () => void): void;
+  _transform(chunk: Uint8Array, encoding: string, cb: (error?: Error) => void): void;
+  _flush(callback: (error?: Error) => void): void;
+  _final(callback: () => void): void;
+  _destroy(err: Error | null, callback: (error: Error | null) => void): void;
+}
+
+// The function constructors above are wired onto real `Transform` at init time.

@@ -10,12 +10,14 @@
  * ③ 在下面的 {@link WASM_MODULES} 里登记它的资产。
  */
 import wnStubUrl from './artifacts/wn_stub.wasm?url';
+import wnZlibUrl from './artifacts/wn_zlib.wasm?url';
 import { instantiateWasm, type WasmExports } from './loader';
 import { installWasm, wasmLoaded } from './registry';
 
 /** 模块名 → 资产 URL。名字即 `internalBinding(...)` 将来取用的键。 */
 export const WASM_MODULES: Record<string, string> = {
   wn_stub: wnStubUrl,
+  wn_zlib: wnZlibUrl,
 };
 
 export interface LoadWasmOptions {

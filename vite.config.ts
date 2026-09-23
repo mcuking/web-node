@@ -55,6 +55,9 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'node',
       include: ['test/**/*.test.ts'],
+      // The native→WASM modules are fetched as hashed assets in the browser;
+      // tests read the committed artifacts off disk instead (see the file).
+      setupFiles: ['test/setup-wasm.ts'],
     },
   };
 });

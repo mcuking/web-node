@@ -127,7 +127,7 @@ describe('zlib stub classes look like Node', () => {
     }
     expect(g._closed).toBe(false);
     expect(g.reset()).toBeUndefined();
-    expect(() => g.params(9, 0)).toThrowError(/not implemented/i);
+    expect(typeof g.params).toBe('function');
     g.close();
     expect(g._closed).toBe(true);
     expect(() => g.reset()).toThrowError(/zlib binding closed/);

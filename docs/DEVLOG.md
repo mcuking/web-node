@@ -244,6 +244,18 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · M116 — `zlib` 换成**真 `deps/zlib` 编 wasm**（阶段 H P1）
+
+**里程碑**：把 `internalBinding('zlib')` 背后从「平台 `CompressionStream` 适配」（M45/M99）换成 **Node 自己那份 C zlib 编出的 wasm**，于是同步 API 与全部编码参数解锁。设计见 `docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`。
+
+- **真上游 C → wasm**：`npm run build:native` 把 `deps/zlib` 的 11 个 `.c`（+ `native/src/wn_zlib.c` 薄包装）编成 106.2 KB、零 imports 的模块（`-DDYNAMIC_CRC_TABLE` 免掉 591KB `crc32.h`、`-DZLIB_CONST`、`-DOS_CODE=3`）。C 侧 ABI：`wn_zlib_new/write/reset/set_params/set_reject_garbage/ensure` + 入/出缓冲区指针。
+- **JS 层**：`bindings/zlib.ts`（`ZlibCodec`：mode→windowBits、字典装载时机、`Z_NEED_DICT` 重试、gzip 多成员，逐条对齐 `src/node_zlib.cc`）+ `builtins/zlib.ts`（**`lib/zlib.js` 的 zlib 半边逐条移植**：`ZlibBase`/`Zlib`/`processChunk(Sync)`/`_processChunk`/便利方法/`flush`/`params`/`crc32`，brotli/zstd/zip 仍响亮抛错）。`zlib.constants` 补到 Node 全量 **170** 项。
+- **修的真 gap**：`internal/errors` 补 `ERR_TRAILING_JUNK_AFTER_STREAM_END`（`TypeError` 基底）。
+- **验收**：新差分装置 `tools/zlib-probe.cjs`（oracle `tools/zlib-oracle.mjs` → `test/fixtures/zlib.json`）真 Node v26.9.0 vs web-node **逐字段 0 diff**；`tsc` 净 · `vitest run` **998 passed / 2 skipped（119 文件）** · build（`wn_zlib-ElRqH9jS.wasm` 108.78 kB、`runtime.worker-xzjeutnS.js` 674.09 kB）· 部署后线上资产全 200。
+- **三个真 bug（已修）**：① `wn_init_stream()` 在已初始化时返回 `h->err`（上次的返回码）→ `Z_STREAM_END` 之后的调用被当成初始化失败而跳过写入，`avail_out` 陈旧 → 上一次的输出被**重复 push**（异步 `gunzip` 出 2× 数据）；② `ZlibBase.prototype._final` 忘了 `callback()` → writable 永不 finish（流不结束）；③ `DeflateRaw({windowBits:8})` 要按 Node 抬到 9。
+- **有意偏离（已写档）**：① gzip 头 OS 字节固定用 zlib 默认 `0x03`（真 Node 在 macOS 写 `0x13`；wasm 无 OS 身份），探针把这一字节归一并有定点测试；② 未字面 vendor `lib/zlib.js`（它顶层 `require('internal/zip')`，14 文件/4271 行），以移植达到可观测等价。
+
+---
 ### 2026-09-23 · M115 — wasm 工具链 + `internalBinding()` 接入缝（阶段 H 开工）
 
 **里程碑**：native → WASM 迁移的 P0（设计见 `docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`）。目标是把 `internalBinding()` 背后那层从「JS 重写」换成「真上游 C/C++ 编 wasm」；本步先把**工具链与接入缝**打通。

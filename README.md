@@ -395,81 +395,9 @@ a real update: hit **✏️ HMR JS** (a `js-update`) or **🎨 HMR CSS** (a
 
 ## Roadmap
 
-| Milestone | Scope | Status |
-|---|---|---|
-| M1 | Pure-JS runtime layer (realm / bindings / module loader) | ✅ Done |
-| M2 | Virtual file system (in-memory tree + OPFS persistence) | ✅ Done |
-| M3 | Networking (virtual TCP + ServiceWorker bridge + preview) | ✅ Done (basic) |
-| S | Streams foundation (`Readable`/`Writable`/`pipe`/backpressure + chunked) | ✅ Done |
-| M4 | npm client (registry + tarball + `node_modules`) | ✅ Done |
-| M3.5a | Keep-alive (persistent connections + pipelining + client pool) | ✅ Done |
-| M3.5b | Real browser-side streaming (SW relays a `ReadableStream`) | ✅ Done |
-| M3.5c | `https` (the `http` surface under a TLS-shaped name) | ✅ Done |
-| M3.5d | Subdomain routing (`<port>.localhost`) | ✅ Done (dev server) |
-| M5 | Real build tool — esbuild WASM: install, initialize, bundle, write back | ✅ Done |
-| M5b | Real bundler — rollup WASM: ESM graph, tree-shaking, write to VFS | ✅ Done |
-| M5c | Real build toolchain — Vite in the tab: production bundle to VFS | ✅ Done |
-| M5d | Vite dev server in the tab (on-demand transforms + preview) | ✅ Done |
-| M5e | Vite HMR in the tab (over BroadcastChannel, not a WebSocket) | ✅ Done |
-| M5f | HMR wrap-up — CSS `css-update` + per-port channel isolation | ✅ Done |
-| M6 | npm wrap-up — `package-lock.json`, integrity checks, peer auto-install | ✅ Done |
-| M7 | `child_process` + a controlled spawn surface (fork/exec/spawn + mini-shell) | ✅ Done |
-| M7 | npm `.bin` shims + lifecycle scripts (JS shims, dep and root scripts) | ✅ Done |
-| M8 | Stream wrap-up — byte-exact `read(n)`, objectMode split, `autoDestroy` | ✅ Done |
-| M9 | Buffer shared memory — `slice`/`subarray`, `from(ArrayBuffer)` views | ✅ Done |
-| M10 | Wider vendoring — real `internal/streams/state.js` drives the high-water marks | ✅ Done |
-| M11 | Fix stream core bugs (sync push recursion, async-iter error) + real `Readable.from` | ✅ Done |
-| M12 | Align the stream state shape (`_readableState`/`_writableState`) + real predicates | ✅ Done |
-| M13 | Vendor `internal/streams/destroy.js` (real `destroy`/`_undestroy` + `[kState]` bits) and run `finished()` on the real predicates | ✅ Done |
-| M14 | Vendor `internal/streams/end-of-stream.js` — `finished()`/`eos()` are the real source, options + AbortSignal included | ✅ Done |
-| M15 | Vendor Node's real `events.js` (replacing the custom EventEmitter) + the real `stream.addAbortSignal` | ✅ Done |
-| M16 | The whole `stream` module is Node's real source (`lib/stream.js` + `internal/streams/*`): Writable/Duplex/Transform/PassThrough/pipeline/compose/duplexPair/operators + `stream/promises`; the hand-written stream is gone | ✅ Done |
-| M17 | Real `async_hooks` — `lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` on a JS `async_wrap` binding; tick/timer are real async resources, so hooks fire and `AsyncLocalStorage` carries a store across async edges | ✅ Done |
-| M18 | Real framework — `@vitejs/plugin-vue` compiles a **Vue 3 SFC** in the tab; `vite build` emits a production Vue bundle and the dev server serves a live, interactive app (HMR included) | ✅ Done |
-| M19 | More vendored source — real `punycode.js`, `domain.js` and `diagnostics_channel.js` (over the real `async_hooks`, on a small JS binding) | ✅ Done |
-| M20 | Real `string_decoder` — the native decode state machine (`src/string_decoder.cc`) ported to JS; `lib/string_decoder.js` vendored | ✅ Done |
-| M21 | Real `internal/util/types` plus a `types` binding matching `src/node_types.cc`; `util.types` is the real module | ✅ Done |
-| M22 | Real `internal/util/inspect.js` — `util.inspect`/`format`/`formatWithOptions` are the real source; `console` goes through real `formatWithOptions` | ✅ Done |
-| M23 | The real assertion stack — `lib/assert.js`, `internal/assert/*`, `internal/util/comparisons`, real `internal/validators.js`; stack frames carry real filenames via `sourceURL` | ✅ Done |
-| M24 | The whole `util` module is real source (`lib/util.js` + `lib/internal/util.js`): `promisify`/`callbackify`/`styleText`/`parseArgs`/`diff`/`MIMEType`/`parseEnv` | ✅ Done |
-| M25 | Real Web EventTarget stack — `internal/event_target.js` + `internal/webidl.js`: real `EventTarget`/`Event`/`CustomEvent`/`defineEventHandler` | ✅ Done |
-| M26 | Real `AbortController`/`AbortSignal` — `internal/abort_controller.js` on the real EventTarget (`timeout`/`any`/`throwIfAborted`) | ✅ Done |
-| M27 | Real `console` — `lib/console.js` + `internal/console/*` + `internal/cli_table`: real `Console` with `table`/`count`/`group`/`time` | ✅ Done |
-| M28 | Real `os` — `lib/os.js` on a static `os` binding matching `src/node_os.cc` | ✅ Done |
-| M29 | Real `timers` — `lib/timers.js` + `internal/timers.js` + `timers/promises.js`, with a libuv-replacing driver inside the `timers` binding | ✅ Done |
-| M30 | Real `worker_threads` messaging — `internal/worker/io.js`; real `MessageChannel`/`MessagePort`/`BroadcastChannel`, the `messaging` binding reimplementing `src/node_messaging.cc` in JS | ✅ Done |
-| M31 | Real `readline` — `lib/readline.js` + `internal/readline/*`: real line editor, key decoder, ANSI cursor helpers and history ring | ✅ Done |
-| M32 | Lighter worker — a build-time plugin strips vendored comments while keeping line/column numbers and MIT headers: worker 1259KB → 1028KB (gzip 315 → 237KB) | ✅ Done |
-| M33 | Real glob — `internal/fs/glob.js` + the bundled `internal/deps/minimatch`: `path.matchesGlob`, `fs.glob`/`globSync`/`promises.glob` | ✅ Done |
-| M34 | `crypto` synchronous surface — plain-JS MD5/SHA-1/SHA-2/HMAC/PBKDF2/HKDF/scrypt checked against Node's OpenSSL output | ✅ Done |
-| M35 | Real `perf_hooks` + the whole `internal/perf/*` group on a JS `performance` binding (histograms needing native hdr_histogram throw) | ✅ Done |
-| M36 | Real WHATWG streams — `stream/web.js` + `internal/webstreams/*`, so `Readable.toWeb`/`Writable.toWeb`/`Duplex.toWeb` work both ways | ✅ Done |
-| M37 | Real `Blob`/`File` — `internal/blob.js` + `internal/file.js` on a JS `blob` binding; globals plus `fs.openAsBlob` and the `URL.createObjectURL` store | ✅ Done |
-| M38 | Real `stream/iter` (the iterable-streams API) and `stream/consumers` (`text`/`json`/`buffer`/`bytes`/`arrayBuffer`/`blob`) | ✅ Done |
-| M39 | npm deep-cut — root `overrides`/`resolutions`, `file:`/`link:` specifiers, and bounded-concurrency tarball downloads | ✅ Done |
-| M40 | `fork()` IPC — a real channel both ways (`child.send`/`process.send`), default JSON serialization, an open channel keeps the child alive, `node nope.js` exits 1 like Node | ✅ Done |
-| M41 | Buffer slab pooling — allocations under half of `Buffer.poolSize` (64 KiB) share one aligned slab, so `.byteOffset`/`.buffer.byteLength` match Node | ✅ Done |
-| M42 | `util.inspect` / ICU fidelity — `async function*` is both a generator and async (`[AsyncGeneratorFunction: x]`), and `icu.getStringWidth` measures real Unicode columns so `console.table`/CJK wrapping match Node | ✅ Done |
-| M43 | Real `process` surface — every public key checked against Node v26.9.0 (`getBuiltinModule`, `getActiveResourcesInfo`, `loadEnvFile`, the uncaught-exception capture trio, `reallyExit`, …); uncaught throws from timer/nextTick callbacks now route through `process._fatalException` | ✅ Done |
-| M44 | Host `fetch` counts toward exit — an in-flight host request keeps a child alive so its output is no longer dropped; pure microtask promises (WebCrypto, `Blob.arrayBuffer`) don't count, matching Node | ✅ Done |
-| M45 | Real `zlib` — deflate/gzip stream and one-shot forms run on the platform `CompressionStream`/`DecompressionStream`, byte-for-byte with Node v26.9.0; sync forms and encoding params throw `NotImplementedError` rather than silently ignoring | ✅ Done |
-| M46 | Host `WebSocket` counts toward exit (the M44 sibling), plus a loader fix for top-level lexical declarations colliding with injected sandbox globals | ✅ Done |
-| M47 | `crypto` ciphers — AES-128/192/256 in ECB/CBC/CTR/CFB/OFB/GCM, plain JS, byte-for-byte with OpenSSL; unimplemented ciphers throw a typed `NotImplementedError` | ✅ Done |
-| M48 | Real `Buffer` — `lib/buffer.js` + `lib/internal/buffer.js` vendored, the hand-written `buffer.ts` deleted; the `buffer` binding grows into a full JS implementation | ✅ Done |
-| M49 | Real `vfs` subsystem — `lib/internal/vfs/*` + `lib/internal/fs/utils.js`; a working `vfs` module with a full `MemoryProvider`; the `uv` binding gets the real 85-entry `UV_ERRNO_MAP` | ✅ Done |
-| M50 | Real `fs/promises` — `lib/fs/promises.js` + `lib/internal/fs/promises.js`; the `fs` binding grows the whole async/promise surface | ✅ Done |
-| M51 | Real callback `fs` — `lib/fs.js` (4083 lines); `fs.watch`/`fs.promises.watch` run the real watchers code via a VFS projection | ✅ Done |
-| M51b | `fs.opendir`/`Dir` + `fs.watchFile` — a real `fs_dir` binding and a `StatWatcher` polling implementation mirroring libuv's `uv_fs_poll` | ✅ Done |
-| M52 | Real `internal/fs/streams.js` — `fs.ReadStream`/`fs.WriteStream` are the real classes (lazy-loaded, so the top-level `require('fs')` cycle resolves) | ✅ Done |
-| M53 | Real `url` — `lib/url.js` vendored (legacy parse/format/resolve + the WHATWG re-exports); `internal/url` becomes a bridge to the host URL classes, with `url`/`url_pattern`/`encoding_binding` bindings | ✅ Done |
-| M54 | Real `v8` — `lib/v8.js` vendored; `serialize`/`deserialize` and the `Serializer`/`Deserializer` classes run on a new `serdes` binding that reimplements V8's structured-clone wire format (version 15) in JS, byte-for-byte with Node v26.9.0 across a 115-case differential corpus; heap snapshots, `queryObjects` and profiling throw | ✅ Done |
-| M55 | Real `tty` — `lib/tty.js` + `lib/internal/tty.js` vendored, with a new `tty_wrap` binding (`isTTY` is always false, the `TTY` handle throws): `isatty` and `getColorDepth`/`hasColors` are real, `ReadStream`/`WriteStream` throw instead of faking a terminal; the `FORCE_COLOR` path through `internal/util/colors` (previously a missing module) now works and colours `util.styleText`. 57 colour-depth + 10 `hasColors` cases match Node v26.9.0 | ✅ Done |
-| M56 | Real `vm` — `lib/vm.js` + `lib/internal/vm.js` vendored, with a new `contextify` binding: the sandbox object *is* the context (tagged with Node's contextify symbol) and scripts run in a `with`-scope over it, so `createContext`/`isContext`/`Script`/`compileFunction`/`runIn*Context` are real while `process`/`require`/`Buffer`/`setTimeout` stay `undefined` inside a fresh context. 59 behaviours match Node v26.9.0 | ✅ Done |
-| M57 | Real `Worker` — a cooperative worker: a second module registry on the same event loop with its own `process`/`worker_threads` views and a real `MessageChannel` to the parent. `workerData`, message round trips, the `online`/`message`/`error`/`exit` lifecycle, `terminate()` and the constructor validation all match Node (including `threadId === -1` and a no-op `postMessage` after exit). The one deviation that matters — no real parallelism — is documented, and everything needing a native thread (`eval`, worker stdio, `resourceLimits`, profiling, nested workers) throws. 15 behaviours match Node v26.9.0 | ✅ Done |
-| M58 | Complete the `internal/errors` table — diffing every `ERR_*` reference in the vendored/`src` trees against the shim turned up **9 codes that vendored modules pull off `internal/errors` but the table never defined**, so `codes.X` was `undefined` and `new` threw "is not a constructor" on the rare path that reached it. All 9 are now declared (word-for-word from `lib/internal/errors.js` and `src/node_errors.h`), guarded by a structural regression test (every referenced code must exist as a constructor; 76 scanned) and a differential corpus (a real Node's `internal/errors`, read through `--expose-internals`, compared field by field; 10/10 match) | ✅ Done |
-| M59 | Real worker stdio — `worker.stdin`/`stdout`/`stderr` used to throw from all three getters, but Node never does (`stdin` is null unless `stdin: true`; `stdout`/`stderr` are always Readables, merely piped to the parent's by default). They are now real streams carried over a second `MessageChannel`: the worker's `process.stdout`/`stderr`/`stdin` are real, its `console` is bound to its own stdout/stderr, forwarding matches Node, and an open `worker.stdin` refs the worker. A race where the worker could exit before an in-flight message was delivered is fixed with a short quiescence grace | ✅ Done |
-| M60 | SystemError-based codes fixed — codes Node declares as `E(code, msg, SystemError)` (`ERR_FS_CP_*`, `ERR_FS_EISDIR`, `ERR_SYSTEM_ERROR`) must build their message from a context object and call themselves `SystemError`; the table registered only `ERR_TTY_INIT_FAILED` that way, so the rest lost both the name and the `: syscall returned code (message) path => dest` suffix. All 11 are now correct, with the `HideStackFramesError` companion; a new full message-text differential also caught three copies of real drift (two `ERR_FS_CP_*` codes had each other's wording) | ✅ Done |
-| M61 | Complete the `internalBinding` surface — Node's internal code reads named properties off `internalBinding(id)`, and a name a binding never defines is `undefined`, which throws "is not a function" the first time that path runs (the same class as M58). Five genuine gaps were found and filled: `util.markPromiseAsHandled` (called by `internal/streams/iter/*`), `uv.UV_ENOSPC` and the whole `UV_E*` set (`internal/fs/watchers`), `v8.kSampling*`, `constants.internal` (`internal/vfs/setup`), and `process_methods.dlopenBinary`. `uv` now derives its whole constant table from the shared `ERRNO` table (88 values, matching Node exactly), and a new structural guard walks the vendored tree asserting no binding property path is undefined | ✅ Done |
+The task list lives in [`docs/ROADMAP.md`](docs/ROADMAP.md) — a fixed, numbered,
+checkbox list of what is done and what is left. Change records go to
+[`docs/DEVLOG.md`](docs/DEVLOG.md).
 
 ## Vendored Node source
 
@@ -534,11 +462,11 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
   `internal/util/parse_args/*`), `internal/mime`, and the `internal/*` pieces
   they need (`primordials`, `fixed_queue`, `constants`, `encoding/util`,
   `streams/state`, `streams/destroy`, `per_context/*`, …).
-- **32 of the 58 top-level `lib/*.js` modules are provided** — 28 as real
-  implementations (vendored source, or our own JS where the real file needs a
-  native layer a tab cannot have) and 4 (`tty`, `v8`, `tls`, `zlib`) as
-  load-only stubs that keep `import` side-effect-free and throw a typed
-  `NotImplementedError` on use. The newest real ones are `perf_hooks` (the whole
+- **The top-level `lib/*.js` modules are provided either as real
+  implementations (vendored source, or our own JS where the real file sits on a
+  native layer a tab cannot have) or as load-only stubs that keep `import`
+  side-effect-free and throw a typed `NotImplementedError` on use. `tls` is the
+  only module left as a pure stub: `tty`, `v8` and `zlib` are real. The newest real ones are `perf_hooks` (the whole
   `internal/perf/*` group), `stream/web` (the whole `internal/webstreams/*`
   group), the `Blob`/`File` globals behind `internal/blob` + `internal/file`, and
   `stream/iter` (+ `internal/streams/iter/*`) with `stream/consumers`.

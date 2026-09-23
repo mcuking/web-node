@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-23（**阶段 H 开工：M115 ✅**——wasm 工具链（wasi-sdk 34）+ `internalBinding()` 接入缝打通，桩 wasm 模块已上线并端到端验证；架构方向变更见下；阶段 A 22/22、阶段 D 4/4、M107 载荷拆分；合计 **51 / 34 / 17**）
+> - **最后更新**：2026-09-23（**阶段 H 推进：M116 ✅**——真 `deps/zlib`（1.3.2.1-motley）编 wasm 上线，`zlib` 的同步形式与全部编码参数解锁，差分语料**对真 Node v26.9.0 0 diff**；阶段 A 22/22、阶段 D 4/4、M107 载荷拆分；合计 **51 / 35 / 16**）
 
 ---
 
@@ -21,13 +21,13 @@
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | G | 借鉴 WebContainer（2026-09-23 调研落地） | 2 | 0 | 2 |
-| H | **native → WASM（对齐 WebContainer 架构）** | 7 | 1 | 6 |
+| H | **native → WASM（对齐 WebContainer 架构）** | 7 | 2 | 5 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **51** | **34** | **17**（+1 不做） |
+| **合计** | | **51** | **35** | **16**（+1 不做） |
 
 > **2026-09-23 架构重定向**：阶段 C 的 M99/M100、阶段 E 的 M106、阶段 G 的 M114，其**实现方式改为「真上游 C/C++ → wasm」**，具体任务落到**阶段 H（M116/M117/M119/M120）**；阶段 F 的 M108/M111 由 **M121** 统一验收。上述条目保留原位并加注，不重复计数。
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 121 个里程碑，剩余 17 个规划任务**（含阶段 H 的 wasm 迁移任务，以及排最后的 webpack/rspack 构建工具链）。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 122 个里程碑，剩余 16 个规划任务**（含阶段 H 的 wasm 迁移任务，以及排最后的 webpack/rspack 构建工具链）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.4（26 → 30），同日晚 M90.5 又拆为 M90.5–M90.9（30 → 34）。
 > 注：M97 于 2026-09-22 拆出 M97.1（`stripTypeScriptTypes` 需要真 TS 解析器 / amaro wasm，代价大）（41 → 42）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
@@ -378,9 +378,14 @@
   - **两个关键坑**：① 目标名必须是 `--target=wasm32-wasip1`（`wasm32-wasi` 已弃用，且会让 clang 去查不存在的 multilib 目录 → `stdlib.h` 找不到）；② `--export-dynamic` 对非 PIE 可执行模块**不导出**任何符号，用源码里的 `export_name` 属性才可靠。
   - **测试环境**：`npx vitest` 必须用 **fnm Node v26.9.0**——vendored 源里有 `using stack = new DisposableStack()`（Node 24+ 语法），v22.19.0 会在编译期报 `Unexpected identifier 'stack'`。
 
-- [ ] **M116 · `zlib` → 真 `deps/zlib` 编 wasm（P1）**  ← 取代 M99 的纯 JS 方案
-  - 用真 `deps/zlib`（1.3.2.1-motley）编 wasm 实现 `zlib` binding；vendor 真 `lib/zlib.js`；解锁 `gzipSync`/`deflateSync`/… 与 `level`/`windowBits`/`memLevel`/`strategy`/`dictionary`/`flush()`。
-  - 验收：zlib 差分**0 diff**（含同步形式与全部编码参数）；M101 随之可 vendor。
+- [x] **M116 · `zlib` → 真 `deps/zlib` 编 wasm（P1）** ✅ 2026-09-23  ← 取代 M99 的纯 JS 方案
+  - **真上游 C → wasm**：把 Node 自己那份 `deps/zlib`（zlib **1.3.2.1-motley**）的 11 个 `.c` 原封不动编成 wasm（`-DDYNAMIC_CRC_TABLE` 免掉 591KB 的 `crc32.h`，`-DZLIB_CONST`，`-DOS_CODE=3`），外加一个薄包装 `native/src/wn_zlib.c`（流式 ABI：`wn_zlib_new`/`write`/`reset`/`set_params`/`set_reject_garbage`/`ensure` + 缓冲区指针），产物 **106.2 KB、零 imports**。
+  - **JS 层**：`bindings/zlib.ts` 的 `ZlibCodec`（mode→windowBits 映射、预设字典装载时机、`Z_NEED_DICT` 重试、gzip 多成员、错误形状逐条对齐 `src/node_zlib.cc` 的 `ZlibContext`）+ `builtins/zlib.ts`（Node `lib/zlib.js` 的 **zlib 半边逐条移植**：`ZlibBase`/`Zlib`/`processChunk(Sync)`/便利方法/`flush`/`params`/`crc32`），brotli/zstd/zip 仍响亮抛错。
+  - **解锁**：`gzipSync`/`deflateSync`/`inflateRawSync`/`unzipSync`/… 全部可用；`level`/`windowBits`/`memLevel`/`strategy`/`dictionary`/`chunkSize`/`flush`/`finishFlush`/`params()`/`rejectGarbageAfterEnd` 全部生效（此前传非默认值即抛）。`zlib.constants` 补齐到 Node 全量 **170** 项（含 `BROTLI_*`/`ZSTD_*`）。
+  - **顺带修的真 gap**：`internal/errors` 补上 `ERR_TRAILING_JUNK_AFTER_STREAM_END`（`TypeError` 基底，Code/文案逐字对齐）。
+  - **验收**：新差分装置 `tools/zlib-probe.cjs`（+ `tools/zlib-oracle.mjs` → `test/fixtures/zlib.json`）在真 Node v26.9.0 与 web-node 各跑一遍，**逐字段 0 diff**（同步/异步一次性、编解码参数、字典、流式+字节流、`flush`/`params`、UNZIP 自动识别、多成员 gzip、错误形状、常量/码表）；`tsc --noEmit` 净 · `vitest run` **998 passed / 2 skipped（119 文件）** · `npm run build`（`wn_zlib-ElRqH9jS.wasm` **108.78 kB**、`runtime.worker-xzjeutnS.js` **674.09 kB**）；部署后线上资产全 **200**。
+  - **三个真 bug（都已修）**：① `wn_init_stream()` 在“已初始化”时返回的是 `h->err`（上一次操作的返回码），于是 `Z_STREAM_END` 之后的调用被误判为初始化失败而**跳过写入**，调用方看到陈旧的 `avail_out` → 把上一次的输出**又推了一遍**（异步 `gunzip` 出 2× 数据）；② `ZlibBase.prototype._final` 忘了调 `callback()`，writable 端永不 finish（流不结束）；③ `DeflateRaw` 的 `windowBits: 8` 需要按 Node 抬到 9。
+  - **两个有意偏离（写进文档）**：① gzip 头第 9 字节（OS）在真 Node（macOS）是 `0x13`、wasm 无 OS 身份所以固定用 zlib 默认 `0x03`——探针把它归一（它是平台元数据，不是数据），并有定点测试锁 `0x03`；② **未**字面 vendor `lib/zlib.js`：它顶层 `require('internal/zip')`（14 文件 / 4271 行），代价不成比例；本步以 `builtins/zlib.ts`（同一份逻辑的移植）达到可观测等价，字面 vendor 待 `internal/zip` 一并搬时再做。
 
 - [ ] **M117 · `perf_hooks` 直方图 → 真 `deps/histogram` 编 wasm（P2）**  ← 取代 M100 的纯 JS 方案
   - 用真 `deps/histogram` 编 wasm；`createHistogram`/`importHistogram`/`monitorEventLoopDelay` + `Histogram`/`RecordableHistogram` 表面。
