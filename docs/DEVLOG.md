@@ -244,6 +244,23 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · 路线图重规划——按 native→WASM 主线重排阶段（文档，无代码）
+
+**背景**：确认走 **native → WASM**（真上游 C/C++ 编 wasm，阶段 H）后，路线图里原先按「JS 重写 native」排的**阶段 C/E/F/G** 出现三类错位：① 已由阶段 H 完成的（M99→M116、M100→M117）；② 已被阶段 H 吸收的（M106→M119/M120、M114→M120、M108/M111→M121）；③ 仅被 wasm 解锁、仍独立的（M101、M107、M109/M110/M112、M113）。结果就是同一个里程碑在两处重复计数、进度表自相矛盾（M99/M100 早已完成却仍计「剩余」）。
+
+**本次改动**（`docs/ROADMAP.md` 重组 + `docs/superpowers/specs/2026-09-23-native-to-wasm-design.md` §4 对齐；**未动任何已完成条目的措辞/勾选**）：
+
+- 新增「**阶段重规划说明**」：把三类错位逐条列清并给出处置。
+- 新增图例 **`[⤳]`（已并入其他里程碑，保留条目、不单独计数）**；M106/M108/M111/M114 改标 `[⤳]`（注明并入对象）。
+- **结清**：M99/M100 就地打 `[x]`（「经阶段 H 的 M116/M117 完成」）。
+- **阶段 C 解散**（M99/M100 结清、M101 移入阶段 H）；**阶段 E 收敛为「启动与加载性能」**（只剩 M107）；**阶段 G 收敛为「预览与路由」**（只剩 M113）。
+- **物理重排**：主线 **阶段 H** 提前，其后是剩余支线 **E/F/G**，最后是**已归档阶段 A/B/C/D** 与「已判定不做 / 已完成总览 / 怎么用」。
+- **进度表重算**（按**叶子任务**，父项如 M90/M92/M93/M93.4/M97 不计）：M88 起共 **50** 项（+1 不做）→ 已完成 **40**、剩余 **10**（H 8/3/5 · E 1/0/1 · F 3/0/3 · G 1/0/1 · A 26/26 · B 5/5 · C 2/2 · D 4/4）。联动更新整体已完成数 123 → **127**（87 + 40）。
+
+**涉及文件**：`docs/ROADMAP.md`、`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`。（M118 brotli/zstd 的在途改动**未提交**，见 `git status`。）
+
+---
+
 ### 2026-09-23 · M117 — `perf_hooks` 直方图换成**真 `deps/histogram` 编 wasm**（阶段 H P2）
 
 **里程碑**：把 `perf_hooks` 的直方图从 M35 时代的「load-only shim（一用即抛）」换成 **真 HdrHistogram**（`deps/histogram`，官方 C 实现）编出的 wasm，于是 `createHistogram`/`importHistogram`/`monitorEventLoopDelay`/`timerify({histogram})` 与 `Histogram`/`RecordableHistogram` 全量方法解锁。设计见 `docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`。
