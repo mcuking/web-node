@@ -335,11 +335,12 @@ export const credentialsBinding: BindingFactory = () => ({
   cacheDir: '/tmp',
 });
 
-/** `icru`/`icu` binding: Intl availability. */
+/** `mksnapshot` binding: reads `isBuildingSnapshotBuffer[0]` (a byte, 0/1). */
 export const mksnapshotBinding: BindingFactory = () => ({
-  // `internal/v8/startup_snapshot.js` reads `[0]` of this array to answer
-  // `isBuildingSnapshot()`; we are never building one.
-  isBuildingSnapshotBuffer: [false],
+  // `internal/v8/startup_snapshot.js` reads `[0]` of this byte array to answer
+  // `isBuildingSnapshot()`. Real Node exposes a `Uint8Array`, so `[0]` is the
+  // *number* 0 (not `false`); we are never building a snapshot.
+  isBuildingSnapshotBuffer: new Uint8Array([0]),
   setSerializeCallback: (): void => {},
   setDeserializeCallback: (): void => {},
   setDeserializeMainFunction: (): void => {},

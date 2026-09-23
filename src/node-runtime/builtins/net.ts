@@ -3,6 +3,7 @@ import type { VirtualSocket } from '../net/network';
 import type { VirtualNetwork } from '../net/network';
 import { createAddressTypes, type AddressTypes, type NetAddressErrorCodes } from '../net/socket-address';
 import { notImplemented } from '../errors';
+import { ERRNO } from '../vfs/types';
 
 /**
  * `net` builtin — a TS equivalent implementation over the virtual network.
@@ -49,6 +50,8 @@ export const netSpec: BuiltinSpec = {
     }
 
     const kAttached = Symbol('web-node.socket.side');
+    // `Symbol.dispose` is not in this project's TS lib yet.
+    const kDispose = (Symbol as unknown as { dispose: symbol }).dispose;
 
     // --- error + validation helpers (Node's internal/errors + validators) ---
     /** Node's `determineSpecificType`, used in ERR_INVALID_ARG_TYPE messages. */
@@ -629,29 +632,131 @@ export const netSpec: BuiltinSpec = {
     }
 
     /**
-     * `net.BoundSocket` — Node's owned, pre-bound socket wrapper. Binding a real
-     * address needs the OS network stack, which a page does not have, so the
-     * class exists with its full member surface but refuses to construct.
+     * `net.BoundSocket` — Node's owned, pre-bound socket wrapper. A page has no
+     * OS network stack, so this binds into web-node's virtual TCP layer: the
+     * port is reserved synchronously (a conflicting bind throws EADDRINUSE just
+     * like Node), `address()` reports the bound address, `close()` releases it,
+     * and `fd()` returns `-1` exactly as Node does on platforms whose sockets
+     * have no file descriptor. Unix-domain/pipe binds have no virtual
+     * counterpart and stay loud.
      */
     class BoundSocket {
-      constructor() {
-        throw notImplemented(
-          'api',
-          'net.BoundSocket',
-          'Binding a real address needs the OS network stack, which is not available in web-node.',
-        );
+      #path: string | undefined;
+      #host: string | undefined;
+      #port = 0;
+      #family: 'IPv4' | 'IPv6' | undefined;
+      #released = false;
+
+      constructor(options: Record<string, unknown> = {}) {
+        const codes = (ctx.require('internal/errors') as { codes: NetAddressErrorCodes }).codes;
+        const validators = ctx.require('internal/validators') as {
+          validateObject: (v: unknown, name: string) => void;
+          validateString: (v: unknown, name: string) => void;
+          validateBoolean: (v: unknown, name: string) => void;
+          validatePort: (v: unknown, name: string, allowZero?: boolean) => number;
+        };
+        validators.validateObject(options, 'options');
+
+        if (options.path !== undefined) {
+          if (
+            options.host !== undefined ||
+            options.port !== undefined ||
+            options.ipv6Only !== undefined ||
+            options.reusePort !== undefined
+          ) {
+            throw new codes.ERR_INVALID_ARG_VALUE(
+              'options',
+              options,
+              'path is mutually exclusive with host, port, ipv6Only, and reusePort',
+            );
+          }
+          validators.validateString(options.path, 'options.path');
+          throw notImplemented(
+            'api',
+            'net.BoundSocket({ path })',
+            'web-node has no unix-domain or named-pipe sockets to bind.',
+          );
+        }
+
+        const port = validators.validatePort(options.port ?? 0, 'options.port');
+        const ipv6Only = options.ipv6Only ?? false;
+        validators.validateBoolean(ipv6Only, 'options.ipv6Only');
+        const reusePort = options.reusePort ?? false;
+        validators.validateBoolean(reusePort, 'options.reusePort');
+
+        let host = options.host;
+        let addressType: number;
+        if (host === undefined || host === null) {
+          host = ipv6Only ? '::' : '0.0.0.0';
+          addressType = ipv6Only ? 6 : 4;
+        } else {
+          validators.validateString(host, 'options.host');
+          addressType = isIP(host as string);
+          if (addressType === 0) {
+            throw new codes.ERR_INVALID_ARG_VALUE(
+              'options.host',
+              host,
+              'must be a numeric IP address; net.BoundSocket does not perform DNS resolution',
+            );
+          }
+        }
+
+        const bindPort = port === 0 ? pickEphemeralPort(network) : port;
+        try {
+          network.listen(bindPort, (vsock) => {
+            // A bound-but-unadopted port is not listening: drop any connection.
+            (vsock as unknown as { close?: () => void }).close?.();
+          });
+        } catch {
+          // libuv defers EADDRINUSE; Node forces it synchronously. So do we.
+          const ExceptionWithHostPort = (
+            ctx.require('internal/errors') as {
+              ExceptionWithHostPort: new (
+                err: number,
+                syscall: string,
+                address?: string,
+                port?: number,
+              ) => Error;
+            }
+          ).ExceptionWithHostPort;
+          throw new ExceptionWithHostPort(ERRNO.EADDRINUSE, 'bind', host as string, bindPort);
+        }
+        this.#host = host as string;
+        this.#port = bindPort;
+        this.#family = addressType === 6 ? 'IPv6' : 'IPv4';
       }
-      address(): never {
-        throw notImplemented('api', 'net.BoundSocket.address', 'net.BoundSocket is unavailable in web-node.');
+
+      /** Capability signal: this build honours `{ path }` (it does not). */
+      get isPipe(): boolean {
+        return this.#path !== undefined;
       }
-      close(): never {
-        throw notImplemented('api', 'net.BoundSocket.close', 'net.BoundSocket is unavailable in web-node.');
+
+      address(): { address?: string; family?: string; port?: number } {
+        if (this.#released) throw this.#adoptedError();
+        return { address: this.#host, family: this.#family, port: this.#port };
       }
-      get fd(): never {
-        throw notImplemented('api', 'net.BoundSocket.fd', 'net.BoundSocket is unavailable in web-node.');
+
+      fd(): number {
+        if (this.#released) throw this.#adoptedError();
+        // Node returns -1 where sockets have no OS file descriptor.
+        return -1;
       }
-      get isPipe(): never {
-        throw notImplemented('api', 'net.BoundSocket.isPipe', 'net.BoundSocket is unavailable in web-node.');
+
+      close(): void {
+        if (this.#released) throw this.#adoptedError();
+        network.unlisten(this.#port);
+        this.#released = true;
+      }
+
+      [kDispose](): void {
+        if (this.#released) return;
+        network.unlisten(this.#port);
+        this.#released = true;
+      }
+
+      #adoptedError(): Error {
+        const codes = (ctx.require('internal/errors') as { codes: NetAddressErrorCodes }).codes;
+        return new codes.ERR_SOCKET_HANDLE_ADOPTED();
       }
     }
 

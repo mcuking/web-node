@@ -84,6 +84,50 @@ describe('url is the vendored Node source', () => {
     expect(url.fileURLToPathBuffer('file:///project/a.js').toString()).toBe('/project/a.js');
   });
 
+  // Windows form (`getPathFromURLWin32`) — every expectation read off oracle
+  // fnm Node v26.9.0 with `fileURLToPath(u, { windows: true })`. Pure string
+  // transform, so it works even though the VFS is POSIX-shaped.
+  it('fileURLToPath({ windows: true }) mirrors getPathFromURLWin32', () => {
+    const url = boot().require('url');
+    const win = (s: string) => url.fileURLToPath(new URL(s), { windows: true });
+    const throws = (s: string) =>
+      expect(() => win(s)).toThrowError(
+        expect.objectContaining({ code: 'ERR_INVALID_FILE_URL_PATH', name: 'TypeError' }),
+      );
+
+    // Drive-letter paths: leading slash dropped, separators turned into `\`.
+    expect(win('file:///C:/a/b.txt')).toBe('C:\\a\\b.txt');
+    expect(win('file:///c:/a/b.txt')).toBe('c:\\a\\b.txt');
+    expect(win('file:///C:/')).toBe('C:\\');
+    expect(win('file:///C:')).toBe('C:');
+    // A literal backslash in the path is already a separator.
+    expect(win('file:///C:/a/b\\c')).toBe('C:\\a\\b\\c');
+    // Percent-encoded path is decoded after separator rewriting.
+    expect(win('file:///C:/a%20b/c%23d.txt')).toBe('C:\\a b\\c#d.txt');
+    expect(win('file:///C:/%E4%B8%AD/x')).toBe('C:\\中\\x');
+    expect(win('file:///C:/déjà.txt')).toBe('C:\\déjà.txt');
+    // Query and fragment are not part of the path.
+    expect(win('file:///C:/a/b?q=1')).toBe('C:\\a\\b');
+    expect(win('file:///C:/a/b#f')).toBe('C:\\a\\b');
+    // `localhost` collapses to an empty host, so it is not treated as UNC.
+    expect(win('file://localhost/C:/x')).toBe('C:\\x');
+    // Any other host is a UNC path; IDN hosts are decoded.
+    expect(win('file://server/share/x')).toBe('\\\\server\\share\\x');
+    expect(win('file://host/C:/x')).toBe('\\\\host\\C:\\x');
+    expect(win('file://xn--n3h/C:/x')).toBe('\\\\☃\\C:\\x');
+
+    // A path with no drive letter is rejected as non-absolute.
+    throws('file:///C');
+    throws('file:///a/b.txt');
+    throws('file:////server/share/x');
+    throws('file:///é/C:/x');
+    // Encoded separators are forbidden (both `%2f` and `%5c`, either case).
+    throws('file:///C:/a/b%2Fc');
+    throws('file:///C:/a/b%2fc');
+    throws('file:///C:/a/b%5Cc');
+    throws('file:///C:/a/b%5cc');
+  });
+
   it('domainToASCII / domainToUnicode', () => {
     const url = boot().require('url');
     expect(url.domainToASCII('münchen.de')).toBe('xn--mnchen-3ya.de');

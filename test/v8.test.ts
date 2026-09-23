@@ -374,7 +374,9 @@ describe('v8 is the vendored Node source', () => {
 
   it('exposes the startup-snapshot namespace without pretending to build one', () => {
     const v8 = boot().require('v8');
-    expect(v8.startupSnapshot.isBuildingSnapshot()).toBe(false);
+    // Real Node exposes the `isBuildingSnapshotBuffer` byte, so `[0]` is the
+    // number 0, not `false`.
+    expect(v8.startupSnapshot.isBuildingSnapshot()).toBe(0);
     expect(() => v8.startupSnapshot.addSerializeCallback(() => {})).toThrow(
       /not building startup snapshot/,
     );

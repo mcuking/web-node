@@ -602,7 +602,16 @@ describe('net.Socket / net.Server prototype fidelity', () => {
     for (const m of ['address', 'close', 'fd', 'isPipe']) {
       expect(m in net.BoundSocket.prototype).toBe(true);
     }
-    expect(() => new net.BoundSocket()).toThrowError(/not implemented/i);
+    expect(() => new net.BoundSocket()).not.toThrowError();
+    // A default bind is a live, releasable virtual handle.
+    const bound = new net.BoundSocket();
+    expect(bound.isPipe).toBe(false);
+    expect(bound.fd()).toBe(-1);
+    expect(bound.address().family).toBe('IPv4');
+    bound.close();
+    expect(() => bound.close()).toThrowError(/already been adopted/i);
+    // Unix-domain/pipe binds have no virtual counterpart and stay loud.
+    expect(() => new net.BoundSocket({ path: '/tmp/sock' })).toThrowError(/not implemented/i);
 
     expect(net._normalizeArgs.length).toBe(1);
     expect(net._normalizeArgs([])).toEqual([{}, null]);

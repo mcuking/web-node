@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **最后更新**：2026-09-23（**M97.1 完成** = 纯 JS `stripTypeScriptTypes`，阶段 B **5/5 收尾**；合计 **44 / 27 / 17**）
+> - **最后更新**：2026-09-23（**阶段 D 4/4 收尾**：M102 `net.BoundSocket` 虚拟绑定 / M103 `http.Agent#createSocket`+`createConnection` / M104 `url.fileURLToPath({windows:true})` / M105 `console`+`v8` 面收尾；合计 **44 / 31 / 13**）
 
 ---
 
@@ -17,14 +17,14 @@
 | A | crypto 收尾（接续 M87） | 22 | 20 | 2 |
 | B | 语义深度（差分语料继续扩面） | 5 | 5 | 0 |
 | C | 平台无对应物的补齐（选择性） | 3 | 0 | 3 |
-| D | 运行时常量小项收尾 | 4 | 0 | 4 |
+| D | 运行时常量小项收尾 | 4 | 4 | 0 |
 | E | 性能路线（wasm / 共享内存） | 2 | 0 | 2 |
 | F | 构建工具链（**用户愿景，最后做**） | 5 | 0 | 5 |
 | G | 借鉴 WebContainer（2026-09-23 调研落地） | 2 | 0 | 2 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **44** | **27** | **17**（+1 不做） |
+| **合计** | | **44** | **31** | **13**（+1 不做） |
 
-> 加上已完成的 **M1–M87**，项目整体：**已完成 114 个里程碑，剩余 17 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
+> 加上已完成的 **M1–M87**，项目整体：**已完成 118 个里程碑，剩余 13 个规划任务（其中 5 个是 webpack/rspack 构建工具链，排最后）**。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.4（26 → 30），同日晚 M90.5 又拆为 M90.5–M90.9（30 → 34）。
 > 注：M97 于 2026-09-22 拆出 M97.1（`stripTypeScriptTypes` 需要真 TS 解析器 / amaro wasm，代价大）（41 → 42）。
 > 注：M90 于 2026-09-22 拆为 M90.1–M90.5（任务数 26 → 30）。
@@ -233,17 +233,24 @@
 
 ## 阶段 D — 运行时常量小项收尾
 
-- [ ] **M102 · `net.BoundSocket`**
-  - `net.BoundSocket`（`isPipe`/`fd`/`close`/`address`）——无 OS 句柄，仍是抛错桩；按需评估。
+- [x] **M102 · `net.BoundSocket`** ✅ 2026-09-23
+  - 无 OS 句柄，但可映射到 **web-node 的虚拟 TCP 层**：构造时就占住端口（冲突同步抛 `EADDRINUSE`），`address()` 返回虚拟地址、`close()` 释放、`isPipe`/`[Symbol.dispose]` 均已实现。
+  - `fd()` 返回 **-1**（Node 在无 fd 的平台上也是如此），属已知偏离并写进 DEVLOG；unix-domain/pipe 绑定无虚拟对应物，**响亮抛**。
+  - 差分探针 `tools/bound-socket-probe.cjs` → fixture `test/fixtures/bound-socket.json`，门禁 `test/bound-socket.test.ts`（逐字节 0 diff）。
+  - 顺带修复 `internal/errors` 的 `ExceptionWithHostPort`/`UVExceptionWithHostPort`：原先 `code = String(err)`/写死 `UNKNOWN`，现按 `uvErrmapGet(err)` 解析（与 Node 同）。
 
-- [ ] **M103 · `http.Agent` 的连接方法**
-  - `Agent#createSocket` / `Agent#createConnection`（目前抛错）。
+- [x] **M103 · `http.Agent` 的连接方法** ✅ 2026-09-23
+  - `Agent#createConnection(...)` 转发到 `net.createConnection`（无 proxy 时的 Node 行为）；`Agent#createSocket(req, options, cb)` 按 `lib/_http_agent.js` 移植：合并 options、`calculateServerName` 算 SNI、写 `_agentKey`/`encoding`、入池 `sockets[name]`、`totalSocketCount`、安装 free/close/timeout/agentRemove 监听。
+  - 同时把 `removeSocket`/`keepSocketAlive`/`reuseSocket` 从空实现改为真实移植（含 `agentKeepAliveTimeoutBuffer`）。
+  - 测试：`test/http-surface.test.ts` 新增 4 例（转发、池记账、SNI/IP、keep-alive hint）。
 
-- [ ] **M104 · `url.fileURLToPath({ windows: true })`**
-  - Windows 路径形态（浏览器标签页无 Windows FS，但可纯字符串实现）。
+- [x] **M104 · `url.fileURLToPath({ windows: true })`** ✅ 2026-09-23
+  - 按 `getPathFromURLWin32` 纯字符串实现：盘符 `C:\a\b`、UNC `\\server\share`（IDN 经 `domainToUnicode`）、`%2f`/`%5c` 一律报错、非绝对路径报错。
+  - 测试：`test/url.test.ts` 新增一例（期望值逐个取自真 Node v26.9.0）。
 
-- [ ] **M105 · `console` / `v8` inspector 面收尾**
-  - `console.createTask` 的 async_hooks 链路、`v8` inspector 相关成员的最终收尾（M75 已做移植）。
+- [x] **M105 · `console` / `v8` inspector 面收尾** ✅ 2026-09-23
+  - 差分探针 `tools/console-v8-surface-probe.cjs` → fixture `test/fixtures/console-v8-surface.json`，门禁 `test/console-v8-surface.test.ts`：`console` 额外面（`Console`/`context`/`createTask`/`profile`/`profileEnd`/`timeStamp`/`timeLog`）与整个 `v8` 成员表、`createTask().run()`、`serialize` 往返、`cachedDataVersionTag`、`isStringOneByteRepresentation`、`startupSnapshot`、`setFlagsFromString` 全部逐字节对齐。
+  - 修复发现的一处真 bug：`mksnapshot` binding 的 `isBuildingSnapshotBuffer` 应为 `Uint8Array([0])`（`[0]` 是数字 `0`，非 `false`），与真 Node 一致。
 
 ---
 

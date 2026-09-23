@@ -244,6 +244,28 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-23 · 阶段 D 收尾（M102–M105）
+
+**改了什么**（四个都是「用真 Node 差分验证」的小项）：
+
+- **M102 `net.BoundSocket`**：不再整体抛错。无 OS 句柄，于是把它映射到 web-node 的**虚拟 TCP 层**——构造即 `network.listen(port)` 占住端口（冲突同步抛 `EADDRINUSE`），`address()` 返回虚拟地址、`close()` 释放、`isPipe`/`[Symbol.dispose]` 齐全。`fd()` 返回 **-1**（Node 在无 fd 的平台上也是如此，属**已知偏离**）；`{ path }`（unix-domain/pipe）无虚拟对应物，**响亮抛**。
+  - 顺带修复两个从未被跑到的 shim：`internal/errors` 的 `ExceptionWithHostPort`（原来 `code = String(err)` → 会得到 `"-48"`）与 `UVExceptionWithHostPort`（原来写死 `UNKNOWN`），现都按 `uvErrmapGet(err)` 解析 errno，与真 Node 一致。
+- **M103 `http.Agent` 连接方法**：`createConnection(...)` 转发 `net.createConnection`；`createSocket(req, options, cb)` 按 `lib/_http_agent.js` 移植（合并 options、`calculateServerName` 算 SNI、写 `_agentKey`/`encoding`、入池 + `totalSocketCount`、安装 free/close/timeout/agentRemove 监听）。`removeSocket`/`keepSocketAlive`/`reuseSocket` 也从空实现改为真实移植（含 `agentKeepAliveTimeoutBuffer`）。
+- **M104 `url.fileURLToPath({ windows: true })`**：按 `getPathFromURLWin32` 纯字符串实现——盘符 `C:\a\b`、UNC `\\server\share`（IDN 经 `domainToUnicode`）、非绝对路径报错、`%2f`/`%5c` 一律报错。
+- **M105 `console` / `v8` 面收尾**：新增 `console` 额外面 + 整个 `v8` 成员表的差分探针；修掉一处真 bug——`mksnapshot` binding 的 `isBuildingSnapshotBuffer` 应为 `Uint8Array([0])`（`[0]` 是数字 `0`，不是 `false`）。
+
+**验证（差分硬证据）**：
+- `tools/bound-socket-probe.cjs` → `test/fixtures/bound-socket.json`；门禁 `test/bound-socket.test.ts`（真 Node v26.9.0 vs web-node 逐字节 **0 diff**）。
+- `tools/console-v8-surface-probe.cjs` → `test/fixtures/console-v8-surface.json`；门禁 `test/console-v8-surface.test.ts`（同样 0 diff）。
+- M103/M104 直接在 vitest 里把期望值写成真 Node 实测值（`test/http-surface.test.ts`、`test/url.test.ts`）。
+- 同时更新两处过期断言（`test/v8.test.ts` 的 `isBuildingSnapshot()` 现为 `0`；`test/stub-fidelity.test.ts` 的 `BoundSocket` 不再抛错）。
+
+**质量门禁**：`tsc --noEmit` 干净 · `vitest run` **986 通过 / 2 skip（113 files）** · `vite build` 绿（worker **2510.84KB**）。
+
+**已知偏离**：`net.BoundSocket#fd()` 在 web-node 返回 `-1`（真 Node 在 macOS 返回真实 fd）。语义上等同 Node 在无 fd 平台的文档行为，已在 probe 中排除该项。
+
+---
+
 ### 2026-09-23 · M97.1 `stripTypeScriptTypes`（纯 JS strip-only，阶段 B 收尾）
 
 **改了什么**：把 `module.stripTypeScriptTypes(source, options)` 真正实现出来——**纯 JS 自研 TS 剥离器**（不引 amaro/SWC wasm），只做 strip-only 模式（把类型跨度覆写成空白、保持字节偏移），不做 codegen/transform。

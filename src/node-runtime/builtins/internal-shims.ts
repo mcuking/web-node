@@ -13,6 +13,11 @@ for (const [name, errno] of Object.entries(ERRNO)) {
   UV_ERRMAP.set(errno, [name, ERRNO_DESC[name] ?? 'unknown error']);
 }
 
+/** Node's local `uvErrmapGet`: resolves an errno regardless of its sign. */
+function uvErrmapGet(errno: number): [string, string] | undefined {
+  return UV_ERRMAP.get(errno) ?? UV_ERRMAP.get(-errno);
+}
+
 /**
  * Shims for the `internal/*` modules that our vendored Node source depends on.
  *
@@ -78,6 +83,7 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_INVALID_THIS: 'Value of "this" must be of type %s',
   ERR_UNKNOWN_SIGNAL: 'Unknown signal: %s',
   ERR_SOCKET_BAD_PORT: 'Port should be %s. Received %s',
+  ERR_SOCKET_HANDLE_ADOPTED: 'The bound socket has already been adopted by a server or socket',
   ERR_INVALID_ADDRESS: 'Invalid socket address',
   ERR_CRYPTO_ENGINE_UNKNOWN: 'Engine "%s" was not found',
   ERR_INVALID_HTTP_TOKEN: '%s must be a valid HTTP token ["%s"]',
@@ -198,6 +204,7 @@ const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_INVALID_RETURN_VALUE: TypeError,
   ERR_UNKNOWN_SIGNAL: TypeError,
   ERR_SOCKET_BAD_PORT: RangeError,
+  ERR_SOCKET_HANDLE_ADOPTED: Error,
   ERR_NO_CRYPTO: Error,
   ERR_NO_TYPESCRIPT: Error,
   ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX: SyntaxError,
@@ -896,10 +903,11 @@ function createErrorsBindingContext(ctx: BuiltinInitContext): Record<string, unk
         this.syscall = syscall;
       }
     },
-    /** The deprecated host-port variant, still imported by `lib/util.js`. */
+    /** The deprecated host-port variant, still imported by `lib/util.js` and `net`. */
     ExceptionWithHostPort: class ExceptionWithHostPort extends NodeError {
       constructor(err: number, syscall: string, address?: string, port?: number, additional?: string) {
-        const code = String(err);
+        // Node resolves the errno through `util.getSystemErrorName(err)`.
+        const [code] = uvErrmapGet(err) ?? ['UNKNOWN', 'unknown error'];
         let details = '';
         if (port && port > 0) details = ` ${address}:${port}`;
         else if (address) details = ` ${address}`;
@@ -914,8 +922,7 @@ function createErrorsBindingContext(ctx: BuiltinInitContext): Record<string, unk
     /** The current host-port form (lib/internal/errors.js). */
     UVExceptionWithHostPort: class UVExceptionWithHostPort extends NodeError {
       constructor(err: number, syscall: string, address?: string, port?: number) {
-        const code = 'UNKNOWN';
-        const uvmsg = 'unknown error';
+        const [code, uvmsg] = uvErrmapGet(err) ?? ['UNKNOWN', 'unknown error'];
         let details = '';
         if (port && port > 0) details = ` ${address}:${port}`;
         else if (address) details = ` ${address}`;
@@ -1372,8 +1379,36 @@ export const internalUrlSpec: BuiltinSpec = {
       }
       const windows = options?.windows ?? false;
       if (windows) {
-        // Windows file URLs have no counterpart in the POSIX-shaped VFS; be loud.
-        throw notImplemented('api', 'url.fileURLToPath({ windows: true })');
+        // Mirrors `getPathFromURLWin32` in `lib/internal/url.js`. The VFS is
+        // POSIX-shaped, but this is a pure string transform, so it works.
+        const hostname = url.hostname;
+        let pathname = url.pathname;
+        for (let n = 0; n < pathname.length; n++) {
+          if (pathname[n] === '%') {
+            const third = pathname.charCodeAt(n + 2) | 0x20;
+            if (
+              (pathname[n + 1] === '2' && third === 102) || // %2f 2F /
+              (pathname[n + 1] === '5' && third === 99) //   %5c 5C \
+            ) {
+              throw new errors.codes.ERR_INVALID_FILE_URL_PATH(
+                'must not include encoded \\ or / characters',
+                url,
+              );
+            }
+          }
+        }
+        pathname = pathname.replace(/\//g, '\\');
+        if (pathname.includes('%')) pathname = decodeURIComponent(pathname);
+        if (hostname !== '') {
+          // UNC path: `\\server\share\resource`.
+          return `\\\\${domainToUnicode(hostname)}${pathname}`;
+        }
+        const letter = pathname.charCodeAt(1) | 0x20;
+        const sep = pathname[2];
+        if (letter < 0x61 /* a */ || letter > 0x7a /* z */ || sep !== ':') {
+          throw new errors.codes.ERR_INVALID_FILE_URL_PATH('must be absolute', url);
+        }
+        return pathname.slice(1);
       }
       if (url.hostname !== '') {
         const platform = (ctx.require('process') as { platform: string }).platform;

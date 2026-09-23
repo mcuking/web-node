@@ -21,6 +21,7 @@ export interface NetAddressErrorCodes {
   ERR_INVALID_ARG_TYPE: new (name: string, expected: string, actual: unknown) => Error;
   ERR_OUT_OF_RANGE: new (str: string, range: string, input: unknown) => Error;
   ERR_SOCKET_BAD_PORT: new (name: string, port: unknown, allowZero?: boolean) => Error;
+  ERR_SOCKET_HANDLE_ADOPTED: new () => Error;
 }
 
 const INSPECT = Symbol.for('nodejs.util.inspect.custom');

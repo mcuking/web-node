@@ -1814,8 +1814,11 @@ export const httpSpec: BuiltinSpec = {
       maxFreeSockets = 256;
       maxTotalSockets = Infinity;
       keepAlive: boolean;
+      keepAliveMsecs = 1000;
+      agentKeepAliveTimeoutBuffer = 1000;
       scheduling: string;
       timeout?: number;
+      totalSocketCount = 0;
       requests: Record<string, unknown[]> = {};
       sockets: Record<string, unknown[]> = {};
       freeSockets: Record<string, unknown[]> = {};
@@ -1828,6 +1831,11 @@ export const httpSpec: BuiltinSpec = {
         if (options.timeout !== undefined) this.timeout = Number(options.timeout);
         if (options.maxSockets !== undefined) this.maxSockets = Number(options.maxSockets);
         if (options.maxFreeSockets !== undefined) this.maxFreeSockets = Number(options.maxFreeSockets);
+        if (options.keepAliveMsecs !== undefined) this.keepAliveMsecs = Number(options.keepAliveMsecs);
+        const buf = options.agentKeepAliveTimeoutBuffer;
+        if (typeof buf === 'number' && buf >= 0 && Number.isFinite(buf)) {
+          this.agentKeepAliveTimeoutBuffer = buf;
+        }
       }
 
       getName(
@@ -1839,11 +1847,59 @@ export const httpSpec: BuiltinSpec = {
         return `${host}:${port}:${localAddress}`;
       }
 
-      createConnection(): never {
-        throw notImplemented('api', 'http.Agent#createConnection');
+      /**
+       * `Agent.prototype.createConnection` from `lib/_http_agent.js`. With no
+       * proxy configured it forwards straight to `net.createConnection` (the
+       * runtime's virtual TCP); proxy support is not implemented.
+       */
+      createConnection(...args: unknown[]): unknown {
+        const net = ctx.require('net') as { createConnection(...a: unknown[]): unknown };
+        return net.createConnection(...args);
       }
-      createSocket(): never {
-        throw notImplemented('api', 'http.Agent#createSocket');
+
+      /**
+       * `Agent.prototype.createSocket`. The client keeps its own keep-alive
+       * cache, so this mirrors the JS-visible behaviour (option merge, SNI
+       * servername, pool bookkeeping, callbacks) without owning the transport.
+       */
+      createSocket(
+        req: { timeout?: number; getHeader?(name: string): string | undefined },
+        options: Record<string, unknown>,
+        cb: (err: Error | null, socket?: unknown) => void,
+      ): void {
+        const opts: Record<string, unknown> = { __proto__: null, ...options, ...this.options };
+        if (opts.socketPath) opts.path = opts.socketPath;
+
+        if (!opts.servername && opts.servername !== '') {
+          opts.servername = calculateServerName(opts, req);
+        }
+        const timeout = req.timeout || (this.options.timeout as number | undefined) || undefined;
+        if (timeout) opts.timeout = timeout;
+
+        const name = this.getName(opts as Parameters<Agent['getName']>[0]);
+        opts._agentKey = name;
+        opts.encoding = null;
+        if (this.keepAlive) {
+          opts.keepAlive = this.keepAlive;
+          opts.keepAliveInitialDelay = this.keepAliveMsecs;
+        }
+
+        let done = false;
+        const oncreate = (err: Error | null, s?: unknown): void => {
+          if (done) return;
+          done = true;
+          if (err) {
+            cb(err);
+            return;
+          }
+          (this.sockets[name] ??= []).push(s);
+          this.totalSocketCount++;
+          installSocketListeners(this, s as Emitter, opts);
+          cb(null, s);
+        };
+
+        const newSocket = this.createConnection(opts, oncreate);
+        if (newSocket) oncreate(null, newSocket);
       }
       addRequest(
         req: unknown,
@@ -1852,14 +1908,127 @@ export const httpSpec: BuiltinSpec = {
         const name = this.getName(options);
         (this.requests[name] ??= []).push(req);
       }
-      removeSocket(): void {}
-      keepSocketAlive(): void {}
-      reuseSocket(): void {}
+      removeSocket(
+        s: unknown,
+        options: { host?: string; hostname?: string; port?: number | string; localAddress?: string },
+      ): void {
+        const name = this.getName(options);
+        const sets: Record<string, unknown[]>[] = [this.sockets];
+        // A destroyed socket also has to leave the free pool.
+        if (!(s as { writable?: boolean }).writable) sets.push(this.freeSockets);
+        for (const sockets of sets) {
+          const list = sockets[name];
+          if (!list) continue;
+          const index = list.indexOf(s);
+          if (index !== -1) {
+            list.splice(index, 1);
+            if (list.length === 0) delete sockets[name];
+          }
+        }
+      }
+      keepSocketAlive(socket: unknown): boolean {
+        const s = socket as {
+          setKeepAlive(enable: boolean, ms: number): void;
+          unref(): void;
+          ref(): void;
+          timeout?: number;
+          setTimeout(t: number): void;
+          _httpMessage?: { res?: { headers: Record<string, string> } };
+        };
+        s.setKeepAlive(true, this.keepAliveMsecs);
+        s.unref();
+
+        let agentTimeout = (this.options.timeout as number | undefined) || 0;
+        let canKeepSocketAlive = true;
+        const keepAliveHint = s._httpMessage?.res?.headers['keep-alive'];
+        if (keepAliveHint) {
+          const hint = /^timeout=(\d+)/.exec(keepAliveHint)?.[1];
+          if (hint) {
+            const buffer = this.agentKeepAliveTimeoutBuffer;
+            let serverHintTimeout = Number.parseInt(hint, 10) * 1000 - buffer;
+            serverHintTimeout = serverHintTimeout > 0 ? serverHintTimeout : 0;
+            if (serverHintTimeout === 0) {
+              canKeepSocketAlive = false;
+            } else if (serverHintTimeout < agentTimeout) {
+              agentTimeout = serverHintTimeout;
+            }
+          }
+        }
+        if (s.timeout !== agentTimeout) s.setTimeout(agentTimeout);
+        return canKeepSocketAlive;
+      }
+      reuseSocket(socket: unknown, req: unknown): void {
+        (req as { reusedSocket?: boolean }).reusedSocket = true;
+        (socket as { ref(): void }).ref();
+      }
       destroy(): void {
         for (const k of Object.keys(this.sockets)) delete this.sockets[k];
         for (const k of Object.keys(this.freeSockets)) delete this.freeSockets[k];
         for (const k of Object.keys(this.requests)) delete this.requests[k];
       }
+    }
+
+    /** `calculateServerName` from `lib/_http_agent.js`. */
+    function calculateServerName(
+      options: { host?: unknown },
+      req: { getHeader?(name: string): string | undefined },
+    ): string {
+      let servername = options.host as string;
+      const hostHeader = req.getHeader?.('host');
+      if (hostHeader) {
+        if (typeof hostHeader !== 'string') {
+          throw new (errorCodes().ERR_INVALID_ARG_TYPE as new (...a: unknown[]) => Error)(
+            'options.headers.host',
+            'string',
+            hostHeader,
+          );
+        }
+        if (hostHeader[0] === '[') {
+          const index = hostHeader.indexOf(']');
+          // Leading '[', but no ']': fall back to the whole header.
+          servername = index === -1 ? hostHeader : hostHeader.substring(1, index);
+        } else {
+          servername = hostHeader.split(':', 1)[0];
+        }
+      }
+      // Don't implicitly set invalid (IP) servernames.
+      const net = ctx.require('net') as { isIP(value: string): number };
+      if (net.isIP(servername)) servername = '';
+      return servername;
+    }
+
+    /** `installListeners` from `lib/_http_agent.js` (minus keylog/proxy). */
+    function installSocketListeners(
+      agent: Agent,
+      s: Emitter,
+      options: Record<string, unknown>,
+    ): void {
+      const onFree = (): void => {
+        agent.emit('free', s, options);
+      };
+      s.on('free', onFree);
+
+      const onClose = (): void => {
+        agent.totalSocketCount--;
+        agent.removeSocket(s, options as Parameters<Agent['removeSocket']>[1]);
+      };
+      s.on('close', onClose);
+
+      const onTimeout = (): void => {
+        const sockets = agent.freeSockets;
+        if (Object.keys(sockets).some((name) => sockets[name].includes(s))) {
+          (s as unknown as { destroy(): void }).destroy();
+        }
+      };
+      s.on('timeout', onTimeout);
+
+      const onRemove = (): void => {
+        s.removeListener('close', onClose);
+        s.removeListener('free', onFree);
+        s.removeListener('timeout', onTimeout);
+        s.removeListener('agentRemove', onRemove);
+      };
+      s.on('agentRemove', onRemove);
     }
 
     const globalAgent = new Agent({ keepAlive: true, scheduling: 'lifo', timeout: 5000 });
