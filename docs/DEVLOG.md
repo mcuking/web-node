@@ -244,6 +244,28 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M125（第一增量）—— 真正实现 `node:wasi`（VFS 支撑的 preview1 宿主）；页内已推进到 rspack 的 Rust 初始化
+
+**里程碑**：上一 spike 认定 rspack 接入的唯一门槛是 `node:wasi`。本增量把它**真做了**——一个以运行时 `fs`(VFS) 为后端的 `wasi_snapshot_preview1` 宿主，因此 WASI 程序看到的就是 `fs` 看到的同一片虚拟文件系统（**不需要额外镜像**）。
+
+**① 实现**：`src/node-runtime/builtins/wasi.ts`（新）——Node `WASI` 类表面（`wasiImport`/`start`/`initialize`/`getImportObject`/`finalizeBindings`）+ **46 个 preview1 syscall**，全部落在运行时 `fs` 上：
+- fd 层：`fd_read/write/seek/tell/close/renumber/sync/datasync/advise/allocate/fdstat_get/set_flags/set_rights/filestat_get/set_size/set_times/pread/pwrite/readdir/prestat_get/prestat_dir_name`（fd 偏移自行跟踪，append 用 `w`/`a` 模式）。
+- path 层：`path_open/filestat_get/filestat_set_times/create_directory/remove_directory/unlink_file/rename/symlink/readlink/link`——先按 preopen 根解析并**做containment 检查**（逃不出 preopen）。
+- 其他：`args_*`/`environ_*`/`clock_time_get`/`clock_res_get`/`random_get`/`sched_yield`/`proc_exit`（sentinel 抛给 `start()` 捕获返回退出码）/`poll_oneoff`（单个 clock 订阅）；socket 族如实 `ENOTSUP`。
+- 错误码：`errnoOf()` 把 `fs` 的 `VfsError.code`（`ENOENT`…）映射为 WASI errno；新增 `ERR_WASI_ALREADY_STARTED` 进错误码表（`ERROR_CODES` + `ERROR_BASES`）。
+
+**② 表面 parity（对真 Node v26.9.0）**：新增 `tools/wasi-surface-oracle.mjs` 生成 `test/fixtures/wasi-surface.json`；`test/wasi.test.ts` 在 web-node 里跑同一组探测**逐字段比对**——导出键、`WASI` 原型自有名与 arity、实例自有键（仅 `wasiImport`）、`getImportObject()` 键、**46 个 syscall 名 + arity**、以及构造器错误码（`ERR_INVALID_ARG_TYPE`/`ERR_INVALID_ARG_VALUE`/`ERR_OUT_OF_RANGE`）全部一致。
+
+**③ 行为测试**：直接对一块真 `WebAssembly.Memory` 调 syscall，再用 `fs` 读回——args/env/clock/random/prestat 正确；`path_open`(CREAT)→`fd_write`→`fd_seek`→`fd_read`→`fd_close` 全通，字节**真的落进了 VFS**（`fs.readFileSync` 读到 `hello wasi`）；缺文件返回 `ENOENT(44)`、坏 fd 返回 `EBADF(8)`。
+
+**④ 页内端到端（真浏览器）**：`node:wasi` 到位后（`RSPACK_BINDING=@rspack/binding-wasm32-wasi/rspack.wasi.cjs`），binding 的 Node 入口能加载，**30MB wasm 真的实例化、Rust 初始化开始执行**——第一个 host 缺口立刻暴露：`random_get` 往 **SharedArrayBuffer 视图**上写被 `crypto.getRandomValues` 拒绝（wasm 内存是共享的）→ 改为填临时缓冲再拷回。修后继续推进，随后**把运行时 worker 卡死（页面无响应，经 Page.reload 恢复）**——这是**下一个增量**的靶子（嫌疑：binding 的 Node 路径用 worker_threads + `Atomics.wait` 等线程池，而 web-node 的 `worker_threads` 是同 realm 协作式，二者相遇即死锁）。
+
+**验收**：`tsc --noEmit` 净 · `vitest run` **1127 passed / 2 skipped（134 文件）** · build ✓。
+
+**新增/改动文件**：`src/node-runtime/builtins/wasi.ts`（新）· `src/node-runtime/builtins/index.ts`（注册）· `src/node-runtime/builtins/internal-shims.ts`（+`ERR_WASI_ALREADY_STARTED`）· `tools/wasi-surface-oracle.mjs`（新）· `test/fixtures/wasi-surface.json`（新）· `test/wasi.test.ts`（新）。
+
+---
+
 ### 2026-09-24 · M121（rspack 退险 spike · 之二）—— binding 含完整编译器；rspack 接入的唯一门槛是 `node:wasi`
 
 **目标**：上一 spike 只验了工具函数（transform/minify）。本节回答「rspack 到底能不能在 web-node 里跑一次真的 build，以及缺什么」。**结论**：能，且只缺一件东西——**`node:wasi`**（当前未实现）。全部结论均为页内活体实测（真 web-node 运行时 + 真 registry）。

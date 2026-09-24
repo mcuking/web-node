@@ -188,7 +188,7 @@
   - **已交付验收**：`tsc --noEmit` 净 · `vitest run` **1117 passed / 2 skipped（129 文件）** · build ✓。
   - **rspack 一侧（2026-09-24 退险 · 之二）**：wasm binding 含**完整编译器**；页内 npm 装下 `@rspack/core` + `@rspack/binding-wasm32-wasi`（143 包 / 82.3s，无 EBADPLATFORM）。**唯一门槛 = `node:wasi` 未实现**——浏览器 ESM 版自身**含顶层 await**（`await fetch(__wasmUrl)` + `await instantiateNapiModule`）且 `fetch(file://…)`，同步 `require` 必抛 `ERR_REQUIRE_ASYNC_MODULE`；Node CJS 版（`rspack.wasi.cjs`）同步、从 `fs` 读 VFS 里的 wasm、用 `worker_threads`。→ 立 **M125**。
 
-- [ ] **M125 · `node:wasi` —— VFS 支撑的 `wasi_snapshot_preview1` 宿主** ← rspack 接入（M121 的 rspack 一侧）的前置
+- [~] **M125 · `node:wasi` —— VFS 支撑的 `wasi_snapshot_preview1` 宿主** ← rspack 接入（M121 的 rspack 一侧）的前置 🚧 2026-09-24（**第一增量 ✅**：真实现了 `node:wasi`（类表面 + 46 个 syscall，backend = 运行时 `fs`/VFS）；表面与真 Node v26.9.0 **逐字段一致**；行为测试证明字节真落进 VFS；页内已推进到 **rspack 的 30MB wasm 实例化 + Rust 初始化开始**，下一个卡点是 binding 的 worker 线程池/`Atomics.wait` 与 web-node 协作式 `worker_threads` 相遇 **wedge**）
   - **为什么**：实测 `@rspack/binding-wasm32-wasi` 的 **Node CJS 版**（`rspack.wasi.cjs`）是唯一可行路径，它**只阻塞在 `require('node:wasi')` 未实现**（`NotImplementedError`）。浏览器 ESM 版是死路（顶层 await + `fetch(file://)`，见上）。
   - **目标**：实现真正的预览1 宿主，**以 web-node 的 VFS（`node:fs`）作后端**，包成 Node 的 `WASI` 类表面（`wasiImport`/`start`/`initialize`/`getImportObject`/`finalizeBindings`；见上游 `lib/wasi.js`，176 行）。现有 `src/node-runtime/wasm/wasi.ts` 是**最小 stub**（`path_open`→ENOENT、`fd_read`→EBADF、无真文件系统），不能支撑。
   - **收益**：① rspack 的 Rust 侧经 `preopens: { '/': '/' }` + 宿主 `fs` **直接读写 web-node 的 VFS**——FS 桥接问题自然消解，无需镜像；② 任何基于 WASI 的 npm 包（wasm 工具链）通用解锁。

@@ -19,6 +19,7 @@ import {
 } from './internal-shims';
 import { vendoredBuiltins } from './vendored-builtins';
 import { vfsSpec } from './vfs';
+import { wasiSpec } from './wasi';
 import { undiciSpec } from './undici';
 import { workerThreadsSpec } from './worker-threads';
 import { cryptoSpec } from './crypto';
@@ -55,6 +56,8 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   ...vendoredBuiltins,
   // milestone 49: Node's virtual file system module (MemoryProvider-backed)
   vfsSpec,
+  // M125: `node:wasi` — a real preview1 host over the VFS (enables the rspack wasm binding)
+  wasiSpec,
   // our implementations
   processSpec,
   moduleSpec,

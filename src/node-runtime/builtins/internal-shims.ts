@@ -32,6 +32,7 @@ function uvErrmapGet(errno: number): [string, string] | undefined {
 
 export const ERROR_CODES: Record<string, string> = {
   ERR_INVALID_ARG_TYPE: 'The "%s" argument must be of type %s. Received %s',
+  ERR_WASI_ALREADY_STARTED: 'WASI instance has already started',
   // `lib/os.js` throws this from the checked-binding wrappers when a binding
   // returns `undefined` (i.e. it set `ctx` on failure). Our bindings never
   // fail, so the class exists for shape fidelity only.
@@ -167,6 +168,7 @@ export const ERROR_CODES: Record<string, string> = {
  */
 const ERROR_BASES: Record<string, ErrorConstructor> = {
   ERR_INVALID_ARG_TYPE: TypeError,
+  ERR_WASI_ALREADY_STARTED: Error,
   ERR_BROTLI_INVALID_PARAM: RangeError,
   ERR_ZSTD_INVALID_PARAM: RangeError,
   ERR_ASYNC_CALLBACK: TypeError,
