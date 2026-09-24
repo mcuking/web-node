@@ -244,6 +244,27 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M121（退险 spike）—— 页内真 npm install 跑通，webpack 卡在 `make` 且退出报得太早
+
+**里程碑**：北极星 B1 的第一步。**没有改产品代码**，只把靶子打准：跑一个真的 bundler 到底卡在哪。四条实测结论（均真浏览器 + 真 registry）：
+
+1. **页内 `npm install` 能装真工具链**：把 `webpack` + `webpack-cli` 加进 `package.json`，本运行时的 npm 客户端从真 registry 装下 **134 个包 / 58.2s**（含 `esbuild` 等 postinstall、`.bin` 链接）。这一步本身已经过了。
+2. **webpack 能加载、能启动编译**：`require('webpack').version` = **5.111.1**；`webpack(config, cb)` 触发，钩子依次跑到 `beforeRun → run → beforeCompile → compile → thisCompilation → make`。
+3. **`make` 之后无进展**：`afterCompile` / `emit` / `done` 始终不来，回调不触发（也没抛错），而事件循环仍活着（心跳定时器持续在跑）。
+4. **两个具体壁障**：
+   - **`crypto.createHash('md4')` 与 `('xxhash64')` 在 wasm OpenSSL 里不支持**（`Digest method not supported`）——而 **md4 正是 webpack 5 默认的 `output.hashFunction`**；`md5`/`sha256` 正常。
+   - **退出报得太早**：`[exit 0]` 在主模块**求值结束**的瞬间就报了，而不是在事件循环排空之后。用一个混合程序直接测出来：`fs.readFile` 回调、`fs.promises`、`setTimeout`、微任务**全部在 `[exit 0]` 那一行之后**才打印。也就是说「这次运行已经结束」这句话是假的。
+
+**为什么 4b 可能是 3 的成因**：`runMain` 返回后 worker 就发 `exit`，而 `resetRunState()` 在下一次 Run **开始**时清空定时器——所以两次运行之间，上一次的定时器/句柄会继续跑到下一次 Run。若 webpack 的异步调度落在被这件事影响的窗口里，就正好表现为“停在 `make`”。**实施顺序因此是先修退出/循环存活语义（M108 的本体），再回看 webpack。**
+
+**已有的地基**：`NodeRuntime.#activeWorkCount()` 已经在数「定时器 + 宿主请求 + 宿主 socket + 活跃 worker」（M57 给子进程用的），所以修法有现成依据：`run` 应在主模块返回后**等到 `#activeWorkCount()` 归零**再发 `exit`（这正是 Node 的行为：有 ref 的句柄在就一直不退出），而不是现在这样同步报完就完。
+
+**下一步（M121 第一增量）**：① 把「运行结束」改成等事件循环排空（提供公开的待完成工作量口 + worker 侧 `await` 排空）；② 把 md4 补上（要么让 `wn_openssl` 提供 md4，要么在哈希层如实回退到 webpack 自带的 wasm md4）；③ 重跑同一个 webpack 探针，把剩余失败逐个变可见。
+
+**探针脚本**（`/tmp`，非仓库）：`wn-m121-probe.mjs`（安装 + 构建）、`wn-m121-diag.mjs`（异步/退出语义）、`wn-m121-diag2.mjs`（哈希 + 钩子进度）、`wn-m121-diag3.mjs`（追踪 webpack 自身的 fs 调用）。
+
+---
+
 ### 2026-09-24 · M120（第三增量）—— 让读也走同步通道：内存树成为 OPFS 的缓存
 
 **里程碑**：M120 本体最后一块。同步通道原本只会上行（`fsyncSync` 写穿），现在下行也通了：`FS_OP_GET`/`FS_OP_STAT`/`FS_OP_LIST` 让内存树**缺席的路径**仍能**同步**问到 OPFS。于是内存树从「唯一真相」变成「缓存」，而缓存不命中时能回源——且回源是阻塞的，所以 `fs.readFileSync` 不用改签名。
