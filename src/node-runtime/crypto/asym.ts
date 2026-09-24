@@ -38,6 +38,7 @@ import {
 } from './der';
 import {
   coordToBytes,
+  CURVES,
   curveByNodeName,
   curveByOidHex,
   decodePoint,
@@ -48,11 +49,13 @@ import {
   ecdsaVerify,
   encodePoint,
   generator,
+  hasArithmetic,
   mod,
   modInverse,
   modPow,
   pointMul,
   type Curve,
+  type NamedCurve,
   type Point,
 } from './ec';
 import { resolveHash } from './hash';
@@ -71,6 +74,10 @@ import {
   type MlKemParam,
 } from './mlkem';
 import {
+  opensslEcCurveInfo,
+  opensslEcCurves,
+  opensslEcPoint,
+  opensslLastError,
   opensslPkeyDecapsulate,
   opensslPkeyDecrypt,
   opensslPkeyDerive,
@@ -157,7 +164,7 @@ export interface RsaMaterial {
 }
 
 export interface EcMaterial {
-  curve: Curve;
+  curve: NamedCurve;
   x: bigint;
   y: bigint;
   d?: bigint;
@@ -205,6 +212,80 @@ export function rsaModulusLength(m: RsaMaterial): number {
   return m.n.toString(2).length;
 }
 
+// --- curve resolution -------------------------------------------------------
+
+/**
+ * Look a curve up by name: the three curves with local arithmetic first, then
+ * OpenSSL's registry (cached), so every curve Node can generate or import is
+ * usable as long as the wasm backend is loaded.
+ */
+const NAMED_CURVES = new Map<string, NamedCurve>();
+
+function namedCurveFromOpenSsl(key: string): NamedCurve | undefined {
+  if (NAMED_CURVES.has(key)) return NAMED_CURVES.get(key);
+  if (!opensslReady()) return undefined;
+  const info = opensslEcCurveInfo(key);
+  if (info === null) return undefined;
+  const curve: NamedCurve = {
+    nodeName: info.name,
+    byteLength: Math.ceil(info.bits / 8),
+    oidHex: info.oidHex,
+    orderByteLength: Math.ceil(info.orderBits / 8),
+  };
+  NAMED_CURVES.set(key, curve);
+  NAMED_CURVES.set(curve.nodeName, curve);
+  NAMED_CURVES.set(info.oidHex, curve);
+  return curve;
+}
+
+/** Resolve a curve by Node's `namedCurve` spelling, or `undefined`. */
+function resolveCurveByName(name: string): NamedCurve | undefined {
+  return curveByNodeName(name) ?? namedCurveFromOpenSsl(name);
+}
+
+/** Resolve a curve by its OID contents hex, or `undefined`. */
+function resolveCurveByOid(oidHex: string): NamedCurve | undefined {
+  const local = curveByOidHex(oidHex);
+  if (local) return local;
+  if (!opensslReady()) return undefined;
+  // OpenSSL takes the dotted form, which the hex contents decode to.
+  let dotted: string;
+  try {
+    dotted = oidDotted(oidHex);
+  } catch {
+    return undefined;
+  }
+  return namedCurveFromOpenSsl(dotted);
+}
+
+/**
+ * The curve with arithmetic attached, or a clear error. Callers reach this only
+ * after the wasm backend has declined the operation, so the honest answer is
+ * "this runtime has no arithmetic for the curve and OpenSSL would not do it".
+ */
+function mathCurve(curve: NamedCurve): Curve {
+  if (!hasArithmetic(curve)) {
+    throw notImplementedError('crypto', `namedCurve ${curve.nodeName} without the wasi OpenSSL backend`);
+  }
+  return curve;
+}
+
+/**
+ * The failure OpenSSL reported for an operation it is the only implementation
+ * of. For a curve with no local arithmetic (see `EC_WITHOUT_ARITHMETIC`) the
+ * backend's own error is the honest answer — reporting "not implemented" would
+ * blame the wrong thing.
+ */
+function opensslFailure(fallback: string): Error {
+  const text = opensslLastError();
+  const match = /^error:([0-9A-F]+):(.*)::(.*)$/.exec(text);
+  if (match === null) return notImplementedError('crypto', `namedCurve ${fallback} (${text || 'OpenSSL declined'})`);
+  // Node's `ERR_OSSL_*` shape: library + reason, upper-cased, spaces to `_`.
+  // Its library list has no `Provider routines`, so those lose the prefix.
+  const code = `ERR_OSSL_${match[3].toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`;
+  return coded('Error', code, text);
+}
+
 export function modulusByteLength(m: RsaMaterial): number {
   return Math.ceil(rsaModulusLength(m) / 8);
 }
@@ -235,21 +316,55 @@ function parseRsaPublic(der: Uint8Array): RsaMaterial {
   return { n: intOf(seq[0]), e: intOf(seq[1]) };
 }
 
-function parseEcPrivate(der: Uint8Array, curveHint?: Curve): EcMaterial {
+function parseEcPrivate(der: Uint8Array, curveHint?: NamedCurve, outerDer?: Uint8Array): EcMaterial {
   const seq = expectSeq(derParse(der));
   const privateKey = seq[1].content;
+  // Resolve the curve before reading the point: the `[1]` point is a bare
+  // coordinate pair whose width only the curve knows.
   let curve = curveHint;
-  for (const child of seq.slice(2)) {
-    if (child.tag === 0xa0) {
-      curve = curveByOidHex(derOidHex(derParse(child.content)));
+  for (const child of seq) {
+    if (child.tag === 0xa0) curve = resolveCurveByOid(derOidHex(derParse(child.content))) ?? curve;
+  }
+  if (!curve) throw new Error('ec: missing curve parameters');
+
+  let point: Point | undefined;
+  const embedded = seq.find((child) => child.tag === 0xa1);
+  if (embedded !== undefined) {
+    try {
+      point = decodePoint(embedded.content.subarray(1), curve);
+    } catch {
+      point = undefined;
     }
   }
-  if (!curve) curve = curveHint;
-  if (!curve) throw new Error('ec: missing curve parameters');
-  const d = bytesToBigInt(privateKey);
-  const point = pointMul(d, generator(curve), curve);
-  if (point === null) throw new Error('ec: invalid private scalar');
-  return { curve, x: point.x, y: point.y, d };
+  if (point === undefined && hasArithmetic(curve)) {
+    const d = bytesToBigInt(privateKey);
+    point = pointMul(d, generator(curve), curve) ?? undefined;
+  }
+  if (point === undefined) point = ecPointFromPrivateDer(outerDer) ?? undefined;
+  if (point === undefined) throw new Error('ec: invalid private scalar');
+  return { curve, x: point.x, y: point.y, d: bytesToBigInt(privateKey) };
+}
+
+/**
+ * Recover an EC key's public point through OpenSSL, for a private key that
+ * carries neither local arithmetic nor an embedded `[1]` point.
+ */
+function ecPointFromPrivateDer(outerDer: Uint8Array | undefined): Point | null {
+  if (outerDer === undefined || !opensslReady()) return null;
+  const handle = opensslPkeyFromDer(outerDer, true);
+  if (!handle) return null;
+  try {
+    const point = opensslEcPoint(handle);
+    // Uncompressed point: `0x04 || X || Y`, each coordinate half the rest.
+    if (point === null || point.length < 3 || point[0] !== 0x04) return null;
+    const half = (point.length - 1) / 2;
+    if (!Number.isInteger(half)) return null;
+    return { x: bytesToBigInt(point.subarray(1, 1 + half)), y: bytesToBigInt(point.subarray(1 + half)) };
+  } catch {
+    return null;
+  } finally {
+    opensslPkeyFree(handle);
+  }
 }
 
 function parseEdPrivate(inner: Uint8Array): EdMaterial {
@@ -310,8 +425,8 @@ function parsePrivateKeyInfo(der: Uint8Array): KeyMaterial {
   const inner = seq[2].content;
   if (oid === OID_RSA) return { type: 'private', asym: 'rsa', rsa: parseRsaPrivate(inner) };
   if (oid === OID_EC) {
-    const curve = algId.length > 1 ? curveByOidHex(derOidHex(algId[1])) : undefined;
-    return { type: 'private', asym: 'ec', ec: parseEcPrivate(inner, curve) };
+    const curve = algId.length > 1 ? resolveCurveByOid(derOidHex(algId[1])) : undefined;
+    return { type: 'private', asym: 'ec', ec: parseEcPrivate(inner, curve, der) };
   }
   if (oid === OID_ED25519) return { type: 'private', asym: 'ed25519', ed: parseEdPrivate(inner) };
   if (oid === OID_DH) {
@@ -331,7 +446,7 @@ function parseSubjectPublicKeyInfo(der: Uint8Array): KeyMaterial {
   const bits = seq[1].content.subarray(1); // strip the unused-bits octet
   if (oid === OID_RSA) return { type: 'public', asym: 'rsa', rsa: parseRsaPublic(bits) };
   if (oid === OID_EC) {
-    const curve = curveByOidHex(derOidHex(algId[1]));
+    const curve = resolveCurveByOid(derOidHex(algId[1]));
     if (!curve) throw new Error('ec: unknown curve');
     const point = decodePoint(bits, curve);
     return { type: 'public', asym: 'ec', ec: { curve, x: point.x, y: point.y } };
@@ -355,7 +470,7 @@ function parsePrivateDer(der: Uint8Array): KeyMaterial {
   const second = seq[1];
   if (first.tag !== 0x02) throw new Error('key: not a private key');
   if (second.tag === 0x30) return parsePrivateKeyInfo(der); // PKCS#8
-  if (second.tag === 0x04) return { type: 'private', asym: 'ec', ec: parseEcPrivate(der) }; // SEC1
+  if (second.tag === 0x04) return { type: 'private', asym: 'ec', ec: parseEcPrivate(der, undefined, der) }; // SEC1
   if (second.tag === 0x02) return { type: 'private', asym: 'rsa', rsa: parseRsaPrivate(der) }; // PKCS#1
   throw new Error('key: unrecognised private key structure');
 }
@@ -402,7 +517,9 @@ function encodeEcPrivate(m: EcMaterial): Uint8Array {
 function encodeEcPrivateKeyInfoBody(m: EcMaterial): Uint8Array {
   if (m.d === undefined) throw new Error('ec: not a private key');
   const publicKey = derBitString(encodePoint({ x: m.x, y: m.y }, m.curve));
-  return derSeq(derIntValue(1n), derOctet(coordToBytes(m.d, m.curve)), derEncode(0xa1, publicKey));
+  // OpenSSL pads the scalar to the *order* width (`ossl_ec_key_simple_priv2oct`),
+  // which is what a re-encoded key has to match byte for byte.
+  return derSeq(derIntValue(1n), derOctet(bigIntToBytes(m.d, dsaByteLength(m.curve))), derEncode(0xa1, publicKey));
 }
 
 function oidDotted(oidHex: string): string {
@@ -978,13 +1095,20 @@ function derDecodeEcdsa(sig: Uint8Array): { r: bigint; s: bigint } {
   return { r: derInt(seq[0]), s: derInt(seq[1]) };
 }
 
+/** The width Node frames an IEEE P1363 signature half at. */
+function dsaByteLength(curve: NamedCurve): number {
+  return curve.orderByteLength ?? curve.byteLength;
+}
+
 function ecdsaSignBytes(alg: SignAlgorithm, data: Uint8Array, key: KeyObject): Uint8Array {
   const m = keyMaterialOf(key);
   if (m.asym !== 'ec' || !m.ec || m.ec.d === undefined) throw keyTypeError('sign');
+  const curve = mathCurve(m.ec.curve);
   const digest = digestFor(alg.hash, data);
-  const sig = ecdsaSign(digest, m.ec.d, m.ec.curve, () => randomBelow(m.ec!.curve.n));
+  const sig = ecdsaSign(digest, m.ec.d, curve, () => randomBelow(curve.n));
   if (alg.dsaEncoding === 'ieee-p1363') {
-    return concat([coordToBytes(sig.r, m.ec.curve), coordToBytes(sig.s, m.ec.curve)]);
+    const width = dsaByteLength(curve);
+    return concat([bigIntToBytes(sig.r, width), bigIntToBytes(sig.s, width)]);
   }
   return derEncodeEcdsa(sig);
 }
@@ -992,13 +1116,14 @@ function ecdsaSignBytes(alg: SignAlgorithm, data: Uint8Array, key: KeyObject): U
 function ecdsaVerifyBytes(alg: SignAlgorithm, data: Uint8Array, key: KeyObject, signature: Uint8Array): boolean {
   const m = keyMaterialOf(key);
   if (m.asym !== 'ec' || !m.ec) throw keyTypeError('verify');
+  const curve = mathCurve(m.ec.curve);
   const digest = digestFor(alg.hash, data);
   const point: Point = { x: m.ec.x, y: m.ec.y };
   let sig: { r: bigint; s: bigint };
   if (alg.dsaEncoding === 'ieee-p1363') {
-    const len = m.ec.curve.byteLength;
-    if (signature.length !== 2 * len) return false;
-    sig = { r: bytesToBigInt(signature.subarray(0, len)), s: bytesToBigInt(signature.subarray(len)) };
+    const width = dsaByteLength(curve);
+    if (signature.length !== 2 * width) return false;
+    sig = { r: bytesToBigInt(signature.subarray(0, width)), s: bytesToBigInt(signature.subarray(width)) };
   } else {
     try {
       sig = derDecodeEcdsa(signature);
@@ -1006,7 +1131,7 @@ function ecdsaVerifyBytes(alg: SignAlgorithm, data: Uint8Array, key: KeyObject, 
       return false;
     }
   }
-  return ecdsaVerify(digest, sig, point, m.ec.curve);
+  return ecdsaVerify(digest, sig, point, curve);
 }
 
 // --- Ed25519 ----------------------------------------------------------------
@@ -1109,7 +1234,8 @@ function opensslSign(alg: SignAlgorithm, data: Uint8Array, m: KeyMaterial): Uint
     if (signature === null) return null;
     if (asym === 'ec' && alg.dsaEncoding === 'ieee-p1363' && m.ec) {
       const { r, s } = derDecodeEcdsa(signature);
-      return concat([coordToBytes(r, m.ec.curve), coordToBytes(s, m.ec.curve)]);
+      const width = dsaByteLength(m.ec.curve);
+      return concat([bigIntToBytes(r, width), bigIntToBytes(s, width)]);
     }
     return signature;
   } catch {
@@ -1197,13 +1323,16 @@ function opensslGenerateMaterial(
   let handle = 0;
   if (type === 'rsa') {
     const exponent = options.publicExponent ?? 65537;
-    // OpenSSL's keygen takes `e` as a bignum parameter; only the default is
-    // routed here, and anything else stays on the JS generator.
-    if (exponent !== 65537) return null;
-    handle = opensslPkeyKeygen('RSA', undefined, options.modulusLength ?? 2048);
+    // OpenSSL takes `e` as a decimal bignum string; only odd values are legal,
+    // which the JS generator reports on if this path declines.
+    handle = opensslPkeyKeygen('RSA', undefined, options.modulusLength ?? 2048, String(exponent));
   } else if (type === 'ec') {
     const curve = options.namedCurve;
-    if (typeof curve !== 'string' || !curveByNodeName(curve)) return null;
+    if (typeof curve !== 'string') return null;
+    // Any curve OpenSSL knows — the JS generator only has the three NIST ones,
+    // so routing here is what makes `secp256k1`, `SM2`, the brainpool and the
+    // binary curves work at all.
+    if (resolveCurveByName(curve) === undefined) return null;
     handle = opensslPkeyKeygen('EC', curve);
   } else if (type === 'ed25519') {
     handle = opensslPkeyKeygen('ED25519');
@@ -1264,6 +1393,10 @@ export function sign(algorithm: unknown, data: Uint8Array, key: unknown): Uint8A
     const viaOpenSsl = opensslSign(alg, data, m);
     if (viaOpenSsl !== null) return viaOpenSsl;
   }
+  // A curve with no local arithmetic has only the OpenSSL implementation, so
+  // when that declines, its error is the answer (an SM2 key rejects every
+  // digest but SM3, exactly as it does in Node).
+  if (m.asym === 'ec' && m.ec && !hasArithmetic(m.ec.curve)) throw opensslFailure(m.ec.curve.nodeName);
   if (m.asym === 'rsa') return rsaSign(alg, data, k);
   if (m.asym === 'ec') return ecdsaSignBytes(alg, data, k);
   if (m.asym === 'ed25519') return edSignBytes(data, k);
@@ -1278,6 +1411,7 @@ export function verify(algorithm: unknown, data: Uint8Array, key: unknown, signa
     const viaOpenSsl = opensslVerify(alg, data, m, signature);
     if (viaOpenSsl !== null) return viaOpenSsl;
   }
+  if (m.asym === 'ec' && m.ec && !hasArithmetic(m.ec.curve)) throw opensslFailure(m.ec.curve.nodeName);
   if (m.asym === 'rsa') return rsaVerify(alg, data, k, signature);
   if (m.asym === 'ec') return ecdsaVerifyBytes(alg, data, k, signature);
   if (m.asym === 'ed25519') return edVerifyBytes(data, k, signature);
@@ -1639,8 +1773,9 @@ function generateMaterial(type: string, options: GenerateKeyPairOptions): { priv
     }
   }
   if (type === 'ec') {
-    const curve = curveByNodeName(options.namedCurve ?? '');
-    if (!curve) throw notImplementedError('crypto', `namedCurve ${options.namedCurve}`);
+    const named = resolveCurveByName(options.namedCurve ?? '');
+    if (!named) throw notImplementedError('crypto', `namedCurve ${options.namedCurve}`);
+    const curve = mathCurve(named);
     const d = randomBelow(curve.n);
     const point = pointMul(d, generator(curve), curve);
     if (point === null) throw new Error('ec: key generation failed');
@@ -1872,6 +2007,11 @@ export function diffieHellman(options: unknown): Uint8Array {
   if (opensslReady()) {
     const viaOpenSsl = opensslDerive(privMat, pubMat);
     if (viaOpenSsl !== null) return viaOpenSsl;
+    // EC on a curve with no local arithmetic has no other implementation; the
+    // backend's error is what Node would have reported too.
+    if (privMat.asym === 'ec' && privMat.ec && !hasArithmetic(privMat.ec.curve)) {
+      throw opensslFailure(privMat.ec.curve.nodeName);
+    }
   }
   if (privMat.asym === 'dh') {
     const priv = privMat.dh!;
@@ -1884,17 +2024,32 @@ export function diffieHellman(options: unknown): Uint8Array {
   const priv = privMat.ec!;
   const pub = pubMat.ec!;
   if (priv.curve !== pub.curve) throw mismatch();
-  const point = pointMul(priv.d as bigint, { x: pub.x, y: pub.y }, priv.curve);
+  const curve = mathCurve(priv.curve);
+  const point = pointMul(priv.d as bigint, { x: pub.x, y: pub.y }, curve);
   if (point === null) throw mismatch();
-  return bigIntToBytes(point.x, priv.curve.byteLength);
+  return bigIntToBytes(point.x, curve.byteLength);
 }
 
-/** Curve lookup used by `crypto.getCurves()`. */
+/**
+ * Curve lookup used by `crypto.getCurves()`. Node's list is
+ * `EC_get_builtin_curves` + `OBJ_nid2sn`, then `filterDuplicateStrings`
+ * (`lib/internal/crypto/util.js`): de-duplicate case-insensitively, keeping
+ * the original spelling, and sort. The curves come from the same OpenSSL the
+ * operations run on; the local three are the fallback when it is not loaded.
+ */
 export function listCurves(): string[] {
-  return ['prime256v1', 'secp256r1', 'secp384r1', 'secp521r1', 'P-256', 'P-384', 'P-521'];
+  if (opensslReady()) {
+    const curves = opensslEcCurves();
+    if (curves !== null) {
+      const unique = new Map<string, string>();
+      for (const curve of curves) unique.set(curve.toLowerCase(), curve);
+      return [...unique.values()].sort();
+    }
+  }
+  return CURVES.map((curve) => curve.nodeName).sort();
 }
 
 /** `crypto.getCiphers`-style helper: is this a known asymmetric family? */
 export function isKnownCurve(name: string): boolean {
-  return curveByNodeName(name) !== undefined;
+  return resolveCurveByName(name) !== undefined;
 }

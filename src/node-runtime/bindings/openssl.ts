@@ -509,15 +509,98 @@ export const PKEY_PADDING = {
 } as const;
 
 /** Generate a key pair; returns a handle to the **private** key, or `0`. */
-export function opensslPkeyKeygen(name: string, group?: string, bits?: number): OpenSslPkey {
+export function opensslPkeyKeygen(
+  name: string,
+  group?: string,
+  bits?: number,
+  exponent?: string,
+): OpenSslPkey {
   const [namePtr, nameLen] = pushName(name);
   const [groupPtr, groupLen] = group === undefined ? [0, 0] : pushName(group);
+  const [expPtr, expLen] = exponent === undefined ? [0, 0] : pushName(exponent);
   try {
     begin();
-    return call<number>('wn_pkey_keygen', namePtr, nameLen, groupPtr, groupLen, bits ?? 0);
+    return call<number>('wn_pkey_keygen', namePtr, nameLen, groupPtr, groupLen, bits ?? 0, expPtr, expLen);
   } finally {
+    free(expPtr);
     free(groupPtr);
     free(namePtr);
+  }
+}
+
+// --- EC curve registry ------------------------------------------------------
+
+/** Read a `\n`-joined string list produced by a size-then-fill export. */
+function ecStringList(exportName: string): string[] | null {
+  begin();
+  const need = call<number>(exportName, 0, 0);
+  if (need < 0) return null;
+  if (need === 0) return [];
+  const ptr = call<number>('wn_alloc', need);
+  try {
+    const written = call<number>(exportName, ptr, need);
+    if (written < 0) return null;
+    const text = new TextDecoder().decode(bytes().slice(ptr, ptr + written));
+    return text.length === 0 ? [] : text.split('\n');
+  } finally {
+    free(ptr);
+  }
+}
+
+/** Every built-in EC curve's short name, in OpenSSL's order (Node's list). */
+export function opensslEcCurves(): string[] | null {
+  return ecStringList('wn_ec_curves');
+}
+
+export interface EcCurveInfo {
+  /** OpenSSL short name, which is also Node's `namedCurve`. */
+  name: string;
+  /** Field size in bits (used for the coordinate width). */
+  bits: number;
+  /** Subgroup order in bits (Node sizes an IEEE P1363 half from this). */
+  orderBits: number;
+  /** The curve OID's contents, hex-encoded (same shape as `Curve.oidHex`). */
+  oidHex: string;
+}
+
+/**
+ * Resolve a curve name (short name, NIST alias, long name or dotted OID) to
+ * its short name, field size and OID, or `null` when OpenSSL does not know it.
+ */
+export function opensslEcCurveInfo(name: string): EcCurveInfo | null {
+  const [ptr, len] = pushName(name);
+  try {
+    begin();
+    const need = call<number>('wn_ec_curve_info', ptr, len, 0, 0);
+    if (need < 0) return null;
+    const outPtr = call<number>('wn_alloc', need);
+    try {
+      const written = call<number>('wn_ec_curve_info', ptr, len, outPtr, need);
+      if (written < 0) return null;
+      const [shortName, bitsText, orderBitsText, oidHex] = new TextDecoder()
+        .decode(bytes().slice(outPtr, outPtr + written))
+        .split('\n');
+      return { name: shortName, bits: Number(bitsText), orderBits: Number(orderBitsText), oidHex };
+    } finally {
+      free(outPtr);
+    }
+  } finally {
+    free(ptr);
+  }
+}
+
+/** Uncompressed public point of an EC key, or `null` for non-EC keys. */
+export function opensslEcPoint(handle: number): Uint8Array | null {
+  begin();
+  const need = call<number>('wn_ec_point', handle, 0, 0);
+  if (need <= 0) return null;
+  const ptr = call<number>('wn_alloc', need);
+  try {
+    const written = call<number>('wn_ec_point', handle, ptr, need);
+    if (written <= 0) return null;
+    return bytes().slice(ptr, ptr + written);
+  } finally {
+    free(ptr);
   }
 }
 

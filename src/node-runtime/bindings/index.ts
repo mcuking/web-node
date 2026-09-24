@@ -87,30 +87,55 @@ const REGISTRY: Record<string, BindingFactory> = {
   zlib: zlibBinding,
 };
 
-/** Bindings Node internal code knows about but that we deliberately do not ship. */
+/**
+ * Bindings Node's internal code knows about but that this runtime deliberately
+ * does not ship. Every name here is a real `internalBinding` id used somewhere in
+ * Node's `lib/`; the runtime has no equivalent for any of them (no libuv, no
+ * sockets, no TLS record layer, no process spawning, no SQLite/FFI/WASI host).
+ *
+ * Registering one means deleting it from this list — the sets must stay
+ * disjoint, which `test/bindings-surface.test.ts` enforces together with "every
+ * name here is actually asked for by the vendored tree".
+ */
 export const UNSUPPORTED_BINDINGS = new Set([
-  'crypto',
-  'zlib',
+  // Compilation / module machinery: there is no V8 compile cache or native
+  // source text to hand out here.
+  'builtins',
+  'cjs_lexer',
+  'internal_only_v8',
+  'ipc_serdes',
+  'module_wrap',
+  'options',
+  // Process control: no fork/exec/signals in a tab.
+  'locks',
+  'permission',
+  'process_wrap',
+  'report',
+  'sea',
+  'signal_wrap',
+  'spawn_sync',
+  'watchdog',
+  // Sockets: `net`/`http` run on the virtual network instead of libuv handles.
+  'cares_wrap',
+  'http2',
+  'http_parser',
+  'js_stream',
+  'pipe_wrap',
+  'stream_pipe',
   'tcp_wrap',
   'udp_wrap',
-  'pipe_wrap',
-  'module_wrap',
-  'inspector',
-  'sea',
-  'ffi',
-  'quic',
+  // TLS / QUIC / DTLS record layers.
   'dtls',
-  'cares_wrap',
-  'http_parser',
-  'trace_events',
-  'builtins',
-  'options',
-  'sqlite',
-  'vfs',
-  'report',
-  'permission',
-  'webstorage',
+  'quic',
+  'tls_wrap',
+  // Host surfaces with no browser counterpart.
   'block_list',
+  'crypto',
+  'ffi',
+  'sqlite',
+  'wasi',
+  'wasm_web_api',
+  'webstorage',
 ]);
 
 export function createBindingTable(ctx: BindingContext): BindingTable {

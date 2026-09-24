@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { MemoryVfs } from '../src/node-runtime/vfs';
 import { NodeRuntime } from '../src/node-runtime/runtime';
 import { VENDORED } from '../src/node-runtime/vendored';
+import { UNSUPPORTED_BINDINGS, hasBinding, listBindings } from '../src/node-runtime/bindings';
+import nodeBindings from './fixtures/node-bindings.json';
 import { ERRNO } from '../src/node-runtime/vfs/types';
 import real from './fixtures/bind-real.json';
 
@@ -153,6 +155,34 @@ describe('internalBinding surface', () => {
     const rejected = Promise.reject(new Error('suppressed by markPromiseAsHandled'));
     util.markPromiseAsHandled!(rejected);
     await new Promise((r) => setTimeout(r, 0));
+  });
+
+  it('classifies every binding Node asks for, exactly once', () => {
+    // `test/fixtures/node-bindings.json` is the set of `internalBinding('x')` ids
+    // Node's own `lib/` uses (see `tools/binding-names-oracle.mjs`). Every id has
+    // to be either implemented or explicitly listed as not shipping: a name that
+    // is neither falls through to a generic "outside the MVP whitelist" error
+    // instead of an honest one, and one that is both is a bookkeeping lie.
+    const known = new Set(nodeBindings.names);
+    expect(known.size).toBeGreaterThan(50);
+    expect(nodeBindings.source).toMatch(/^Node /);
+
+    const invented = [...UNSUPPORTED_BINDINGS].filter((name) => !known.has(name));
+    expect(invented, 'listed as unsupported but not a real Node binding').toEqual([]);
+    const both = [...UNSUPPORTED_BINDINGS].filter((name) => hasBinding(name));
+    expect(both, 'listed as unsupported yet registered').toEqual([]);
+    // Anything Node asks for and the runtime answers must use Node's own spelling.
+    for (const name of listBindings().supported) {
+      if (name !== 'wn_stub') expect(known.has(name), `registered but not a Node binding: ${name}`).toBe(true);
+    }
+    // And everything the vendored tree reads must fall in one of the two sets.
+    const asked = new Set<string>();
+    for (const source of Object.values(VENDORED)) {
+      for (const match of source.matchAll(/internalBinding\(\s*['"]([a-z0-9_]+)['"]\s*\)/g)) {
+        if (!match[1].startsWith('internal/')) asked.add(match[1]);
+      }
+    }
+    expect([...asked].filter((name) => !hasBinding(name) && !UNSUPPORTED_BINDINGS.has(name))).toEqual([]);
   });
 
   it('refuses dlopen loudly rather than faking a handle', () => {

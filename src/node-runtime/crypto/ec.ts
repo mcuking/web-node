@@ -14,19 +14,42 @@
 import { resolveHash } from './hash';
 import { bigIntToBytes, bytesToBigInt } from './der';
 
-export interface Curve {
+/**
+ * The identity of a curve: what Node calls it, its coordinate width and its
+ * OID. Everything that only needs to *encode* a key or a signature works from
+ * this alone.
+ */
+export interface NamedCurve {
   /** Node's `namedCurve` spelling (asymmetricKeyDetails.namedCurve). */
   nodeName: string;
   /** The byte length of a field element / coordinate. */
   byteLength: number;
+  /** DER OID contents as hex, e.g. "2a8648ce3d030107" for prime256v1. */
+  oidHex: string;
+  /**
+   * Byte length of the subgroup order. Equal to `byteLength` for the NIST
+   * primes, but smaller on some legacy curves (the WTLS ones), where Node sizes
+   * an IEEE P1363 signature half from the *order* rather than the field.
+   */
+  orderByteLength?: number;
+}
+
+export interface Curve extends NamedCurve {
   p: bigint;
   a: bigint;
   b: bigint;
   gx: bigint;
   gy: bigint;
   n: bigint;
-  /** DER OID contents as hex, e.g. "2a8648ce3d030107" for prime256v1. */
-  oidHex: string;
+}
+
+/**
+ * True when this runtime has the arithmetic for the curve (the three NIST
+ * curves). Curves OpenSSL knows but we do not are keyed by name/OID only, and
+ * every operation on them has to go through the wasm backend.
+ */
+export function hasArithmetic(curve: NamedCurve): curve is Curve {
+  return typeof (curve as Curve).p === 'bigint';
 }
 
 function hexBig(hex: string): bigint {
@@ -189,12 +212,12 @@ export function generator(curve: Curve): Point {
 }
 
 /** Byte-encode a coordinate to the curve's fixed field length. */
-export function coordToBytes(value: bigint, curve: Curve): Uint8Array {
+export function coordToBytes(value: bigint, curve: NamedCurve): Uint8Array {
   return bigIntToBytes(value, curve.byteLength);
 }
 
 /** Build an uncompressed SEC1 point: 0x04 || X || Y. */
-export function encodePoint(point: Point, curve: Curve): Uint8Array {
+export function encodePoint(point: Point, curve: NamedCurve): Uint8Array {
   const out = new Uint8Array(1 + 2 * curve.byteLength);
   out[0] = 0x04;
   out.set(coordToBytes(point.x, curve), 1);
@@ -202,14 +225,14 @@ export function encodePoint(point: Point, curve: Curve): Uint8Array {
   return out;
 }
 
-export function decodePoint(bytes: Uint8Array, curve: Curve): Point {
+export function decodePoint(bytes: Uint8Array, curve: NamedCurve): Point {
   if (bytes.length !== 1 + 2 * curve.byteLength || bytes[0] !== 0x04) {
     throw new Error('ec: unsupported point encoding');
   }
   const x = bytesToBigInt(bytes.subarray(1, 1 + curve.byteLength));
   const y = bytesToBigInt(bytes.subarray(1 + curve.byteLength));
   const point = { x, y };
-  if (!isOnCurve(point, curve)) throw new Error('ec: point is not on the curve');
+  if (hasArithmetic(curve) && !isOnCurve(point, curve)) throw new Error('ec: point is not on the curve');
   return point;
 }
 
@@ -217,10 +240,13 @@ export function decodePoint(bytes: Uint8Array, curve: Curve): Point {
  * Decode an uncompressed (0x04) or compressed (0x02/0x03) SEC1 public point.
  * These NIST primes are all 3 mod 4, so the square root is `y^((p+1)/4)`.
  */
-export function decodePublicKey(bytes: Uint8Array, curve: Curve): Point {
+export function decodePublicKey(bytes: Uint8Array, curve: NamedCurve): Point {
   const bl = curve.byteLength;
   if (bytes.length === 1 + 2 * bl && bytes[0] === 0x04) return decodePoint(bytes, curve);
   if (bytes.length === 1 + bl && (bytes[0] === 0x02 || bytes[0] === 0x03)) {
+    // Compressed points need the curve equation, which only the curves with
+    // local arithmetic have.
+    if (!hasArithmetic(curve)) throw new Error('ec: compressed points need local arithmetic');
     const x = bytesToBigInt(bytes.subarray(1));
     const { p, a, b } = curve;
     const rhs = mod(x * x * x + a * x + b, p);
@@ -235,7 +261,7 @@ export function decodePublicKey(bytes: Uint8Array, curve: Curve): Point {
 }
 
 /** Compressed SEC1 encoding: 0x02/0x03 || X (parity of Y in the tag). */
-export function encodePublicKey(point: Point, curve: Curve, compressed: boolean): Uint8Array {
+export function encodePublicKey(point: Point, curve: NamedCurve, compressed: boolean): Uint8Array {
   if (!compressed) return encodePoint(point, curve);
   const out = new Uint8Array(1 + curve.byteLength);
   out[0] = Number(point.y & 1n) === 0 ? 0x02 : 0x03;

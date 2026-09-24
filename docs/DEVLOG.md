@@ -244,6 +244,22 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M119（第七增量）—— 全曲线 EC（OpenSSL 注册表）+ 绑定清单清理
+
+**里程碑**：把「只有 3 条 NIST 曲线有算术」这个限制拆掉，并用一台永久门禁回答「native 迁完了吗」。
+
+- **`crypto.getCurves()` 交给 OpenSSL**：新增 `wn_ec_curves`（`EC_get_builtin_curves` + `OBJ_nid2sn`），JS 侧再套 Node 的 `filterDuplicateStrings`（大小写不敏感去重、保留原拼写、排序）。**结果：82 条曲线、顺序与 Node 完全一致**（此前是 7 条手写名字）。这是设计文档「开放问题 §7.3（getCiphers/getHashes/getCurves 这类表面常量由 wasm 导出还是 TS 表维护）」的答复：由 wasm 导出。
+- **任意曲线都能用**：`EcMaterial.curve` 从「必须带全套域参（p/a/b/Gx/Gy/n）」放宽为 `NamedCurve`（名称 + 坐标宽 + OID），加 `hasArithmetic()` 判别。无本地算术的曲线（secp256k1、prime192v1、brainpool\*、SM2、sect\*/c2\*/wtls\* …）走 `wn_ec_curve_info`（`EC_curve_nist2nid` → `OBJ_sn2nid` → `OBJ_txt2obj`，与 Node 的 `Ec::GetCurveIdFromName` 同序）解析，keygen 直接交给 OpenSSL。**secp256k1 等 80 条曲线从「报 NotImplementedError」变成完整可用**（keygen/导入/导出/签验/ECDH）。
+- **RSA 任意 publicExponent**：`wn_pkey_keygen` 新增指数参数（`BN_dec2bn` + `EVP_PKEY_CTX_set1_rsa_keygen_pubexp`），不再只有 65537 走 wasm。
+- **两个被测试实测出来的字节级差异（都已修）**：① EC 私钥标量 OpenSSL 按**阶的字节宽**补齐（`ossl_ec_key_simple_priv2oct` 用 `EC_GROUP_order_bits`），不是按域宽、也不是最简长度——WTLS 那类「阶短于域」的曲线会差一个 0x00；② **IEEE P1363 的半宽用阶宽而非域宽**（Node 的 `GroupOrderSize`），同样只在阶≠域的曲线上显形（wtls1 是 28 字节而域宽算出来是 30）。
+- **SM2 的真相（写进文档的有意偏离）**：OpenSSL 的 EC key manager **按设计拒绝**导入 SM2 曲线的材料（`ec_kmgmt.c` 的 `common_check_sm2`），而 SM2 key manager 只收 SM3 且**没有 derive**。所以：SM2 的 keygen/导入/导出/`asymmetricKeyDetails` 我们都行（且比 Node 更好——Node 导入 SM2 后 `asymmetricKeyType` 是 `undefined`、非 SM3 一律 `ERR_OSSL_INVALID_DIGEST`、ECDH 靠“没经过 DER”才碰巧能用）；**SM3 签验我们与 Node 双向互验通过**；非 SM3 摘要与 ECDH 我们**如实报 OpenSSL 的错误**（`ERR_OSSL_INVALID_DIGEST` / `operation not supported for this keytype`），而不是笼统说“未实现”。
+- **绑定清单清理（回答“native 迁完了吗”）**：`UNSUPPORTED_BINDINGS` 曾把 `crypto`、`zlib`、`inspector`、`trace_events` 同时写成“已注册”和“刻意不提供”，还混入 `vfs`（不是 Node 的 binding 名）。现在这份清单**恰好等于“Node 的 lib/ 会要、而我们不提供”的 31 个名字**，按原因分组（编译机制 / 进程控制 / socket / TLS / 无浏览器对应物）。新增夹具 `test/fixtures/node-bindings.json`（72 个名字，源出 `tools/binding-names-oracle.mjs`）与永久门禁：**清单里不能有虚构名、不能与已注册集合重叠、已注册名必须是 Node 的真实拼写、vendored 树读到的每个 binding 都必须落在两者之一**。
+- **删掉一处真死代码**：`src/node-runtime/builtins/fs-promises.ts`（`fsPromisesSpec`）自 M49 之后已无人引用——`fs/promises` 现在是 vendored 真源。
+- **验收**：新差分门禁 `test/crypto-openssl-curves.test.ts`（7 例）——`getCurves()` 逐项相等；12 条代表性曲线（NIST / Koblitz / 遗留 NIST / Brainpool / SM2 / 二元域 / WTLS）的 keygen→Node 导入→我们重导入**字节一致**、Node 生成的密钥我们导入后 details 一致、**双向签验 + P1363**、**跨实现 ECDH 逐字节相等**；RSA 四个 publicExponent。另有 `Oakley-EC2N-3/4` 的说明：它们**在 Node 里也无法导出**（`ERR_OSSL_MISSING_OID`，NID 没有 OID），所以只是被列出。`tsc --noEmit` 净 · `vitest run` **1051 passed / 2 skipped（125 文件）** · build（`wn_openssl-CRn2NAJj.wasm` 2481.83 kB、`runtime.worker-DefAp24J.js` 713.78 kB）。
+- **M119 剩余**：非对称 keygen 的自定义 DH 参数（`group`/`prime`/`generator`）与 ml-kem。
+
+---
+
 ### 2026-09-24 · M119（第六增量）—— X509Certificate 与 SPKAC 切到 wasm
 
 **里程碑**：crypto 里最后两块纯 JS 表面（证书与 SPKAC）也改了道。

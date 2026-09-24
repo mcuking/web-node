@@ -29,11 +29,13 @@
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
 #include <openssl/crypto.h>
+#include <openssl/ec.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/kdf.h>
 #include <openssl/objects.h>
+#include <openssl/param_build.h>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
@@ -580,7 +582,6 @@ enum {
 };
 
 static EVP_PKEY *wn_pkey(int32_t handle) { return (EVP_PKEY *)(intptr_t)handle; }
-
 /** Copy a not-necessarily-NUL-terminated wasm string into `buf`. */
 static const char *wn_str(const char *src, int32_t len, char *buf, size_t cap) {
     if (len <= 0 || len >= (int32_t)cap) return NULL;
@@ -592,11 +593,14 @@ static const char *wn_str(const char *src, int32_t len, char *buf, size_t cap) {
 /**
  * Generate a key pair. `name` is the OpenSSL algorithm ("RSA", "EC",
  * "ED25519", "DH", …); `group` is the named group/curve for the algorithms
- * that take one (EC, DH); `bits` the key size for RSA. Returns a private-key
- * handle (0 on failure) — the public half is derived by exporting it.
+ * that take one (EC, DH); `bits` the key size for RSA; `exp` the RSA public
+ * exponent as a decimal string (empty/NULL keeps OpenSSL's default 65537).
+ * Returns a private-key handle (0 on failure) — the public half is derived by
+ * exporting it.
  */
 WN_EXPORT(wn_pkey_keygen)(const char *name, int32_t nlen,
-                          const char *group, int32_t glen, int32_t bits) {
+                          const char *group, int32_t glen, int32_t bits,
+                          const char *exp, int32_t elen) {
     char namebuf[64];
     if (wn_str(name, nlen, namebuf, sizeof(namebuf)) == NULL) return 0;
 
@@ -607,6 +611,25 @@ WN_EXPORT(wn_pkey_keygen)(const char *name, int32_t nlen,
     if (bits > 0) {
         /* Only RSA-style keygen takes a bit count; others keep their default. */
         if (EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, bits) != 1) {
+            wn_capture_error();
+            EVP_PKEY_CTX_free(ctx);
+            return 0;
+        }
+    }
+    if (elen > 0) {
+        char expbuf[64];
+        if (wn_str(exp, elen, expbuf, sizeof(expbuf)) == NULL) {
+            EVP_PKEY_CTX_free(ctx);
+            return 0;
+        }
+        BIGNUM *e = NULL;
+        if (BN_dec2bn(&e, expbuf) == 0) {
+            EVP_PKEY_CTX_free(ctx);
+            return 0;
+        }
+        /* Takes ownership of `e` on success. */
+        if (EVP_PKEY_CTX_set1_rsa_keygen_pubexp(ctx, e) != 1) {
+            BN_free(e);
             wn_capture_error();
             EVP_PKEY_CTX_free(ctx);
             return 0;
@@ -886,6 +909,157 @@ WN_EXPORT(wn_pkey_decrypt)(int32_t handle, int32_t padding,
     EVP_PKEY_CTX_free(ctx);
     if (ok != 1) { wn_capture_error(); return -1; }
     return (int32_t)outlen;
+}
+
+/* --- EC curve registry ------------------------------------------------------ */
+/*
+ * `crypto.getCurves()` in Node is `EC_get_builtin_curves` + `OBJ_nid2sn`, and
+ * an EC `namedCurve` is resolved through `EC_curve_nist2nid` then `OBJ_sn2nid`
+ * (`ncrypto::Ec::GetCurveIdFromName` / `GetCurves`). Both live in the OpenSSL
+ * that actually performs the operations, so they are answered from there
+ * rather than from a hand-maintained JS table.
+ */
+
+/** Node's curve-name lookup: NIST alias first, then short name. */
+static int wn_ec_nid(const char *name) {
+    int nid = EC_curve_nist2nid(name);
+    if (nid == NID_undef) nid = OBJ_sn2nid(name);
+    if (nid == NID_undef) nid = OBJ_ln2nid(name);
+    if (nid == NID_undef) {
+        /* Dotted OID (the JS side derives it from the AlgorithmIdentifier). */
+        ASN1_OBJECT *obj = OBJ_txt2obj(name, 0);
+        if (obj != NULL) {
+            nid = OBJ_obj2nid(obj);
+            ASN1_OBJECT_free(obj);
+        }
+    }
+    return nid;
+}
+
+/** Every built-in curve's short name, newline-joined (size-then-fill). */
+WN_EXPORT(wn_ec_curves)(uint8_t *out, int32_t cap) {
+    size_t count = EC_get_builtin_curves(NULL, 0);
+    if (count == 0) return -1;
+    EC_builtin_curve *curves = (EC_builtin_curve *)malloc(count * sizeof(EC_builtin_curve));
+    if (curves == NULL) return -1;
+    if (EC_get_builtin_curves(curves, count) != count) { free(curves); return -1; }
+
+    int32_t need = 0;
+    for (size_t i = 0; i < count; i++) {
+        const char *sn = OBJ_nid2sn(curves[i].nid);
+        if (sn != NULL) need += (int32_t)strlen(sn) + 1;
+    }
+    if (need > 0) need--; /* join with '\n': no trailing separator */
+    if (out == NULL) { free(curves); return need; }
+    if (cap < need) { free(curves); return -1; }
+
+    int32_t off = 0;
+    for (size_t i = 0; i < count; i++) {
+        const char *sn = OBJ_nid2sn(curves[i].nid);
+        if (sn == NULL) continue;
+        if (off > 0) out[off++] = '\n';
+        size_t len = strlen(sn);
+        memcpy(out + off, sn, len);
+        off += (int32_t)len;
+    }
+    free(curves);
+    return off;
+}
+
+/**
+ * Describe a curve as `<short name>\n<field bits>\n<order bits>\n<OID contents
+ * hex>`. The short name and OID are what the JS key encoder needs to build a
+ * SubjectPublicKeyInfo / PKCS#8 for curves it has no arithmetic for; the field
+ * bits give the coordinate width and the order bits the width of an IEEE
+ * P1363 signature half (Node uses the group order there). Returns -1 for an
+ * unknown name.
+ */
+WN_EXPORT(wn_ec_curve_info)(const char *name, int32_t nlen, uint8_t *out, int32_t cap) {
+    char namebuf[256];
+    if (wn_str(name, nlen, namebuf, sizeof(namebuf)) == NULL) return -1;
+    int nid = wn_ec_nid(namebuf);
+    if (nid == NID_undef) return -1;
+    EC_GROUP *group = EC_GROUP_new_by_curve_name(nid);
+    if (group == NULL) { wn_capture_error(); return -1; }
+    int bits = EC_GROUP_get_degree(group);
+    int orderbits = 0;
+    const BIGNUM *order = EC_GROUP_get0_order(group);
+    if (order != NULL) orderbits = BN_num_bits(order);
+    EC_GROUP_free(group);
+
+    ASN1_OBJECT *obj = OBJ_nid2obj(nid);
+    if (obj == NULL) { wn_capture_error(); return -1; }
+    unsigned char *oid = NULL;
+    int oidlen = i2d_ASN1_OBJECT(obj, &oid);
+    if (oidlen < 2) {
+        /*
+         * Some built-in curves have a name but no OID at all — `Oakley-EC2N-3`
+         * and `Oakley-EC2N-4` are `NID_ipsec3/4`, which OpenSSL's object
+         * database leaves without an encoding. They still appear in
+         * `wn_ec_curves` (Node lists them too) but cannot be encoded into a
+         * SubjectPublicKeyInfo, so there is no OID to report. Node fails on
+         * them as well (`ERR_OSSL_MISSING_OID` when exporting).
+         */
+        OPENSSL_free(oid);
+        wn_capture_error();
+        return -1;
+    }
+    /* `i2d_ASN1_OBJECT` emits the TLV; the JS side wants the contents only. */
+    const unsigned char *content = oid + 2;
+    int contentlen = oidlen - 2;
+
+    const char *sn = OBJ_nid2sn(nid);
+    if (sn == NULL) sn = namebuf;
+    static const char hexd[] = "0123456789abcdef";
+    char text[512];
+    int off = 0;
+    int snlen = (int)strlen(sn);
+    memcpy(text, sn, (size_t)snlen); off = snlen;
+    text[off++] = '\n';
+    /* decimal bits */
+    char digits[16]; int d = 0;
+    int v = bits;
+    if (v == 0) digits[d++] = '0';
+    while (v > 0) { digits[d++] = (char)('0' + (v % 10)); v /= 10; }
+    while (d > 0) text[off++] = digits[--d];
+    text[off++] = '\n';
+    d = 0;
+    v = orderbits;
+    if (v == 0) digits[d++] = '0';
+    while (v > 0) { digits[d++] = (char)('0' + (v % 10)); v /= 10; }
+    while (d > 0) text[off++] = digits[--d];
+    text[off++] = '\n';
+    for (int i = 0; i < contentlen; i++) {
+        text[off++] = hexd[(content[i] >> 4) & 0xf];
+        text[off++] = hexd[content[i] & 0xf];
+    }
+    OPENSSL_free(oid);
+    if (out == NULL) return off;
+    if (cap < off) return -1;
+    memcpy(out, text, (size_t)off);
+    return off;
+}
+
+/**
+ * The uncompressed public point of a key (EC only). Needed when a private key
+ * arrives without its embedded public half and the curve has no JS arithmetic
+ * (Node derives it from the group).
+ */
+WN_EXPORT(wn_ec_point)(int32_t handle, uint8_t *out, int32_t cap) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey == NULL) return -1;
+    size_t len = 0;
+    unsigned char *point = NULL;
+    len = EVP_PKEY_get1_encoded_public_key(pkey, &point);
+    if (point == NULL || len == 0) {
+        OPENSSL_free(point);
+        wn_capture_error();
+        return -1;
+    }
+    int32_t n = (int32_t)len;
+    if (out != NULL && cap >= n) memcpy(out, point, len);
+    OPENSSL_free(point);
+    return n;
 }
 
 /* --- X509 certificates ------------------------------------------------------ */
