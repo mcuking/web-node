@@ -249,7 +249,15 @@ catch (e) { parentPort.postMessage(e.code); }
       expect(thrown?.message).toMatch(new RegExp(fragment));
     };
     opt({ eval: true }, 'eval');
-    opt({ resourceLimits: { maxOldGenerationSizeMb: 1 } }, 'resourceLimits');
+
+    // `resourceLimits` is accepted and ignored, not refused: it can only ever
+    // restrict a worker, so not enforcing it cannot change a program's output —
+    // and toolchains (jest-worker, hence webpack's minifier) set it routinely.
+    const limited = new wt.Worker('/project/plain.js', {
+      resourceLimits: { maxOldGenerationSizeMb: 1 },
+    });
+    expect(limited.resourceLimits).toEqual({});
+    await new Promise((r) => limited.on('exit', r));
 
     const worker = new wt.Worker('/project/plain.js');
     await expect(worker.getHeapSnapshot()).rejects.toThrow(/not implemented/);

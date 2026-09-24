@@ -18,8 +18,11 @@ import type { WorkerHandle } from '../proc/worker';
  * in Node; what is missing is the parallelism a real thread would give, which the
  * documentation states plainly. `stdin`/`stdout`/`stderr` are real streams (a
  * second port pair carries their bytes, since a tab has no per-thread pipe);
- * the option shapes that need the native isolate — `eval`, `resourceLimits` —
- * throw instead of being approximated.
+ * the option shapes that need the native isolate — `eval` and `data:` workers —
+ * throw instead of being approximated. `resourceLimits` is the one exception: it
+ * is accepted and ignored, because it can only ever *restrict* a worker, so not
+ * enforcing it cannot change a program's output (`worker.resourceLimits` stays
+ * empty, which is the honest answer).
  *
  * The constants (`isMainThread`, `threadId`, `parentPort: null`) are the truth
  * for the main thread, and `markAsUntransferable`/`isMarkedAsUntransferable`
@@ -159,15 +162,15 @@ export const workerThreadsSpec: BuiltinSpec = {
           name = (options.name as string).trim();
         }
 
-        for (const key of ['resourceLimits'] as const) {
-          if (options[key] !== undefined && options[key] !== null && options[key] !== false) {
-            throw notImplemented(
-              'api',
-              `worker_threads.Worker({ ${key} })`,
-              'A browser tab has no per-thread OS pipe or V8 isolate, so this option cannot be honoured.',
-            );
-          }
-        }
+        // `resourceLimits` caps the worker's own V8 heap and stack. This runtime
+        // has one heap shared by every worker, so there is nothing to cap — but
+        // the option only ever *restricts* a worker, so honouring the request by
+        // simply not enforcing a limit cannot change a program's output. It is
+        // accepted and reported as unenforced by `worker.resourceLimits` (which
+        // stays empty) rather than thrown on, because toolchains set it
+        // routinely (jest-worker does) and refusing it would fail builds for a
+        // limit nobody can observe. `eval`/`data:` workers above are different:
+        // there the feature itself is missing, so those still throw.
 
         const execPath = String(process.execPath ?? '/bin/node');
         this.#handle = binding.workers.create({

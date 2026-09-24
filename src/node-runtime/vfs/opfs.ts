@@ -2,6 +2,13 @@ import type { Persistence, ReadSource, SnapshotSource } from './persistence';
 import { encodeBase64, decodeBase64 } from './base64';
 
 /**
+ * The debounce must ride the **host** timer queue: `installGlobals` replaces the
+ * worker's `globalThis.setTimeout` with the runtime's own, whose queue `runMain`
+ * clears before every run. Captured at module load, before `installGlobals`.
+ */
+const hostSetTimeout = globalThis.setTimeout.bind(globalThis);
+
+/**
  * OPFS-backed persistence for the in-memory VFS — the backend used when the FS
  * worker is unavailable (no cross-origin isolation, so no `SharedArrayBuffer`).
  *
@@ -19,7 +26,7 @@ export class OpfsPersistence implements Persistence {
   readonly durable = false;
   #rootName: string;
   #dir: FileSystemDirectoryHandle | null = null;
-  #timer: number | null = null;
+  #timer: ReturnType<typeof hostSetTimeout> | null = null;
   #pending = false;
   #debounceMs: number;
 
@@ -47,12 +54,12 @@ export class OpfsPersistence implements Persistence {
     if (!OpfsPersistence.supported) return;
     this.#pending = true;
     if (this.#timer !== null) return;
-    this.#timer = setTimeout(() => {
+    this.#timer = hostSetTimeout(() => {
       this.#timer = null;
       if (!this.#pending) return;
       this.#pending = false;
       void this.flush(vfs);
-    }, this.#debounceMs) as unknown as number;
+    }, this.#debounceMs);
   }
 
   /** Write the full snapshot to OPFS. */

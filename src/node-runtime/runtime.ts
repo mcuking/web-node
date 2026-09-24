@@ -597,6 +597,38 @@ export class NodeRuntime {
   }
 
   /**
+   * Pending asynchronous work, as `activeWorkCount` sees it: refed timers,
+   * in-flight host requests and sockets, and running workers. Zero means
+   * nothing is left to hold the loop open, so the process would exit.
+   */
+  get pendingWork(): number {
+    return this.#activeWorkCount();
+  }
+
+  /**
+   * Resolve once a real Node process would exit — when nothing is left to keep
+   * the loop alive. A program that leaves a handle behind (a server from
+   * `listen()`, an interval that was never cleared) never drains, which is
+   * Node's behaviour too, not a bug in the wait.
+   *
+   * The check runs inside a macrotask, so every microtask and `nextTick` the
+   * program queued has already run by the time it looks. `timeoutMs` > 0 caps
+   * the wait and resolves `false` instead of waiting forever.
+   */
+  async drain(timeoutMs = 0): Promise<boolean> {
+    const start = performance.now();
+    for (;;) {
+      // Yield exactly as long as a macrotask: microtasks (promises, nextTick)
+      // run before this callback fires, so "idle" here means truly idle.
+      await new Promise<void>((resolve) => {
+        nativeSetTimeout(resolve, 0);
+      });
+      if (this.#activeWorkCount() === 0) return true;
+      if (timeoutMs > 0 && performance.now() - start >= timeoutMs) return false;
+    }
+  }
+
+  /**
    * Execute a module by absolute VFS path (the program entry point).
    *
    * Every call models a *fresh process*: the user module cache is dropped and

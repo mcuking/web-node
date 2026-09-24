@@ -461,7 +461,22 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
       this.flags = flags;
       this.length = length;
     }
+    /**
+     * Hand the job to the loop, then report on a later turn.
+     *
+     * `src/node_file.cc`'s job is libuv thread-pool work: it returns and calls
+     * `ondone` when the pool is done, on a later loop iteration. Calling it
+     * inline would make every `fs` async API synchronous under the hood — the
+     * callback would run before the statement after the call, which the
+     * documented "never called synchronously" contract forbids and which breaks
+     * callers that set state up after starting a read. The deferred callback is
+     * also live work, so a pending read keeps the loop open, as it does in Node.
+     */
     run(path: string): Error | undefined {
+      ctx.timers.setImmediate(() => this.#finish(path));
+      return undefined;
+    }
+    #finish(path: string): void {
       try {
         // `open` first: a missing file must fail with the `open` syscall, like
         // the native job does.
@@ -481,10 +496,8 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
         } else {
           this.ondone?.(null, undefined, fd, st.size, null);
         }
-        return undefined;
       } catch (err) {
         this.ondone?.(err as Error);
-        return undefined;
       }
     }
   }
@@ -501,19 +514,23 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
       this.data = data;
     }
     run(path: string): Error | undefined {
+      // Deferred for the same reason as `ReadFileJobBinding.run`: the native job
+      // reports from the thread pool, never inline.
+      ctx.timers.setImmediate(() => this.#finish(path));
+      return undefined;
+    }
+    #finish(path: string): void {
       let fd: number | undefined;
       try {
         fd = openSync(path, flagsToMode(this.flags), this.mode);
         writeSync(fd, this.data, 0, this.data.byteLength, 0);
         closeSync(fd);
         this.ondone?.(null);
-        return undefined;
       } catch (err) {
         if (fd !== undefined) {
           try { closeSync(fd); } catch { /* already closed */ }
         }
         this.ondone?.(err as Error);
-        return undefined;
       }
     }
   }
@@ -1061,23 +1078,26 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     // No symlink support: reproduce the two ways these calls fail on a real FS
     // (missing parent, parent is a file) so error handling matches, then fail
     // loudly rather than silently pretending the link was created.
-    symlink: (target: string, path: string, _type: number, _token?: unknown) => {
-      const abs = vfs.resolve(path);
-      const parent = abs.slice(0, abs.lastIndexOf('/')) || '/';
-      if (!vfs.exists(parent)) throw new VfsError('ENOENT', 'symlink', target, undefined, path);
-      if (vfs.stat(parent).type !== 'dir') {
-        throw new VfsError('ENOTDIR', 'symlink', target, undefined, path);
-      }
-      throw new VfsError('ENOSYS', 'symlink', path);
-    },
-    link: (existing: string, path: string, _token?: unknown) => {
-      if (!vfs.exists(existing)) throw new VfsError('ENOENT', 'link', existing, undefined, path);
-      throw new VfsError('ENOSYS', 'link', path);
-    },
-    readlink: (path: string, _encoding: unknown, _token?: unknown) => {
-      if (!vfs.exists(path)) throw new VfsError('ENOENT', 'readlink', path);
-      throw new VfsError('EINVAL', 'readlink', path);
-    },
+    symlink: (target: string, path: string, _type: number, token?: unknown) =>
+      wrap(() => {
+        const abs = vfs.resolve(path);
+        const parent = abs.slice(0, abs.lastIndexOf('/')) || '/';
+        if (!vfs.exists(parent)) throw new VfsError('ENOENT', 'symlink', target, undefined, path);
+        if (vfs.stat(parent).type !== 'dir') {
+          throw new VfsError('ENOTDIR', 'symlink', target, undefined, path);
+        }
+        throw new VfsError('ENOSYS', 'symlink', path);
+      }, token),
+    link: (existing: string, path: string, token?: unknown) =>
+      wrap(() => {
+        if (!vfs.exists(existing)) throw new VfsError('ENOENT', 'link', existing, undefined, path);
+        throw new VfsError('ENOSYS', 'link', path);
+      }, token),
+    readlink: (path: string, _encoding: unknown, token?: unknown) =>
+      wrap(() => {
+        if (!vfs.exists(path)) throw new VfsError('ENOENT', 'readlink', path);
+        throw new VfsError('EINVAL', 'readlink', path);
+      }, token),
 
     // ---- helpers used by the fs builtin ----
     __fds: fds,

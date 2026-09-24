@@ -271,6 +271,17 @@ function run(id: number, entry?: string): void {
     post({ id, type: 'error', message: (err as Error).message });
     return;
   }
+  // The program is not over when its entry module returns: it is over when the
+  // event loop has nothing left to run (Node stays alive for a pending timer, a
+  // socket, a worker). Report the exit only once it has drained, or a run that
+  // scheduled work past its last synchronous statement would look finished
+  // while its callbacks and timers were still about to fire.
+  void finishRun(id);
+}
+
+async function finishRun(id: number): Promise<void> {
+  if (!runtime || !vfs) return;
+  await runtime.drain();
   persistence.schedule(vfs);
   post({ id, type: 'exit', code: runtime.exitCode ?? 0 });
 }

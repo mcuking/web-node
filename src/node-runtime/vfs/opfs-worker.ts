@@ -28,6 +28,18 @@ import {
 } from '../../sync/fs-protocol';
 import type { Persistence, ReadSource, SnapshotSource } from './persistence';
 
+/**
+ * The debounce must ride the **host** timer queue.
+ *
+ * `installGlobals` replaces the worker's `globalThis.setTimeout` with the
+ * runtime's own `setTimeout` (the vendored `timers`), and `runMain` clears that
+ * queue before every run. A bare `setTimeout` here would be a debounce the next
+ * Run silently cancels — and one that never fires at all in practice. These are
+ * captured at module load, before `installGlobals` runs.
+ */
+const hostSetTimeout = globalThis.setTimeout.bind(globalThis);
+const hostClearTimeout = globalThis.clearTimeout.bind(globalThis);
+
 /** Why the FS worker could not be started; the caller keeps the async backend. */
 export type FsWorkerUnavailable =
   | 'no-worker'
@@ -43,7 +55,7 @@ export class OpfsWorkerPersistence implements Persistence {
   #channel: SyncChannel;
   #nextId = 1;
   #pending = new Map<number, { resolve: (value: unknown) => void; reject: (err: Error) => void }>();
-  #timer: ReturnType<typeof setTimeout> | null = null;
+  #timer: ReturnType<typeof hostSetTimeout> | null = null;
   #waiting: SnapshotSource | null = null;
   #debounceMs: number;
   #closed = false;
@@ -117,7 +129,7 @@ export class OpfsWorkerPersistence implements Persistence {
   schedule(source: SnapshotSource): void {
     this.#waiting = source;
     if (this.#timer !== null) return;
-    this.#timer = setTimeout(() => {
+    this.#timer = hostSetTimeout(() => {
       this.#timer = null;
       const pending = this.#waiting;
       this.#waiting = null;
@@ -186,7 +198,7 @@ export class OpfsWorkerPersistence implements Persistence {
 
   async clear(): Promise<void> {
     if (this.#timer !== null) {
-      clearTimeout(this.#timer);
+      hostClearTimeout(this.#timer);
       this.#timer = null;
       this.#waiting = null;
     }

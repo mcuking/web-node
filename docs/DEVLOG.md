@@ -244,6 +244,39 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M121（第一增量）—— 运行直到事件循环排空；修三个真 bug，webpack 能编译了
+
+**里程碑**：北极星 B1 的第一块实戥地。spike 定位的两个壁障里，「退出报得太早」是主因；挖它的时候又带出两个真 bug。现在**页内 webpack 能完成编译**，只剩 minifier 一步（`require(esm)`，见下）。
+
+**① 运行结束 = 事件循环排空，不是主模块返回**（M108 的本体）
+- 新增 `NodeRuntime.drain(timeoutMs?)`（在**宏任务**里查，所以微任务/nextTick 都已排空）与 `pendingWork` getter；`runtime.worker.ts` 的 `run` 改成 `runMain` 后 `await drain()` 再 `post(exit)`。
+- 判定依据是现成的 `#activeWorkCount()`（refed 定时器 + 宿主请求/socket + 活跃 worker）。**`__liveCount()` 本来就是 ref 感知的**，所以 `unref()` 的定时器不会挂住退出（与 Node 一致），而 `fs.watch` 这类内部句柄会——两条都对。
+- 留下的句柄永不清（`listen()` 的 server、未 `clearInterval` 的 interval）就永不退出——与 Node 一致，不是 bug，UI 的「服务器保持运行」语义因此保留。
+- 证据：`A sync-start / B readFile-cb / F sync-end / E microtask / C promises / D timer 200ms / [exit 0 · 217ms]`——回调全部落在 exit **之前**（之前是之后）。
+
+**② 持久化 debounce 跑在沙箱定时器队列上（真 bug，线上同样中招）**
+- `OpfsWorkerPersistence.schedule` / `OpfsPersistence.schedule` 用的是**裸 `setTimeout`**，而 `installGlobals` 会把 worker 的 `globalThis.setTimeout` 换成**运行时的** `setTimeout`（vendored `timers`），且 `runMain` 每次都会清空那个队列 —— 于是 debounce 被下一个 Run 静默取消，实测**根本不 fire**。
+- 修复：两个文件都在**模块加载期**捕获宿主定时器（早于 `installGlobals`）。证据：改前程序写 800 个文件后 `.wvm.json` 仍是 33 条（mount 时的旧快照），改后 834 条 / 800 个真实镜像文件。
+
+**③ `fs` 的异步 API 实际上是同步的（真 bug，且是 webpack 卡住的直接原因）**
+- `binding.ReadFileJob`/`WriteFileJob` 代表 libuv 线程池作业，却**内联调 `ondone`** —— `fs.readFile` 的回调在下一句语句**之前**就跑了（实测 `1, 3-cb, 2`，Node 是 `1, 2, 3-cb`）。
+- `readlink`/`symlink`/`link` **忽略 token**，异步形式**直接 throw** 而不回调（实测 `SYNC-THROW EINVAL`）。enhanced-resolve 的解 symlink 步骤正好走 `fs.readlink`，一个同步抛出就能把 webpack 的异步链打断，而它又不留任何待办句柄——正好是“事件循环空着、回调不来”的现象。
+- 修复：`ondone` 改到 `ctx.timers.setImmediate`（宏任务，且算活工作——待办的读会拉住循环，跟 Node 一样）；三个方法改用 `wrap(...)`，异步走回调、同步仍抛。新增 `test/fs-async.test.ts`（6 例）。
+
+**④ `Worker({ resourceLimits })` 改为接受并忽略**
+- jest-worker（TerserPlugin 的并行层）会传它；它是**限制**不是特性，不强制不会改变程序输出（`worker.resourceLimits` 仍返回 `{}`，这是诚实的）。`eval`/`data:` worker 仍响亮报错。实测 jest-worker 的 worker 真跑起来了：`minifier-webpack-plugin` → `jest-worker/threadChild` → `terserMinify`。
+
+**页内实跑（真浏览器，dev 跨源隔离）**
+- 页内 `npm install` 装下 webpack + webpack-cli（**134 包 / ~48s**，持久化到 OPFS，重载后 5828 条快照 / `restored from OPFS`）。
+- **webpack 5.111.1 完成编译**：不再卡在 `make`；模块解析、loader 跑、`finishModules`、`seal` 都走完，产出真实的 webpack 诊断（先用 `.js` 里写 `import` 撞上 `javascript/dynamic` 的**正确**报错——`/project/package.json` 是 `type: commonjs`；换 `.mjs` 后消失）。
+- **minifier 在 worker 线程里跑起来了**：`minimizer-webpack-plugin` → `jest-worker/threadChild` → `terserMinify`。
+
+**剩下一个壁障（下一增量）**：`terser.minify is not a function`。实测原因：terser 的 `exports['.'].require` 指向 **`dist/bundle.min.js`（ESM）**，而本运行时的 loader `require` 一个 ES 模块时只得到**空导出面**（`Object.keys(require('terser'))` 为空）。也就是说缺的是 Node 的 **`require(esm)`**（同步 require ES 模块；Node ≥ 22.12 已支持，本仓 vendored 源是 v26 同代）。补上它，webpack 生产构建就应该完整跑完。
+
+**验收**：`tsc --noEmit` 净 · `vitest run` **1117 passed / 2 skipped（129 文件）** · build ✓（`fs.worker.js` 7.16 kB、worker 723.33 kB、`wn_openssl.wasm` 2483.15 kB）。
+
+---
+
 ### 2026-09-24 · M121（退险 spike）—— 页内真 npm install 跑通，webpack 卡在 `make` 且退出报得太早
 
 **里程碑**：北极星 B1 的第一步。**没有改产品代码**，只把靶子打准：跑一个真的 bundler 到底卡在哪。四条实测结论（均真浏览器 + 真 registry）：

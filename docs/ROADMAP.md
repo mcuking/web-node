@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-24（**阶段 H：M119 ✅ · M120 ✅ 结清**——M119：自定义 DH 参数与 ml-kem keygen 全走 wasm OpenSSL；M120：FS-worker + SAB 同步通道，`fs.fsyncSync` 真阻塞到落盘、读也能阻塞回源。**M121（北极星）已开工**：spike 定位出两个壁障——md4 缺失 + 退出报得太早）
+> - **最后更新**：2026-09-24（**阶段 H：M119 ✅ · M120 ✅ 结清**。**M121（北极星）第一增量 ✅**：运行结束改为等事件循环排空，修了持久化 debounce 与 `fs` 异步 API 两个真 bug；**webpack 5 已在页内完成编译**，minifier 已在 worker 线程里跑起来，下一增量补 `require(esm)`）
 
 ---
 
@@ -174,11 +174,16 @@
   - **端到端证据**：本地 dev（跨源隔离）页面：① 写文件 → `fsyncSync` → 自旋 4 s，页面在自旋窗口内**从 OPFS 直接读回相同字节**（debounce 快照不可能已跑）；② 绕过运行时直接把文件/目录写进 OPFS、**重载页面**后（文件树看不见它们）仍能 `readFileSync`/`readdirSync` 读到；③ `rmSync` 后页面直接查 OPFS → 已删。
   - **已知边界（已写明）**：不回源重建列表（内存树已知的目录只列内存子项）；非跨源隔离时无 SAB → 无回源能力（`readSource()` 为 `null`），验收只能在**本地 dev/preview** 做。
 
-- [~] **M121 · 页内跑通 webpack / rspack 生产构建（P6）**  ← **B1 北极星**，汇合 M108/M111 🚧 2026-09-24（**退险 spike ✅**，两个具体壁障已定位）
+- [~] **M121 · 页内跑通 webpack / rspack 生产构建（P6）**  ← **B1 北极星**，汇合 M108/M111 🚧 2026-09-24（**spike ✅ + 第一增量 ✅**：webpack 已能完成编译，只剩 minifier 的 `require(esm)`）
   - 目标：这个浏览器 Node 环境能跑 **webpack / rspack** 生产构建；本 runtime 构建与宿主构建**产物一致**。
   - 验收：页内产出 bundle；与现有差分装置兼容。
-  - **spike 已过（2026-09-24，真浏览器 + 真 registry）**：① 页内 `npm install` 装下 **webpack + webpack-cli（134 包 / 58.2s）**——本运行时的 npm 客户端能应付真工具链；② webpack **5.111.1** 能加载并启动编译，钩子跑到 `make`；③ 但**卡在 `make` 之后**（`afterCompile`/`done` 不来、回调不触发、也不报错），而事件循环仍在跑；④ 两个可执行壁障已定位：**（a）`md4`/`xxhash64` 在 wasm OpenSSL 里不支持**（md4 是 webpack 5 默认 `output.hashFunction`；`md5`/`sha256` 正常），**（b）退出报得太早**——`[exit 0]` 在主模块求值结束时就报，`fs.readFile` 回调/promise/定时器/微任务全在它**之后**才打印。
-  - **下一步（第一增量）**：先把「运行结束」改成等事件循环排空（现成依据：`NodeRuntime.#activeWorkCount()` 已在数定时器/宿主请求/socket/worker，M57 给子进程用），摆正后再回看 webpack；随后再处理 md4。
+  - **spike（2026-09-24）**：① 页内 `npm install` 装下 webpack + webpack-cli（134 包 / 58.2s）；② webpack 5.111.1 能加载并启动编译；③ 卡在 `make` 之后；④ 两个壁障：`md4` 缺失 + 退出报得太早。
+  - **第一增量（2026-09-24）**：**运行结束改成等事件循环排空**（`NodeRuntime.drain()`/`pendingWork`，`runMain` 后 `await drain()` 再报 exit——回调全部落在 exit 之前）；挖出并修了**两个真 bug**：
+    - **持久化 debounce 跑在沙箱定时器队列上**（`installGlobals` 把 `globalThis.setTimeout` 换成运行时的，而 `runMain` 会清空那个队列）→ debounce 从不 fire。改为模块加载期捕获宿主定时器。
+    - **`fs` 异步 API 实为同步**：`ReadFileJob`/`WriteFileJob` 内联调 `ondone`（`fs.readFile` 回调先于下一句语句）；`readlink`/`symlink`/`link` 忽略 token、异步形式直接 throw。前者改宏任务（待办读会拉住循环），后者改走 `wrap`。
+  - **页内实测**：webpack 5.111.1 **完成编译**（不再卡 `make`）；**minifier 在 worker 线程里跑起来了**（`minimizer-webpack-plugin` → `jest-worker/threadChild` → `terserMinify`）；为此把 `Worker({ resourceLimits })` 改为接受并忽略（只是限制，不改变输出）。
+  - **下一增量（已定位）**：补 **`require(esm)`** —— terser 的 `exports['.'].require` 指向 ESM 的 `dist/bundle.min.js`，而 loader 对 ESM 的 `require` 只给出空导出面（`terser.minify` 为 `undefined`）。
+  - **已交付验收**：`tsc --noEmit` 净 · `vitest run` **1117 passed / 2 skipped（129 文件）** · build ✓。
 
 ---
 
