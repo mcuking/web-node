@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <link rel="preload" as="fetch" crossorigin="" href="/web-node/assets/vendored-sources.txt?v=e23c8c42ea39">
+
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>web-node — Node.js in the browser</title>
+    <script type="module" crossorigin src="/web-node/assets/index-ffCjH20v.js"></script>
+    <link rel="stylesheet" crossorigin href="/web-node/assets/index-DVoCeKxV.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">▣</span>
+        <div>
+          <strong>web-node</strong>
+          <span class="sub">Node.js core running in your browser tab</span>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="install">⬇ Install deps</button>
+        <button id="build">▦ Build</button>
+        <button id="bundle">⧉ Bundle</button>
+        <button id="vite">⚡ Vite build</button>
+      <button id="vitedev">🛠 Vite dev</button>
+        <button id="hmred">✏️ HMR JS</button>
+        <button id="hmrcss">🎨 HMR CSS</button>
+        <button id="run" class="primary">▶ Run</button>
+        <button id="clear">Clear</button>
+        <button id="reset">Reset project</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="pane files">
+        <div class="pane-head">Files <span class="hint">(VFS → OPFS)</span></div>
+        <ul id="file-tree" class="file-tree"></ul>
+      </section>
+
+      <section class="pane editor">
+        <div class="pane-head"><span id="active-file">—</span><span id="dirty" class="dirty"></span></div>
+        <textarea id="editor" spellcheck="false"></textarea>
+      </section>
+
+      <section class="pane output">
+        <div class="pane-head">
+          <div class="tabs">
+            <button class="tab active" data-tab="output">Output</button>
+            <button class="tab" data-tab="preview">Preview</button>
+          </div>
+          <span id="status" class="status"></span>
+        </div>
+
+        <div class="view" id="view-output">
+          <pre id="terminal"></pre>
+        </div>
+
+        <div class="view hidden" id="view-preview">
+          <div class="preview-bar">
+            <label for="port-select">:&nbsp;</label>
+            <select id="port-select"></select>
+            <button id="refresh" title="Reload the preview">⟳</button>
+            <a id="open-tab" href="#" target="_blank" rel="noopener">open ↗</a>
+          </div>
+          <iframe id="preview-frame" title="preview" src="about:blank"></iframe>
+          <div id="preview-empty" class="preview-empty">
+            No port bound yet. <code>http.createServer(…).listen(3000)</code> then hit ▶ Run.
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="statusbar">
+      <span id="boot">booting runtime…</span>
+      <span id="facts"></span>
+    </footer>
+
+  </body>
+</html>
