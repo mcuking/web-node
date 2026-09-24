@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-24（**阶段 H：M119 ✅ · M120 ✅ 结清**。**M121（北极星）两个增量均 ✅**：① 运行结束改为等事件循环排空 + 修三个真 bug；② 补上 **`require(esm)`**（模块命名空间语义 + TLA → `ERR_REQUIRE_ASYNC_MODULE`），并修掉「冷条目快照把磁盘文件清零」的数据丢失真 bug。**页内 webpack 5 生产构建（含 terser）已完整跑通，产物与宿主 Node 逐字节一致**。**同日新增阶段 I**：把 WebContainer **活体调研**（`docs/webcontainer-research.md` 第九–十一节）中可借鉴的功能登记为 M122–M124）
+> - **最后更新**：2026-09-24（**阶段 H：M119 ✅ · M120 ✅ 结清**。**M121（北极星）两个增量均 ✅**：① 运行结束改为等事件循环排空 + 修三个真 bug；② 补上 **`require(esm)`**（模块命名空间语义 + TLA → `ERR_REQUIRE_ASYNC_MODULE`），并修掉「冷条目快照把磁盘文件清零」的数据丢失真 bug。**页内 webpack 5 生产构建（含 terser）已完整跑通，产物与宿主 Node 逐字节一致**。**同日新增阶段 I**：把 WebContainer **活体调研**（`docs/webcontainer-research.md` 第九–十一节）中可借鉴的功能登记为 M122–M124。**同日 rspack 退险（之二）**：wasm binding 含完整编译器；rspack 接入的**唯一门槛 = `node:wasi`**，立为新里程碑 **M125**）
 
 ---
 
@@ -34,7 +34,7 @@
 
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
-| **H** | **native → WASM（主线，P0–P6）** | 8 | 6 | 2 |
+| **H** | **native → WASM（主线，P0–P6）** | 9 | 6 | 3 |
 | E | 启动与加载性能 | 1 | 0 | 1 |
 | F | 构建工具链（**用户愿景，最后做**） | 3 | 0 | 3 |
 | G | 预览与路由 | 1 | 0 | 1 |
@@ -44,10 +44,10 @@
 | C | 平台无对应物（**已解散**，条目已分流） | 2 | 2 | 0 |
 | D | 运行时常量小项（**已归档**） | 4 | 4 | 0 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **54** | **43** | **11**（+1 不做） |
+| **合计** | | **55** | **43** | **12**（+1 不做） |
 
-> **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 ✅ · M120 ✅ · M121。
-> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 130 个里程碑，剩余 11 个规划任务**。
+> **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 ✅ · M120 ✅ · M121 · **M125**。
+> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 130 个里程碑，剩余 12 个规划任务**。
 > 注：本表按**叶子任务**计数——M90（拆 M90.1–M90.9）、M92（拆 M92.1/M92.2）、M93（拆 M93.1–M93.4）、M93.4（拆 a–h）、M97（拆 M97.1）的**父项为拆分占位、不计入**。（旧表 A=22 系拆分前的陈旧值，本次一并修正为 26。）
 
 ---
@@ -186,6 +186,14 @@
   - **页内实测**：webpack 5.111.1 **完成编译**（不再卡 `make`）；**minifier 在 worker 线程里跑起来了**（`minimizer-webpack-plugin` → `jest-worker/threadChild` → `terserMinify`）；为此把 `Worker({ resourceLimits })` 改为接受并忽略（只是限制，不改变输出）。
   - **下一增量（已定位）**：补 **`require(esm)`** —— terser 的 `exports['.'].require` 指向 ESM 的 `dist/bundle.min.js`，而 loader 对 ESM 的 `require` 只给出空导出面（`terser.minify` 为 `undefined`）。
   - **已交付验收**：`tsc --noEmit` 净 · `vitest run` **1117 passed / 2 skipped（129 文件）** · build ✓。
+  - **rspack 一侧（2026-09-24 退险 · 之二）**：wasm binding 含**完整编译器**；页内 npm 装下 `@rspack/core` + `@rspack/binding-wasm32-wasi`（143 包 / 82.3s，无 EBADPLATFORM）。**唯一门槛 = `node:wasi` 未实现**——浏览器 ESM 版自身**含顶层 await**（`await fetch(__wasmUrl)` + `await instantiateNapiModule`）且 `fetch(file://…)`，同步 `require` 必抛 `ERR_REQUIRE_ASYNC_MODULE`；Node CJS 版（`rspack.wasi.cjs`）同步、从 `fs` 读 VFS 里的 wasm、用 `worker_threads`。→ 立 **M125**。
+
+- [ ] **M125 · `node:wasi` —— VFS 支撑的 `wasi_snapshot_preview1` 宿主** ← rspack 接入（M121 的 rspack 一侧）的前置
+  - **为什么**：实测 `@rspack/binding-wasm32-wasi` 的 **Node CJS 版**（`rspack.wasi.cjs`）是唯一可行路径，它**只阻塞在 `require('node:wasi')` 未实现**（`NotImplementedError`）。浏览器 ESM 版是死路（顶层 await + `fetch(file://)`，见上）。
+  - **目标**：实现真正的预览1 宿主，**以 web-node 的 VFS（`node:fs`）作后端**，包成 Node 的 `WASI` 类表面（`wasiImport`/`start`/`initialize`/`getImportObject`/`finalizeBindings`；见上游 `lib/wasi.js`，176 行）。现有 `src/node-runtime/wasm/wasi.ts` 是**最小 stub**（`path_open`→ENOENT、`fd_read`→EBADF、无真文件系统），不能支撑。
+  - **收益**：① rspack 的 Rust 侧经 `preopens: { '/': '/' }` + 宿主 `fs` **直接读写 web-node 的 VFS**——FS 桥接问题自然消解，无需镜像；② 任何基于 WASI 的 npm 包（wasm 工具链）通用解锁。
+  - **验收**：① `require('node:wasi')` 表面与真 Node 0 diff；② WASI syscall 差分（对真 Node `node:wasi` 行为）；③ 页内 rspack 生产构建产出 bundle。
+  - **前置事实（已实测）**：`RSPACK_BINDING=@rspack/binding-wasm32-wasi/rspack.wasi.cjs` 子路径解析可用，已一路走到 `node:wasi` 报未实现。
 
 ---
 

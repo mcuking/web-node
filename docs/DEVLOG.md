@@ -244,6 +244,36 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M121（rspack 退险 spike · 之二）—— binding 含完整编译器；rspack 接入的唯一门槛是 `node:wasi`
+
+**目标**：上一 spike 只验了工具函数（transform/minify）。本节回答「rspack 到底能不能在 web-node 里跑一次真的 build，以及缺什么」。**结论**：能，且只缺一件东西——**`node:wasi`**（当前未实现）。全部结论均为页内活体实测（真 web-node 运行时 + 真 registry）。
+
+**① binding 导出面 = 完整编译器**（73 个键）：除 `transform*`/`minify*` 外，含 `JsCompiler`、`JsCompilation`、`JsStats`、`ChunkGraph`、`NormalModule`、`NativeWatcher`、`JsResolver`、`Sources`、`VirtualFileStore`……不是只有工具函数。
+
+**② 页内 `npm install` 能装下 rspack**：把 `@rspack/core@2.2.7` + `@rspack/binding-wasm32-wasi@2.2.7` 加进 `/project/package.json`，本运行时 npm 装下 **143 个包 / 82.3s**（含 emnapi 全家桶 `@emnapi/core`/`@emnapi/wasi-threads`/`@napi-rs/wasm-runtime`）。**没有 `EBADPLATFORM`**——本运行时 npm 不校验 `cpu: ["wasm32"]`（宿主 `npm i` 必须加 `--force --cpu=wasm32`）。
+
+**③ 两条加载路径，都实测踩到底：**
+
+- **Node CJS 版**（`main: rspack.wasi.cjs`）→ 只阻塞在 **`node:wasi` 未实现**：
+  `NotImplementedError: [web-node] module "node:wasi" is not implemented`（`rspack.wasi.cjs:8` 就是 `const { WASI } = require('node:wasi')`）。
+- **浏览器 ESM 版**（`browser: rspack.wasi-browser.js`，web-node 的 `#packageEntry` **把 `browser` 排在 `main` 之前**所以选中它）→ **三重堵死**：
+  1. web-node 按 **CJS** 编译它 → `Failed to compile …: Cannot use import statement outside a module`（包 package.json 无 `type: module`，`.js` 按 Node 规则即 CJS——web-node 的行为**是对的**）；
+  2. 把它复制成 `.mjs` 强制按 ESM 加载 → **`ERR_REQUIRE_ASYNC_MODULE`**：浏览器版**自身有顶层 await**（`const __wasmFile = await fetch(__wasmUrl).then(r=>r.arrayBuffer())` 与 `await __emnapiInstantiateNapiModule(...)`，见该文件 31/37 行）——**同步 `require` 永远进不去**，真 Node 也一样；
+  3. 它还用 `fetch(file://…/rspack.wasm32-wasi.wasm)` 取 wasm，浏览器原生 `fetch` 不支持 `file:`。
+
+**所以浏览器版是死路，唯一可行的是 Node CJS 版。** 而且 CJS 版恰好也是**更合 web-node 架构**的一条：
+- 它用 **`fs.readFileSync`** 读 wasm（直接读 web-node 的 VFS，**不碰 fetch**）；
+- 它用 **`worker_threads`** 起线程池（web-node 已支持，M57）；
+- 它 `new WASI({ version:'preview1', fs: __nodeFs, preopens: { '/': '/' } })`——**若 `node:wasi` 用 web-node 自己的 `fs`(VFS) 作后端，rspack 的 Rust 侧就能直接读写 web-node 的 VFS**（`preopens` 把 WASI `/` 映射到宿主 `/`）——**FS 桥接问题因此自然消解，不需要额外镜像**。
+
+**门槛量化**：web-node 现有 `src/node-runtime/wasm/wasi.ts` 是**最小 stub**（`path_open`→ENOENT、`fd_read`→EBADF、无真文件系统），**不能**支撑 rspack。需要实现一个**真的 `wasi_snapshot_preview1` 宿主**，以 VFS 为后端，并包成 Node `node:wasi` 的 `WASI` 类表面（`wasiImport`/`start`/`initialize`/`getImportObject`/`finalizeBindings`，见 `lib/wasi.js`）。
+
+**下一步（已登记为新里程碑，见 ROADMAP）**：实现 `node:wasi`（VFS 支撑的 preview1 宿主）→ 再把 `@rspack/core` 指向 CJS 版（`RSPACK_BINDING=@rspack/binding-wasm32-wasi/rspack.wasi.cjs`，已实测该子路径解析可用、能一路走到 `node:wasi`）→ 页内跑通一次 rspack 生产构建。
+
+**探针**：web-node 页内（`/project/index.js` + Run），脚本内容见本节；`/tmp/rspack-spike/` 为纯浏览器对照 spike（归档在 `docs/rspack-probe/`）。
+
+---
+
 ### 2026-09-24 · M121（rspack 退险 spike）—— 浏览器端 wasm binding 可用；同步阻塞 API 死锁、异步路径可用
 
 **目标**：webpack 那条线（M121 第一/第二增量）已把北极星 B1 走通；本节转向**构建工具链的另一个候选 rspack**，先退险——回答「`@rspack/binding-wasm32-wasi` 官方浏览器入口到底能不能在纯浏览器里跑、哪种 API 能跑」。**不改产品代码**，只做活体实测。结论：**可行**，但有明确的 API 边界。
