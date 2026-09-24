@@ -27,6 +27,13 @@ function uid(prefix: string): string {
 
 /** Injected binding names for the CommonJS wrapper parameters. */
 export const EXPORTS_BINDING = '__wn_exports';
+/**
+ * The symbol that marks an object as "this came from an ES module". It is a
+ * `Symbol.for` key (not `__esModule`) so it can never collide with a binding a
+ * module really exports, and so the transform's emitted code and the loader's
+ * namespace builder agree without sharing a lexical scope.
+ */
+export const ESM_NAMESPACE_SYMBOL = 'web-node.esm-namespace';
 export const REQUIRE_BINDING = '__wn_require';
 /** Async loader backing rewritten dynamic `import()` expressions. */
 export const IMPORT_BINDING = '__wn_import';
@@ -464,9 +471,19 @@ export function transformEsmToCjs(source: string, moduleUrl: string): TransformR
     }
   }
 
+  // The marker that says "this exports object came from an ES module" is a
+  // symbol, not `__esModule`. `__esModule` belongs to the *module*: a real ESM
+  // module may export a binding with that name, and `require(esm)`'s namespace
+  // must report it (see `esmNamespace` in `loader/index.ts`). Keeping our own
+  // flag off that name means the two can never collide.
   const header =
-    `Object.defineProperty(${EX}, '__esModule', { value: true });\n` +
-    `function __wnDefault(m) { return (m && m.__esModule) ? m.default : m; }\n` +
+    `const __wn_esm = Symbol.for(${JSON.stringify(ESM_NAMESPACE_SYMBOL)});\n` +
+    `Object.defineProperty(${EX}, __wn_esm, { value: true });\n` +
+    // A default import unwraps `.default` when the module is a real ES module
+    // (marked with our symbol) or a transpiled one (Babel/TS leave
+    // `__esModule = true`). Plain CommonJS keeps `module.exports` as its
+    // default, which is what `import x from 'cjs'` yields under Node.
+    `function __wnDefault(m) { return (m && (m[__wn_esm] || m.__esModule)) ? m.default : m; }\n` +
     `const __mod_url = ${JSON.stringify(moduleUrl)};\n` +
     `const __mod_file = __mod_url.replace(/^file:\\/\\//, '');\n` +
     `const __mod_dir = __mod_file.slice(0, __mod_file.lastIndexOf('/')) || '/';\n`;

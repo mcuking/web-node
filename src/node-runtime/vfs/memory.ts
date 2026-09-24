@@ -610,11 +610,32 @@ export class MemoryVfs implements Vfs {
     e.mode = mode & 0o777;
     this.#touch(abs, 'change');
   }
-  /** Snapshot the whole tree (used for persistence + tests). */
+  /**
+   * Snapshot the whole tree (used for persistence + tests).
+   *
+   * Cold entries are materialised first. A cold file (or directory) is a
+   * placeholder the read source confirmed but nobody has touched this session,
+   * so it holds no bytes. Encoding it as-is would emit an empty payload, and the
+   * mirror write on the other side (`truncate(0)` then write) would overwrite the
+   * real file in the store with zero bytes — silently destroying every file a
+   * session never reads. Pull the bytes in so the snapshot is complete and a
+   * mirror is only ever written with real content.
+   */
   snapshot(): Array<{ path: string; type: 'file' | 'dir'; data?: string; mode: number }> {
     const out: Array<{ path: string; type: 'file' | 'dir'; data?: string; mode: number }> = [];
     for (const [path, e] of this.#entries) {
       if (path === '/') continue;
+      if (e.cold) {
+        // Iterating the Map while `#materialize` inserts children is safe: new
+        // entries are visited later in this same loop.
+        try {
+          this.#materialize(path, e);
+        } catch {
+          // Gone from the store between the info() probe and now. Drop it rather
+          // than resurrect it as an empty file.
+          continue;
+        }
+      }
       out.push({
         path,
         type: e.type,

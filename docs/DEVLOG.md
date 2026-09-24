@@ -244,6 +244,24 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M121（第二增量）—— `require(esm)` 补齐，北极星 B1 页内逐字节达成；挖出并修掉「冷条目快照清零」数据丢失
+
+**结果**：**页内 webpack 5 生产构建完整跑通（含 terser 压缩），产物与宿主 Node 逐字节一致**（1513 字节，连跑两次相同）。核心增量是 `require(esm)`；为复现它先清了一次 OPFS，顺带定位并修掉一个会**静默清零磁盘文件**的持久化真 bug。
+
+**① `require(esm)`（M121 第二增量）**
+- 之前 `require` 一个 ES 模块拿到的是「空导出面 / 原始 exports 对象」：terser 的 `exports['.'].require` 指向 **ESM** 时，minifier 里 `terser.minify` 就是 `undefined`。
+- 实现：`loader/index.ts` 新增 `esmNamespace()`，按 Node `populateCJSExportsFromESM`（`lib/internal/modules/cjs/loader.js`）的语义构造**模块命名空间**——键**排序**、属性 `enumerable+writable+non-configurable`、`Symbol.toStringTag='Module'`；**有 `default` 导出且模块自身未导出 `__esModule` 时**补 `__esModule: true`（让 `_interopRequireDefault` 这类转译消费者认得出真 ESM），**没有 default 时不补**（补了会让互操作代码去读 `.default` 拿到 `undefined`）。ESM 模块在该模块缓存里记住 namespace，`require`/`import` 每次返回**同一个对象**。
+- **TLA**：ESM 图里出现顶层 `await` 时，同步 `require` 抛 **`ERR_REQUIRE_ASYNC_MODULE`**（不是把 V8 的 `await is only valid…` 裸透出去）。码进 `internal-shims` 的 `ERROR_CODES` + 两处 `CUSTOM_FORMATTERS`/`CUSTOM_PROPS`（`filename` / `Require stack:` / 非枚举 `requireStack`），`getRequireStack` 语义与 Node 逐字对齐（含「非空栈即便元素是 `undefined` 也照样输出表头」这一细节）。
+- **标记改用 Symbol**：ESM 导出面的标记从 `__esModule` 换成 `Symbol.for('web-node.esm-namespace')`（`esm-transform.ts` 的 `ESM_NAMESPACE_SYMBOL`）——`__esModule` 属于**模块自己**（真 ESM 可以导出同名绑定，`require(esm)` 必须如实报告它），自己的标记不能再占用这个名字。`__wnDefault(m)` 同时认 symbol 与 `__esModule`（保住「转译 CJS 的 default 互操作」，普通 CJS 仍 return 模块本身）。`esmNamespace()` 也给 namespace 打上该 symbol，否则 `import d from 'esm'` 里 `__wnDefault` 不认它、会把整个 namespace 当 default 交出去（`test/_m18.test.ts` 的 Vue SFC 实测踩到 `vue is not a function`）。
+- **验证**：新增 `test/require-esm.test.ts`，6 个模块（无 default / 有 default / `export *` / `export { default } from` / 模块自导出 `__esModule`）与 **Node v26.9.0 基准**（`test/fixtures/require-esm.json`）**逐字段一致**（keys/tag/`__esModule` 存在性与值）；另有模块缓存同一对象、TLA 抛码 3 例。
+
+**② 持久化会把「冷条目」快照成空 → 镜像写入端把磁盘文件清零（真 bug，静默数据丢失）**
+- 现象：首次干净重装后构建成功（逐字节一致），vite 因改源触发一次 page reload 后，`require('terser')` 又变空导出——实测 `fs.statSync(terserBundle).size === 0`，OPFS 镜像也 0 字节，`.wvm.json` 里该条目 `data: ''`。坏掉的文件**恰好是「本会话没读过」的那几个**（terser `dist/bundle.min.js`、watchpack `lib/index.js`，上一节就见过）。
+- 根因（M120 冷/热模型的交界）：`MemoryVfs` 从存储回源时把条目建成 **cold**（只有 size、无字节），而 `snapshot()` **不物化 cold 条目**，直接 `encodeBase64(e.data)` → `''`；持久化侧 `flush` 的镜像循环对每个 file 无条件 `truncate(0)` + 写 `decodeBase64(item.data ?? '')` → **把磁盘上真实文件覆写成 0 字节**。于是「只要一个文件本会话没被读过，它下一次快照就被清零」，症状随机且静默。
+- 修复：`snapshot()` 先对 cold 条目调 `#materialize()`（Map 迭代期插入子项是安全的，随后会被同一循环访问），物化失败（存储里已没有）就跳过该条目、不复活成空文件。
+- 验证：新增 `test/vfs-snapshot-cold.test.ts`（4 例：cold 文件物化为真字节 / cold 目录及其 cold 子项 / 字节已丢的 cold 条目被丢弃 / 真·空文件仍快照为空）。页内实证：干净重装修复后 `terser/dist/bundle.min.js = 1104314`、`watchpack/lib/index.js = 17573`、`ajv/dist/refs/data.json = 409`（之前是 0 / 缺失，`boot failed`）。
+
+**涉及文件**：`src/node-runtime/loader/esm-transform.ts`、`src/node-runtime/loader/index.ts`、`src/node-runtime/builtins/internal-shims.ts`、`src/node-runtime/vfs/memory.ts`；新增 `test/require-esm.test.ts` + `test/fixtures/require-esm.json`、`test/vfs-snapshot-cold.test.ts`。验证：`tsc --noEmit` 净、`vitest run` **1124 passed / 2 skipped（133 文件）**、`npm run build` ✓、页内 webpack 生产构建与宿主 **0 diff**。
 ### 2026-09-24 · M121（第一增量）—— 运行直到事件循环排空；修三个真 bug，webpack 能编译了
 
 **里程碑**：北极星 B1 的第一块实戥地。spike 定位的两个壁障里，「退出报得太早」是主因；挖它的时候又带出两个真 bug。现在**页内 webpack 能完成编译**，只剩 minifier 一步（`require(esm)`，见下）。

@@ -1,7 +1,7 @@
 import type { Realm } from '../realm';
 import type { Vfs } from '../vfs';
 import * as p from '../vfs/posix';
-import { transformEsmToCjs, EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING } from './esm-transform';
+import { transformEsmToCjs, EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING, ESM_NAMESPACE_SYMBOL } from './esm-transform';
 import { codeMask } from './code-mask';
 import { notImplemented } from '../errors';
 import { compileTagged } from '../vm';
@@ -147,6 +147,12 @@ function conditionsFor(condition: Condition): string[] {
 interface UserModule {
   exports: unknown;
   state: 'loading' | 'loaded';
+  /**
+   * The namespace object `require()`/`import()` hand back for an ES module.
+   * Built once, cached, and returned instead of the raw exports — see
+   * `esmNamespace`. Absent for CommonJS.
+   */
+  namespace?: Record<string, unknown>;
 }
 
 /** Resolution + execution for user modules living in the VFS. */
@@ -554,7 +560,7 @@ export class ModuleLoader {
     if (!this.#hooks.hasAny) {
       const fromDir = p.dirname(fromFile);
       const resolved = this.resolve(request, fromDir, condition);
-      return this.loadModule(resolved);
+      return this.loadModule(resolved, undefined, undefined, fromFile);
     }
     return this.#requireThroughHooks(fromFile, request, condition);
   };
@@ -599,7 +605,7 @@ export class ModuleLoader {
     }
     const sourceOverride =
       usedHookSource && typeof loaded.source === 'string' ? loaded.source : undefined;
-    return this.loadModule(absPath, sourceOverride, format === 'module');
+    return this.loadModule(absPath, sourceOverride, format === 'module', fromFile);
   }
 
   /** Best-effort module format for a VFS path (used by the load-hook default step). */
@@ -764,6 +770,20 @@ export class ModuleLoader {
   }
 
   /**
+   * `ERR_REQUIRE_ASYNC_MODULE(filename, parent)` — Node's refusal to `require()`
+   * an ESM graph that contains top-level await. Built from the runtime's own
+   * `internal/errors` table so the message, `code`, and non-enumerable
+   * `requireStack` all match.
+   */
+  #requireAsyncModuleError(requiredPath: string, requirer?: string): Error {
+    const errors = this.#realm.require('internal/errors') as {
+      codes: { ERR_REQUIRE_ASYNC_MODULE: new (filename?: string, parent?: unknown) => Error };
+    };
+    const parent = requirer ? { filename: requirer } : undefined;
+    return new errors.codes.ERR_REQUIRE_ASYNC_MODULE(requiredPath, parent);
+  }
+
+  /**
    * Load a module by absolute VFS path.
    *
    * `sourceOverride` lets the runtime execute a module whose text does not come
@@ -771,9 +791,9 @@ export class ModuleLoader {
    * else about the load (resolution root, module type, wrapper parameters) is
    * derived from the path exactly as usual.
    */
-  loadModule(absPath: string, sourceOverride?: string, forceEsm = false): unknown {
+  loadModule(absPath: string, sourceOverride?: string, forceEsm = false, requirer?: string): unknown {
     const cached = this.#cache.get(absPath);
-    if (cached && sourceOverride === undefined) return cached.exports;
+    if (cached && sourceOverride === undefined) return cached.namespace ?? cached.exports;
 
     if (absPath.endsWith('.json') && sourceOverride === undefined) {
       const text = new TextDecoder().decode(this.#vfs.readFile(absPath));
@@ -830,6 +850,13 @@ export class ModuleLoader {
         const dropAt = globals.indexOf(redeclared ?? '\u0000');
         if (redeclared === null || dropAt === -1) {
           this.#cache.delete(absPath);
+          // `await` at a module's top level is ESM-only syntax; a real ESM graph
+          // with top-level await is exactly what Node refuses to hand to a
+          // synchronous `require()`, and it says so with its own code rather than
+          // leaking the parser's sentence. Match that.
+          if (isEsm && /await is only valid in async functions/.test(message)) {
+            throw this.#requireAsyncModuleError(absPath, requirer);
+          }
           throw new Error(`Failed to compile ${absPath}: ${message}`);
         }
         globals = globals.filter((_, i) => i !== dropAt);
@@ -871,7 +898,10 @@ export class ModuleLoader {
 
     mod.exports = moduleObj.exports;
     mod.state = 'loaded';
-    return mod.exports;
+    // An ES module is never handed out as a bare object: consumers get a module
+    // namespace, whether they arrived through `require()` or `import()`.
+    if (isEsm) mod.namespace = esmNamespace(moduleObj.exports as Record<string, unknown>);
+    return mod.namespace ?? mod.exports;
   }
 
   #isPackageEsm(absPath: string): boolean {
@@ -907,6 +937,60 @@ export class ModuleLoader {
 /** `internal/util#isUnderNodeModules` — a path component matching `node_modules`. */
 function isUnderNodeModules(filename: string): boolean {
   return /^(?:.*)[\\/]node_modules[\\/]/.test(filename);
+}
+
+/**
+ * The object `require()`/`import()` hand back for an ES module, shaped like the
+ * spec's module namespace object.
+ *
+ * `populateCJSExportsFromESM` in Node's `lib/internal/modules/cjs/loader.js`
+ * decides between three outcomes, and this mirrors them for the one case we can
+ * produce:
+ *
+ *   - the module has a `default` export and does not itself export `__esModule`
+ *     → Node builds a *facade* module (`export * from …; export { default } …;
+ *     export const __esModule = true`) so that transpiled consumers
+ *     (`_interopRequireDefault`, which picks `.default` when `__esModule` is
+ *     set) recognise real ESM. We reproduce that as an extra `__esModule`;
+ *   - otherwise → the namespace as-is, with *no* `__esModule`. Reporting `true`
+ *     when there is no default is actively wrong: interop code would then read
+ *     `.default` and get `undefined` instead of the module.
+ *
+ * Names come out in sorted order and the properties are writable and
+ * non-configurable, as they are on a real namespace.
+ */
+function esmNamespace(exportsObject: Record<string, unknown>): Record<string, unknown> {
+  const source = exportsObject;
+  const names = Object.keys(source);
+  const hasDefault = names.includes('default');
+  const hasOwnEsm = names.includes('__esModule');
+  const keys = hasDefault && !hasOwnEsm ? [...names, '__esModule'].sort() : names.sort();
+
+  const namespace = Object.create(null) as Record<string, unknown>;
+  for (const key of keys) {
+    Object.defineProperty(namespace, key, {
+      value: key === '__esModule' && !hasOwnEsm ? true : source[key],
+      enumerable: true,
+      writable: true,
+      configurable: false,
+    });
+  }
+  Object.defineProperty(namespace, Symbol.toStringTag, {
+    value: 'Module',
+    writable: false,
+    enumerable: false,
+    configurable: false,
+  });
+  // Carry the same marker the transform puts on a raw exports object, so a
+  // default import (`__wnDefault`) recognises this namespace as ESM and unwraps
+  // `.default`. It is non-enumerable, so it never shows up in `Object.keys`.
+  Object.defineProperty(namespace, Symbol.for(ESM_NAMESPACE_SYMBOL), {
+    value: true,
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+  return namespace;
 }
 
 /** `node_modules` directories walked up from `fromDir`, nearest first. */

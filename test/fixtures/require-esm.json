@@ -1,0 +1,52 @@
+{
+  "no-default": {
+    "keys": [
+      "a",
+      "f"
+    ],
+    "tag": "[object Module]",
+    "hasEsm": false
+  },
+  "with-default": {
+    "keys": [
+      "__esModule",
+      "a",
+      "default"
+    ],
+    "tag": "[object Module]",
+    "hasEsm": true,
+    "esm": true
+  },
+  "star": {
+    "keys": [
+      "xi"
+    ],
+    "tag": "[object Module]",
+    "hasEsm": false
+  },
+  "inner": {
+    "keys": [
+      "xi"
+    ],
+    "tag": "[object Module]",
+    "hasEsm": false
+  },
+  "reexport-default": {
+    "keys": [
+      "__esModule",
+      "default"
+    ],
+    "tag": "[object Module]",
+    "hasEsm": true,
+    "esm": true
+  },
+  "es-module-tag": {
+    "keys": [
+      "__esModule",
+      "a"
+    ],
+    "tag": "[object Module]",
+    "hasEsm": true,
+    "esm": false
+  }
+}

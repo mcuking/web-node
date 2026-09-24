@@ -154,6 +154,9 @@ export const ERROR_CODES: Record<string, string> = {
   ERR_USE_AFTER_CLOSE: '%s was closed',
   // Message body lives in CUSTOM_FORMATTERS; listed here so the class exists.
   ERR_INVALID_RETURN_VALUE: 'Expected %s to be returned from the "%s" function but got %s.',
+  // Message body lives in CUSTOM_FORMATTERS (it is built conditionally).
+  ERR_REQUIRE_ASYNC_MODULE:
+    'require() cannot be used on an ESM graph with top-level await. Use import() instead.',
 };
 
 /**
@@ -285,6 +288,32 @@ function addNumericalSeparator(val: string): string {
   return `${val.slice(0, i)}${res}`;
 }
 
+/**
+ * The requirer a loader hands to `ERR_REQUIRE_ASYNC_MODULE`: Node stores a full
+ * CJS module record, but the only part the message and the error use is the
+ * `filename` and the chain of parents (`getRequireStack` in
+ * `lib/internal/modules/helpers.js`). The loader passes the same shape.
+ */
+export interface RequireParent {
+  filename?: string;
+  id?: string;
+  parent?: RequireParent;
+}
+
+/**
+ * `getRequireStack(parent)` — filenames from the requirer up through its
+ * parents. Mirrors Node exactly, including pushing `filename || id` even when
+ * that is `undefined` (a synthetic parent): Node then still emits the
+ * `Require stack:` header because the array is non-empty.
+ */
+function requireStackOf(parent: RequireParent | undefined): unknown[] {
+  const requireStack: unknown[] = [];
+  for (let cursor = parent; cursor; cursor = cursor.parent) {
+    requireStack.push(cursor.filename || cursor.id);
+  }
+  return requireStack;
+}
+
 const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
   // These three are *function* messages in Node that ignore extra arguments for
   // the message (they only set own properties). As plain `%s` templates the
@@ -380,6 +409,22 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
     const [path, base, exactUrl] = args as [string, string, unknown];
     return `Cannot find ${exactUrl ? 'module' : 'package'} '${path}' imported from ${base}`;
   },
+  // `ERR_REQUIRE_ASYNC_MODULE(filename, parent, locations)`. The
+  // `--experimental-print-required-tla` advisory is appended only when that flag
+  // is off (it always is here); the required module and the requirer's stack
+  // follow. `parent` is the loader's synthetic CJS module record.
+  ERR_REQUIRE_ASYNC_MODULE: (args) => {
+    const [filename, parent] = args as [string | undefined, RequireParent | undefined, unknown];
+    let message =
+      'require() cannot be used on an ESM graph with top-level await. Use import() instead.' +
+      ' To see where the top-level await comes from, use --experimental-print-required-tla.';
+    if (filename) message += `\nRequired module: ${filename}`;
+    if (parent) {
+      const stack = requireStackOf(parent);
+      if (stack.length > 0) message += '\nRequire stack:\n- ' + stack.join('\n- ');
+    }
+    return message;
+  },
   // `ERR_UNSUPPORTED_ESM_URL_SCHEME(url, supported)`. The win32 sentence does
   // not apply in a browser tab.
   ERR_UNSUPPORTED_ESM_URL_SCHEME: (args) => {
@@ -453,6 +498,19 @@ const CUSTOM_PROPS: Record<string, (err: Record<string, unknown>, args: unknown[
   // an explicit URL was supplied (lib/internal/errors.js).
   ERR_MODULE_NOT_FOUND: (err, args) => {
     if (args[2]) err.url = `${args[2]}`;
+  },
+  // `ERR_REQUIRE_ASYNC_MODULE(filename, parent)` hangs the requirer's stack off
+  // the error as a non-enumerable `requireStack` (lib/internal/errors.js).
+  ERR_REQUIRE_ASYNC_MODULE: (err, args) => {
+    const parent = args[1] as RequireParent | undefined;
+    if (parent) {
+      Object.defineProperty(err, 'requireStack', {
+        value: requireStackOf(parent),
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      });
+    }
   },
   // `ERR_ACCESS_DENIED` carries the permission and resource it was denied for.
   ERR_ACCESS_DENIED: (err, args) => {

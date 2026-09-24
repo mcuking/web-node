@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-24（**阶段 H：M119 ✅ · M120 ✅ 结清**。**M121（北极星）第一增量 ✅**：运行结束改为等事件循环排空，修了持久化 debounce 与 `fs` 异步 API 两个真 bug；**webpack 5 已在页内完成编译**，minifier 已在 worker 线程里跑起来，下一增量补 `require(esm)`）
+> - **最后更新**：2026-09-24（**阶段 H：M119 ✅ · M120 ✅ 结清**。**M121（北极星）两个增量均 ✅**：① 运行结束改为等事件循环排空 + 修三个真 bug；② 补上 **`require(esm)`**（模块命名空间语义 + TLA → `ERR_REQUIRE_ASYNC_MODULE`），并修掉「冷条目快照把磁盘文件清零」的数据丢失真 bug。**页内 webpack 5 生产构建（含 terser）已完整跑通，产物与宿主 Node 逐字节一致**）
 
 ---
 
@@ -174,7 +174,7 @@
   - **端到端证据**：本地 dev（跨源隔离）页面：① 写文件 → `fsyncSync` → 自旋 4 s，页面在自旋窗口内**从 OPFS 直接读回相同字节**（debounce 快照不可能已跑）；② 绕过运行时直接把文件/目录写进 OPFS、**重载页面**后（文件树看不见它们）仍能 `readFileSync`/`readdirSync` 读到；③ `rmSync` 后页面直接查 OPFS → 已删。
   - **已知边界（已写明）**：不回源重建列表（内存树已知的目录只列内存子项）；非跨源隔离时无 SAB → 无回源能力（`readSource()` 为 `null`），验收只能在**本地 dev/preview** 做。
 
-- [~] **M121 · 页内跑通 webpack / rspack 生产构建（P6）**  ← **B1 北极星**，汇合 M108/M111 🚧 2026-09-24（**spike ✅ + 第一增量 ✅**：webpack 已能完成编译，只剩 minifier 的 `require(esm)`）
+- [~] **M121 · 页内跑通 webpack / rspack 生产构建（P6）**  ← **B1 北极星**，汇合 M108/M111 🚧 2026-09-24（**spike ✅ + 第一增量 ✅ + 第二增量 ✅**：`require(esm)` 补齐后 **webpack 5 生产构建（含 terser 压缩）已在页内完整跑通，产物与宿主 Node 逐字节一致**；顺带修掉「冷条目快照清零磁盘文件」的数据丢失真 bug。剩：rspack 一侧按需推进）
   - 目标：这个浏览器 Node 环境能跑 **webpack / rspack** 生产构建；本 runtime 构建与宿主构建**产物一致**。
   - 验收：页内产出 bundle；与现有差分装置兼容。
   - **spike（2026-09-24）**：① 页内 `npm install` 装下 webpack + webpack-cli（134 包 / 58.2s）；② webpack 5.111.1 能加载并启动编译；③ 卡在 `make` 之后；④ 两个壁障：`md4` 缺失 + 退出报得太早。
