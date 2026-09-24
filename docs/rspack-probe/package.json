@@ -1,0 +1,1 @@
+{"name":"rspack-spike","private":true,"type":"module","dependencies":{"@rspack/binding-wasm32-wasi":"^2.2.7","vite":"^6.4.3"},"allowScripts":{"esbuild@0.25.12":true}}

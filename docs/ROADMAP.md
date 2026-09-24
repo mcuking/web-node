@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-24（**阶段 H：M119 ✅ · M120 ✅ 结清**。**M121（北极星）两个增量均 ✅**：① 运行结束改为等事件循环排空 + 修三个真 bug；② 补上 **`require(esm)`**（模块命名空间语义 + TLA → `ERR_REQUIRE_ASYNC_MODULE`），并修掉「冷条目快照把磁盘文件清零」的数据丢失真 bug。**页内 webpack 5 生产构建（含 terser）已完整跑通，产物与宿主 Node 逐字节一致**）
+> - **最后更新**：2026-09-24（**阶段 H：M119 ✅ · M120 ✅ 结清**。**M121（北极星）两个增量均 ✅**：① 运行结束改为等事件循环排空 + 修三个真 bug；② 补上 **`require(esm)`**（模块命名空间语义 + TLA → `ERR_REQUIRE_ASYNC_MODULE`），并修掉「冷条目快照把磁盘文件清零」的数据丢失真 bug。**页内 webpack 5 生产构建（含 terser）已完整跑通，产物与宿主 Node 逐字节一致**。**同日新增阶段 I**：把 WebContainer **活体调研**（`docs/webcontainer-research.md` 第九–十一节）中可借鉴的功能登记为 M122–M124）
 
 ---
 
@@ -38,15 +38,16 @@
 | E | 启动与加载性能 | 1 | 0 | 1 |
 | F | 构建工具链（**用户愿景，最后做**） | 3 | 0 | 3 |
 | G | 预览与路由 | 1 | 0 | 1 |
+| **I** | **借鉴 WebContainer（活体调研 2026-09-24）** | 3 | 0 | 3 |
 | A | crypto 收尾（**已归档**） | 26 | 26 | 0 |
 | B | 语义深度（**已归档**） | 5 | 5 | 0 |
 | C | 平台无对应物（**已解散**，条目已分流） | 2 | 2 | 0 |
 | D | 运行时常量小项（**已归档**） | 4 | 4 | 0 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **51** | **43** | **8**（+1 不做） |
+| **合计** | | **54** | **43** | **11**（+1 不做） |
 
 > **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 ✅ · M120 ✅ · M121。
-> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 130 个里程碑，剩余 8 个规划任务**。
+> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 130 个里程碑，剩余 11 个规划任务**。
 > 注：本表按**叶子任务**计数——M90（拆 M90.1–M90.9）、M92（拆 M92.1/M92.2）、M93（拆 M93.1–M93.4）、M93.4（拆 a–h）、M97（拆 M97.1）的**父项为拆分占位、不计入**。（旧表 A=22 系拆分前的陈旧值，本次一并修正为 26。）
 
 ---
@@ -55,6 +56,7 @@
 
 > **架构目标（B2）**：`internalBinding()` 背后的 native 层，从「TS 手写 shim / 平台 API 适配」迁移为**真上游 C/C++ 源码编出的 WASM 模块**；JS 层改用 Node 自己的 `lib/` 真源码（即 WebContainer 的 `lib/` + `internal_bindings` 形态）。
 > **验收闸门（B1）**：① 现有差分装置 **0 diff**；② **北极星**：页内跑通 **webpack / rspack 生产构建**。
+> **活体调研旁证（2026-09-24）**：WebContainer 的 `node:wasi` **端到端可用**（用真 wasi-sdk 34.0 编的 `wasm32-wasip1` 模块，`fd_write`/`getenv`/导出函数全通）→ 印证本阶段「**真上游 C/C++ → wasm + 最小 WASI 宿主**」的路线成立（也是 rspack `binding-wasm32-wasi` 的前置）。
 > **阶段 C 结清（2026-09-23）**：M99（zlib）→ **M116** ✅、M100（histogram）→ **M117** ✅（均已在此完成）；M101 移入本阶段（见下）。
 > **技术路线（甲）**：能编真上游 C/C++ 的（zlib/histogram/brotli/zstd/ada/OpenSSL 子集）用 **wasi-sdk** 编；syscall 层**不编 libuv**，改用 **SAB + `Atomics.wait` + FS-worker**。
 > **设计文档**：[`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`](superpowers/specs/2026-09-23-native-to-wasm-design.md)。接入缝 = `REGISTRY`（把 `zlib`/`crypto` 从 `UNSUPPORTED_BINDINGS` 移回并指向 wasm）；产物 = 带内容哈希的独立资产 + 惰性实例化。
@@ -232,6 +234,7 @@
 ## 阶段 G — 预览与路由（借鉴 WebContainer，2026-09-23 调研落地）
 
 > **来源**：`docs/webcontainer-research.md`（StackBlitz WebContainer 实测）。两条同领域已验证的工程手法，作为后续实现任务。
+> **2026-09-24 活体复证**：真开容器后再次确认其预览形态——每端口独立子域 + DevServer SW，另有 `PreviewRelay` 共享 worker 与 `File System Worker`（详见调研第九–十一节）。
 > **与现有条目的关系**：M113 承接已完成的 M3.5d「子域名路由」（dev 侧已有，本条做静态托管补齐 + 每端口 DevServer SW）；**M114（真·同步 `fs`）已并入阶段 H 的 M120**（`[⤳]`），本阶段只保留 M113。
 
 - [ ] **M113 · 预览端口 → 子域名路由（静态托管跟进）**
@@ -246,6 +249,35 @@
   - **现状**：web-node 在**同 realm 内**实现（单线程、简单、不阻塞 UI）；一旦要真并发/真同步就绕不开。
   - **前置**：**跨源隔离（COOP/COEP）**→ 才能用 SAB（隔离路由已就绪 M3.5d）。
   - **验收**：fs 同步调用在独立 worker 完成、主线程可阻塞等待；无 `Atomics.wait` 死锁；与现有 fs 语义差分 0 diff。
+
+---
+
+---
+
+## 阶段 I — 借鉴 WebContainer（**活体调研落地**，2026-09-24）
+
+> **来源**：`docs/webcontainer-research.md` **第九–十一节**——唐工要求「不能只看文章」，故**真开一个 WebContainer（官方 `@webcontainer/api@1.6.0`，Node v22.22.3）逐条实测**：DNS 哨兵 IP、`Fetcher Worker`、TLS 证书为空、`.node → ERR_DLOPEN_DISABLED`、`node:wasi` 端到端可用 / `http2` 连接崩 / `node:sqlite` 原型无方法 / `node:sea` 是桩。
+> **筛选原则**：只登记**我们确实缺、且它已实证可行**的功能；纯差异项（如 crypto 非对称——它反而跑不了，我们已实现）与共性项（TLS 边缘终止）**不入表**。
+> **与现有条目的关系**：M113（子域名 + 每端口 DevServer SW）已存在，本次实测**复证并强化**；M121（rspack）不受影响（其 `.node` 同样加载不了 → 走 wasm 方案不变）。
+
+- [ ] **M122 · 沙箱出站网络（egress）** —— 借 WebContainer 的「宿主源 Fetcher Worker / 托管 proxy」
+  - **对标（实测）**：WebContainer 容器内 `fetch` 由 **`stackblitz.com` 源的专用 `Fetcher Worker`** 发出，**不受沙箱页 CORS 约束**（实测 `httpbin.org`（无 ACAO）→ 200）；DNS 给每个域名分假 IP（`example.com→1.0.0.2`、`registry.npmjs.org→1.0.0.3`…），裸 TCP 落到 `127.0.0.1:1`；npm registry 走托管 proxy + server-side 加速。
+  - **现状（真差距）**：web-node 只有**入站虚拟 TCP + 回环 DNS**，**无真出网** → 页内 `fetch`/`https`/`net.connect` 到公网不可用。
+  - **方案**：出站调用（`fetch` / `https` / `net` 出站 socket）经消息通道**转发到「宿主源的专用 worker」**，用**宿主 `fetch`/网络**执行（受宿主 CORS，必要时由**自建受控 proxy** 兜底）；`dns` 保持回环或转由 proxy 侧解析；npm registry 走**可配置代理**——**不依赖 StackBlitz 托管服务**（官方 README 明确其 API 依赖 StackBlitz proxy，我们须自备）。
+  - **验收**：页内 `fetch('https://registry.npmjs.org/ms')` 成功；`npm install` 可选走真 registry/proxy；入站虚拟网络与现有差分 **0 回归**；无第三方托管依赖。
+  - **风险**：跨源/CORS；企业出口合规；需自备 proxy。工作量：中–大。
+
+- [ ] **M123 · 多进程模型：1 进程 = 1 worker（`fork` / `cluster`）** —— 借 WebContainer 的「worker-per-process」
+  - **对标（实测）**：WebContainer 每个「进程」是**独立 Web Worker**（CDP 实测 `Node.js Worker PID 2…22`），故 `fork`/`cluster`/多进程**天然支持**。
+  - **现状**：web-node **1 Run = 1 runtime worker**；`child_process` 为**同 realm 协作式** ProcessHost（M7）。
+  - **方案**：让 `child_process.fork` **真起独立 worker**（复用 M57 的「第二注册表 + MessageChannel」范式），`cluster` 在**虚拟 TCP** 上做共享监听分发（复用 M102 `net.BoundSocket`）。
+  - **验收**：`fork` 子进程为独立 worker 且有独立 `process.pid`；`cluster` 多 worker 监听同端口可分流；差分 **0 回归**。工作量：中–大。
+
+- [ ] **M124 · 「加载 OK ≠ 可用」行为门禁（跨模块巡查）** —— 借 WebContainer 的**反面教训**
+  - **对标（实测）**：WebContainer 里 `http2` **require 成功但连接崩**（缺 `consume`）、`node:sqlite` **类在但原型无方法**、`node:sea` **是桩**（`isSea()` 返回 `undefined`）——**表面可用、行为不可用**。
+  - **现状**：web-node 已以**行为差分**为验收（M79–M81 + 67 模块表面），但尚无**常设巡查**专门抓「require-OK 但首次实调用崩」。
+  - **方案**：把「关键路径行为」纳入 `tools/*-probe.cjs` 语料（每个「已实现」模块至少覆盖一次**首次实调用**）；门禁对「加载成功但关键方法缺失/抛错」报警。
+  - **验收**：能自动揪出「require-OK 但运行期崩」的回归；现有模块**零告警**。工作量：小–中。
 
 ---
 

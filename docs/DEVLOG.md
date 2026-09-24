@@ -244,6 +244,28 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M121（rspack 退险 spike）—— 浏览器端 wasm binding 可用；同步阻塞 API 死锁、异步路径可用
+
+**目标**：webpack 那条线（M121 第一/第二增量）已把北极星 B1 走通；本节转向**构建工具链的另一个候选 rspack**，先退险——回答「`@rspack/binding-wasm32-wasi` 官方浏览器入口到底能不能在纯浏览器里跑、哪种 API 能跑」。**不改产品代码**，只做活体实测。结论：**可行**，但有明确的 API 边界。
+
+**工具链**：spike 落在 `/tmp/rspack-spike`（Vite 6.4.3，端口 8799），已归档进 `docs/rspack-probe/`（含 README 与复现步骤）。两个前置：① 装 wasm32 binding 必须 `npm i --force --cpu=wasm32`，否则在本机 arm64 上报 `EBADPLATFORM`；② 页面必须是**跨源隔离页**（COOP `same-origin` / COEP `credentialless`），binding 要 **2GB 固定共享内存**（`initial:32768, maximum:32768, shared:true`）与 `SharedArrayBuffer`。
+
+**实测结论**（真浏览器 + 真 wasm）：
+1. **能加载并实例化**：`crossOriginIsolated=true`、`SharedArrayBuffer` 可用；binding 导出 **73** 个键，`EXPECTED_RSPACK_CORE_VERSION=2.2.7`（napi-rs/emnapi wasm 产物）。
+2. **同步 API 可用**：`transformSync('const x: number = 1;', …)` → `var x = 1;`。
+3. **同步阻塞型 API 死锁**：`minifySync` 在**主线程**报 `Atomics.wait cannot be called in this context`；在 **Worker** 里（默认 `asyncWorkPoolSize:4` 线程池）**永久挂起**——线程子 worker 确实起来了（事后核对过 target），但线程池无回信。这是当前**唯一真壁障**。
+4. **异步 API 可用**：`await binding.minify(code, opts)` → 真压缩输出 `const add=(o,c)=>o+c;console.log(3);`；`await binding.transform(...)` 亦 OK。→ **rspack 的 production/minify 走的就是 async 路径**，这条完全能用。
+5. **binding 自带 memfs 与 Rust 侧连通**：binding 导出 `__fs` / `__volume`（`@napi-rs/wasm-runtime/fs`）；JS 侧 `vol.writeFileSync('/proj/index.js', …)` 写入后 Rust 侧能读到——`binding.loadBrowserslist('/proj','production')` 正常返回，不再抛 `Failed to convert JavaScript value \`Undefined\` into rust type \`String\``（那个错是缺第二个 `mode` 参数，不是桥不通）。
+6. **错误通道**：worker 里要 `globalThis.window = globalThis` 兜底——rspack 的错误回调经 `window.dispatchEvent`，无 `window` 时错误会被静默吞掉。
+
+**接入 web-node 时真正的两道缝（未做）**：① **wasm 资产怎么喂进 Worker 内的运行时**（这里靠 Vite `?url` 处理 **30MB** 的 `rspack.wasm32-wasi.wasm`，本仓需要等价的资产加载路径）；② **两套 FS 的桥接**——binding 的 Rust 侧只认它自带的 memfs，**看不见 web-node 的 VFS**，接入时必须在两者间做同步。
+
+**结论/建议**：rspack binding 在浏览器**可行**，接入形态应是「runtime worker + 异步 binding 调用」（正好满足 `Atomics.wait` 需要 Worker 的场景）。**本轮不接入**，只把靶子打准。
+
+**探针脚本**：`/tmp/rspack-spike/src/{entry.js,worker.js}`（**已归档** `docs/rspack-probe/`，含 `README.md`/`vite.config.js`/`index.html`），`/tmp/rspack-probe/`（包解包后的 `rspack.wasi-browser.js`/`wasi-worker-browser.mjs` 阅读用，未归档）。
+
+---
+
 ### 2026-09-24 · M121（第二增量）—— `require(esm)` 补齐，北极星 B1 页内逐字节达成；挖出并修掉「冷条目快照清零」数据丢失
 
 **结果**：**页内 webpack 5 生产构建完整跑通（含 terser 压缩），产物与宿主 Node 逐字节一致**（1513 字节，连跑两次相同）。核心增量是 `require(esm)`；为复现它先清了一次 OPFS，顺带定位并修掉一个会**静默清零磁盘文件**的持久化真 bug。
