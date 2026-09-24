@@ -15,6 +15,7 @@
  * stays as the fallback, so callers see no difference.
  */
 import { outputBytes } from './byte-out';
+import { opensslErrorCode } from './openssl-error';
 import {
   bigIntToBytes,
   bytesToBigInt,
@@ -28,6 +29,7 @@ import {
   derOid,
   derOidHex,
   derParse,
+  derParseAll,
   derSeq,
   expectSeq,
   fromHex,
@@ -74,6 +76,8 @@ import {
   type MlKemParam,
 } from './mlkem';
 import {
+  opensslDhKeygen,
+  opensslDhKeygenParams,
   opensslEcCurveInfo,
   opensslEcCurves,
   opensslEcPoint,
@@ -276,13 +280,16 @@ function mathCurve(curve: NamedCurve): Curve {
  * backend's own error is the honest answer — reporting "not implemented" would
  * blame the wrong thing.
  */
-function opensslFailure(fallback: string): Error {
+/**
+ * The exception Node raises for an OpenSSL failure, rebuilt from the captured
+ * error string and reason (see `./openssl-error.ts`). When OpenSSL queued
+ * nothing at all there is no Node error to mirror, so the name is reported as
+ * an unimplemented feature instead of inventing a code.
+ */
+function opensslFailure(what: string): Error {
   const text = opensslLastError();
-  const match = /^error:([0-9A-F]+):(.*)::(.*)$/.exec(text);
-  if (match === null) return notImplementedError('crypto', `namedCurve ${fallback} (${text || 'OpenSSL declined'})`);
-  // Node's `ERR_OSSL_*` shape: library + reason, upper-cased, spaces to `_`.
-  // Its library list has no `Provider routines`, so those lose the prefix.
-  const code = `ERR_OSSL_${match[3].toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`;
+  const code = opensslErrorCode();
+  if (code === null) return notImplementedError('crypto', `${what} (${text || 'OpenSSL declined'})`);
   return coded('Error', code, text);
 }
 
@@ -385,37 +392,59 @@ function parseDhParams(node: DerNode | undefined): { prime: bigint; generator: b
 }
 
 /**
- * PKCS#8 stores the ML-KEM private key as its 64-byte FIPS 203 seed `d || z`,
- * wrapped in a nested OCTET STRING (OpenSSL's `ML-KEM` seed encoding). Expand
- * it into the encapsulation key and the decapsulation key.
+ * PKCS#8 stores the ML-KEM private key either as its 64-byte FIPS 203 seed
+ * `d || z`, as the expanded decapsulation key, or as both. Recognise every
+ * spelling we have seen:
+ *
+ *   * `[0]` (0x80) or a plain OCTET STRING of 64 bytes — the seed. Node emits
+ *     this one (`*_p8fmt[].name == "seed-only"`).
+ *   * `[1]` (0x81) or a plain OCTET STRING of the full `dk` length — only the
+ *     expanded key (`"priv-only"`).
+ *   * a SEQUENCE of the two — OpenSSL's *default* PKCS#8 payload, which is what
+ *     `i2d_PrivateKey` hands back (`"seed-priv"`).
+ *
+ * The seed is expanded with our own FIPS 203 code, so the encapsulation and
+ * decapsulation halves always agree.
  */
 function parseMlKemPrivate(inner: Uint8Array, param: MlKemParam): MlKemMaterial {
+  const ekLength = mlKemPublicKeyLength(param);
+  const dkLength = 2 * ekLength + 32;
+
+  const fromSeed = (seed: Uint8Array): MlKemMaterial => {
+    const owned = Uint8Array.from(seed);
+    const { ek, dk } = mlKemExpandSeed(owned, param);
+    return { param, seed: owned, publicKey: ek, privateKey: dk };
+  };
+  const fromExpanded = (dk: Uint8Array): MlKemMaterial => {
+    // dk = dkPKE || ek || H(ek) || z, so the encapsulation key sits right after
+    // the (ekLength - 32)-byte dkPKE.
+    const publicKey = Uint8Array.from(dk.subarray(ekLength - 32, 2 * ekLength - 32));
+    return { param, publicKey, privateKey: Uint8Array.from(dk) };
+  };
+
   let node: DerNode | undefined;
   try {
     node = derParse(inner);
   } catch {
     node = undefined;
   }
-  const ekLength = mlKemPublicKeyLength(param);
-  const vectorBytes = ekLength - 32;
-
-  // The seed form is a `[0]` IMPLICIT OCTET STRING (tag 0x80) holding `d || z`;
-  // some encoders use a plain OCTET STRING instead.
-  if (node && (node.tag === 0x80 || node.tag === 0x04) && node.content.length === 64) {
-    const seed = Uint8Array.from(node.content);
-    const { ek, dk } = mlKemExpandSeed(seed, param);
-    return { param, seed, publicKey: ek, privateKey: dk };
-  }
-  // The expanded form is `[1]` (tag 0x81): dkPKE || ek || H(ek) || z.
-  if (node && node.tag === 0x81) {
-    const dk = Uint8Array.from(node.content);
-    const publicKey = dk.subarray(vectorBytes, vectorBytes + ekLength);
-    return { param, publicKey: Uint8Array.from(publicKey), privateKey: dk };
+  if (node) {
+    if ((node.tag === 0x80 || node.tag === 0x04) && node.content.length === 64) {
+      return fromSeed(node.content);
+    }
+    if (node.tag === 0x81 || (node.tag === 0x04 && node.content.length === dkLength)) {
+      return fromExpanded(node.content);
+    }
+    if (node.tag === 0x30) {
+      const children = derParseAll(node.content);
+      const seed = children.find((c) => c.tag === 0x04 && c.content.length === 64);
+      if (seed) return fromSeed(seed.content);
+      const expanded = children.find((c) => c.tag === 0x04 && c.content.length === dkLength);
+      if (expanded) return fromExpanded(expanded.content);
+    }
   }
   // Fallback: interpret the bytes as a raw seed.
-  const seed = Uint8Array.from(node ? node.content : inner);
-  const { ek, dk } = mlKemExpandSeed(seed, param);
-  return { param, seed, publicKey: ek, privateKey: dk };
+  return fromSeed(node ? node.content : inner);
 }
 
 function parsePrivateKeyInfo(der: Uint8Array): KeyMaterial {
@@ -1313,8 +1342,9 @@ function opensslRsaCipher(
 
 /**
  * Generate a key pair on OpenSSL, handing back material parsed from the DER it
- * emits. Returns `null` for options the JS generator must handle (unusual RSA
- * exponents, DH groups, ML-KEM, …).
+ * emits. Returns `null` for the requests the JS generator still owns (an RSA
+ * exponent OpenSSL rejects, and DH `primeLength`, i.e. fresh safe-prime
+ * generation).
  */
 function opensslGenerateMaterial(
   type: string,
@@ -1336,6 +1366,20 @@ function opensslGenerateMaterial(
     handle = opensslPkeyKeygen('EC', curve);
   } else if (type === 'ed25519') {
     handle = opensslPkeyKeygen('ED25519');
+  } else if (type === 'dh') {
+    // Every spelling of the request goes to OpenSSL: `group` and `prime` are
+    // explicit domain parameters (a group name resolves to its prime and g = 2),
+    // and `primeLength` asks OpenSSL's safe-prime generator for fresh ones. A
+    // refusal — a modulus below OpenSSL's 512-bit floor, say — is reported as
+    // the OpenSSL error Node would raise, never papered over by the JS path.
+    const request = dhRequest(options);
+    handle =
+      'prime' in request
+        ? opensslDhKeygen(bigIntToBytes(request.prime), bigIntToBytes(request.generator))
+        : opensslDhKeygenParams(request.bits, request.generator);
+    if (!handle) throw opensslFailure('dh');
+  } else if (isMlKemParam(type)) {
+    handle = opensslPkeyKeygen(type.toUpperCase());
   } else {
     return null;
   }
@@ -1692,13 +1736,17 @@ function isProbablePrime(candidate: bigint, rounds = 8): boolean {
 }
 
 function generatePrime(bits: number): bigint {
+  if (!Number.isInteger(bits) || bits < 2) throw coded('RangeError', 'ERR_OUT_OF_RANGE', `bits must be at least 2`);
   const bytes = Math.ceil(bits / 8);
+  // The top byte only contributes `bits % 8 || 8` bits, so mask the random byte
+  // down and force the true most-significant bit. Getting this wrong leaves the
+  // candidate permanently one byte too wide and loops forever.
+  const shift = bytes * 8 - bits;
   for (;;) {
     const candidateBytes = randomBytes(bytes);
-    candidateBytes[0] |= 0x80;
+    candidateBytes[0] = (candidateBytes[0] >> shift) | (1 << (7 - shift));
     candidateBytes[bytes - 1] |= 1;
     const candidate = bytesToBigInt(candidateBytes);
-    if (candidate.toString(2).length !== bits) continue;
     if ((candidate - 1n) % 65537n === 0n) continue;
     if (isProbablePrime(candidate)) return candidate;
   }
@@ -1794,7 +1842,11 @@ function generateMaterial(type: string, options: GenerateKeyPairOptions): { priv
     };
   }
   if (type === 'dh') {
-    const { prime, generator } = resolveDhParams(options);
+    const request = dhRequest(options);
+    const { prime, generator } =
+      'prime' in request
+        ? request
+        : { prime: generateSafePrime(request.bits), generator: BigInt(request.generator) };
     const privateKey = dhPrivateExponent(prime, generator);
     const publicKey = modPow(generator, privateKey, prime);
     const dh: DhMaterial = { prime, generator };
@@ -1847,12 +1899,45 @@ function generateSafePrime(bits: number): bigint {
   }
 }
 
-/** Resolves the DH parameters `generateKeyPair('dh')` was asked for. */
-function resolveDhParams(options: GenerateKeyPairOptions): { prime: bigint; generator: bigint } {
-  if (options.group === undefined && options.prime === undefined && options.primeLength === undefined) {
-    throw coded('TypeError', 'ERR_MISSING_OPTION', 'At least one of the group, prime, or primeLength options is required');
-  }
-  if (options.group !== undefined) {
+/** What `generateKeyPair('dh')` is asking for, once validated. */
+type DhRequest = { prime: bigint; generator: bigint } | { bits: number; generator: number };
+
+/**
+ * Interpret `generateKeyPair('dh')`'s options, validating them exactly as
+ * Node's keygen validator does: `group`, `prime` and `primeLength` are mutually
+ * exclusive (`null` counting as absent), a named group resolves to its prime
+ * with g = 2, and `primeLength` asks for fresh parameters.
+ */
+function dhRequest(options: GenerateKeyPairOptions): DhRequest {
+  const present = (value: unknown): boolean => value !== undefined && value !== null;
+  const incompatible = (a: string, b: string): Error =>
+    coded('TypeError', 'ERR_INCOMPATIBLE_OPTION_PAIR', `Option "${a}" cannot be used in combination with option "${b}"`);
+  const int32 = (value: unknown, name: string): number => {
+    if (typeof value !== 'number') {
+      throw coded(
+        'TypeError',
+        'ERR_INVALID_ARG_TYPE',
+        `The "options.${name}" property must be of type number. Received ${receivedArgType(value)}`,
+      );
+    }
+    if (!Number.isInteger(value)) {
+      throw coded(
+        'RangeError',
+        'ERR_OUT_OF_RANGE',
+        `The value of "options.${name}" is out of range. It must be an integer. Received ${value}`,
+      );
+    }
+    if (value < 0 || value > 2147483647) {
+      throw coded(
+        'RangeError',
+        'ERR_OUT_OF_RANGE',
+        `The value of "options.${name}" is out of range. It must be >= 0 && <= 2147483647. Received ${value}`,
+      );
+    }
+    return value;
+  };
+
+  if (present(options.group)) {
     if (typeof options.group !== 'string') {
       throw coded(
         'TypeError',
@@ -1860,23 +1945,29 @@ function resolveDhParams(options: GenerateKeyPairOptions): { prime: bigint; gene
         `The "options.group" property must be of type string. Received ${receivedArgType(options.group)}`,
       );
     }
+    if (present(options.prime)) throw incompatible('group', 'prime');
+    if (present(options.primeLength)) throw incompatible('group', 'primeLength');
+    if (present(options.generator)) throw incompatible('group', 'generator');
     const group = modpGroup(options.group);
     if (!group) throw coded('Error', 'ERR_CRYPTO_UNKNOWN_DH_GROUP', 'Unknown DH group');
     return { prime: BigInt('0x' + group.primeHex), generator: BigInt('0x' + group.generatorHex) };
   }
-  let generator = 2n;
-  if (options.generator !== undefined) {
-    if (typeof options.generator !== 'number') {
-      throw coded(
-        'TypeError',
-        'ERR_INVALID_ARG_TYPE',
-        `The "options.generator" property must be of type number. Received ${receivedArgType(options.generator)}`,
-      );
-    }
-    generator = BigInt(options.generator);
+
+  if (present(options.prime)) {
+    if (present(options.primeLength)) throw incompatible('prime', 'primeLength');
+    return {
+      prime: dhPrimeToBigInt(options.prime),
+      generator: BigInt(present(options.generator) ? int32(options.generator, 'generator') : 2),
+    };
   }
-  if (options.prime !== undefined) return { prime: dhPrimeToBigInt(options.prime), generator };
-  return { prime: generateSafePrime(options.primeLength as number), generator };
+
+  if (!present(options.primeLength)) {
+    throw coded('TypeError', 'ERR_MISSING_OPTION', 'At least one of the group, prime, or primeLength options is required');
+  }
+  return {
+    bits: int32(options.primeLength, 'primeLength'),
+    generator: present(options.generator) ? int32(options.generator, 'generator') : 2,
+  };
 }
 
 /**
@@ -1944,8 +2035,9 @@ function keyTypeError(op: string): Error {
   return coded('Error', 'ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE', `Invalid key object type public, expected private for ${op}`);
 }
 
+/** An exception carrying a Node error `code`. */
 function coded(name: string, code: string, message: string): Error {
-  const Ctor = name === 'TypeError' ? TypeError : Error;
+  const Ctor = name === 'TypeError' ? TypeError : name === 'RangeError' ? RangeError : Error;
   const err = new Ctor(message);
   (err as { code?: string }).code = code;
   return err;

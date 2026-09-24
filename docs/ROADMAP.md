@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-24（**阶段 H：M119 第七增量 ✅**——全曲线 EC/RSA 指数走 wasm、`getCurves()` 与 Node 逐项一致、绑定清单加永久门禁；新增「native 层实现方式总表」；M119 仅剩自定义 DH 参数与 ml-kem，下一站 **M120 同步 syscall**）
+> - **最后更新**：2026-09-24（**阶段 H：M119 第八增量 ✅ 且 M119 结清**——自定义 DH 参数（`group`/`prime`/`primeLength`）与 ml-kem keygen 全部走 wasm OpenSSL，OSSL 错误码补齐库名前缀，**非对称 keygen 的全部形状都在 wasm 上了**；下一站 **M120 同步 syscall**）
 
 ---
 
@@ -26,7 +26,7 @@
 2. **结清 / 吸收**上面第 1、2 类，使同一件工作不在两处重复计数；
 3. **立阶段 H 为主线**，其余阶段只保留各自真正剩余的任务，并按重算结果刷新「进度总览」。
 
-**重算结果（M88 起）**：共 **50** 项任务（另 1 项判定不做）→ 已完成 **40**、剩余 **10**。其中 **阶段 C 就此解散**（M99/M100 经 H 完成、M101 移入 H），**阶段 E 收敛为「启动与加载性能」**（M106 已拆入 H），**阶段 G 收敛为「预览与路由」**（M114 并入 H）。
+**重算结果（M88 起）**：共 **50** 项任务（另 1 项判定不做）→ 已完成 **41**、剩余 **9**。其中 **阶段 C 就此解散**（M99/M100 经 H 完成、M101 移入 H），**阶段 E 收敛为「启动与加载性能」**（M106 已拆入 H），**阶段 G 收敛为「预览与路由」**（M114 并入 H）。
 
 ---
 
@@ -34,7 +34,7 @@
 
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
-| **H** | **native → WASM（主线，P0–P6）** | 8 | 5 | 3 |
+| **H** | **native → WASM（主线，P0–P6）** | 8 | 6 | 2 |
 | E | 启动与加载性能 | 1 | 0 | 1 |
 | F | 构建工具链（**用户愿景，最后做**） | 3 | 0 | 3 |
 | G | 预览与路由 | 1 | 0 | 1 |
@@ -43,10 +43,10 @@
 | C | 平台无对应物（**已解散**，条目已分流） | 2 | 2 | 0 |
 | D | 运行时常量小项（**已归档**） | 4 | 4 | 0 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **51** | **42** | **9**（+1 不做） |
+| **合计** | | **51** | **43** | **8**（+1 不做） |
 
-> **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 · M120 · M121。
-> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 129 个里程碑，剩余 9 个规划任务**。
+> **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 ✅ · M120 · M121。
+> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 130 个里程碑，剩余 8 个规划任务**。
 > 注：本表按**叶子任务**计数——M90（拆 M90.1–M90.9）、M92（拆 M92.1/M92.2）、M93（拆 M93.1–M93.4）、M93.4（拆 a–h）、M97（拆 M97.1）的**父项为拆分占位、不计入**。（旧表 A=22 系拆分前的陈旧值，本次一并修正为 26。）
 
 ---
@@ -73,7 +73,7 @@
 > | `wn_histogram` | `deps/histogram`（hdr_histogram）+ 逐行移植 `src/histogram.cc` | binding `performance`（`Histogram`/ELD） | 257.7 KB | M117 |
 > | `wn_brotli` | `deps/brotli` **1.2.0**（36 `.c` 原封） | binding `zlib`（brotli 半边） | 847.4 KB | M118 |
 > | `wn_zstd` | `deps/zstd` **1.5.7**（27 `.c` 原封，不开多线程） | binding `zlib`（zstd 半边） | 484.0 KB | M118 |
-> | `wn_openssl` | `deps/openssl` **3.5.8** 子集（自包含 WASI target） | `crypto` **模块**（TS 层直驱，**不是** binding） | 2481.8 KB | M119 |
+> | `wn_openssl` | `deps/openssl` **3.5.8** 子集（自包含 WASI target） | `crypto` **模块**（TS 层直驱，**不是** binding） | 2483.2 KB | M119 |
 >
 > **② TS 自研（等价实现，`origin: 'web-node'`）**——模块还在，地基换成能在标签页里跑的东西：
 >
@@ -145,7 +145,7 @@
   - **解锁**：`brotliCompress(Sync)` / `brotliDecompress(Sync)` / `zstdCompress(Sync)` / `zstdDecompress(Sync)`、四个流类、全部 `BROTLI_PARAM_*`/`ZSTD_c_*`/`ZSTD_d_*` 参数、字典、`pledgedSrcSize`、`stream/web` 的 `CompressionStream('brotli')`；仅 zip 存档助手仍响亮抛错。
   - **验收**：差分装置扩到 `tools/zlib-probe.cjs`（+ oracle → `test/fixtures/zlib.json`，**56 个观测键**），真 Node v26.9.0 vs web-node **逐字段 0 diff**（含参数、字典、流式、异步、错误形状、`stream/web` brotli）；`tsc --noEmit` 净 · `vitest run` **1011 passed / 2 skipped（120 文件）** · build（worker **689.29 kB**）。
 
-- [~] **M119 · `crypto` → OpenSSL 子集编 wasm（P4）**  ← 承接 M106 的 crypto 部分 🚧 2026-09-24（**摘要/HMAC ✅ + 对称密码与 KDF ✅ + Argon2 ✅ + 非对称 ✅ + ECDH/DH + ML-KEM ✅ + X509/SPKAC ✅ + 全曲线 EC/RSA 指数 ✅；仅剩自定义 DH 参数与 ml-kem 的 keygen**）
+- [x] **M119 · `crypto` → OpenSSL 子集编 wasm（P4）**  ← 承接 M106 的 crypto 部分 ✅ 2026-09-24（**摘要/HMAC + 对称密码与 KDF + Argon2 + 非对称 + ECDH/DH + ML-KEM + X509/SPKAC + 全曲线 EC/RSA 指数 + 自定义 DH 参数与 ml-kem keygen——全部结清**）
   - **可行性（已退险）**：真 OpenSSL **3.5.8**（`deps/openssl/openssl`）用 wasi-sdk 编出 `libcrypto.a` 5.75 MB / `libssl.a` 0.85 MB，**0 error**；薄模块 `wn_openssl.wasm` **2.29 MB**，SHA-256/MD5/HMAC-SHA256 与真 Node **逐字节一致**。OpenSSL 没有 WASI target，新增自包含 target `native/openssl/99-wasi.conf`（`no-asm/no-shared/no-threads/no-sock/no-engine/no-legacy/no-secure-memory`）；构建走 OpenSSL 自己的 `Configure`+`make build_libs`，缓存到 `native/.openssl-build`。
   - **已交付增量（摘要路径）**：`native/src/wn_openssl.c` 的通用名 ABI（`EVP_MD_fetch` / 一次性+流式 digest / HMAC / XOF），`bindings/openssl.ts` 薄封装，`wasm/lazy.ts` 惰性加载（**不进启动期 `WASM_MODULES`**，避免 M107 的启动回退——解密后立刻后台拉取），`crypto/hash.ts` 在模块就绪后把全部摘要（md5/sha1/sha2/sha3/keccak/blake2/sm3/ripemd160/md5-sha1/shake）切到 OpenSSL，**未就绪或其他名则回退纯 JS**（两者逐字节相同，切换对调用者不可见）。
   - **剩余**：cipher（AES/ChaCha/DES/Camellia/ARIA/SM4/OCB/SIV/XTS/CCM/CBC-CTS）、KDF（pbkdf2/hkdf/scrypt/argon2）、非对称（RSA/EC/DH/ML-KEM）、X509/SPKAC 仍在纯 JS；后续增量逐个迁。
@@ -160,7 +160,8 @@
   - **已交付增量⑥（X509/SPKAC）**：`wn_openssl` 新增 `wn_x509_*`（解析 / DER 重编码 / subject / issuer / SAN / infoAccess / 生效期字符串与秒数 / 序号 / 签名算法名与 OID / EKU / `X509_check_ca`）与 `wn_spkac_*`（`NETSCAPE_SPKI` 的验签 / 公钥 PEM / challenge）。**关键认识**：getter 的字符串由 Node 自己的打印辅助函数决定（ncrypto 的 `PrintGeneralName`/`SafeX509*Print` + `X509_NAME_print_ex(kX509NameFlagsMultiline)`/`ASN1_TIME_print`/`BN_bn2hex`），所以**把那些辅助函数逐行搬到 C**（含 `IsSafeAltName`/`PrintAltName`/`GEN_*` 各类型与 `othername:` 前缀表），而不是在 JS 里继续“根据 DER 推”。`check*`/`verify`/`checkIssued`/`toLegacyObject` 仍用 DER 派生状态（指纹就是 DER 摘要，签验已走 wasm），避开在 JS 里重实现 `X509_check_host` 的 flag 语义。**两个实现细节**：① 字符串读取用“先问长度、再填缓冲”两步（C 侧传 NULL 只返长度）；② 缺失的可选扩展 C 侧返 0 长度，绑定层归一为 `null`（Node 是 `undefined`）。wasm 堆不回收，用 `FinalizationRegistry` 释放 handle。验收：`test/x509.test.ts` 与 `test/crypto-certificate.test.ts` 各新增“**开关引擎得到完全相同的输出**”门禁（X509 比 20 个字段含 raw/PEM/legacy/SPKI，SPKAC 比验签/challenge/公钥/空白宽松度），原有差分语料 0 diff。`vitest run` **1043 passed / 2 skipped**，`wn_openssl-Dl_5d2Si.wasm` **2479.56 kB**。
   - **已交付增量⑦（全曲线 EC + RSA 指数）**：`crypto.getCurves()` 改为 OpenSSL 注册表（`wn_ec_curves` = `EC_get_builtin_curves` + `OBJ_nid2sn`，JS 再套 Node 的 `filterDuplicateStrings`）→ **82 条曲线、顺序与 Node 逐项一致**（设计文档开放问题 §7.3 的答复：表面常量由 wasm 导出）。`EcMaterial.curve` 从「必须带全套域参」放宽为 `NamedCurve`（名/宽/OID）+ `hasArithmetic()`，无本地算术的曲线走 `wn_ec_curve_info`（`EC_curve_nist2nid`→`OBJ_sn2nid`→`OBJ_txt2obj`，与 Node 的 `Ec::GetCurveIdFromName` 同序）交给 OpenSSL —— **secp256k1 / brainpool\* / prime192v1 / sect\* / SM2 等 80 条曲线从报错变为完整可用**。`wn_pkey_keygen` 新增指数参数（`BN_dec2bn` + `EVP_PKEY_CTX_set1_rsa_keygen_pubexp`），RSA 任意 `publicExponent` 走 wasm。**两个实测出来的字节级差异已修**：EC 私钥标量按**阶宽**补齐（`ossl_ec_key_simple_priv2oct`），IEEE P1363 半宽也用**阶宽**（Node 的 `GroupOrderSize`）——两者都只在「阶≠域」的曲线（WTLS 系）显形。**SM2 有意偏离（已写文档）**：OpenSSL 的 EC key manager **按设计**拒绝导入 SM2 曲线材料（`ec_kmgmt.c` 的 `common_check_sm2`），SM2 key manager 只收 SM3 且无 derive → SM2 的 keygen/导入/导出/details 全可用、**SM3 签验与 Node 双向互验通过**，非 SM3 摘要与 ECDH 如实报 OpenSSL 错误（`ERR_OSSL_INVALID_DIGEST` / `operation not supported for this keytype`）。`Oakley-EC2N-3/4` 在 Node 里也无法导出（`ERR_OSSL_MISSING_OID`），只列出。验收：新门禁 `test/crypto-openssl-curves.test.ts`（7 例，12 条曲线 × 字节一致/双导入/双向签验/P1363/ECDH + RSA 指数）。
   - **顺带清理**：`UNSUPPORTED_BINDINGS` 之前自相矛盾（`crypto`/`zlib`/`inspector`/`trace_events` 同时“已注册”与“刻意不提供”，还混入非 binding 名的 `vfs`）；现改为**恰好 32 个「Node 的 lib/ 会要而我们不提供」的真实名字**，并加夹具 `test/fixtures/node-bindings.json`（72 名，`tools/binding-names-oracle.mjs` 生成）+ 永久门禁（无虚构名 / 不与已注册重叠 / 已注册名须为 Node 真实拼写 / vendored 读写到的 binding 必须全落在两者之一）。删掉真死代码 `builtins/fs-promises.ts`。
-  - **剩余**：keygen 的**自定义 DH 参数**（`group`/`prime`/`generator`）与 **ml-kem**（两者目前只支持内置组/固定参数）。
+  - **已交付增量⑧（自定义 DH 参数 + ml-kem keygen，M119 结清）**：`wn_dh_keygen(p, g)` 覆盖 `group` 与 `prime`/`generator`（与 Node 一样把名字解成 p/g；p/g 命中已知组时 OpenSSL 自己缓存 `q`/`keylength`），`wn_dh_keygen_params(bits, generator)` 覆盖 `primeLength`（`paramgen_init` → `paramgen` → 再从参数 keygen，**两步不可少**：`keygen_init` 的 selection 不含 `DOMAIN_PARAMETERS`）。ML-KEM keygen 直接 `wn_pkey_keygen('ML-KEM-*')`；**坑在导出格式**：Node 用 `seed-only`（`[0]` 隐式标签，86 字节），**OpenSSL 默认是 `seed-priv`**（`SEQUENCE { OCTET STRING(seed), OCTET STRING(dk) }`，用全域 tag）——旧解析器把整个 dk 当种子展开，造出的私钥 Node 导入报 `DECODER routines::unsupported`；现三种拼写都识别。**顺手修一个真 hang**：JS `generatePrime` 把首字节无条件置 0x80，导致 `bits % 8 !== 0` 时死循环（`generateSafePrime(512)` → `generatePrime(511)` 永远不满足位宽守门）。新增共享模块 `crypto/openssl-error.ts`（把 `ERR_LIB_*` → Node 名表从 `openssl-cipher.ts` 抽出），**OSSL 错误码补齐库名前缀**（`ERR_OSSL_DH_MODULUS_TOO_SMALL`、`ERR_OSSL_EVP_PROVIDER_KEYMGMT_FAILURE`；`PROV` 不在表里 → 维持 `ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS`）。DH 选项校验按 Node 对齐（三写法互斥、`validateInt32`、`ERR_MISSING_OPTION`），且 **OpenSSL 拒绝时如实抛错、不静默回退**。验收：`test/crypto-openssl-pkey.test.ts` **18 例**（含 `primeLength ∈ {0,256,511,512.5,-1}` 与 Node 逐字同错）。
+  - **剩余**：无（M119 结清）。下一步 **M120 同步 syscall**。
 
 - [ ] **M120 · 同步 syscall：SAB + `Atomics.wait` + FS-worker（P5）**  ← 吸收 M114、承接 M106 的 fs 部分
   - 真·同步 `fs` 在独立 worker 完成、主线程可阻塞等待；前置跨源隔离（COOP/COEP）；与现有 fs 语义差分 0 diff。

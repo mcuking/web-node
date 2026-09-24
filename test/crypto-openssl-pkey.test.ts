@@ -12,6 +12,7 @@ import { describe, expect, it, afterAll } from 'vitest';
 import {
   constants as nodeConstants,
   createPrivateKey as nodeCreatePrivateKey,
+  getDiffieHellman as nodeGetDiffieHellman,
   createPublicKey as nodeCreatePublicKey,
   decapsulate as nodeDecapsulate,
   diffieHellman as nodeDiffieHellman,
@@ -49,6 +50,11 @@ afterAll(() => setOpensslEnabled(true));
 
 const encoder = new TextEncoder();
 const MESSAGE = encoder.encode('the quick brown fox jumps over the lazy dog');
+
+/** Lower-case hex of a byte string, for byte-for-byte comparisons. */
+function hex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 
 /** Run `fn` with the wasm engine off, restoring it afterwards. */
 function withJsEngine<T>(fn: () => T): T {
@@ -296,6 +302,190 @@ describe('wn_openssl public-key engine', () => {
     expect(ours).toEqual(theirs);
   });
 
+  it('generates DH keys on every group Node knows, interoperating with Node', () => {
+    // A named group is the same request as its prime with g = 2, so all eight
+    // flow through one OpenSSL entry point. The private exponent is random, so
+    // the evidence is interoperation: Node must import our keys and land on the
+    // same shared secret, and vice versa.
+    for (const group of ['modp1', 'modp2', 'modp5', 'modp14', 'modp15', 'modp16', 'modp17', 'modp18']) {
+      const ours = makePair('dh', { group }, 'openssl');
+      const theirs = nodeGenerateKeyPairSync('dh', {
+        group,
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+      } as never) as unknown as { privateKey: string; publicKey: string };
+
+      const ab = diffieHellman({
+        privateKey: createPrivateKey(ours.privateKey),
+        publicKey: createPublicKey(theirs.publicKey),
+      });
+      const ba = new Uint8Array(
+        nodeDiffieHellman({
+          privateKey: nodeCreatePrivateKey(theirs.privateKey),
+          publicKey: nodeCreatePublicKey(ours.publicKey),
+        } as never),
+      );
+      expect(ab, `${group} shared secret`).toEqual(ba);
+
+      // The only variable-length field is the private exponent, and OpenSSL
+      // caps it at the group's own private-key length, so the encodings can
+      // differ only by that INTEGER's sign octet.
+      const oursLen = (createPrivateKey(ours.privateKey).export({ type: 'pkcs8', format: 'der' }) as Uint8Array).length;
+      const theirsLen = (
+        nodeCreatePrivateKey(theirs.privateKey).export({ type: 'pkcs8', format: 'der' }) as Uint8Array
+      ).length;
+      expect(Math.abs(oursLen - theirsLen), `${group} private DER length`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('generates DH keys from explicit prime and generator', () => {
+    // Node hands OpenSSL the prime and g = 2 for a named group too, so this is
+    // the same code path with the parameters spelled out.
+    // `createDiffieHellman('modp14')` hands back the group *name* from
+    // `getPrime()`; `getDiffieHellman` hands back the real prime.
+    const reference = nodeGetDiffieHellman('modp14');
+    const prime = reference.getPrime() as unknown as Uint8Array;
+    // `generator` is a number in Node's keygen options, not a byte string.
+    const generator = (reference.getGenerator() as unknown as Uint8Array)[0];
+
+    const ours = makePair('dh', { prime, generator }, 'openssl');
+    const theirs = nodeGenerateKeyPairSync('dh', {
+      prime,
+      generator,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    } as never) as unknown as { privateKey: string; publicKey: string };
+
+    expect(
+      diffieHellman({
+        privateKey: createPrivateKey(ours.privateKey),
+        publicKey: createPublicKey(theirs.publicKey),
+      }),
+    ).toEqual(
+      new Uint8Array(
+        nodeDiffieHellman({
+          privateKey: nodeCreatePrivateKey(theirs.privateKey),
+          publicKey: nodeCreatePublicKey(ours.publicKey),
+        } as never),
+      ),
+    );
+  });
+
+  it('generates a fresh safe prime for `primeLength`, agreeing with Node', () => {
+    // OpenSSL keygen only keys an *existing* group, so `primeLength` asks its
+    // safe-prime generator for parameters first. Both sides fix the size of p
+    // (and so of the exponent OpenSSL draws), which makes the encodings
+    // comparable rather than merely interoperable.
+    const ours = makePair('dh', { primeLength: 512 }, 'openssl');
+    const theirs = nodeGenerateKeyPairSync('dh', {
+      primeLength: 512,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    } as never) as unknown as { privateKey: string; publicKey: string };
+    const ourPrivate = nodeCreatePrivateKey(ours.privateKey);
+    const theirPrivate = nodeCreatePrivateKey(theirs.privateKey);
+    expect(ourPrivate.asymmetricKeyType).toBe('dh');
+    expect((ourPrivate.export({ type: 'pkcs8', format: 'der' }) as Uint8Array).length).toBe(
+      (theirPrivate.export({ type: 'pkcs8', format: 'der' }) as Uint8Array).length,
+    );
+    // Node reads the same public key out of our private key, so parameters and
+    // key agree.
+    expect(hex(nodeCreatePublicKey(ourPrivate).export({ type: 'spki', format: 'der' }) as Uint8Array)).toBe(
+      hex(nodeCreatePublicKey(ours.publicKey).export({ type: 'spki', format: 'der' }) as Uint8Array),
+    );
+  });
+
+  it('refuses an undersized `primeLength` exactly as Node does', () => {
+    // The 512-bit floor is OpenSSL's `DH_MIN_MODULUS_BITS`, and the error is a
+    // `DH`-library one, so the code only matches if the library name survives
+    // the trip out of the wasm module.
+    for (const primeLength of [0, 256, 511, 512.5, -1]) {
+      const thrownBy = (fn: () => unknown): { name?: string; code?: string; message: string } | null => {
+        try {
+          fn();
+          return null;
+        } catch (error) {
+          return error as { name?: string; code?: string; message: string };
+        }
+      };
+      const nodeError = thrownBy(() => nodeGenerateKeyPairSync('dh', { primeLength } as never));
+      const ourError = thrownBy(() =>
+        generateKeyPairSync('dh', {
+          primeLength,
+          privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+          publicKeyEncoding: { type: 'spki', format: 'pem' },
+        } as never),
+      );
+      expect(nodeError, `primeLength ${primeLength} node throws`).not.toBeNull();
+      expect(ourError, `primeLength ${primeLength} ours throws`).not.toBeNull();
+      expect(ourError!.name, `primeLength ${primeLength} name`).toBe(nodeError!.name);
+      expect(ourError!.code, `primeLength ${primeLength} code`).toBe(nodeError!.code);
+      expect(ourError!.message, `primeLength ${primeLength} message`).toBe(nodeError!.message);
+    }
+  });
+
+  it('rejects the same DH option combinations Node rejects', () => {
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['missing everything', {}],
+      ['group and prime', { group: 'modp14', prime: new Uint8Array(1) }],
+      ['group and primeLength', { group: 'modp14', primeLength: 512 }],
+      ['group and generator', { group: 'modp14', generator: 5 }],
+      ['prime and primeLength', { prime: new Uint8Array(1), primeLength: 512 }],
+      ['unknown group', { group: 'modp99' }],
+    ];
+    for (const [label, options] of cases) {
+      const thrownBy = (fn: () => unknown): { code?: string; message: string } | null => {
+        try {
+          fn();
+          return null;
+        } catch (error) {
+          return error as { code?: string; message: string };
+        }
+      };
+      const nodeError = thrownBy(() => nodeGenerateKeyPairSync('dh', options as never));
+      const ourError = thrownBy(() =>
+        generateKeyPairSync('dh', {
+          ...options,
+          privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+          publicKeyEncoding: { type: 'spki', format: 'pem' },
+        } as never),
+      );
+      expect(nodeError, `${label} node throws`).not.toBeNull();
+      expect(ourError, `${label} ours throws`).not.toBeNull();
+      expect(ourError!.code, `${label} code`).toBe(nodeError!.code);
+      expect(ourError!.message, `${label} message`).toBe(nodeError!.message);
+    }
+  });
+
+  it('generates ML-KEM keys on the wasm engine, interoperating with Node', () => {
+    for (const type of ['ml-kem-512', 'ml-kem-768', 'ml-kem-1024']) {
+      const ours = makePair(type, {}, 'openssl');
+      const nodePrivate = nodeCreatePrivateKey(ours.privateKey);
+      expect(nodePrivate.asymmetricKeyType, `${type} type`).toBe(type);
+
+      // Node emits the seed form of PKCS#8 (a 66-byte inner payload; 86 bytes in
+      // all), and OpenSSL's default is the seed-and-expanded form. Our parse has
+      // to read both; our encoder writes the seed form, which both accept.
+      const privateDer = createPrivateKey(ours.privateKey).export({ type: 'pkcs8', format: 'der' }) as Uint8Array;
+      const nodePrivateDer = nodePrivate.export({ type: 'pkcs8', format: 'der' }) as Uint8Array;
+      expect(privateDer.length, `${type} pkcs8 length`).toBe(nodePrivateDer.length);
+      const handle = opensslPkeyFromDer(privateDer, true);
+      expect(handle, `${type} openssl import`).toBeGreaterThan(0);
+      opensslPkeyFree(handle);
+
+      // Encapsulate against our key, decapsulate with Node; then the reverse.
+      const { sharedKey, ciphertext } = encapsulate(ours.publicKey);
+      expect(
+        new Uint8Array(nodeDecapsulate(nodePrivate, ciphertext as never) as never),
+        `${type} ours->node`,
+      ).toEqual(sharedKey);
+      const theirs = nodeEncapsulate(nodeCreatePublicKey(ours.publicKey));
+      expect(decapsulate(ours.privateKey, new Uint8Array(theirs.ciphertext as never)), `${type} node->ours`).toEqual(
+        new Uint8Array(theirs.sharedKey as never),
+      );
+    }
+  });
+
   it('agrees with Node on ML-KEM encapsulation', () => {
     for (const type of ['ml-kem-512', 'ml-kem-768', 'ml-kem-1024']) {
       const { privateKey, publicKey } = generateKeyPairSync(type, {
@@ -339,6 +529,7 @@ describe('wn_openssl public-key engine', () => {
       ['ec', { namedCurve: 'prime256v1' }],
       ['rsa', { modulusLength: 2048 }],
       ['ml-kem-768', {}],
+      ['dh', { group: 'modp14' }],
     ] as Array<[string, Record<string, unknown>]>) {
       const pair = makePair(type, options, 'openssl');
       const privateDer = createPrivateKey(pair.privateKey).export({

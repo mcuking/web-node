@@ -530,6 +530,32 @@ export function opensslPkeyKeygen(
 
 // --- EC curve registry ------------------------------------------------------
 
+/**
+ * Generate a DH key pair from explicit domain parameters; returns a handle to
+ * the **private** key, or `0`. Named groups go through the same entry point
+ * (the caller resolves the name to its prime and `g`).
+ */
+export function opensslDhKeygen(prime: Uint8Array, generator: Uint8Array): OpenSslPkey {
+  const [pPtr, pLen] = push(prime);
+  const [gPtr, gLen] = push(generator);
+  try {
+    begin();
+    return call<number>('wn_dh_keygen', pPtr, pLen, gPtr, gLen);
+  } finally {
+    free(gPtr);
+    free(pPtr);
+  }
+}
+
+/**
+ * Generate a DH key pair with freshly generated parameters of `bits` length
+ * (Node's `primeLength`); returns a **private** key handle, or `0`.
+ */
+export function opensslDhKeygenParams(bits: number, generator: number): OpenSslPkey {
+  begin();
+  return call<number>('wn_dh_keygen_params', bits, generator);
+}
+
 /** Read a `\n`-joined string list produced by a size-then-fill export. */
 function ecStringList(exportName: string): string[] | null {
   begin();

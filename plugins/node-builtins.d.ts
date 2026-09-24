@@ -90,6 +90,7 @@ declare module 'node:crypto' {
   /** Only the members the asymmetric tests compare against are declared. */
   interface KeyObject {
     export(options: { type: 'pkcs8' | 'spki'; format: 'pem' | 'der' }): string | Uint8Array;
+    asymmetricKeyType?: string;
   }
   interface KeyPairSyncResult {
     publicKey: KeyObject;
@@ -123,6 +124,10 @@ declare module 'node:crypto' {
   ): KeyPairSyncResult;
   export function createPrivateKey(key: string | Uint8Array): KeyObject;
   export function createPublicKey(key: string | Uint8Array | KeyObject): KeyObject;
+  export function getDiffieHellman(groupName: string): {
+    getPrime(): Uint8Array;
+    getGenerator(): Uint8Array;
+  };
   export function sign(algorithm: unknown, data: Uint8Array, key: unknown): Uint8Array;
   export function verify(
     algorithm: unknown,

@@ -27,12 +27,11 @@ import {
   CIPH_MODE,
   opensslCipherInfo,
   opensslCipherNew,
-  opensslErrorLib,
-  opensslErrorReason,
   opensslLastError,
   opensslReady,
   type OpenSslCipherHandle,
 } from '../bindings/openssl';
+import { opensslErrorCode } from './openssl-error';
 import type { CipherSpec } from './cipher';
 import type { SyncCipher } from './chacha20';
 
@@ -42,23 +41,6 @@ export interface OpenSslCipherOptions {
   /** CCM's declared plaintext length, when `setAAD` supplied one. */
   plaintextLength?: number;
 }
-
-/**
- * `ERR_LIB_*` → the fragment Node's `error::Decorate` inserts into the code
- * (`src/crypto/crypto_util.cc`). The list is Node's, verbatim: a library it does
- * not name — the `PROV` provider library raises most cipher errors — yields an
- * empty fragment, so `PROV_R_BAD_DECRYPT` becomes `ERR_OSSL_BAD_DECRYPT`.
- */
-const ERR_LIB_NAMES: Record<number, string> = {
-  2: 'SYS', 3: 'BN', 4: 'RSA', 5: 'DH', 6: 'EVP', 7: 'BUF', 8: 'OBJ', 9: 'PEM',
-  10: 'DSA', 11: 'X509', 13: 'ASN1', 14: 'CONF', 15: 'CRYPTO', 16: 'EC', 32: 'BIO',
-  33: 'PKCS7', 34: 'X509V3', 35: 'PKCS12', 36: 'RAND', 37: 'DSO', 38: 'ENGINE',
-  39: 'OCSP', 40: 'UI', 41: 'COMP', 42: 'ECDSA', 43: 'ECDH', 44: 'OSSL_STORE',
-  45: 'FIPS', 46: 'CMS', 47: 'TS', 48: 'HMAC', 50: 'CT', 51: 'ASYNC', 52: 'KDF',
-  53: 'SM2', 128: 'USER',
-};
-/** `ERR_LIB_SSL` is the one library Node spells without the `OSSL_` prefix. */
-const ERR_LIB_SSL = 20;
 
 const AUTH_FAILED = 'Unsupported state or unable to authenticate data';
 const UNSUPPORTED_STATE = 'Unsupported state';
@@ -78,19 +60,15 @@ function invalidState(operation: string): Error {
 /**
  * Rebuild the exception Node raises for an OpenSSL failure (`ThrowCryptoError`
  * in `src/crypto/crypto_util.cc`): the message is the long `error:...` string
- * and the code is `ERR_OSSL_<REASON>` derived from `ERR_GET_LIB` +
- * `ERR_reason_error_string`. When OpenSSL queued *nothing* — a GCM tag mismatch
- * does exactly that — Node uses its own message and sets no code at all.
+ * and the code is `ERR_OSSL_<LIBRARY>_<REASON>`. When OpenSSL queued *nothing*
+ * — a GCM tag mismatch does exactly that — Node uses its own message and sets
+ * no code at all.
  */
 function throwOpenSslError(fallback: string): never {
   const detail = opensslLastError();
-  const reason = opensslErrorReason();
   const error = new Error(detail || fallback) as Error & { code?: string };
-  if (reason) {
-    const library = ERR_LIB_NAMES[opensslErrorLib()] ?? '';
-    const prefix = opensslErrorLib() === ERR_LIB_SSL ? '' : 'OSSL_';
-    error.code = `ERR_${prefix}${library ? `${library}_` : ''}${reason.replace(/ /g, '_').toUpperCase()}`;
-  }
+  const code = opensslErrorCode();
+  if (code !== null) error.code = code;
   throw error;
 }
 

@@ -661,6 +661,105 @@ WN_EXPORT(wn_pkey_keygen)(const char *name, int32_t nlen,
     return (int32_t)(intptr_t)pkey;
 }
 
+/**
+ * Generate a DH key pair from explicit domain parameters, given as raw
+ * big-endian integers for `p` and `g`.
+ *
+ * One code path covers every way Node spells the request: a named group
+ * (`modp14`, …) is the same thing as its prime with `g = 2`, which is exactly
+ * how Node feeds it to OpenSSL, so the JS side resolves the name to bytes.
+ * When `p`/`g` match a group OpenSSL knows, its FFC key management caches that
+ * group's `q` (and `keylength`) and draws the private exponent the same way the
+ * named-group path does; otherwise the legacy `bits(p) - 2` rule applies. Both
+ * match `DH_generate_key`, which is what Node calls.
+ */
+WN_EXPORT(wn_dh_keygen)(const uint8_t *pbytes, int32_t plen,
+                        const uint8_t *gbytes, int32_t glen) {
+    EVP_PKEY_CTX *pctx = NULL, *kctx = NULL;
+    EVP_PKEY *params = NULL, *pkey = NULL;
+    OSSL_PARAM_BLD *bld = NULL;
+    OSSL_PARAM *param_arr = NULL;
+    BIGNUM *bp = NULL, *bg = NULL;
+    int32_t ret = 0;
+
+    bp = BN_bin2bn(pbytes, plen, NULL);
+    bg = BN_bin2bn(gbytes, glen, NULL);
+    if (bp == NULL || bg == NULL) goto done;
+
+    /* Build a domain-parameters key from p/g, then keygen using it as template. */
+    pctx = EVP_PKEY_CTX_new_from_name(NULL, "DH", NULL);
+    if (pctx == NULL) { wn_capture_error(); goto done; }
+    if (EVP_PKEY_fromdata_init(pctx) != 1) { wn_capture_error(); goto done; }
+    bld = OSSL_PARAM_BLD_new();
+    if (bld == NULL) goto done;
+    if (OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_FFC_P, bp) != 1 ||
+        OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_FFC_G, bg) != 1) {
+        wn_capture_error();
+        goto done;
+    }
+    param_arr = OSSL_PARAM_BLD_to_param(bld);
+    if (param_arr == NULL) goto done;
+    if (EVP_PKEY_fromdata(pctx, &params, EVP_PKEY_KEY_PARAMETERS, param_arr) != 1) {
+        wn_capture_error();
+        goto done;
+    }
+
+    kctx = EVP_PKEY_CTX_new_from_pkey(NULL, params, NULL);
+    if (kctx == NULL) { wn_capture_error(); goto done; }
+    if (EVP_PKEY_keygen_init(kctx) != 1) { wn_capture_error(); goto done; }
+    if (EVP_PKEY_keygen(kctx, &pkey) != 1) { pkey = NULL; wn_capture_error(); goto done; }
+    ret = (int32_t)(intptr_t)pkey;
+
+done:
+    EVP_PKEY_free(params);
+    OSSL_PARAM_free(param_arr);
+    OSSL_PARAM_BLD_free(bld);
+    EVP_PKEY_CTX_free(kctx);
+    EVP_PKEY_CTX_free(pctx);
+    BN_free(bp);
+    BN_free(bg);
+    return ret;
+}
+
+/**
+ * Generate a DH key pair with freshly generated domain parameters (Node's
+ * `primeLength`). Two steps, because that is what the provider models: generate
+ * the parameters (selection = domain parameters), then key from them. OpenSSL's
+ * own safe-prime generator does the work, exactly as it does for Node, so a
+ * prime size it refuses fails here the same way.
+ */
+WN_EXPORT(wn_dh_keygen_params)(int32_t bits, int32_t generator) {
+    EVP_PKEY_CTX *pctx = NULL, *kctx = NULL;
+    EVP_PKEY *params = NULL, *pkey = NULL;
+    size_t pbits = (size_t)bits;
+    int g = generator;
+    char ffc_type[] = "generator";
+    int32_t ret = 0;
+
+    pctx = EVP_PKEY_CTX_new_from_name(NULL, "DH", NULL);
+    if (pctx == NULL) { wn_capture_error(); return 0; }
+    if (EVP_PKEY_paramgen_init(pctx) != 1) { wn_capture_error(); goto done; }
+    OSSL_PARAM p[4];
+    p[0] = OSSL_PARAM_construct_utf8_string(OSSL_PKEY_PARAM_FFC_TYPE, ffc_type, 0);
+    p[1] = OSSL_PARAM_construct_size_t(OSSL_PKEY_PARAM_FFC_PBITS, &pbits);
+    p[2] = OSSL_PARAM_construct_int(OSSL_PKEY_PARAM_DH_GENERATOR, &g);
+    p[3] = OSSL_PARAM_construct_end();
+    if (EVP_PKEY_CTX_set_params(pctx, p) != 1) { wn_capture_error(); goto done; }
+    if (EVP_PKEY_paramgen(pctx, &params) != 1) { params = NULL; wn_capture_error(); goto done; }
+
+    kctx = EVP_PKEY_CTX_new_from_pkey(NULL, params, NULL);
+    if (kctx == NULL) { wn_capture_error(); goto done; }
+    if (EVP_PKEY_keygen_init(kctx) != 1) { wn_capture_error(); goto done; }
+    if (EVP_PKEY_keygen(kctx, &pkey) != 1) { pkey = NULL; wn_capture_error(); goto done; }
+    ret = (int32_t)(intptr_t)pkey;
+
+done:
+    EVP_PKEY_free(params);
+    EVP_PKEY_CTX_free(kctx);
+    EVP_PKEY_CTX_free(pctx);
+    return ret;
+}
+
 /** Import a private (PKCS#8/PKCS#1/SEC1) or public (SPKI/PKCS#1) DER key. */
 WN_EXPORT(wn_pkey_from_der)(const uint8_t *der, int32_t len, int32_t is_private) {
     const unsigned char *p = der;

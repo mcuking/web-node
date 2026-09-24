@@ -244,6 +244,22 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M119（第八增量）—— keygen 收尾：自定义 DH 参数与 ml-kem，外加一套 lib 前缀保真的 OSSL 错误
+
+**里程碑**：把 `generateKeyPair`/`generateKeyPairSync` 上**最后两类还得靠 JS 兜底**的请求（自定义 DH 参数、ML-KEM）换成 OpenSSL；顺带把 OSSL 错误的 **错误码保真**补齐到 Node 的形状。至此**非对称 keygen 的全部形状都走 wasm OpenSSL**。
+
+- **DH keygen 走 OpenSSL（`wn_dh_keygen`）**：Node 自己的做法就是把 `group` 解析成"prime + g = 2"再交给 OpenSSL，所以我们照祥——JS 侧只把名字解成 p/g（`modpGroup`，与 Node 的 `DHPointer::FindGroup` 同一批 prime），C 侧用 `fromdata` 把 p/g 造成域参 pkey，再以它为 template keygen。**一个入口覆盖 `group` 与 `prime`/`generator` 两种写法**。与 `group` 相比多出来的 `q` 不需要手动给：当 p/g 命中 OpenSSL 知道的组时它自己把 `q`/`keylength` 缓存上，私钥指数就按组规则抽（modp5 等）；否则落回 `bits(p) - 2` 的旧规则（modp1/modp2）。两者都与 Node 调用的 `DH_generate_key` 一致。
+- **`primeLength` 也走 OpenSSL（`wn_dh_keygen_params`）**：这是 Node 的 `EVP_PKEY_CTX_set_dh_paramgen_prime_len/generator` + `paramgen` 两步路——**必需两步**，因为 provider 的 `dh_gen` 只有 selection 含 `DOMAIN_PARAMETERS` 时才生参数，而 `keygen_init` 只置 `KEYPAIR`（第一版只调 `keygen`，直接被 `provider keymgmt failure` 拦下）。安全素数由 OpenSSL 自己生，与 Node 同一份代码。
+- **顺手修掉一个真 hang（先前无人测到的死循环）**：JS 界的 `generatePrime` 把首字节无条件 `|= 0x80`，于是候选整数永远是 `ceil(bits/8)*8` 位，而收尾的 `toString(2).length !== bits` 守门在 `bits % 8 !== 0` 时**永远不放过**——`generateSafePrime(512)` → `generatePrime(511)` 就死循环。现在改成按 `bits` 把首字节右移 `bytes*8 - bits` 位再置真正的最高位（能生成任意位宽的素数），并在 `bits < 2` 时报 `ERR_OUT_OF_RANGE`。这条路径现在只在 wasm 未就绪的兼容回退里用。
+- **`ml-kem` keygen 走 OpenSSL**：直接 `wn_pkey_keygen('ML-KEM-512/768/1024')`。真麻烦在**导出格式**：Node 用 `seed-only`（PKCS#8 里是 `[0]` 隐式 OCTET STRING 的 64 字节种子，全文 86 字节），而 **OpenSSL 的默认是 `seed-priv`**——`SEQUENCE { OCTET STRING(seed), OCTET STRING(私钥) }`（用**全域** tag，不是 `[0]`/`[1]`）。于是旧解析器把整个 `dk` 当成种子再展开，造出了一把**错的**私钥（它自己能用，Node 导入却报 `DECODER routines::unsupported`）。`parseMlKemPrivate` 现按三种拼写识别：种子形式（`0x80`/裸 OCTET STRING，64 字节）、展开形式（`0x81`/裸 OCTET STRING，`2*ekLen+32` 字节）、以及 OpenSSL 的 `SEQUENCE` 二成员形式——只要拿到种子就自己展开（封装/解封两半始终一致）。我们写出去的一律是 Node 认的 seed-only 形式。
+- **OSSL 错误码保真（新文件 `crypto/openssl-error.ts`）**：`opensslFailure` 之前只拿 reason 拼 `ERR_OSSL_<REASON>`，于是 `DH_R_MODULUS_TOO_SMALL` 会错成 `ERR_OSSL_MODULUS_TOO_SMALL`。现在把原本藏在 `openssl-cipher.ts` 里的 **`ERR_LIB_*` → Node 名表**抽成共享模块，用 C 侧早就暴露好的 `wn_openssl_error_lib()/error_reason()` 拼完整码：**库在 Node 表里就带前缀**（`ERR_OSSL_DH_MODULUS_TOO_SMALL`、`ERR_OSSL_EVP_PROVIDER_KEYMGMT_FAILURE`），**`PROV` provider 库不在表里就不带**（`ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS` 维持原样），`ERR_LIB_SSL` 按 Node 的特殊规则写成 `ERR_SSL_…`（无 `OSSL_`）。于是对称/非对称两条路走到同一套规则上。
+- **DH 选项校验按 Node 对齐**：`group`/`prime`/`primeLength` **互斥**（`ERR_INCOMPATIBLE_OPTION_PAIR`，`null` 视作缺席）、`primeLength`/`generator` 走 `validateInt32`（非整数与越界的**文案不同**，都复刻）、缺全部选项 → `ERR_MISSING_OPTION`。顺手补上 `coded()` 对 `RangeError` 的支持（先前只认 `TypeError`，否则 `ERR_OUT_OF_RANGE` 会错成 `Error`）。**OpenSSL 拒绝参数时如实抛它的错、不再静默回退到 JS**（参数太小时两边都应报 `ERR_OSSL_DH_MODULUS_TOO_SMALL`）。
+- **验收**：`test/crypto-openssl-pkey.test.ts` 13 → **18 例**。新增：8 个 MODP 组的 keygen + 与 Node 互算共享密钥 + 私钥 DER 长度差 ≤ 1（只有指数 INTEGER 的符号字节可变）；显式 `prime`/`generator`（prime 由 `crypto.getDiffieHellman('modp14').getPrime()` 提供）；`primeLength: 512` 与 Node **编码长度相等**且 Node 从我们的私钥能导出同一个公钥；`primeLength ∈ {0, 256, 511, 512.5, -1}` 与 Node **name/code/message 逐字相等**；DH 六种选项组合的 code + message 逐字相等；ML-KEM 三种参数的 keygen→Node 导入→双向封装/解封（同时断言 PKCS#8 长度与 Node 相等、且我们自己写出的 DER 能被 OpenSSL 重导入）。
+- **验收数据**：`tsc --noEmit` 净 · `vitest run` **1057 passed / 2 skipped（125 文件）** · build（`wn_openssl-fwvDt1Ck.wasm` **2483.15 kB**、`runtime.worker-C8szd-Cp.js` **715.25 kB**）。
+- **M119 至此结清**。下一步 **M120 同步 syscall**（SAB + `Atomics.wait` + FS-worker；需 COOP/COEP，线上只能走本地 dev/preview）。
+
+---
+
 ### 2026-09-24 · M119（第七增量）—— 全曲线 EC（OpenSSL 注册表）+ 绑定清单清理
 
 **里程碑**：把「只有 3 条 NIST 曲线有算术」这个限制拆掉，并用一台永久门禁回答「native 迁完了吗」。
