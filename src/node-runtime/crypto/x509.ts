@@ -3,13 +3,22 @@
  *
  * Node's implementation sits on OpenSSL (`X509View` in `deps/ncrypto`) plus a
  * thin JS wrapper (`lib/internal/crypto/x509.js`). There is no OpenSSL in a
- * page, so this module re-implements the *observable* surface: the same getters
- * with the same string formats, the same `check*`/`verify` semantics, and the
- * same legacy object. The formats are not guessed — they are read off the
- * OpenSSL print helpers Node calls (`X509_NAME_print_ex` with
- * `kX509NameFlagsMultiline`, `ASN1_TIME_print`, `PrintGeneralName`,
- * `SafeX509InfoAccessPrint`, `BIGNUM` hex) and pinned by a differential fixture
- * (`test/fixtures/x509.json`, produced by `tools/x509-oracle.mjs`).
+ * page, so this module has two backends with the same observable surface:
+ *
+ *  - once `wn_openssl` is loaded (`opensslReady()`), the certificate is parsed
+ *    with `d2i_X509` and every string/number getter comes from the real OpenSSL
+ *    print helpers — `X509_NAME_print_ex` with `kX509NameFlagsMultiline`,
+ *    `ASN1_TIME_print`, Node's `PrintGeneralName`/`SafeX509*Print`, `BN_bn2hex`,
+ *    `X509_check_ca`;
+ *  - otherwise the fields are re-derived here from the DER by re-implementing
+ *    exactly those helpers.
+ *
+ * Both are pinned by the same differential fixture (`test/fixtures/x509.json`,
+ * produced by `tools/x509-oracle.mjs`), so the switch is invisible.
+ *
+ * The `check*`/`verify`/`checkIssued` methods and the legacy object always use
+ * the DER-derived state below: they need the parsed structure and the key
+ * objects, and those key operations already route through the same module.
  */
 
 import { TAG, derEncode, derInt, derParse, expectSeq, type DerNode } from './der';
@@ -22,6 +31,23 @@ import {
 } from './asym';
 import { resolveHash } from './hash';
 import { kByteFactory, outputBytes } from './byte-out';
+import {
+  opensslReady,
+  opensslX509Ca,
+  opensslX509Free,
+  opensslX509InfoAccess,
+  opensslX509Issuer,
+  opensslX509KeyUsage,
+  opensslX509New,
+  opensslX509SerialNumber,
+  opensslX509SignatureAlgorithm,
+  opensslX509SignatureAlgorithmOid,
+  opensslX509Subject,
+  opensslX509SubjectAltName,
+  opensslX509ToDer,
+  opensslX509ValidTimeMs,
+  opensslX509ValidTimeString,
+} from '../bindings/openssl';
 
 // --- small helpers ----------------------------------------------------------
 
@@ -607,7 +633,18 @@ function matchHostname(pattern: string, host: string): boolean {
 
 interface CertState {
   publicKey?: KeyObject;
+  der?: Uint8Array;
 }
+
+/**
+ * Frees an OpenSSL certificate handle once the wrapper is collected; the wasm
+ * heap is not garbage-collected, so without this every parsed certificate would
+ * leak. Handles only exist while the module is loaded, which is why the
+ * callback may call straight through bytes of `setOpensslEnabled(false)`.
+ */
+const x509Finalizer = typeof FinalizationRegistry === 'function'
+  ? new FinalizationRegistry<number>((handle) => opensslX509Free(handle))
+  : null;
 
 /**
  * Mirrors `lib/internal/crypto/x509.js`: a caching wrapper with the same
@@ -616,29 +653,98 @@ interface CertState {
 export class X509Certificate {
   #material: CertMaterial;
   #state: CertState = {};
+  /** OpenSSL `X509*` when the module was ready at construction, else `0`. */
+  #handle = 0;
 
   constructor(buffer: unknown) {
     this.#material = parseCertificate(buffer);
+    if (opensslReady()) {
+      const handle = opensslX509New(this.#material.der);
+      if (handle) {
+        this.#handle = handle;
+        x509Finalizer?.register(this, handle, this);
+      }
+    }
   }
 
-  get subject(): string { return this.#material.subject; }
-  get subjectAltName(): string | undefined { return this.#material.subjectAltName; }
-  get issuer(): string { return this.#material.issuer; }
+  /**
+   * Read a string getter from OpenSSL, falling back to the DER-derived value
+   * when the backend is absent, or when it reports the field as missing (which
+   * is only meaningful for the optional extensions — the caller passes the
+   * matching fallback).
+   */
+  #pick(value: string | null, fallback: string | undefined): string | undefined {
+    return value === null ? fallback : value;
+  }
+
+  get subject(): string {
+    const value = this.#handle ? this.#pick(opensslX509Subject(this.#handle), this.#material.subject) : undefined;
+    return value ?? this.#material.subject;
+  }
+  get subjectAltName(): string | undefined {
+    return this.#handle
+      ? this.#pick(opensslX509SubjectAltName(this.#handle), this.#material.subjectAltName)
+      : this.#material.subjectAltName;
+  }
+  get issuer(): string {
+    const value = this.#handle ? this.#pick(opensslX509Issuer(this.#handle), this.#material.issuer) : undefined;
+    return value ?? this.#material.issuer;
+  }
   get issuerCertificate(): undefined { return undefined; }
-  get infoAccess(): string | undefined { return this.#material.infoAccess; }
-  get validFrom(): string { return this.#material.validFrom; }
-  get validTo(): string { return this.#material.validTo; }
-  get validFromDate(): Date { return new Date(this.#material.validFromMs); }
-  get validToDate(): Date { return new Date(this.#material.validToMs); }
+  get infoAccess(): string | undefined {
+    return this.#handle
+      ? this.#pick(opensslX509InfoAccess(this.#handle), this.#material.infoAccess)
+      : this.#material.infoAccess;
+  }
+  get validFrom(): string {
+    const value = this.#handle ? opensslX509ValidTimeString(this.#handle, 0) : null;
+    return value ?? this.#material.validFrom;
+  }
+  get validTo(): string {
+    const value = this.#handle ? opensslX509ValidTimeString(this.#handle, 1) : null;
+    return value ?? this.#material.validTo;
+  }
+  get validFromDate(): Date {
+    const ms = this.#handle ? opensslX509ValidTimeMs(this.#handle, 0) : null;
+    return new Date(ms ?? this.#material.validFromMs);
+  }
+  get validToDate(): Date {
+    const ms = this.#handle ? opensslX509ValidTimeMs(this.#handle, 1) : null;
+    return new Date(ms ?? this.#material.validToMs);
+  }
   get fingerprint(): string { return this.#fingerprint('sha1'); }
   get fingerprint256(): string { return this.#fingerprint('sha256'); }
   get fingerprint512(): string { return this.#fingerprint('sha512'); }
-  get keyUsage(): string[] | undefined { return this.#material.extKeyUsage; }
-  get serialNumber(): string { return this.#material.serialNumber; }
-  get signatureAlgorithm(): string | undefined { return this.#material.signatureAlgorithm; }
-  get signatureAlgorithmOid(): string { return this.#material.signatureAlgorithmOid; }
+  get keyUsage(): string[] | undefined {
+    if (this.#handle) {
+      const usage = opensslX509KeyUsage(this.#handle);
+      if (usage !== null) return usage;
+    }
+    return this.#material.extKeyUsage;
+  }
+  get serialNumber(): string {
+    const value = this.#handle ? opensslX509SerialNumber(this.#handle) : null;
+    return value ?? this.#material.serialNumber;
+  }
+  get signatureAlgorithm(): string | undefined {
+    return this.#handle
+      ? this.#pick(opensslX509SignatureAlgorithm(this.#handle), this.#material.signatureAlgorithm)
+      : this.#material.signatureAlgorithm;
+  }
+  get signatureAlgorithmOid(): string {
+    const value = this.#handle ? opensslX509SignatureAlgorithmOid(this.#handle) : null;
+    return value ?? this.#material.signatureAlgorithmOid;
+  }
+  /** The certificate's DER. OpenSSL re-encodes it (`X509View::toDER`). */
+  #der(): Uint8Array {
+    if (this.#state.der === undefined) {
+      const der = this.#handle ? opensslX509ToDer(this.#handle) : null;
+      this.#state.der = der ?? this.#material.der;
+    }
+    return this.#state.der;
+  }
   get raw(): Uint8Array {
-    return outputBytes(this, this.#material.der, 'buffer', (b) => b) as Uint8Array;
+    return outputBytes(this, this.#der(), 'buffer', (b) => b) as Uint8Array;
   }
   get publicKey(): KeyObject {
     if (this.#state.publicKey === undefined) {
@@ -648,17 +754,19 @@ export class X509Certificate {
     }
     return this.#state.publicKey;
   }
-  get ca(): boolean { return this.#material.ca; }
+  get ca(): boolean {
+    return this.#handle ? opensslX509Ca(this.#handle) : this.#material.ca;
+  }
 
   #fingerprint(hash: string): string {
     const algo = resolveHash(hash);
     if (!algo) throw new Error(`unsupported hash: ${hash}`);
-    const digest = algo.hash(this.#material.der);
+    const digest = algo.hash(this.#der());
     return [...digest].map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(':');
   }
 
   toString(): string {
-    return pemEncode('CERTIFICATE', this.#material.der);
+    return pemEncode('CERTIFICATE', this.#der());
   }
 
   /** No standard JSON encoding exists, so Node falls back to the PEM string. */
@@ -748,23 +856,23 @@ export class X509Certificate {
     const legacy: Record<string, unknown> = {};
     legacy.subject = nameToObject(m.subjectName);
     legacy.issuer = nameToObject(m.issuerName);
-    if (m.subjectAltName !== undefined) legacy.subjectaltname = m.subjectAltName;
-    if (m.infoAccess !== undefined) legacy.infoAccess = m.infoAccess;
-    legacy.ca = m.ca;
+    if (this.subjectAltName !== undefined) legacy.subjectaltname = this.subjectAltName;
+    if (this.infoAccess !== undefined) legacy.infoAccess = this.infoAccess;
+    legacy.ca = this.ca;
     if (keyMaterial.rsa) {
       legacy.modulus = keyMaterial.rsa.n.toString(16).toUpperCase();
       legacy.exponent = '0x' + keyMaterial.rsa.e.toString(16).toUpperCase();
       legacy.pubkey = outputBytes(this, m.spkiDer, 'buffer', (b) => b);
       legacy.bits = keyMaterial.rsa.n.toString(2).length;
     }
-    legacy.valid_from = m.validFrom;
-    legacy.valid_to = m.validTo;
+    legacy.valid_from = this.validFrom;
+    legacy.valid_to = this.validTo;
     legacy.fingerprint = this.fingerprint;
     legacy.fingerprint256 = this.fingerprint256;
     legacy.fingerprint512 = this.fingerprint512;
-    if (m.extKeyUsage !== undefined) legacy.ext_key_usage = m.extKeyUsage;
-    legacy.serialNumber = m.serialNumber;
-    legacy.raw = outputBytes(this, m.der, 'buffer', (b) => b);
+    if (this.keyUsage !== undefined) legacy.ext_key_usage = this.keyUsage;
+    legacy.serialNumber = this.serialNumber;
+    legacy.raw = outputBytes(this, this.#der(), 'buffer', (b) => b);
     return translatePeerCertificate(legacy);
   }
 }

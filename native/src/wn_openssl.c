@@ -22,15 +22,22 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 
+#include <openssl/asn1.h>
+#include <openssl/bio.h>
+#include <openssl/bn.h>
 #include <openssl/core_names.h>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/kdf.h>
+#include <openssl/objects.h>
+#include <openssl/pem.h>
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 
 /* WASI has no getpid; OpenSSL only uses it for DRBG fork-detection. */
 int getpid(void) { return 1; }
@@ -879,6 +886,461 @@ WN_EXPORT(wn_pkey_decrypt)(int32_t handle, int32_t padding,
     EVP_PKEY_CTX_free(ctx);
     if (ok != 1) { wn_capture_error(); return -1; }
     return (int32_t)outlen;
+}
+
+/* --- X509 certificates ------------------------------------------------------ */
+/*
+ * `crypto.X509Certificate` in Node is a thin wrapper over `X509View`
+ * (`deps/ncrypto`), i.e. over OpenSSL's X509 API plus Node's own print helpers
+ * (`deps/ncrypto/ncrypto.cc`: `PrintGeneralName`, `SafeX509SubjectAltNamePrint`,
+ * `SafeX509InfoAccessPrint`). Those helpers — not the DER structure — are what
+ * determines the *strings* the getters return, so they are ported verbatim
+ * here rather than re-derived.
+ *
+ * Only the string/number getters live on this side; `checkHost`/`verify`/
+ * `checkIssued` and the legacy object stay in JS, where they only need the
+ * parsed DER and the key objects (which already route through this module).
+ */
+
+/* `kX509NameFlagsMultiline` / `kX509NameFlagsRFC2253WithinUtf8JSON`. */
+#define WN_NAME_FLAGS_MULTILINE \
+    (ASN1_STRFLGS_ESC_2253 | ASN1_STRFLGS_ESC_CTRL | ASN1_STRFLGS_UTF8_CONVERT | \
+     XN_FLAG_SEP_MULTILINE | XN_FLAG_FN_SN)
+#define WN_NAME_FLAGS_RFC2253_JSON \
+    (XN_FLAG_RFC2253 & ~ASN1_STRFLGS_ESC_MSB & ~ASN1_STRFLGS_ESC_CTRL)
+
+static X509 *wn_x509(int32_t handle) { return (X509 *)(intptr_t)handle; }
+
+/** Copy a memory BIO's contents into `out`; always returns the byte length. */
+static int32_t wn_bio_out(BIO *bio, uint8_t *out, int32_t cap) {
+    BUF_MEM *mem = NULL;
+    BIO_get_mem_ptr(bio, &mem);
+    if (mem == NULL) return -1;
+    int32_t len = (int32_t)mem->length;
+    if (out != NULL && cap >= len && len > 0) memcpy(out, mem->data, (size_t)len);
+    return len;
+}
+
+/** `IsSafeAltName` — a name needs escaping when it could break the list syntax. */
+static int wn_is_safe_alt_name(const unsigned char *name, int len, int utf8_ok) {
+    for (int i = 0; i < len; i++) {
+        unsigned char c = name[i];
+        if (c == '"' || c == '\\' || c == ',' || c == '\'') return 0;
+        if (utf8_ok) {
+            if (c < ' ' || c == 0x7f) return 0;
+        } else {
+            if (c < ' ' || c > '~') return 0;
+        }
+    }
+    return 1;
+}
+
+/** `PrintAltName` — safe names are written as-is, others JSON-escaped. */
+static void wn_print_alt_name(BIO *out, const unsigned char *name, int len,
+                              int utf8_ok, const char *prefix) {
+    static const char hex[] = "0123456789abcdef";
+    if (wn_is_safe_alt_name(name, len, utf8_ok)) {
+        if (prefix != NULL) BIO_printf(out, "%s:", prefix);
+        BIO_write(out, name, len);
+        return;
+    }
+    BIO_write(out, "\"", 1);
+    if (prefix != NULL) BIO_printf(out, "%s:", prefix);
+    for (int j = 0; j < len; j++) {
+        unsigned char c = name[j];
+        if (c == '\\') {
+            BIO_write(out, "\\\\", 2);
+        } else if (c == '"') {
+            BIO_write(out, "\\\"", 2);
+        } else if ((c >= ' ' && c != ',' && c <= '~') || (utf8_ok && (c & 0x80))) {
+            BIO_write(out, &c, 1);
+        } else {
+            char u[] = {'\\', 'u', '0', '0', hex[(c & 0xf0) >> 4], hex[c & 0x0f]};
+            BIO_write(out, u, sizeof(u));
+        }
+    }
+    BIO_write(out, "\"", 1);
+}
+
+/** `PrintGeneralName` (ncrypto). Returns 0 for a type Node cannot render. */
+static int wn_print_general_name(BIO *out, const GENERAL_NAME *gen) {
+    if (gen->type == GEN_DNS) {
+        const ASN1_IA5STRING *name = gen->d.dNSName;
+        BIO_write(out, "DNS:", 4);
+        wn_print_alt_name(out, ASN1_STRING_get0_data(name), ASN1_STRING_length(name), 0, NULL);
+    } else if (gen->type == GEN_EMAIL) {
+        const ASN1_IA5STRING *name = gen->d.rfc822Name;
+        BIO_write(out, "email:", 6);
+        wn_print_alt_name(out, ASN1_STRING_get0_data(name), ASN1_STRING_length(name), 0, NULL);
+    } else if (gen->type == GEN_URI) {
+        const ASN1_IA5STRING *name = gen->d.uniformResourceIdentifier;
+        BIO_write(out, "URI:", 4);
+        wn_print_alt_name(out, ASN1_STRING_get0_data(name), ASN1_STRING_length(name), 0, NULL);
+    } else if (gen->type == GEN_DIRNAME) {
+        BIO_write(out, "DirName:", 8);
+        BIO *tmp = BIO_new(BIO_s_mem());
+        if (tmp == NULL) return 0;
+        if (X509_NAME_print_ex(tmp, gen->d.dirn, 0, WN_NAME_FLAGS_RFC2253_JSON) < 0) {
+            BIO_free(tmp);
+            return 0;
+        }
+        BUF_MEM *mem = NULL;
+        BIO_get_mem_ptr(tmp, &mem);
+        if (mem != NULL) {
+            wn_print_alt_name(out, (const unsigned char *)mem->data, (int)mem->length, 1, NULL);
+        }
+        BIO_free(tmp);
+    } else if (gen->type == GEN_IPADD) {
+        const ASN1_OCTET_STRING *ip = gen->d.ip;
+        const unsigned char *b = ASN1_STRING_get0_data(ip);
+        int ip_len = ASN1_STRING_length(ip);
+        BIO_printf(out, "IP Address:");
+        if (ip_len == 4) {
+            BIO_printf(out, "%d.%d.%d.%d", b[0], b[1], b[2], b[3]);
+        } else if (ip_len == 16) {
+            for (unsigned int j = 0; j < 8; j++) {
+                unsigned int pair = ((unsigned int)b[2 * j] << 8) | b[2 * j + 1];
+                BIO_printf(out, j == 0 ? "%X" : ":%X", pair);
+            }
+        } else {
+            BIO_printf(out, "<invalid length=%d>", ip_len);
+        }
+    } else if (gen->type == GEN_RID) {
+        char oline[256];
+        OBJ_obj2txt(oline, sizeof(oline), gen->d.rid, 1);
+        BIO_printf(out, "Registered ID:%s", oline);
+    } else if (gen->type == GEN_OTHERNAME) {
+        int unicode = 1;
+        const char *prefix = NULL;
+        int nid = OBJ_obj2nid(gen->d.otherName->type_id);
+#ifdef NID_id_on_SmtpUTF8Mailbox
+        if (nid == NID_id_on_SmtpUTF8Mailbox) prefix = "SmtpUTF8Mailbox";
+#endif
+#ifdef NID_XmppAddr
+        if (nid == NID_XmppAddr) prefix = "XmppAddr";
+#endif
+#ifdef NID_SRVName
+        if (nid == NID_SRVName) { prefix = "SRVName"; unicode = 0; }
+#endif
+#ifdef NID_ms_upn
+        if (nid == NID_ms_upn) prefix = "UPN";
+#endif
+#ifdef NID_NAIRealm
+        if (nid == NID_NAIRealm) prefix = "NAIRealm";
+#endif
+        int val_type = gen->d.otherName->value->type;
+        if (prefix == NULL || (unicode && val_type != V_ASN1_UTF8STRING) ||
+            (!unicode && val_type != V_ASN1_IA5STRING)) {
+            BIO_printf(out, "othername:<unsupported>");
+        } else {
+            BIO_printf(out, "othername:");
+            if (unicode) {
+                ASN1_UTF8STRING *name = gen->d.otherName->value->value.utf8string;
+                wn_print_alt_name(out, ASN1_STRING_get0_data(name),
+                                  ASN1_STRING_length(name), 1, prefix);
+            } else {
+                ASN1_IA5STRING *name = gen->d.otherName->value->value.ia5string;
+                wn_print_alt_name(out, ASN1_STRING_get0_data(name),
+                                  ASN1_STRING_length(name), 0, prefix);
+            }
+        }
+    } else if (gen->type == GEN_X400) {
+        BIO_printf(out, "X400Name:<unsupported>");
+    } else if (gen->type == GEN_EDIPARTY) {
+        BIO_printf(out, "EdiPartyName:<unsupported>");
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+/** Parse a DER certificate; returns an X509 handle (0 when it is not a cert). */
+WN_EXPORT(wn_x509_new)(const uint8_t *der, int32_t len) {
+    if (der == NULL || len <= 0) return 0;
+    const unsigned char *p = der;
+    X509 *cert = d2i_X509(NULL, &p, (long)len);
+    if (cert == NULL) { wn_capture_error(); return 0; }
+    return (int32_t)(intptr_t)cert;
+}
+
+WN_EXPORT(wn_x509_free)(int32_t handle) {
+    X509 *cert = wn_x509(handle);
+    if (cert != NULL) X509_free(cert);
+    return 0;
+}
+
+/** The canonical DER re-encoding (`X509View::toDER`). */
+WN_EXPORT(wn_x509_to_der)(int32_t handle, uint8_t *out, int32_t cap) {
+    X509 *cert = wn_x509(handle);
+    if (cert == NULL) return -1;
+    int len = i2d_X509(cert, NULL);
+    if (len <= 0) { wn_capture_error(); return -1; }
+    if (out == NULL || cap < len) return len;
+    unsigned char *p = out;
+    i2d_X509(cert, &p);
+    return len;
+}
+
+/** `X509_NAME_print_ex(_, _, 0, kX509NameFlagsMultiline)`. */
+static int32_t wn_x509_name(int handle, int issuer, uint8_t *out, int32_t cap) {
+    X509 *cert = wn_x509(handle);
+    if (cert == NULL) return -1;
+    BIO *bio = BIO_new(BIO_s_mem());
+    if (bio == NULL) return -1;
+    X509_NAME *name = issuer ? X509_get_issuer_name(cert) : X509_get_subject_name(cert);
+    if (X509_NAME_print_ex(bio, name, 0, WN_NAME_FLAGS_MULTILINE) <= 0) {
+        BIO_free(bio);
+        wn_capture_error();
+        return -1;
+    }
+    int32_t len = wn_bio_out(bio, out, cap);
+    BIO_free(bio);
+    return len;
+}
+
+WN_EXPORT(wn_x509_subject)(int32_t handle, uint8_t *out, int32_t cap) {
+    return wn_x509_name(handle, 0, out, cap);
+}
+WN_EXPORT(wn_x509_issuer)(int32_t handle, uint8_t *out, int32_t cap) {
+    return wn_x509_name(handle, 1, out, cap);
+}
+
+/** `SafeX509SubjectAltNamePrint`: 1 = present, 0 = absent, -1 = error. */
+WN_EXPORT(wn_x509_subject_alt_name)(int32_t handle, uint8_t *out, int32_t cap) {
+    X509 *cert = wn_x509(handle);
+    if (cert == NULL) return -1;
+    int index = X509_get_ext_by_NID(cert, NID_subject_alt_name, -1);
+    if (index < 0) return 0;
+    X509_EXTENSION *ext = X509_get_ext(cert, index);
+    if (ext == NULL) return -1;
+    if (OBJ_obj2nid(X509_EXTENSION_get_object(ext)) != NID_subject_alt_name) return 0;
+    GENERAL_NAMES *names = (GENERAL_NAMES *)X509V3_EXT_d2i(ext);
+    if (names == NULL) { wn_capture_error(); return -1; }
+    BIO *bio = BIO_new(BIO_s_mem());
+    if (bio == NULL) { GENERAL_NAMES_free(names); return -1; }
+    int ok = 1;
+    for (int i = 0; i < sk_GENERAL_NAME_num(names); i++) {
+        const GENERAL_NAME *gen = sk_GENERAL_NAME_value(names, i);
+        if (i != 0) BIO_write(bio, ", ", 2);
+        if (!wn_print_general_name(bio, gen)) { ok = 0; break; }
+    }
+    GENERAL_NAMES_free(names);
+    int32_t len = ok ? wn_bio_out(bio, out, cap) : -1;
+    BIO_free(bio);
+    return len;
+}
+
+/** `SafeX509InfoAccessPrint`: 1 = present, 0 = absent, -1 = error. */
+WN_EXPORT(wn_x509_info_access)(int32_t handle, uint8_t *out, int32_t cap) {
+    X509 *cert = wn_x509(handle);
+    if (cert == NULL) return -1;
+    int index = X509_get_ext_by_NID(cert, NID_info_access, -1);
+    if (index < 0) return 0;
+    X509_EXTENSION *ext = X509_get_ext(cert, index);
+    if (ext == NULL) return -1;
+    if (OBJ_obj2nid(X509_EXTENSION_get_object(ext)) != NID_info_access) return 0;
+    AUTHORITY_INFO_ACCESS *descs = (AUTHORITY_INFO_ACCESS *)X509V3_EXT_d2i(ext);
+    if (descs == NULL) { wn_capture_error(); return -1; }
+    BIO *bio = BIO_new(BIO_s_mem());
+    if (bio == NULL) { AUTHORITY_INFO_ACCESS_free(descs); return -1; }
+    int ok = 1;
+    for (int i = 0; i < sk_ACCESS_DESCRIPTION_num(descs); i++) {
+        const ACCESS_DESCRIPTION *desc = sk_ACCESS_DESCRIPTION_value(descs, i);
+        if (i != 0) BIO_write(bio, "\n", 1);
+        char objtmp[80];
+        i2t_ASN1_OBJECT(objtmp, sizeof(objtmp), desc->method);
+        BIO_printf(bio, "%s - ", objtmp);
+        if (!wn_print_general_name(bio, desc->location)) { ok = 0; break; }
+    }
+    AUTHORITY_INFO_ACCESS_free(descs);
+    int32_t len = ok ? wn_bio_out(bio, out, cap) : -1;
+    BIO_free(bio);
+    return len;
+}
+
+/** `ASN1_TIME_print` of `notBefore`/`notAfter` (`which`: 0 = from, 1 = to). */
+WN_EXPORT(wn_x509_valid_time_string)(int32_t handle, int32_t which, uint8_t *out, int32_t cap) {
+    X509 *cert = wn_x509(handle);
+    if (cert == NULL) return -1;
+    const ASN1_TIME *t = which ? X509_get0_notAfter(cert) : X509_get0_notBefore(cert);
+    BIO *bio = BIO_new(BIO_s_mem());
+    if (bio == NULL) return -1;
+    ASN1_TIME_print(bio, t);
+    int32_t len = wn_bio_out(bio, out, cap);
+    BIO_free(bio);
+    return len;
+}
+
+/* Days between 1970-01-01 and y-m-d (proleptic Gregorian), Hinnant's algorithm. */
+static int64_t wn_days_from_civil(int64_t y, unsigned m, unsigned d) {
+    y -= m <= 2;
+    int64_t era = (y >= 0 ? y : y - 399) / 400;
+    unsigned yoe = (unsigned)(y - era * 400);
+    int doy = (153 * ((int)m + ((int)m > 2 ? -3 : 9)) + 2) / 5 + (int)d - 1;
+    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + (unsigned)doy;
+    return era * 146097 + (int64_t)doe - 719468;
+}
+
+/**
+ * Seconds since the epoch for `notBefore`/`notAfter` (Node's `PortableTimeGM`
+ * over `ASN1_TIME_to_tm`). `which`: 0 = from, 1 = to.
+ */
+WN_EXPORT(wn_x509_valid_time_seconds)(int32_t handle, int32_t which, double *out) {
+    X509 *cert = wn_x509(handle);
+    if (cert == NULL || out == NULL) return -1;
+    const ASN1_TIME *t = which ? X509_get0_notAfter(cert) : X509_get0_notBefore(cert);
+    struct tm tm;
+    memset(&tm, 0, sizeof(tm));
+    if (ASN1_TIME_to_tm(t, &tm) != 1) { wn_capture_error(); return -1; }
+    int64_t secs = wn_days_from_civil(tm.tm_year + 1900, (unsigned)(tm.tm_mon + 1),
+                                      (unsigned)tm.tm_mday) * 86400 +
+                   (int64_t)tm.tm_hour * 3600 + (int64_t)tm.tm_min * 60 + tm.tm_sec;
+    *out = (double)secs;
+    return 0;
+}
+
+/** Serial number as uppercase hex (`ASN1_INTEGER_to_BN` + `BN_bn2hex`). */
+WN_EXPORT(wn_x509_serial_number)(int32_t handle, uint8_t *out, int32_t cap) {
+    X509 *cert = wn_x509(handle);
+    if (cert == NULL) return -1;
+    ASN1_INTEGER *serial = X509_get_serialNumber(cert);
+    if (serial == NULL) return -1;
+    BIGNUM *bn = ASN1_INTEGER_to_BN(serial, NULL);
+    if (bn == NULL) { wn_capture_error(); return -1; }
+    char *hex = BN_bn2hex(bn);
+    BN_free(bn);
+    if (hex == NULL) { wn_capture_error(); return -1; }
+    int32_t len = (int32_t)strlen(hex);
+    if (out != NULL && cap >= len && len > 0) memcpy(out, hex, (size_t)len);
+    OPENSSL_free(hex);
+    return len;
+}
+
+/** `OBJ_nid2ln(X509_get_signature_nid())`; -1 when the NID is undefined. */
+WN_EXPORT(wn_x509_signature_algorithm)(int32_t handle, uint8_t *out, int32_t cap) {
+    X509 *cert = wn_x509(handle);
+    if (cert == NULL) return -1;
+    int nid = X509_get_signature_nid(cert);
+    if (nid == NID_undef) return -1;
+    const char *ln = OBJ_nid2ln(nid);
+    if (ln == NULL) return -1;
+    int32_t len = (int32_t)strlen(ln);
+    if (out != NULL && cap >= len && len > 0) memcpy(out, ln, (size_t)len);
+    return len;
+}
+
+/** `OBJ_obj2txt(..., 1)` of the certificate's signature algorithm. */
+WN_EXPORT(wn_x509_signature_algorithm_oid)(int32_t handle, uint8_t *out, int32_t cap) {
+    X509 *cert = wn_x509(handle);
+    if (cert == NULL) return -1;
+    const X509_ALGOR *alg = NULL;
+    X509_get0_signature(NULL, &alg, cert);
+    if (alg == NULL) return -1;
+    const ASN1_OBJECT *obj = NULL;
+    X509_ALGOR_get0(&obj, NULL, NULL, alg);
+    if (obj == NULL) return -1;
+    char buf[128];
+    int len = OBJ_obj2txt(buf, sizeof(buf), obj, 1);
+    if (len <= 0 || len >= (int)sizeof(buf)) return -1;
+    if (out != NULL && cap >= len) memcpy(out, buf, (size_t)len);
+    return len;
+}
+
+/** Extended key usage OIDs, newline-joined; -1 when the extension is absent. */
+WN_EXPORT(wn_x509_key_usage)(int32_t handle, uint8_t *out, int32_t cap) {
+    X509 *cert = wn_x509(handle);
+    if (cert == NULL) return -1;
+    STACK_OF(ASN1_OBJECT) *objs =
+        (STACK_OF(ASN1_OBJECT) *)X509_get_ext_d2i(cert, NID_ext_key_usage, NULL, NULL);
+    if (objs == NULL) return -1;
+    BIO *bio = BIO_new(BIO_s_mem());
+    if (bio == NULL) { sk_ASN1_OBJECT_pop_free(objs, ASN1_OBJECT_free); return -1; }
+    for (int i = 0; i < sk_ASN1_OBJECT_num(objs); i++) {
+        char buf[128];
+        OBJ_obj2txt(buf, sizeof(buf), sk_ASN1_OBJECT_value(objs, i), 1);
+        if (i != 0) BIO_write(bio, "\n", 1);
+        BIO_puts(bio, buf);
+    }
+    sk_ASN1_OBJECT_pop_free(objs, ASN1_OBJECT_free);
+    int32_t len = wn_bio_out(bio, out, cap);
+    BIO_free(bio);
+    return len;
+}
+
+/** `X509_check_ca(...) == 1`. */
+WN_EXPORT(wn_x509_ca)(int32_t handle) {
+    X509 *cert = wn_x509(handle);
+    if (cert == NULL) return -1;
+    return X509_check_ca(cert) == 1 ? 1 : 0;
+}
+
+/* --- SPKAC (legacy `crypto.Certificate`) ------------------------------------ */
+/*
+ * `ncrypto::VerifySpkac`/`ExportPublicKey`/`ExportChallenge`: a base64 SPKAC is
+ * a `NETSCAPE_SPKI`, and all three helpers just decode it and pull one part
+ * out. The base64 decoder is OpenSSL's own `NETSCAPE_SPKI_b64_decode` (i.e.
+ * `EVP_DecodeBlock`), whose leniency is observable — hence routing rather than
+ * re-implementing it.
+ */
+
+/** Decode a NUL-free base64 SPKAC; NULL when it is not one. */
+static NETSCAPE_SPKI *wn_spkac_decode(const uint8_t *input, int32_t len) {
+    if (input == NULL || len <= 0) return NULL;
+    char *buf = (char *)malloc((size_t)len + 1);
+    if (buf == NULL) return NULL;
+    memcpy(buf, input, (size_t)len);
+    buf[len] = '\0';
+    NETSCAPE_SPKI *spki = NETSCAPE_SPKI_b64_decode(buf, len);
+    free(buf);
+    return spki;
+}
+
+/** `NETSCAPE_SPKI_verify` against the embedded key: 1 true, 0 false, -1 error. */
+WN_EXPORT(wn_spkac_verify)(const uint8_t *input, int32_t len) {
+    NETSCAPE_SPKI *spki = wn_spkac_decode(input, len);
+    if (spki == NULL) return -1;
+    EVP_PKEY *pkey = X509_PUBKEY_get(spki->spkac->pubkey);
+    if (pkey == NULL) {
+        NETSCAPE_SPKI_free(spki);
+        wn_capture_error();
+        return -1;
+    }
+    int ok = NETSCAPE_SPKI_verify(spki, pkey) > 0 ? 1 : 0;
+    EVP_PKEY_free(pkey);
+    NETSCAPE_SPKI_free(spki);
+    return ok;
+}
+
+/** `PEM_write_bio_PUBKEY` of the embedded key; -1 when decoding failed. */
+WN_EXPORT(wn_spkac_public_key)(const uint8_t *input, int32_t len,
+                               uint8_t *out, int32_t cap) {
+    NETSCAPE_SPKI *spki = wn_spkac_decode(input, len);
+    if (spki == NULL) return -1;
+    EVP_PKEY *pkey = NETSCAPE_SPKI_get_pubkey(spki);
+    NETSCAPE_SPKI_free(spki);
+    if (pkey == NULL) { wn_capture_error(); return -1; }
+    BIO *bio = BIO_new(BIO_s_mem());
+    if (bio == NULL) { EVP_PKEY_free(pkey); return -1; }
+    int ok = PEM_write_bio_PUBKEY(bio, pkey) > 0;
+    EVP_PKEY_free(pkey);
+    if (!ok) { BIO_free(bio); wn_capture_error(); return -1; }
+    int32_t written = wn_bio_out(bio, out, cap);
+    BIO_free(bio);
+    return written;
+}
+
+/** The challenge as UTF-8 (`ASN1_STRING_to_UTF8`); -1 when decoding failed. */
+WN_EXPORT(wn_spkac_challenge)(const uint8_t *input, int32_t len,
+                              uint8_t *out, int32_t cap) {
+    NETSCAPE_SPKI *spki = wn_spkac_decode(input, len);
+    if (spki == NULL) return -1;
+    unsigned char *buf = NULL;
+    int size = ASN1_STRING_to_UTF8(&buf, spki->spkac->challenge);
+    NETSCAPE_SPKI_free(spki);
+    if (size < 0) { wn_capture_error(); return -1; }
+    if (out != NULL && cap >= size && size > 0) memcpy(out, buf, (size_t)size);
+    OPENSSL_free(buf);
+    return (int32_t)size;
 }
 
 /** ECDH / DH shared secret between our private key and a peer's public key. */

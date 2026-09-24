@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import { MemoryVfs } from '../src/node-runtime/vfs';
 import { NodeRuntime } from '../src/node-runtime/runtime';
+import { setOpensslEnabled } from '../src/node-runtime/bindings/openssl';
 
 /**
  * `crypto.X509Certificate` — a real DER/PEM certificate parser.
@@ -115,5 +116,48 @@ describe('crypto.X509Certificate unit surface', () => {
     expect(legacy.subject.CN).toBe('example.com');
     expect(legacy.infoAccess['OCSP - URI']).toEqual(['http://ocsp.example.com']);
     expect(legacy.serialNumber).toBe(leaf.serialNumber);
+  });
+});
+
+describe('crypto.X509Certificate engine parity', () => {
+  const read = (name: string): string => fs.readFileSync(`test/fixtures/x509/${name}`, 'utf8');
+
+  /** Every getter, so the two engines are compared on the whole surface. */
+  const snapshot = (cert: any): Record<string, unknown> => ({
+    subject: cert.subject,
+    issuer: cert.issuer,
+    subjectAltName: cert.subjectAltName,
+    infoAccess: cert.infoAccess,
+    validFrom: cert.validFrom,
+    validTo: cert.validTo,
+    validFromDate: cert.validFromDate.toISOString(),
+    validToDate: cert.validToDate.toISOString(),
+    keyUsage: cert.keyUsage,
+    serialNumber: cert.serialNumber,
+    signatureAlgorithm: cert.signatureAlgorithm,
+    signatureAlgorithmOid: cert.signatureAlgorithmOid,
+    fingerprint: cert.fingerprint,
+    fingerprint256: cert.fingerprint256,
+    fingerprint512: cert.fingerprint512,
+    ca: cert.ca,
+    raw: hex(cert.raw),
+    pem: cert.toString(),
+    legacy: cert.toLegacyObject(),
+    publicKeySpki: hex(cert.publicKey.export({ type: 'spki', format: 'der' })),
+  });
+
+  const hex = (bytes: Uint8Array): string => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+  it('produces identical getters with the wasm engine on and off', () => {
+    const crypto = boot();
+    for (const name of ['leaf.pem', 'ca.pem']) {
+      const pem = read(name);
+      setOpensslEnabled(true);
+      const withWasm = snapshot(new crypto.X509Certificate(pem));
+      setOpensslEnabled(false);
+      const withoutWasm = snapshot(new crypto.X509Certificate(pem));
+      setOpensslEnabled(true);
+      expect(withoutWasm, `${name} (js vs wasm)`).toEqual(withWasm);
+    }
   });
 });

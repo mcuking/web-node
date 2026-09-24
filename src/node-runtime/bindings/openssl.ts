@@ -761,3 +761,189 @@ export function opensslPkeyDecapsulate(
     free(ctPtr);
   }
 }
+
+// --- X509 certificates ------------------------------------------------------
+
+const textDecoder = new TextDecoder();
+
+/**
+ * Read a string-returning `wn_x509_*` entry point. The C side reports the
+ * required length when handed a null buffer, so the call happens twice (size,
+ * then fill) — the returned strings are small and this keeps away from
+ * fixed-size limits. `null` means "absent or failed"; the caller then falls back
+ * to its own implementation.
+ */
+function x509String(exportName: string, handle: number, extra: number[] = []): string | null {
+  const need = call<number>(exportName, handle, ...extra, 0, 0);
+  if (need < 0) return null;
+  if (need === 0) return '';
+  const ptr = call<number>('wn_alloc', need);
+  try {
+    const written = call<number>(exportName, handle, ...extra, ptr, need);
+    if (written < 0) return null;
+    return textDecoder.decode(bytes().subarray(ptr, ptr + written));
+  } finally {
+    free(ptr);
+  }
+}
+
+/** Parse a DER certificate; returns a handle, or `0` when it is not one. */
+export function opensslX509New(der: Uint8Array): number {
+  const [ptr, len] = push(der);
+  try {
+    begin();
+    return call<number>('wn_x509_new', ptr, len);
+  } finally {
+    free(ptr);
+  }
+}
+
+/** Release a certificate handle. Safe with `0`. */
+export function opensslX509Free(handle: number): void {
+  if (handle) call<number>('wn_x509_free', handle);
+}
+
+/** The certificate's canonical DER re-encoding, or `null`. */
+export function opensslX509ToDer(handle: number): Uint8Array | null {
+  const need = call<number>('wn_x509_to_der', handle, 0, 0);
+  if (need <= 0) return null;
+  const ptr = call<number>('wn_alloc', need);
+  try {
+    const written = call<number>('wn_x509_to_der', handle, ptr, need);
+    if (written < 0) return null;
+    return bytes().slice(ptr, ptr + written);
+  } finally {
+    free(ptr);
+  }
+}
+
+/** Multiline `X509_NAME_print_ex` of the subject. */
+export function opensslX509Subject(handle: number): string | null {
+  return x509String('wn_x509_subject', handle);
+}
+
+/** Multiline `X509_NAME_print_ex` of the issuer. */
+export function opensslX509Issuer(handle: number): string | null {
+  return x509String('wn_x509_issuer', handle);
+}
+
+/**
+ * Like {@link x509String}, but for the optional extensions: an absent extension
+ * comes back as an empty string, which the getters must report as `undefined`
+ * (Node returns `undefined`, not `''`). A present-but-empty GENERAL_NAMES /
+ * AUTHORITY_INFO_ACCESS is not representable in a valid certificate.
+ */
+function x509OptionalString(exportName: string, handle: number): string | null {
+  const value = x509String(exportName, handle);
+  return value === null || value === '' ? null : value;
+}
+
+/** Node's `SafeX509SubjectAltNamePrint`; `null` when the extension is absent. */
+export function opensslX509SubjectAltName(handle: number): string | null {
+  return x509OptionalString('wn_x509_subject_alt_name', handle);
+}
+
+/** Node's `SafeX509InfoAccessPrint`; `null` when the extension is absent. */
+export function opensslX509InfoAccess(handle: number): string | null {
+  return x509OptionalString('wn_x509_info_access', handle);
+}
+
+/** `ASN1_TIME_print` of `notBefore`/`notAfter` (`which`: 0 = from, 1 = to). */
+export function opensslX509ValidTimeString(handle: number, which: 0 | 1): string | null {
+  return x509String('wn_x509_valid_time_string', handle, [which]);
+}
+
+/** Epoch milliseconds of `notBefore`/`notAfter`. */
+export function opensslX509ValidTimeMs(handle: number, which: 0 | 1): number | null {
+  const ptr = call<number>('wn_alloc', 8);
+  try {
+    if (call<number>('wn_x509_valid_time_seconds', handle, which, ptr) !== 0) return null;
+    return new DataView(memory().buffer, ptr, 8).getFloat64(0, true) * 1000;
+  } finally {
+    free(ptr);
+  }
+}
+
+/** Uppercase-hex serial number (`BN_bn2hex`). */
+export function opensslX509SerialNumber(handle: number): string | null {
+  return x509String('wn_x509_serial_number', handle);
+}
+
+/** `OBJ_nid2ln` of the signature algorithm; `null` when the NID is undefined. */
+export function opensslX509SignatureAlgorithm(handle: number): string | null {
+  return x509String('wn_x509_signature_algorithm', handle);
+}
+
+/** Dotted-OID form of the signature algorithm. */
+export function opensslX509SignatureAlgorithmOid(handle: number): string | null {
+  return x509String('wn_x509_signature_algorithm_oid', handle);
+}
+
+/** Extended key usage OIDs; `null` when the extension is absent. */
+export function opensslX509KeyUsage(handle: number): string[] | null {
+  const value = x509OptionalString('wn_x509_key_usage', handle);
+  return value === null ? null : value.split('\n');
+}
+
+/** `X509_check_ca(...) == 1`. */
+export function opensslX509Ca(handle: number): boolean {
+  return call<number>('wn_x509_ca', handle) === 1;
+}
+
+// --- SPKAC (legacy `crypto.Certificate`) ------------------------------------
+
+/**
+ * `NETSCAPE_SPKI_verify` against the SPKAC's own key. `null` means the input is
+ * not a decodable SPKAC (or the key is unusable), so the caller falls back.
+ */
+export function opensslSpkacVerify(input: Uint8Array): boolean | null {
+  const [ptr, len] = push(input);
+  try {
+    begin();
+    const result = call<number>('wn_spkac_verify', ptr, len);
+    return result < 0 ? null : result === 1;
+  } finally {
+    free(ptr);
+  }
+}
+
+/** `PEM_write_bio_PUBKEY` of the SPKAC's key, or `null`. */
+export function opensslSpkacPublicKey(input: Uint8Array): Uint8Array | null {
+  const [ptr, len] = push(input);
+  try {
+    begin();
+    const need = call<number>('wn_spkac_public_key', ptr, len, 0, 0);
+    if (need < 0) return null;
+    const outPtr = call<number>('wn_alloc', Math.max(need, 1));
+    try {
+      const written = call<number>('wn_spkac_public_key', ptr, len, outPtr, need);
+      if (written < 0) return null;
+      return bytes().slice(outPtr, outPtr + written);
+    } finally {
+      free(outPtr);
+    }
+  } finally {
+    free(ptr);
+  }
+}
+
+/** The SPKAC challenge bytes, or `null`. */
+export function opensslSpkacChallenge(input: Uint8Array): Uint8Array | null {
+  const [ptr, len] = push(input);
+  try {
+    begin();
+    const need = call<number>('wn_spkac_challenge', ptr, len, 0, 0);
+    if (need < 0) return null;
+    if (need === 0) return new Uint8Array(0);
+    const outPtr = call<number>('wn_alloc', need);
+    try {
+      const written = call<number>('wn_spkac_challenge', ptr, len, outPtr, need);
+      if (written < 0) return null;
+      return bytes().slice(outPtr, outPtr + written);
+    } finally {
+      free(outPtr);
+    }
+  } finally {
+    free(ptr);
+  }
+}

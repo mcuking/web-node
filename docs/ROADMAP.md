@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-24（**阶段 H：M119 第五增量 ✅**——ECDH/DH 与 ML-KEM 截装切到 wasm；M119 仅剩 keygen 部分场景与 X509/SPKAC）
+> - **最后更新**：2026-09-24（**阶段 H：M119 第六增量 ✅**——X509Certificate 与 SPKAC 切到 wasm（打印辅助函数逐行搬到 C）；M119 仅剩 keygen 的少数场景，下一站 **M120 同步 syscall**）
 
 ---
 
@@ -97,7 +97,7 @@
   - **解锁**：`brotliCompress(Sync)` / `brotliDecompress(Sync)` / `zstdCompress(Sync)` / `zstdDecompress(Sync)`、四个流类、全部 `BROTLI_PARAM_*`/`ZSTD_c_*`/`ZSTD_d_*` 参数、字典、`pledgedSrcSize`、`stream/web` 的 `CompressionStream('brotli')`；仅 zip 存档助手仍响亮抛错。
   - **验收**：差分装置扩到 `tools/zlib-probe.cjs`（+ oracle → `test/fixtures/zlib.json`，**56 个观测键**），真 Node v26.9.0 vs web-node **逐字段 0 diff**（含参数、字典、流式、异步、错误形状、`stream/web` brotli）；`tsc --noEmit` 净 · `vitest run` **1011 passed / 2 skipped（120 文件）** · build（worker **689.29 kB**）。
 
-- [~] **M119 · `crypto` → OpenSSL 子集编 wasm（P4）**  ← 承接 M106 的 crypto 部分 🚧 2026-09-24（**摘要/HMAC ✅ + 对称密码与 KDF ✅ + Argon2 ✅ + RSA/EC/Ed25519 签名与 RSA 加解密 ✅ + ECDH/DH + ML-KEM 截装 ✅；仅剩 keygen 部分场景与 X509/SPKAC**）
+- [~] **M119 · `crypto` → OpenSSL 子集编 wasm（P4）**  ← 承接 M106 的 crypto 部分 🚧 2026-09-24（**摘要/HMAC ✅ + 对称密码与 KDF ✅ + Argon2 ✅ + RSA/EC/Ed25519 签名与 RSA 加解密 ✅ + ECDH/DH + ML-KEM 截装 ✅ + X509/SPKAC ✅；仅剩 keygen 的少数场景**）
   - **可行性（已退险）**：真 OpenSSL **3.5.8**（`deps/openssl/openssl`）用 wasi-sdk 编出 `libcrypto.a` 5.75 MB / `libssl.a` 0.85 MB，**0 error**；薄模块 `wn_openssl.wasm` **2.29 MB**，SHA-256/MD5/HMAC-SHA256 与真 Node **逐字节一致**。OpenSSL 没有 WASI target，新增自包含 target `native/openssl/99-wasi.conf`（`no-asm/no-shared/no-threads/no-sock/no-engine/no-legacy/no-secure-memory`）；构建走 OpenSSL 自己的 `Configure`+`make build_libs`，缓存到 `native/.openssl-build`。
   - **已交付增量（摘要路径）**：`native/src/wn_openssl.c` 的通用名 ABI（`EVP_MD_fetch` / 一次性+流式 digest / HMAC / XOF），`bindings/openssl.ts` 薄封装，`wasm/lazy.ts` 惰性加载（**不进启动期 `WASM_MODULES`**，避免 M107 的启动回退——解密后立刻后台拉取），`crypto/hash.ts` 在模块就绪后把全部摘要（md5/sha1/sha2/sha3/keccak/blake2/sm3/ripemd160/md5-sha1/shake）切到 OpenSSL，**未就绪或其他名则回退纯 JS**（两者逐字节相同，切换对调用者不可见）。
   - **剩余**：cipher（AES/ChaCha/DES/Camellia/ARIA/SM4/OCB/SIV/XTS/CCM/CBC-CTS）、KDF（pbkdf2/hkdf/scrypt/argon2）、非对称（RSA/EC/DH/ML-KEM）、X509/SPKAC 仍在纯 JS；后续增量逐个迁。
@@ -109,6 +109,8 @@
   - **剩余**：DH/ECDH 的 `diffieHellman()`、ML-KEM 的 `encapsulate`/`decapsulate`（C 侧就位，只差接线）、X509/SPKAC 仍纯 JS。
   - **已交付增量⑤（DH/ECDH + ML-KEM）**：`diffieHellman()`（ec/dh）走 `wn_pkey_derive`（域参数不匹配→回退纯 JS 抛 `ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS`）；ML-KEM 的 `encapsulate`/`decapsulate` 走 `wn_pkey_encapsulate`/`decapsulate`，密钥经 **SPKI/PKCS#8** 导入（`[0]` seed 与 `[1]` expanded 两种私钥形式 OpenSSL 都认）。**注意**：ML-KEM 的裸私钥接口 `EVP_PKEY_new_raw_private_key_ex` 要的是**扩展后的 `dk`**，不是 64 字节 seed。验收：ECDH 三曲线与 Node 逐字节相等、Node 的 `modp14` DH 对密钥相等、ML-KEM 三参数集与 Node 双向互验 + 与纯 JS FIPS 203 一致，另有“DER 能被 OpenSSL 导入”的路由探针（防静默回退）。`vitest run` **1041 passed / 2 skipped**。
   - **剩余**：非对称 **keygen** 的部分场景（rsa 非默认 publicExponent、ec 非 NIST 曲线、自定义 DH 参数、ml-kem）、**X509/SPKAC** 仍纯 JS。
+  - **已交付增量⑥（X509/SPKAC）**：`wn_openssl` 新增 `wn_x509_*`（解析 / DER 重编码 / subject / issuer / SAN / infoAccess / 生效期字符串与秒数 / 序号 / 签名算法名与 OID / EKU / `X509_check_ca`）与 `wn_spkac_*`（`NETSCAPE_SPKI` 的验签 / 公钥 PEM / challenge）。**关键认识**：getter 的字符串由 Node 自己的打印辅助函数决定（ncrypto 的 `PrintGeneralName`/`SafeX509*Print` + `X509_NAME_print_ex(kX509NameFlagsMultiline)`/`ASN1_TIME_print`/`BN_bn2hex`），所以**把那些辅助函数逐行搬到 C**（含 `IsSafeAltName`/`PrintAltName`/`GEN_*` 各类型与 `othername:` 前缀表），而不是在 JS 里继续“根据 DER 推”。`check*`/`verify`/`checkIssued`/`toLegacyObject` 仍用 DER 派生状态（指纹就是 DER 摘要，签验已走 wasm），避开在 JS 里重实现 `X509_check_host` 的 flag 语义。**两个实现细节**：① 字符串读取用“先问长度、再填缓冲”两步（C 侧传 NULL 只返长度）；② 缺失的可选扩展 C 侧返 0 长度，绑定层归一为 `null`（Node 是 `undefined`）。wasm 堆不回收，用 `FinalizationRegistry` 释放 handle。验收：`test/x509.test.ts` 与 `test/crypto-certificate.test.ts` 各新增“**开关引擎得到完全相同的输出**”门禁（X509 比 20 个字段含 raw/PEM/legacy/SPKI，SPKAC 比验签/challenge/公钥/空白宽松度），原有差分语料 0 diff。`vitest run` **1043 passed / 2 skipped**，`wn_openssl-Dl_5d2Si.wasm` **2479.56 kB**。
+  - **剩余**：非对称 **keygen** 的少数场景（rsa 非默认 publicExponent、ec 非 NIST 曲线、自定义 DH 参数、ml-kem）。
 
 - [ ] **M120 · 同步 syscall：SAB + `Atomics.wait` + FS-worker（P5）**  ← 吸收 M114、承接 M106 的 fs 部分
   - 真·同步 `fs` 在独立 worker 完成、主线程可阻塞等待；前置跨源隔离（COOP/COEP）；与现有 fs 语义差分 0 diff。

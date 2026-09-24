@@ -244,6 +244,20 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M119（第六增量）—— X509Certificate 与 SPKAC 切到 wasm
+
+**里程碑**：crypto 里最后两块纯 JS 表面（证书与 SPKAC）也改了道。
+
+- **X509**：`wn_openssl` 新增 `wn_x509_*`（`new`/`free`/`to_der`/`subject`/`issuer`/`subject_alt_name`/`info_access`/`valid_time_string`/`valid_time_seconds`/`serial_number`/`signature_algorithm`/`signature_algorithm_oid`/`key_usage`/`ca`）。**关键认识**：决定 getter 字符串的是 Node 自己的打印辅助函数（`deps/ncrypto` 的 `PrintGeneralName` / `SafeX509SubjectAltNamePrint` / `SafeX509InfoAccessPrint`，以及 `X509_NAME_print_ex` + `kX509NameFlagsMultiline`、`ASN1_TIME_print`、`BN_bn2hex`、`X509_check_ca`），所以它们被**逐行搬到 C**，而不是继续在 JS 里“根据 DER 推”。`bindings/openssl.ts` 的字符串读取用“先问长度、再填缓冲”两步（C 侧传 NULL 即只返长度），避免定长限制。
+- **可选扩展的"空 vs 缺失"**：`subjectAltName`/`infoAccess` 缺失时 Node 返回 `undefined`，而 C 侧对“无此扩展”返回 0 长度——绑定层把空串归一为 `null`（第一次跑差分就是在这里报 `"" vs null` 的）。
+- **生命周期**：wasm 堆不回收，用 `FinalizationRegistry` 在包装对象被回收时 `wn_x509_free`（未注册就只能泄漏）。
+- **SPKAC**：`wn_spkac_verify`/`public_key`/`challenge` 接 `NETSCAPE_SPKI_b64_decode` / `NETSCAPE_SPKI_verify` / `PEM_write_bio_PUBKEY` / `ASN1_STRING_to_UTF8`。base64 解码的“宽松度”是 OpenSSL `EVP_DecodeBlock` 的行为，所以也交给真身。
+- **没动的部分**：`checkHost`/`checkEmail`/`checkIP`/`checkIssued`/`checkPrivateKey`/`verify`/`toLegacyObject`/`fingerprint` 仍用 DER 派生状态（指纹就是 DER 的摘要，而签名/验签经 `asym.ts` 已经走 wasm）。这样两边语义一致，也避开了 `X509_check_host` 那套 flag 在 JS 里重实现的风险。
+- **验收**：`test/x509.test.ts` 新增“**开关引擎得到完全相同的 getter**”门禁（20 个字段，含 `raw`/PEM/legacy/SPKI 十六进制）；`test/crypto-certificate.test.ts` 同样加 SPKAC 的开关对比。原有差分语料（`test/fixtures/x509.json`、`test/fixtures/crypto-certificate.json`）**逐字段 0 diff**。`tsc --noEmit` 净 · `vitest run` **1043 passed / 2 skipped（124 文件）** · build（`wn_openssl-Dl_5d2Si.wasm` 2479.56 kB 独立资产、`runtime.worker-DefvwTSx.js` 711.20 kB）。
+- **M119 剩余**：非对称 **keygen** 的少数场景（rsa 非默认 `publicExponent`、ec 非 NIST 曲线、自定义 DH 参数、ml-kem）。
+
+---
+
 ### 2026-09-24 · M119（第五增量）—— DH/ECDH 与 ML-KEM 切到 wasm
 
 **里程碑**：C 侧的 `wn_pkey_*` 上一增量已经写好（含 `derive`/`encapsulate`/`decapsulate`），这一步把 JS 侧接上。

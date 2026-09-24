@@ -22,6 +22,12 @@
  */
 import { createPublicKey, verify, type KeyObject } from './asym';
 import { TAG, derEncode, derOidHex, derParse, pemEncode } from './der';
+import {
+  opensslReady,
+  opensslSpkacChallenge,
+  opensslSpkacPublicKey,
+  opensslSpkacVerify,
+} from '../bindings/openssl';
 
 /**
  * OpenSSL's `data_ascii2bin` table (crypto/evp/encode.c), verbatim. Values are
@@ -188,6 +194,12 @@ function resolveHash(sigAlgOidHex: string, signature: Uint8Array): string | null
 
 /** `verifySpkac` on already-coerced, non-empty input. */
 export function verifySpkacBytes(bytes: Uint8Array): boolean {
+  // OpenSSL owns the base64 leniency (`EVP_DecodeBlock` via
+  // `NETSCAPE_SPKI_b64_decode`), so prefer it whenever the module is loaded.
+  if (opensslReady()) {
+    const viaOpenSsl = opensslSpkacVerify(bytes);
+    if (viaOpenSsl !== null) return viaOpenSsl;
+  }
   const spkac = parseSpkac(bytes);
   if (spkac === null) return false;
   const hash = resolveHash(spkac.sigAlgOidHex, spkac.signature);
@@ -207,6 +219,10 @@ export function verifySpkacBytes(bytes: Uint8Array): boolean {
 
 /** `exportPublicKey` on already-coerced, non-empty input; `null` on failure. */
 export function exportPublicKeyBytes(bytes: Uint8Array): Uint8Array | null {
+  if (opensslReady()) {
+    const viaOpenSsl = opensslSpkacPublicKey(bytes);
+    if (viaOpenSsl !== null) return viaOpenSsl;
+  }
   const spkac = parseSpkac(bytes);
   if (spkac === null) return null;
   let der: Uint8Array;
@@ -221,6 +237,10 @@ export function exportPublicKeyBytes(bytes: Uint8Array): Uint8Array | null {
 
 /** `exportChallenge` on already-coerced, non-empty input; `null` on failure. */
 export function exportChallengeBytes(bytes: Uint8Array): Uint8Array | null {
+  if (opensslReady()) {
+    const viaOpenSsl = opensslSpkacChallenge(bytes);
+    if (viaOpenSsl !== null) return viaOpenSsl;
+  }
   const spkac = parseSpkac(bytes);
   if (spkac === null) return null;
   return spkac.challenge;
