@@ -451,3 +451,42 @@ export function opensslScrypt(
     free(pwPtr);
   }
 }
+
+/** RFC 9106 Argon2, or `null` when OpenSSL rejects the parameters. */
+export function opensslArgon2(
+  algorithm: 'ARGON2D' | 'ARGON2I' | 'ARGON2ID',
+  params: {
+    password: Uint8Array;
+    salt: Uint8Array;
+    secret: Uint8Array;
+    associatedData: Uint8Array;
+    lanes: number;
+    keylen: number;
+    memcost: number;
+    iterations: number;
+  },
+): Uint8Array | null {
+  const [algoPtr, algoLen] = pushName(algorithm);
+  const [pwPtr, pwLen] = push(params.password);
+  const [saltPtr, saltLen] = push(params.salt);
+  const [secretPtr, secretLen] = push(params.secret);
+  const [adPtr, adLen] = push(params.associatedData);
+  const outPtr = call<number>('wn_alloc', Math.max(params.keylen, 1));
+  try {
+    begin();
+    const written = call<number>(
+      'wn_argon2', algoPtr, algoLen, pwPtr, pwLen, saltPtr, saltLen,
+      secretPtr, secretLen, adPtr, adLen,
+      params.lanes, params.keylen, params.memcost, params.iterations, outPtr,
+    );
+    if (written < 0) return null;
+    return bytes().slice(outPtr, outPtr + written);
+  } finally {
+    free(outPtr);
+    free(adPtr);
+    free(secretPtr);
+    free(saltPtr);
+    free(pwPtr);
+    free(algoPtr);
+  }
+}

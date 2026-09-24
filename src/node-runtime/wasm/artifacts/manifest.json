@@ -11,8 +11,8 @@
   },
   "modules": {
     "wn_openssl.wasm": {
-      "bytes": 2298460,
-      "sha256": "b0ec1c5ecc46d4048dd38542b725c1c0aa5dbe5fafa11d30ad020b09ce683b8d"
+      "bytes": 2299198,
+      "sha256": "0001f3201a450df1e6b6603a677dc458c268fdb7bf7c213c7aaa0cf0d1ae28c9"
     }
   }
 }

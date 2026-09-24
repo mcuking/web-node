@@ -73,6 +73,19 @@ declare module 'node:crypto' {
     keylen: number,
     options: { N: number; r: number; p: number; maxmem: number },
   ): Uint8Array;
+  export function argon2Sync(
+    algorithm: string,
+    parameters: {
+      message: Uint8Array;
+      nonce: Uint8Array;
+      parallelism: number;
+      tagLength: number;
+      memory: number;
+      passes: number;
+      secret?: Uint8Array;
+      associatedData?: Uint8Array;
+    },
+  ): Uint8Array;
 }
 
 declare module 'node:url' {

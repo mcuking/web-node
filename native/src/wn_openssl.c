@@ -18,6 +18,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include <openssl/core_names.h>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -490,6 +491,64 @@ WN_EXPORT(wn_scrypt)(const uint8_t *pw, int32_t pwlen,
     int ok = EVP_PBE_scrypt((const char *)pw, (size_t)pwlen, salt, (size_t)saltlen,
                             (uint64_t)N, (uint64_t)r, (uint64_t)p,
                             (uint64_t)maxmem, out, (size_t)keylen);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return keylen;
+}
+
+/*
+ * RFC 9106 Argon2, via the default provider's ARGON2D / ARGON2I / ARGON2ID
+ * KDF. `algo` is the bare OpenSSL algorithm name (not NUL-terminated on the
+ * JS side).
+ *
+ * Deliberately omits `OSSL_KDF_PARAM_THREADS`: `deps/ncrypto/ncrypto.cc` only
+ * sets it (bumping `OSSL_set_max_threads` on a private library context) to
+ * spread lanes across OS threads, and our wasi OpenSSL is built with
+ * `thread_scheme=(none)`. Lane count is a *separate* parameter that defines
+ * the algorithm, so dropping the thread hint cannot change the output — it
+ * only keeps the computation on one lane at a time. The provider rejects
+ * `threads > lanes`, which is why raising lanes alone is safe here.
+ */
+WN_EXPORT(wn_argon2)(const char *algo, int32_t alen,
+                     const uint8_t *pw, int32_t pwlen,
+                     const uint8_t *salt, int32_t saltlen,
+                     const uint8_t *secret, int32_t secretlen,
+                     const uint8_t *ad, int32_t adlen,
+                     int32_t lanes, int32_t keylen,
+                     uint32_t memcost, uint32_t iter,
+                     uint8_t *out) {
+    char name[16];
+    if (alen <= 0 || alen >= (int32_t)sizeof(name)) return -1;
+    memcpy(name, algo, (size_t)alen);
+    name[alen] = '\0';
+
+    EVP_KDF *kdf = EVP_KDF_fetch(NULL, name, NULL);
+    if (kdf == NULL) { wn_capture_error(); return -1; }
+    EVP_KDF_CTX *kctx = EVP_KDF_CTX_new(kdf);
+    EVP_KDF_free(kdf);
+    if (kctx == NULL) { wn_capture_error(); return -1; }
+
+    uint32_t lanes_u = (uint32_t)lanes;
+    OSSL_PARAM params[9];
+    size_t i = 0;
+    params[i++] = OSSL_PARAM_construct_octet_string(
+        OSSL_KDF_PARAM_PASSWORD, (void *)pw, (size_t)pwlen);
+    params[i++] = OSSL_PARAM_construct_octet_string(
+        OSSL_KDF_PARAM_SALT, (void *)salt, (size_t)saltlen);
+    params[i++] = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_LANES, &lanes_u);
+    params[i++] = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_MEMCOST, &memcost);
+    params[i++] = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ITER, &iter);
+    if (secretlen > 0) {
+        params[i++] = OSSL_PARAM_construct_octet_string(
+            OSSL_KDF_PARAM_SECRET, (void *)secret, (size_t)secretlen);
+    }
+    if (adlen > 0) {
+        params[i++] = OSSL_PARAM_construct_octet_string(
+            OSSL_KDF_PARAM_ARGON2_AD, (void *)ad, (size_t)adlen);
+    }
+    params[i] = OSSL_PARAM_construct_end();
+
+    int ok = EVP_KDF_derive(kctx, out, (size_t)keylen, params);
+    EVP_KDF_CTX_free(kctx);
     if (ok != 1) { wn_capture_error(); return -1; }
     return keylen;
 }

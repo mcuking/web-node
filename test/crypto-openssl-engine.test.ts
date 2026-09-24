@@ -11,6 +11,7 @@
  */
 import { describe, expect, it, afterAll } from 'vitest';
 import {
+  argon2Sync,
   createCipheriv,
   createDecipheriv,
   hkdfSync,
@@ -24,6 +25,7 @@ import {
 } from '../src/node-runtime/bindings/openssl';
 import { createCipher, resolveCipher, type CipherSpec } from '../src/node-runtime/crypto/cipher';
 import { opensslCipherName } from '../src/node-runtime/crypto/openssl-cipher';
+import { argon2, type Argon2Params } from '../src/node-runtime/crypto/argon2';
 import { hkdf, pbkdf2, scrypt, resolveHash } from '../src/node-runtime/crypto/hash';
 
 afterAll(() => setOpensslEnabled(true));
@@ -280,6 +282,67 @@ describe('wn_openssl KDF engine', () => {
         ),
       );
       expect(hex(withJsEngine(() => scrypt(password, salt, keylen, params))), `js ${keylen}`).toBe(expected);
+    }
+  });
+
+  it('matches Node for Argon2 through both engines', () => {
+    const nonce = encoder.encode('a nonce for argon2');
+    const secret = encoder.encode('a side secret');
+    const ad = encoder.encode('associated data');
+    // One row per Argon2 type; the last two exercise `secret`/`associatedData`
+    // and extra lanes, the knobs the pure-JS fallback can get wrong quietly.
+    const rows: Array<{ algorithm: 'argon2d' | 'argon2i' | 'argon2id'; type: number; params: Argon2Params }> = [
+      ['argon2d', 0],
+      ['argon2i', 1],
+      ['argon2id', 2],
+    ].map(([algorithm, type]) => ({
+      algorithm: algorithm as 'argon2d' | 'argon2i' | 'argon2id',
+      type: type as number,
+      params: {
+        type: type as number,
+        password,
+        salt: nonce,
+        secret: new Uint8Array(0),
+        associatedData: new Uint8Array(0),
+        parallelism: 1,
+        tagLength: 32,
+        memory: 4096,
+        passes: 3,
+      },
+    }));
+    rows.push({
+      algorithm: 'argon2id',
+      type: 2,
+      params: {
+        type: 2,
+        password,
+        salt: nonce,
+        secret,
+        associatedData: ad,
+        parallelism: 4,
+        tagLength: 64,
+        memory: 1024, // 8 * lanes, the provider's documented floor
+        passes: 2,
+      },
+    });
+
+    for (const row of rows) {
+      const expected = hex(withWasmEngine(() => argon2(row.params)));
+      expect(expected, `wasm ${row.algorithm}`).toBe(
+        hex(
+          argon2Sync(row.algorithm, {
+            message: row.params.password,
+            nonce: row.params.salt,
+            parallelism: row.params.parallelism,
+            tagLength: row.params.tagLength,
+            memory: row.params.memory,
+            passes: row.params.passes,
+            secret: row.params.secret.length ? row.params.secret : undefined,
+            associatedData: row.params.associatedData.length ? row.params.associatedData : undefined,
+          }),
+        ),
+      );
+      expect(hex(withJsEngine(() => argon2(row.params))), `js ${row.algorithm}`).toBe(expected);
     }
   });
 });

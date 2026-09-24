@@ -1,13 +1,17 @@
-// Argon2 (RFC 9106) — pure JS. Node's `crypto.argon2(Sync)` sits on the bundled
-// OpenSSL Argon2, which a page does not have, so this reproduces the algorithm
-// directly: BLAKE2b for H0 / H', the BlaMka compression function, and the
-// data-dependent (d) / data-independent (i) / hybrid (id) index generation.
+// Argon2 (RFC 9106). Node's `crypto.argon2(Sync)` sits on the bundled
+// OpenSSL Argon2; the wasi OpenSSL subset (M119) now provides that too, so
+// `argon2()` prefers it and falls back to the pure-JS implementation below
+// (byte-identical, so the choice is invisible). The fallback reproduces the
+// algorithm directly: BLAKE2b for H0 / H', the BlaMka compression function,
+// and the data-dependent (d) / data-independent (i) / hybrid (id) index
+// generation.
 //
 // 64-bit words are held as BigInt. The block fills are the hot path, but the
 // inputs a page can realistically hash in a browser stay well inside the range
 // where this is fast enough, and it keeps the arithmetic obviously correct.
 
 import { blake2b } from './blake2b';
+import { opensslArgon2, opensslReady } from '../bindings/openssl';
 
 const MASK64 = (1n << 64n) - 1n;
 
@@ -276,7 +280,44 @@ function fillSegment(memory: BigUint64Array, instance: Instance, pass: number, l
   }
 }
 
+const ARGON2_OPENSSL_NAMES: Record<number, 'ARGON2D' | 'ARGON2I' | 'ARGON2ID'> = {
+  [ARGON2_D]: 'ARGON2D',
+  [ARGON2_I]: 'ARGON2I',
+  [ARGON2_ID]: 'ARGON2ID',
+};
+
+/** Which engine {@link argon2} would use right now (diagnostics/tests). */
+export function argon2Engine(): 'openssl' | 'js' {
+  return opensslReady() ? 'openssl' : 'js';
+}
+
+/**
+ * RFC 9106 Argon2. Prefers the wasi OpenSSL subset once it has been
+ * instantiated (M119) — it is the same code Node runs; the pure-JS fallback
+ * below is byte-identical, so the swap is invisible to callers.
+ */
 export function argon2(params: Argon2Params): Uint8Array {
+  const { type, password, salt, secret, associatedData, parallelism, tagLength, memory, passes } = params;
+  if (opensslReady()) {
+    const opensslName = ARGON2_OPENSSL_NAMES[type];
+    if (opensslName !== undefined) {
+      const viaOpenSsl = opensslArgon2(opensslName, {
+        password,
+        salt,
+        secret,
+        associatedData,
+        lanes: parallelism,
+        keylen: tagLength,
+        memcost: memory,
+        iterations: passes,
+      });
+      if (viaOpenSsl !== null) return viaOpenSsl;
+    }
+  }
+  return argon2Js(params);
+}
+
+function argon2Js(params: Argon2Params): Uint8Array {
   const { type, password, salt, secret, associatedData, parallelism, tagLength, memory, passes } = params;
   const lanes = parallelism;
 
