@@ -244,6 +244,24 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M120（第二增量）—— FS-worker + SAB 同步通道：`fsyncSync` 真的阻塞到落盘
+
+**里程碑**：浏览器没有阻塞式系统调用，而 OPFS 的句柄**只能用 `await` 拿**。这就死锁了：运行时 worker 想阻塞，但那个被阻塞的事件循环正是本该跑 `await` 的那个。解法是把 OPFS 挪到**第二个 worker**，两边用共享内存对话。现在 `fs.fsyncSync` / `fdatasyncSync` 是真同步：不返回则一定已写入 OPFS。
+
+- **同步通道（`src/sync/sab-rpc.ts`）**：控制块（16 个 int32）+ 随请求走的 payload `SharedArrayBuffer`。调用方把请求写进共享内存 → `postMessage` 摆一下 → `Atomics.wait` 停车；对端干完（**可以是异步的**）把结果写回同一块内存 → `Atomics.notify` 叫醒。**`postMessage` 无法送答案**，这是关键：停在 `Atomics.wait` 的线程不跑消息处理器，以事件形式送达的回复它永远看不到。
+- **绝不挂死**：每次停车带超时（默认 10 s），超时抛 `ERR_WEB_NODE_SYNC_TIMEOUT`。停在 `Atomics.wait` 的 worker 无法被中断，若对端死了/没起来，否则整个标签页就冻在那里、无法诊断。
+- **响应可能装不下**：调用方不知道响应该多大（空请求也得装下一个错误信封）。对端发现装不下就回 `STATUS_RETRY` + 需要的字节数，调用方扩容后重发。**重发时对端回放缓存而不重跑**——否则重试一个非幂等操作就是真 bug。
+- **FS-worker（`src/worker/fs.worker.ts` + `vfs/fs-service.ts` + `vfs/opfs-store.ts`）**：只有它是 OPFS 的唯一写入者（同步句柄每文件独占）。**同步通道与异步通道共用一个队列**——否则一个 fire-and-forget 的快照可能插到它本该在后的持久写入中间。worker 壳只负责把端口接到 `FsService`，活的决策全在后者，因此能脱离 worker 单测。
+- **持久化分两层**：全树快照仍走异步 debounce（npm install 成千文件，不该每个都往返），**单个文件的持久写入**走同步通道（`FS_OP_PUT` = 写+`flush`）。`OpfsFileStore.put` 每个操作开/关句柄，不长期持有（一个 npm install 会碰成千文件，每文件一个句柄会直接耗尽）。
+- **不隔离时如实降级**：gh-pages 不发 COOP/COEP → 无 `SharedArrayBuffer` → `OpfsWorkerPersistence.create()` 返回 null，回退到原来的直接后端（`durable = false`，`sync()` 为 no-op）。这与真实 `fsync` 在只用页缓存的文件系统上的行为相同，且 UI 会写明 `sync fs: async` / `durable`。
+- **`fsyncSync` 的完整形状**：fd 的强制转换在**原生层**（`lib/fs.js` 是直接调 binding 的），所以由绑定层复刻（`validateInt32(fd,'fd',0)` 的全部四种错误：非数 → `ERR_INVALID_ARG_TYPE`、非整/NaN → `ERR_OUT_OF_RANGE … must be an integer`、越界 → `ERR_OUT_OF_RANGE … >= 0 && <= 2147483647`）；fd < 3 是 `EINVAL`（stdio 在这里不是文件）、未分配过的 fd 是 `EBADF`（**无 path**，native 的 `uv_fsync` 拿的是 fd）。差分夹具 **51 → 65 个观测键**（新增 14 个 fsync/fdatasync 项），与真 Node 逐字相等。
+- **浏览器专属的坑（Node 测不出来）**：**`TextDecoder` 拒绝解码指向 `SharedArrayBuffer` 的视图**（缓冲区可能在解码器底下被 detach）。两个解码点（`decodePut` 的路径、`decodeError` 的信封）都先 `slice()` 复制。Node 允许，所以普通单测永远抓不到；现在的测试会**给 `TextDecoder` 打桩模拟浏览器的限制**，从构造上防止回归。
+- **验收**：`tsc --noEmit` 净 · `vitest run` **1083 passed / 2 skipped（126 文件）** · build（新增独立 chunk `fs.worker-*.js` **4.89 kB**；worker 仍 **719.97 kB**）。
+- **端到端证据（这是本条的关键）**：本地 dev（COOP/COEP → 跨源隔离）页面里跑一个程序：写文件 → `fsyncSync` → 打印标记 → **原地自旋 4 秒**（运行着程序的 runtime worker 被卡住，400 ms 的 debounce 快照不可能跑）。页面在这段窗口里**从 OPFS 直接读回原始字节**，与写入的 token **完全相等** → 字节只能是同步通道写进去的。终端同步显示 `__PROOF__…` / `__SPUN__` / `[exit 0]`。UI 的 facts 行显示 `sync fs: durable`。
+- **下一步（M120 本体剩余）**：把同步通道扩到其他可阻塞表面（`fdatasync` 已在；`read`/`stat` 这类需从 OPFS 读回的同步操作，能把「只在 OPFS 里的文件」也纳入 `readFileSync`）。
+
+---
+
 ### 2026-09-24 · M120（首个增量）—— 退险 spike：runtime worker 里 `Atomics.wait` 真的能阻塞
 
 **背景**：M120（同步 syscall）的前置是**跨源隔离**（COOP/COEP）→ 才有 `SharedArrayBuffer`；而 gh-pages **不发这两个头**，所以线上验证只能走本地 dev/preview。先做一次性 spike，确认机制可行再投入。

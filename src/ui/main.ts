@@ -330,6 +330,7 @@ client.on('ready', (runtimeInfo) => {
     `${runtimeInfo.wasmModules.length} wasm modules`,
     `${runtimeInfo.vendoredFiles.length} vendored node files`,
     runtimeInfo.persistSupported ? 'OPFS: on' : 'OPFS: unavailable',
+    runtimeInfo.persistence === 'fs-worker' ? 'sync fs: durable' : 'sync fs: async',
   ].join('  ·  ');
   writeTerminal('web-node runtime ready.\n', 'ok');
   if (runtimeInfo.wasmModules.length) {

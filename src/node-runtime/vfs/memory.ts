@@ -46,6 +46,34 @@ export class MemoryVfs implements Vfs {
 
   #listeners = new Set<(change: VfsChange) => void>();
 
+  /**
+   * Where `sync()` sends a file's bytes (`fs.fsyncSync`). Injected by the
+   * runtime once a durable backend exists; without one, `sync()` is a no-op
+   * because the memory tree is already the authority for every reader.
+   */
+  #syncSink: ((path: string, data: Uint8Array) => void) | null = null;
+
+  /** Install (or clear with `null`) the durable-write sink. */
+  setSyncSink(sink: ((path: string, data: Uint8Array) => void) | null): void {
+    this.#syncSink = sink;
+  }
+
+  /**
+   * `fs.fsyncSync` / `fdatasyncSync`: block until this file's bytes are durable.
+   *
+   * The bytes come from the tree, which is the authority — the backing store may
+   * be behind (persistence is debounced). A path with no file behind it is a
+   * no-op, not an error: an fd stays usable after its file is unlinked, and
+   * `fsync` on a directory descriptor is legal on Linux. Node reports both as
+   * success.
+   */
+  sync(path: string): void {
+    const resolved = p.resolve(this.#cwd, path);
+    const entry = this.#entries.get(resolved);
+    if (!entry || entry.type !== 'file') return;
+    this.#syncSink?.(resolved, entry.data);
+  }
+
   subscribe(listener: (change: VfsChange) => void): () => void {
     this.#listeners.add(listener);
     return () => {

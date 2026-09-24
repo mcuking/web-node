@@ -124,6 +124,50 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
     if (!fds.delete(fd)) throw new VfsError('EBADF', 'close', String(fd));
   }
 
+  /**
+   * Node's fd coercion (`lib/internal/validators.js`'s `validateInt32(fd, 'fd', 0)`).
+   *
+   * The check is not in `lib/fs.js` — `fsyncSync` calls the native binding
+   * directly — so it belongs here, at the layer that *is* the native binding.
+   * Reproducing it through the vendored error constructors keeps the wording
+   * byte-identical, including the `Received an instance of Object` rendering.
+   */
+  function coerceFd(fd: unknown): number {
+    const codes = (ctx.requireBuiltin?.('internal/errors') as
+      | { codes?: Record<string, new (...args: unknown[]) => Error> }
+      | undefined)?.codes;
+    if (typeof fd !== 'number') {
+      const Ctor = codes?.ERR_INVALID_ARG_TYPE;
+      if (Ctor) throw new Ctor('fd', 'number', fd);
+      throw new TypeError(`The "fd" argument must be of type number. Received ${String(fd)}`);
+    }
+    const fail = (detail: string): never => {
+      const Ctor = codes?.ERR_OUT_OF_RANGE;
+      if (Ctor) throw new Ctor('fd', detail, fd);
+      throw new RangeError(`The value of "fd" is out of range. It must be ${detail}. Received ${fd}`);
+    };
+    if (!Number.isInteger(fd)) fail('an integer');
+    if (fd < 0 || fd > 2147483647) fail('>= 0 && <= 2147483647');
+    return fd;
+  }
+
+  /**
+   * `fsync`/`fdatasync` on an fd.
+   *
+   * Measured against Node v26.9.0: the stdio descriptors are not files here, so
+   * they report `EINVAL: invalid argument, fsync` (no path — the call runs on an
+   * fd); an fd the table has never handed out is `EBADF`. A real file forwards to
+   * the VFS, which blocks until the bytes are durable when a durable backend is
+   * attached.
+   */
+  function fsyncFd(rawFd: unknown, syscall: 'fsync' | 'fdatasync'): void {
+    const fd = coerceFd(rawFd);
+    if (fd < 3) throw new VfsError('EINVAL', syscall);
+    const entry = fds.get(fd);
+    if (!entry) throw new VfsError('EBADF', syscall);
+    vfs.sync?.(entry.path);
+  }
+
   function readSync(fd: number, buffer: Uint8Array, offset = 0, length = buffer.byteLength - offset, position: number | null = null): number {
     if (fd === 0) return 0; // stdin: EOF in the browser
     const entry = fds.get(fd);
@@ -898,9 +942,8 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
       next.set(data.subarray(0, Math.min(len, data.byteLength)));
       vfs.writeFile(entry.path, next);
     },
-    fsyncSync: () => undefined,
-    fdatasyncSync: () => undefined,
-    realpathSync: (path: string) => vfs.realpath(path),
+    fsyncSync: (fd: number) => fsyncFd(fd, 'fsync'),
+    fdatasyncSync: (fd: number) => fsyncFd(fd, 'fdatasync'),    realpathSync: (path: string) => vfs.realpath(path),
     // `lib/fs.js` calls this positionally: (path, maxRetries, recursive,
     // retryDelay). `validateRmOptionsSync` has already applied `force`/EISDIR
     // logic before we get here, so a missing path is a no-op (as in native Rimraf).
@@ -992,9 +1035,8 @@ export const fsBinding: BindingFactory = (ctx: BindingContext) => {
         next.set(data.subarray(0, Math.min(len, data.byteLength)));
         vfs.writeFile(path, next);
       }, token),
-    fsync: (_fd: number, token?: unknown) => wrap(() => undefined, token),
-    fdatasync: (_fd: number, token?: unknown) => wrap(() => undefined, token),
-    fchmod: (fd: number, mode: number, token?: unknown) => wrap(() => vfs.chmod(fdPath(fd), mode), token),
+    fsync: (fd: number, token?: unknown) => wrap(() => fsyncFd(fd, 'fsync'), token),
+    fdatasync: (fd: number, token?: unknown) => wrap(() => fsyncFd(fd, 'fdatasync'), token),    fchmod: (fd: number, mode: number, token?: unknown) => wrap(() => vfs.chmod(fdPath(fd), mode), token),
     chmod: (path: string, mode: number, token?: unknown) => wrap(() => vfs.chmod(path, mode), token),
     // The VFS has no ownership model, so the chown family and timestamp setters
     // succeed as no-ops (matching how a real permission-less FS behaves).

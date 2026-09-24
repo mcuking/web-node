@@ -153,3 +153,24 @@ declare module 'node:crypto' {
 declare module 'node:url' {
   export function fileURLToPath(url: string | URL): string;
 }
+
+/**
+ * Only what `test/sab-channel.test.ts` needs: the M120 sync channel has to be
+ * proven against a *real* second thread, since parking in `Atomics.wait` is only
+ * meaningful when another thread can wake it.
+ */
+declare module 'node:worker_threads' {
+  export interface WorkerOptions {
+    eval?: boolean;
+    workerData?: unknown;
+    transferList?: readonly unknown[];
+  }
+  export class Worker {
+    constructor(filename: string | URL, options?: WorkerOptions);
+    on(event: 'message', listener: (value: unknown) => void): this;
+    on(event: 'error', listener: (error: Error) => void): this;
+    on(event: 'exit', listener: (code: number) => void): this;
+    terminate(): Promise<number>;
+  }
+  export const parentPort: { postMessage(value: unknown): void } | null;
+}

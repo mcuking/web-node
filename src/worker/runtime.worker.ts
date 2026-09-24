@@ -1,6 +1,11 @@
 /// <reference lib="webworker" />
 import { NodeRuntime, ProcessExit } from '../node-runtime/runtime';
-import { MemoryVfs, OpfsPersistence } from '../node-runtime/vfs';
+import {
+  MemoryVfs,
+  OpfsPersistence,
+  OpfsWorkerPersistence,
+  type Persistence,
+} from '../node-runtime/vfs';
 import { VENDORED, installVendored, vendoredLoaded } from '../node-runtime/vendored';
 import { loadWasmModule } from '../node-runtime/wasm/lazy';
 import { loadWasmModules, wasmModuleNames } from '../node-runtime/wasm';
@@ -86,6 +91,12 @@ type Request =
 export interface RuntimeInfo {
   persistSupported: boolean;
   restored: boolean;
+  /**
+   * Which storage backend is live. `fs-worker` means `fs.fsyncSync` really
+   * blocks until the bytes are in OPFS (M120); `direct` means persistence is
+   * asynchronous and a sync flush is a no-op (no cross-origin isolation).
+   */
+  persistence: 'fs-worker' | 'direct' | 'none';
   files: string[];
   bindings: string[];
   /** 已加载的 native→WASM 模块（M115）。 */
@@ -104,7 +115,22 @@ type Response =
   | { id: number; type: 'httpEnd' }
   | { id: number; type: 'ready'; info: RuntimeInfo };
 
-const persistence = new OpfsPersistence('web-node-project');
+/**
+ * Storage backend.
+ *
+ * `OpfsWorkerPersistence` is preferred: it runs OPFS in a second worker so a
+ * blocking `fsyncSync` can park the runtime worker in `Atomics.wait` while that
+ * worker does the `await`ing. It needs cross-origin isolation (COOP/COEP) for
+ * `SharedArrayBuffer`, which GitHub Pages does not send — there the direct
+ * backend keeps working, just without a synchronous flush.
+ */
+const persistence: Persistence =
+  OpfsWorkerPersistence.create({ rootName: 'web-node-project' }) ??
+  new OpfsPersistence('web-node-project');
+
+const persistenceKind: RuntimeInfo['persistence'] =
+  persistence.durable ? 'fs-worker' : OpfsPersistence.supported ? 'direct' : 'none';
+
 let runtime: NodeRuntime | null = null;
 let vfs: MemoryVfs | null = null;
 
@@ -193,6 +219,11 @@ async function init(id: number): Promise<void> {
 
   if (!hasRestored) writeAll(v, DEMO_FILES);
 
+  // Durable `fsync` rides this sink. Without a durable backend there is nothing
+  // to wait for, so the sink stays unset and `fsync` degrades to a no-op — the
+  // same answer a real filesystem gives when its writes sit in a page cache.
+  if (persistence.durable) v.setSyncSink((path, data) => persistence.sync(path, data));
+
   vfs = v;
   runtime = new NodeRuntime({
     vfs: v,
@@ -211,6 +242,7 @@ async function init(id: number): Promise<void> {
     info: {
       persistSupported: OpfsPersistence.supported,
       restored: hasRestored,
+      persistence: persistenceKind,
       files: listTree(v),
       bindings: runtime.realm.bindingIds,
       wasmModules: wasmModuleNames(),

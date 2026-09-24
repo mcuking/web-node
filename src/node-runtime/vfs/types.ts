@@ -315,8 +315,20 @@ export interface Vfs {
   /** Resolve a (possibly relative) path against the current working directory. */
   resolve(p: PathLike): string;
 
-  /** `fs.realpath`: resolve the path and verify it exists (syscall `lstat`). */
+  /**
+   * `fs.realpath`: resolve the path and verify it exists (syscall `lstat`).
+   */
   realpath(p: PathLike): string;
+
+  /**
+   * Make one file durable: hand its current bytes to backing storage and do not
+   * return until they are there (`fs.fsyncSync` / `fdatasyncSync`).
+   *
+   * Omitted by a VFS with nowhere to flush to; the binding then runs the call
+   * as a no-op, which is what a real `fsync` does on a filesystem whose writes
+   * sit in a page cache.
+   */
+  sync?(path: string): void;
 
   /**
    * Observe changes to the tree. Returns an unsubscribe function.

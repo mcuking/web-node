@@ -1,15 +1,22 @@
-import type { MemoryVfs } from './memory';
+import type { Persistence, SnapshotSource } from './persistence';
 import { encodeBase64, decodeBase64 } from './base64';
 
 /**
- * OPFS-backed persistence for the in-memory VFS.
+ * OPFS-backed persistence for the in-memory VFS — the backend used when the FS
+ * worker is unavailable (no cross-origin isolation, so no `SharedArrayBuffer`).
  *
  * The memory tree stays authoritative (fast, synchronous). This sidecar writes
  * a debounced snapshot into the Origin Private File System so a page reload
  * restores the project. OPFS sync access handles (`createSyncAccessHandle`) are
  * only available inside a Worker, which is where the runtime lives.
+ *
+ * It cannot honour a *synchronous* flush: the handles it needs are created by
+ * `await`ing, and the thread that wants to block is the very thread that would
+ * have to run the continuation. `durable` is therefore `false` and `sync()` is a
+ * no-op — `fs.writeFileSync` still reaches OPFS, just on the debounce.
  */
-export class OpfsPersistence {
+export class OpfsPersistence implements Persistence {
+  readonly durable = false;
   #rootName: string;
   #dir: FileSystemDirectoryHandle | null = null;
   #timer: number | null = null;
@@ -36,7 +43,7 @@ export class OpfsPersistence {
   }
 
   /** Schedule a flush; multiple calls within the debounce window collapse into one. */
-  schedule(vfs: MemoryVfs): void {
+  schedule(vfs: SnapshotSource): void {
     if (!OpfsPersistence.supported) return;
     this.#pending = true;
     if (this.#timer !== null) return;
@@ -49,7 +56,7 @@ export class OpfsPersistence {
   }
 
   /** Write the full snapshot to OPFS. */
-  async flush(vfs: MemoryVfs): Promise<void> {
+  async flush(vfs: SnapshotSource): Promise<void> {
     if (!OpfsPersistence.supported) return;
     const dir = await this.#ensureDir();
     const snapshot = vfs.snapshot();
@@ -116,4 +123,12 @@ export class OpfsPersistence {
       /* ignore */
     }
   }
+
+  /**
+   * Not supported by this backend: see the class comment. The bytes are already
+   * in the authoritative memory tree and will be mirrored on the next debounce,
+   * so the call is a no-op rather than an error — the same thing a real `fsync`
+   * does on a filesystem that keeps its writes in a page cache.
+   */
+  sync(_path: string, _data: Uint8Array): void {}
 }

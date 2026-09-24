@@ -88,6 +88,30 @@ out.utimesENOENT = shape(() => fs.utimesSync(miss, 0, 0));
 out.linkENOENT = shape(() => fs.linkSync(miss, base + '/lnk'));
 out.symlinkENOTDIR = shape(() => fs.symlinkSync('t', file + '/s'));
 
+// ---- fsync / fdatasync (M120) ----
+// The fd is coerced by the native layer, not by lib/fs.js, so these pin the
+// conversion errors as well as the descriptor states. stdout/stderr are pipes
+// here (the oracle runs the probe with a pipe), which is what makes EINVAL the
+// answer rather than a successful flush.
+{
+  const fd = fs.openSync(file, 'r+');
+  out.fsyncOk = shape(() => fs.fsyncSync(fd));
+  out.fdatasyncOk = shape(() => fs.fdatasyncSync(fd));
+  fs.closeSync(fd);
+  out.fsyncClosed = shape(() => fs.fsyncSync(fd));
+  out.fsyncUnknown = shape(() => fs.fsyncSync(999));
+  out.fsyncStdin = shape(() => fs.fsyncSync(0));
+  out.fsyncStdout = shape(() => fs.fsyncSync(1));
+  out.fdatasyncStderr = shape(() => fs.fdatasyncSync(2));
+  out.fsyncNegative = shape(() => fs.fsyncSync(-1));
+  out.fsyncFractional = shape(() => fs.fsyncSync(1.5));
+  out.fsyncNaN = shape(() => fs.fsyncSync(NaN));
+  out.fsyncTooBig = shape(() => fs.fsyncSync(2147483648));
+  out.fsyncUndefined = shape(() => fs.fsyncSync(undefined));
+  out.fsyncString = shape(() => fs.fsyncSync('3'));
+  out.fsyncObject = shape(() => fs.fsyncSync({}));
+}
+
 // ---- error object shape ----
 {
   let e;

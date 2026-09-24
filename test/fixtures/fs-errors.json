@@ -306,6 +306,78 @@
     "dest": "<d>/a.txt/s",
     "message": "ENOTDIR: not a directory, symlink 't' -> '<d>/a.txt/s'"
   },
+  "fsyncOk": "no-throw",
+  "fdatasyncOk": "no-throw",
+  "fsyncClosed": {
+    "code": "EBADF",
+    "syscall": "fsync",
+    "errno": -9,
+    "name": "Error",
+    "message": "EBADF: bad file descriptor, fsync"
+  },
+  "fsyncUnknown": {
+    "code": "EBADF",
+    "syscall": "fsync",
+    "errno": -9,
+    "name": "Error",
+    "message": "EBADF: bad file descriptor, fsync"
+  },
+  "fsyncStdin": {
+    "code": "EINVAL",
+    "syscall": "fsync",
+    "errno": -22,
+    "name": "Error",
+    "message": "EINVAL: invalid argument, fsync"
+  },
+  "fsyncStdout": {
+    "code": "EINVAL",
+    "syscall": "fsync",
+    "errno": -22,
+    "name": "Error",
+    "message": "EINVAL: invalid argument, fsync"
+  },
+  "fdatasyncStderr": {
+    "code": "EINVAL",
+    "syscall": "fdatasync",
+    "errno": -22,
+    "name": "Error",
+    "message": "EINVAL: invalid argument, fdatasync"
+  },
+  "fsyncNegative": {
+    "code": "ERR_OUT_OF_RANGE",
+    "name": "RangeError",
+    "message": "The value of \"fd\" is out of range. It must be >= 0 && <= 2147483647. Received -1"
+  },
+  "fsyncFractional": {
+    "code": "ERR_OUT_OF_RANGE",
+    "name": "RangeError",
+    "message": "The value of \"fd\" is out of range. It must be an integer. Received 1.5"
+  },
+  "fsyncNaN": {
+    "code": "ERR_OUT_OF_RANGE",
+    "name": "RangeError",
+    "message": "The value of \"fd\" is out of range. It must be an integer. Received NaN"
+  },
+  "fsyncTooBig": {
+    "code": "ERR_OUT_OF_RANGE",
+    "name": "RangeError",
+    "message": "The value of \"fd\" is out of range. It must be >= 0 && <= 2147483647. Received 2147483648"
+  },
+  "fsyncUndefined": {
+    "code": "ERR_INVALID_ARG_TYPE",
+    "name": "TypeError",
+    "message": "The \"fd\" argument must be of type number. Received undefined"
+  },
+  "fsyncString": {
+    "code": "ERR_INVALID_ARG_TYPE",
+    "name": "TypeError",
+    "message": "The \"fd\" argument must be of type number. Received type string ('3')"
+  },
+  "fsyncObject": {
+    "code": "ERR_INVALID_ARG_TYPE",
+    "name": "TypeError",
+    "message": "The \"fd\" argument must be of type number. Received an instance of Object"
+  },
   "errIsError": true,
   "errCtor": "Error",
   "errName": "Error",
