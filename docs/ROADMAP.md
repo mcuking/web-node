@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-24（**阶段 H：M119 第七增量 ✅**——全曲线 EC/RSA 指数走 wasm、`getCurves()` 与 Node 逐项一致、绑定清单加永久门禁；M119 仅剩自定义 DH 参数与 ml-kem，下一站 **M120 同步 syscall**）
+> - **最后更新**：2026-09-24（**阶段 H：M119 第七增量 ✅**——全曲线 EC/RSA 指数走 wasm、`getCurves()` 与 Node 逐项一致、绑定清单加永久门禁；新增「native 层实现方式总表」；M119 仅剩自定义 DH 参数与 ml-kem，下一站 **M120 同步 syscall**）
 
 ---
 
@@ -58,6 +58,47 @@
 > **阶段 C 结清（2026-09-23）**：M99（zlib）→ **M116** ✅、M100（histogram）→ **M117** ✅（均已在此完成）；M101 移入本阶段（见下）。
 > **技术路线（甲）**：能编真上游 C/C++ 的（zlib/histogram/brotli/zstd/ada/OpenSSL 子集）用 **wasi-sdk** 编；syscall 层**不编 libuv**，改用 **SAB + `Atomics.wait` + FS-worker**。
 > **设计文档**：[`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`](superpowers/specs/2026-09-23-native-to-wasm-design.md)。接入缝 = `REGISTRY`（把 `zlib`/`crypto` 从 `UNSUPPORTED_BINDINGS` 移回并指向 wasm）；产物 = 带内容哈希的独立资产 + 惰性实例化。
+
+### native 层实现方式总表（2026-09-24 盘点）
+
+> 回答「哪些 native 是用真 C/C++ 编 wasm、哪些是 TS 自研、哪些只保形状」这一个问题，一张表说完。
+> 「native」= Node 的 `internalBinding()` 背后那层（不是 JS 模块本身）。三种落地手法加两类例外：
+>
+> **① 真上游 C/C++ → wasm**（阶段 H 主线，`src/node-runtime/wasm/artifacts/`）：
+>
+> | wasm 模块 | 上游源码 | 接入点（binding / 模块） | 体积 | 里程碑 |
+> |---|---|---|---|---|
+> | `wn_stub` | 手写桩 | `wn_stub`（冒烟） | 46.5 KB | M115 |
+> | `wn_zlib` | `deps/zlib` **1.3.2.1-motley**（11 `.c` 原封） | binding `zlib` | 108.8 KB | M116 |
+> | `wn_histogram` | `deps/histogram`（hdr_histogram）+ 逐行移植 `src/histogram.cc` | binding `performance`（`Histogram`/ELD） | 257.7 KB | M117 |
+> | `wn_brotli` | `deps/brotli` **1.2.0**（36 `.c` 原封） | binding `zlib`（brotli 半边） | 847.4 KB | M118 |
+> | `wn_zstd` | `deps/zstd` **1.5.7**（27 `.c` 原封，不开多线程） | binding `zlib`（zstd 半边） | 484.0 KB | M118 |
+> | `wn_openssl` | `deps/openssl` **3.5.8** 子集（自包含 WASI target） | `crypto` **模块**（TS 层直驱，**不是** binding） | 2481.8 KB | M119 |
+>
+> **② TS 自研（等价实现，`origin: 'web-node'`）**——模块还在，地基换成能在标签页里跑的东西：
+>
+> | 模块 | 文件 | 替换掉的 native binding | 手法 |
+> |---|---|---|---|
+> | `net` | `builtins/net.ts` | `tcp_wrap` `udp_wrap` `pipe_wrap` `stream_pipe` `js_stream` | 进程内虚拟 TCP：端口表 + 双工字节管道（`net/network.ts`） |
+> | `http` | `builtins/http.ts` | `http_parser` | TS HTTP/1.1（`Content-Length`/chunked、keep-alive、连接池） |
+> | `https` | `builtins/https.ts` | `tls_wrap`（表面） | `http` 实现套 TLS 名；TLS 材料只记录不使用 |
+> | `dns` | `builtins/dns.ts` | `cares_wrap` | loopback-only 解析器（每个名字都解析到回环） |
+> | `child_process` | `builtins/child_process.ts` + `shell/sh.ts` | `process_wrap` `spawn_sync` `signal_wrap` | 第二模块注册表 + 真 mini-shell 解析器 + IPC 通道 |
+> | `worker_threads` | `builtins/worker-threads.ts` + `proc/worker.ts` | （无线程 binding） | 同事件循环第二注册表 + 真 `MessageChannel`（无真并行） |
+> | `crypto` | `builtins/crypto.ts` + `crypto/*.ts` | `crypto` | TS 编排，**底层就是 `wn_openssl`**（未就绪回退纯 JS，对调用者不可见） |
+> | `zlib` | `builtins/zlib.ts`（移植 `lib/zlib.js`） | `zlib` | JS 层移植，**底层是 `wn_zlib`/`wn_brotli`/`wn_zstd`** |
+> | `vfs` | `builtins/vfs.ts` | `fs`（部分） | 自研虚拟文件系统 |
+> | `process` / `module` | `builtins/{process,module}.ts` | `module_wrap` 等 | 自研（图/加载器是本运行时自己的） |
+>
+> **③ 只保形状、握手响亮抛错**：`tls`（`builtins/tls.ts`）——类层次（`SecureContext`/`TLSSocket`）、配置面、48 字节 ticket-key 存储是真的；**任何需要真握手的东西抛 `NotImplementedError`**，不编造值。
+>
+> **④ 无浏览器对应物 → `unsupported()` 代理**（`builtins/unsupported.ts`）：`sqlite` `ffi` `wasi` `wasm_web_api` `webstorage` `block_list`。规则：**import 不炸**（Vite 那种副作用导入必须能过），**属性被调用即抛**类型化错误；`isatty` 等无害属性给真值。
+>
+> **⑤ 不需要（编译/模块机制）**：`builtins` `cjs_lexer` `module_wrap` `ipc_serdes` `options` `internal_only_v8` `locks` `watchdog` —— 本运行时的 loader/图是自研的，没有 V8 编译缓存或原生源码文本要发。
+>
+> **附：registered binding 的三个来源**（共 41 个，含 `wn_stub`）——**wasm 支撑** 3（`wn_stub`/`zlib`/`performance`）、**TS 手写 shim** 38（`fs`/`buffer`/`timers`/`errors`/`serdes`/`contextify`/`v8`/`url`/…，多为小表面或宿主能力桥接）、**刻意不提供** 31（见 `UNSUPPORTED_BINDINGS`，由 `test/bindings-surface.test.ts` + `test/fixtures/node-bindings.json` 锁死）。JS 模块层的真源码 vendored（119+ 文件：stream/events/util/assert/perf_hooks/…）不算 native，但正是「JS 层用 Node 自己的 `lib/`」这一半目标。
+
+---
 
 - [x] **M115 · wasm 工具链 + binding 接入缝（P0）** ✅ 2026-09-23
   - **工具链**：装 **wasi-sdk 34.0**（`~/wasi-sdk-34.0`，clang 23.1.0-wasi-sdk + wasi-libc + wasm-ld；可用 `WASI_SDK_PATH` 覆盖）。构建入口 `native/build.mjs`（`npm run build:native [-- --inspect]`），产物写到 `src/node-runtime/wasm/artifacts/`（**提交进仓库**，部署/CI 不需工具链）并附 `manifest.json`（工具链版本 + sha256）。
