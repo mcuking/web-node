@@ -13,6 +13,11 @@
  * failure; `wn_openssl_last_error()` then yields the OpenSSL error string
  * (same shape as Node's: `error:1C80006B:Provider routines::wrong final block
  * length`).
+ *
+ * The public-key half (`wn_pkey_*`) is generic EVP_PKEY plumbing: keys are
+ * built from DER (or from raw bytes for the fixed-length algorithms) and the
+ * operations name their digest, so RSA / EC / Ed25519 / DH / ML-KEM all share
+ * one surface instead of one entry point per algorithm.
  */
 #include <stdint.h>
 #include <string.h>
@@ -24,6 +29,8 @@
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/kdf.h>
+#include <openssl/rsa.h>
+#include <openssl/x509.h>
 
 /* WASI has no getpid; OpenSSL only uses it for DRBG fork-detection. */
 int getpid(void) { return 1; }
@@ -551,4 +558,387 @@ WN_EXPORT(wn_argon2)(const char *algo, int32_t alen,
     EVP_KDF_CTX_free(kctx);
     if (ok != 1) { wn_capture_error(); return -1; }
     return keylen;
+}
+
+/* --- public keys (EVP_PKEY) ------------------------------------------------- */
+
+/* Node's `crypto.constants` padding numbers, so JS can pass them through. */
+enum {
+    WN_PAD_NONE = 0,
+    WN_PAD_PKCS1 = 1,
+    WN_PAD_NO_PADDING = 3,
+    WN_PAD_OAEP = 4,
+    WN_PAD_X931 = 5,
+    WN_PAD_PSS = 6,
+};
+
+static EVP_PKEY *wn_pkey(int32_t handle) { return (EVP_PKEY *)(intptr_t)handle; }
+
+/** Copy a not-necessarily-NUL-terminated wasm string into `buf`. */
+static const char *wn_str(const char *src, int32_t len, char *buf, size_t cap) {
+    if (len <= 0 || len >= (int32_t)cap) return NULL;
+    memcpy(buf, src, (size_t)len);
+    buf[len] = '\0';
+    return buf;
+}
+
+/**
+ * Generate a key pair. `name` is the OpenSSL algorithm ("RSA", "EC",
+ * "ED25519", "DH", …); `group` is the named group/curve for the algorithms
+ * that take one (EC, DH); `bits` the key size for RSA. Returns a private-key
+ * handle (0 on failure) — the public half is derived by exporting it.
+ */
+WN_EXPORT(wn_pkey_keygen)(const char *name, int32_t nlen,
+                          const char *group, int32_t glen, int32_t bits) {
+    char namebuf[64];
+    if (wn_str(name, nlen, namebuf, sizeof(namebuf)) == NULL) return 0;
+
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(NULL, namebuf, NULL);
+    if (ctx == NULL) { wn_capture_error(); return 0; }
+    if (EVP_PKEY_keygen_init(ctx) != 1) { EVP_PKEY_CTX_free(ctx); wn_capture_error(); return 0; }
+
+    if (bits > 0) {
+        /* Only RSA-style keygen takes a bit count; others keep their default. */
+        if (EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, bits) != 1) {
+            wn_capture_error();
+            EVP_PKEY_CTX_free(ctx);
+            return 0;
+        }
+    }
+    if (glen > 0) {
+        char groupbuf[64];
+        if (wn_str(group, glen, groupbuf, sizeof(groupbuf)) == NULL) {
+            EVP_PKEY_CTX_free(ctx);
+            return 0;
+        }
+        OSSL_PARAM params[2];
+        params[0] = OSSL_PARAM_construct_utf8_string(OSSL_PKEY_PARAM_GROUP_NAME, groupbuf, 0);
+        params[1] = OSSL_PARAM_construct_end();
+        if (EVP_PKEY_CTX_set_params(ctx, params) != 1) {
+            EVP_PKEY_CTX_free(ctx);
+            wn_capture_error();
+            return 0;
+        }
+    }
+
+    EVP_PKEY *pkey = NULL;
+    if (EVP_PKEY_keygen(ctx, &pkey) != 1) {
+        EVP_PKEY_CTX_free(ctx);
+        wn_capture_error();
+        return 0;
+    }
+    EVP_PKEY_CTX_free(ctx);
+    return (int32_t)(intptr_t)pkey;
+}
+
+/** Import a private (PKCS#8/PKCS#1/SEC1) or public (SPKI/PKCS#1) DER key. */
+WN_EXPORT(wn_pkey_from_der)(const uint8_t *der, int32_t len, int32_t is_private) {
+    const unsigned char *p = der;
+    EVP_PKEY *pkey = is_private ? d2i_AutoPrivateKey(NULL, &p, (long)len)
+                                : d2i_PUBKEY(NULL, &p, (long)len);
+    if (pkey == NULL) { wn_capture_error(); return 0; }
+    return (int32_t)(intptr_t)pkey;
+}
+
+/** Import a fixed-length raw key (Ed25519, ML-KEM, X25519, …). */
+WN_EXPORT(wn_pkey_from_raw)(const char *name, int32_t nlen,
+                            const uint8_t *data, int32_t dlen, int32_t is_private) {
+    char namebuf[64];
+    if (wn_str(name, nlen, namebuf, sizeof(namebuf)) == NULL) return 0;
+    EVP_PKEY *pkey = is_private
+        ? EVP_PKEY_new_raw_private_key_ex(NULL, namebuf, NULL, data, (size_t)dlen)
+        : EVP_PKEY_new_raw_public_key_ex(NULL, namebuf, NULL, data, (size_t)dlen);
+    if (pkey == NULL) { wn_capture_error(); return 0; }
+    return (int32_t)(intptr_t)pkey;
+}
+
+/** Serialise a key as DER, writing at most `cap` bytes; returns the length. */
+WN_EXPORT(wn_pkey_to_der)(int32_t handle, int32_t is_private, uint8_t *out, int32_t cap) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey == NULL) return -1;
+    unsigned char *p = out;
+    int len = is_private ? i2d_PrivateKey(pkey, &p) : i2d_PUBKEY(pkey, &p);
+    if (len <= 0) { wn_capture_error(); return -1; }
+    if (len > cap) { wn_capture_error(); return -1; }
+    return (int32_t)len;
+}
+
+/** Byte length of the DER (or raw) encoding, so JS can size its buffer. */
+WN_EXPORT(wn_pkey_der_size)(int32_t handle, int32_t is_private) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey == NULL) return -1;
+    int len = is_private ? i2d_PrivateKey(pkey, NULL) : i2d_PUBKEY(pkey, NULL);
+    if (len <= 0) { wn_capture_error(); return -1; }
+    return (int32_t)len;
+}
+
+/** Byte length of the raw key encoding (0 when the algorithm has none). */
+WN_EXPORT(wn_pkey_raw_size)(int32_t handle, int32_t is_private) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey == NULL) return -1;
+    size_t len = 0;
+    int ok = is_private ? EVP_PKEY_get_raw_private_key(pkey, NULL, &len)
+                        : EVP_PKEY_get_raw_public_key(pkey, NULL, &len);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return (int32_t)len;
+}
+
+WN_EXPORT(wn_pkey_to_raw)(int32_t handle, int32_t is_private, uint8_t *out, int32_t cap) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey == NULL) return -1;
+    size_t len = (size_t)cap;
+    int ok = is_private ? EVP_PKEY_get_raw_private_key(pkey, out, &len)
+                        : EVP_PKEY_get_raw_public_key(pkey, out, &len);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return (int32_t)len;
+}
+
+WN_EXPORT(wn_pkey_size)(int32_t handle) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey == NULL) return -1;
+    int size = EVP_PKEY_get_size(pkey);
+    if (size <= 0) { wn_capture_error(); return -1; }
+    return (int32_t)size;
+}
+
+WN_EXPORT(wn_pkey_free)(int32_t handle) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey != NULL) EVP_PKEY_free(pkey);
+    return 0;
+}
+
+/**
+ * Apply Node's `padding`/`saltLength` (and, for OAEP, the digest/label) to a
+ * signing context. Only RSA understands these; other algorithms pass 0 and
+ * keep OpenSSL's defaults.
+ */
+static int wn_set_sign_padding(EVP_PKEY_CTX *pctx, int32_t padding, int32_t saltlen) {
+    switch (padding) {
+        case WN_PAD_PKCS1:
+            return EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PADDING) == 1;
+        case WN_PAD_X931:
+            return EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_X931_PADDING) == 1;
+        case WN_PAD_NO_PADDING:
+            return EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_NO_PADDING) == 1;
+        case WN_PAD_PSS:
+            if (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) != 1) return 0;
+            /* 0 leaves OpenSSL's default (max salt on sign, auto on verify). */
+            if (saltlen != 0 && EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, saltlen) != 1) return 0;
+            return 1;
+        default:
+            return 1;
+    }
+}
+
+/**
+ * Sign `data`. An empty `md` signs the message directly (Ed25519); otherwise
+ * OpenSSL hashes it first. `padding`/`saltlen` are Node's constants (0 = the
+ * algorithm default). Returns the signature length, or -1.
+ */
+WN_EXPORT(wn_pkey_sign)(int32_t handle, const char *md, int32_t mdlen,
+                        int32_t padding, int32_t saltlen,
+                        const uint8_t *data, int32_t dlen,
+                        uint8_t *out, int32_t cap) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey == NULL) return -1;
+    char mdbuf[64];
+    const char *mdname = mdlen > 0 ? wn_str(md, mdlen, mdbuf, sizeof(mdbuf)) : NULL;
+    if (mdlen > 0 && mdname == NULL) return -1;
+    EVP_MD *mdobj = mdname != NULL ? EVP_MD_fetch(NULL, mdname, NULL) : NULL;
+    if (mdname != NULL && mdobj == NULL) { wn_capture_error(); return -1; }
+
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    if (ctx == NULL) { EVP_MD_free(mdobj); return -1; }
+    EVP_PKEY_CTX *pctx = NULL;
+    int ok = EVP_DigestSignInit(ctx, &pctx, mdobj, NULL, pkey);
+    if (ok == 1 && padding != WN_PAD_NONE && pctx != NULL) {
+        ok = wn_set_sign_padding(pctx, padding, saltlen);
+    }
+    size_t siglen = 0;
+    if (ok == 1) ok = EVP_DigestSign(ctx, NULL, &siglen, data, (size_t)dlen);
+    if (ok == 1 && siglen <= (size_t)cap) {
+        ok = EVP_DigestSign(ctx, out, &siglen, data, (size_t)dlen);
+    } else if (ok == 1) {
+        ok = 0;
+    }
+    EVP_MD_CTX_free(ctx);
+    EVP_MD_free(mdobj);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return (int32_t)siglen;
+}
+
+/** Verify `sig` over `data`. Returns 1 (valid), 0 (invalid) or -1 (error). */
+WN_EXPORT(wn_pkey_verify)(int32_t handle, const char *md, int32_t mdlen,
+                          int32_t padding, int32_t saltlen,
+                          const uint8_t *data, int32_t dlen,
+                          const uint8_t *sig, int32_t siglen) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey == NULL) return -1;
+    char mdbuf[64];
+    const char *mdname = mdlen > 0 ? wn_str(md, mdlen, mdbuf, sizeof(mdbuf)) : NULL;
+    if (mdlen > 0 && mdname == NULL) return -1;
+    EVP_MD *mdobj = mdname != NULL ? EVP_MD_fetch(NULL, mdname, NULL) : NULL;
+    if (mdname != NULL && mdobj == NULL) { wn_capture_error(); return -1; }
+
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    if (ctx == NULL) { EVP_MD_free(mdobj); return -1; }
+    EVP_PKEY_CTX *pctx = NULL;
+    int ok = EVP_DigestVerifyInit(ctx, &pctx, mdobj, NULL, pkey);
+    if (ok == 1 && padding != WN_PAD_NONE && pctx != NULL) {
+        ok = wn_set_sign_padding(pctx, padding, saltlen);
+    }
+    int res = ok == 1 ? EVP_DigestVerify(ctx, sig, (size_t)siglen, data, (size_t)dlen) : -1;
+    EVP_MD_CTX_free(ctx);
+    EVP_MD_free(mdobj);
+    if (res == 1) return 1;
+    if (res == 0) return 0;
+    wn_capture_error();
+    return -1;
+}
+
+/** Apply Node's `padding` (plus OAEP digest/label) to an encrypt context. */
+static int wn_set_encrypt_padding(EVP_PKEY_CTX *ctx, int32_t padding,
+                                  const char *md, int32_t mdlen,
+                                  const uint8_t *label, int32_t labellen) {
+    switch (padding) {
+        case WN_PAD_PKCS1:
+            return EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_PADDING) == 1;
+        case WN_PAD_NO_PADDING:
+            return EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_NO_PADDING) == 1;
+        case WN_PAD_OAEP: {
+            if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) != 1) return 0;
+            if (mdlen > 0) {
+                char mdbuf[64];
+                const char *mdname = wn_str(md, mdlen, mdbuf, sizeof(mdbuf));
+                if (mdname == NULL) return 0;
+                EVP_MD *mdobj = EVP_MD_fetch(NULL, mdname, NULL);
+                if (mdobj == NULL) return 0;
+                int ok = EVP_PKEY_CTX_set_rsa_oaep_md(ctx, mdobj) == 1;
+                EVP_MD_free(mdobj);
+                if (!ok) return 0;
+            }
+            if (labellen > 0) {
+                /* `set0` takes ownership, so hand it a copy OpenSSL can free. */
+                void *copy = OPENSSL_memdup(label, (size_t)labellen);
+                if (copy == NULL) return 0;
+                if (EVP_PKEY_CTX_set0_rsa_oaep_label(ctx, copy, labellen) != 1) {
+                    OPENSSL_free(copy);
+                    return 0;
+                }
+            }
+            return 1;
+        }
+        default:
+            return 1;
+    }
+}
+
+/** RSA-encrypt `data` (or any key that supports `EVP_PKEY_encrypt`). */
+WN_EXPORT(wn_pkey_encrypt)(int32_t handle, int32_t padding,
+                           const char *md, int32_t mdlen,
+                           const uint8_t *label, int32_t labellen,
+                           const uint8_t *data, int32_t dlen,
+                           uint8_t *out, int32_t cap) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey == NULL) return -1;
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_pkey(NULL, pkey, NULL);
+    if (ctx == NULL) { wn_capture_error(); return -1; }
+    size_t outlen = 0;
+    int ok = EVP_PKEY_encrypt_init(ctx);
+    if (ok == 1) ok = wn_set_encrypt_padding(ctx, padding, md, mdlen, label, labellen);
+    if (ok == 1) ok = EVP_PKEY_encrypt(ctx, NULL, &outlen, data, (size_t)dlen);
+    if (ok == 1 && outlen <= (size_t)cap) {
+        ok = EVP_PKEY_encrypt(ctx, out, &outlen, data, (size_t)dlen);
+    } else if (ok == 1) {
+        ok = 0;
+    }
+    EVP_PKEY_CTX_free(ctx);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return (int32_t)outlen;
+}
+
+/** RSA-decrypt `data`. Returns the plaintext length, or -1. */
+WN_EXPORT(wn_pkey_decrypt)(int32_t handle, int32_t padding,
+                           const char *md, int32_t mdlen,
+                           const uint8_t *label, int32_t labellen,
+                           const uint8_t *data, int32_t dlen,
+                           uint8_t *out, int32_t cap) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey == NULL) return -1;
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_pkey(NULL, pkey, NULL);
+    if (ctx == NULL) { wn_capture_error(); return -1; }
+    size_t outlen = 0;
+    int ok = EVP_PKEY_decrypt_init(ctx);
+    if (ok == 1) ok = wn_set_encrypt_padding(ctx, padding, md, mdlen, label, labellen);
+    if (ok == 1) ok = EVP_PKEY_decrypt(ctx, NULL, &outlen, data, (size_t)dlen);
+    if (ok == 1 && outlen <= (size_t)cap) {
+        ok = EVP_PKEY_decrypt(ctx, out, &outlen, data, (size_t)dlen);
+    } else if (ok == 1) {
+        ok = 0;
+    }
+    EVP_PKEY_CTX_free(ctx);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return (int32_t)outlen;
+}
+
+/** ECDH / DH shared secret between our private key and a peer's public key. */
+WN_EXPORT(wn_pkey_derive)(int32_t handle, int32_t peer, uint8_t *out, int32_t cap) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    EVP_PKEY *peerkey = wn_pkey(peer);
+    if (pkey == NULL || peerkey == NULL) return -1;
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_pkey(NULL, pkey, NULL);
+    if (ctx == NULL) { wn_capture_error(); return -1; }
+    size_t outlen = 0;
+    int ok = EVP_PKEY_derive_init(ctx);
+    if (ok == 1) ok = EVP_PKEY_derive_set_peer(ctx, peerkey);
+    if (ok == 1) ok = EVP_PKEY_derive(ctx, NULL, &outlen);
+    if (ok == 1 && outlen <= (size_t)cap) {
+        ok = EVP_PKEY_derive(ctx, out, &outlen);
+    } else if (ok == 1) {
+        ok = 0;
+    }
+    EVP_PKEY_CTX_free(ctx);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return (int32_t)outlen;
+}
+
+/**
+ * KEM encapsulation (ML-KEM). Writes the ciphertext to `ct` and the shared
+ * secret to `ss`; `out[0]`/`out[1]` receive their lengths.
+ */
+WN_EXPORT(wn_pkey_encapsulate)(int32_t handle,
+                               uint8_t *ct, int32_t ctcap,
+                               uint8_t *ss, int32_t sscap,
+                               int32_t *out) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey == NULL) return -1;
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_pkey(NULL, pkey, NULL);
+    if (ctx == NULL) { wn_capture_error(); return -1; }
+    size_t ctlen = (size_t)ctcap;
+    size_t sslen = (size_t)sscap;
+    int ok = EVP_PKEY_encapsulate_init(ctx, NULL);
+    if (ok == 1) ok = EVP_PKEY_encapsulate(ctx, ct, &ctlen, ss, &sslen);
+    EVP_PKEY_CTX_free(ctx);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    out[0] = (int32_t)ctlen;
+    out[1] = (int32_t)sslen;
+    return 0;
+}
+
+/** KEM decapsulation (ML-KEM). `out[0]` receives the shared-secret length. */
+WN_EXPORT(wn_pkey_decapsulate)(int32_t handle,
+                               const uint8_t *ct, int32_t ctlen,
+                               uint8_t *ss, int32_t sscap,
+                               int32_t *out) {
+    EVP_PKEY *pkey = wn_pkey(handle);
+    if (pkey == NULL) return -1;
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_pkey(NULL, pkey, NULL);
+    if (ctx == NULL) { wn_capture_error(); return -1; }
+    size_t sslen = (size_t)sscap;
+    int ok = EVP_PKEY_decapsulate_init(ctx, NULL);
+    if (ok == 1) ok = EVP_PKEY_decapsulate(ctx, ss, &sslen, ct, (size_t)ctlen);
+    EVP_PKEY_CTX_free(ctx);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    out[0] = (int32_t)sslen;
+    return 0;
 }

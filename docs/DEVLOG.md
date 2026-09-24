@@ -244,6 +244,30 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M119（第三增量）—— Argon2 切到 wasm OpenSSL 的 ARGON2D/I/ID
+
+**里程碑**：`crypto.argon2(Sync)` 之前跑纯 JS 的 RFC 9106 实现（BLAKE2b + BlaMka + 索引生成），现在优先跑 default provider 的 Argon2 KDF，未就绪/名字取不到则**原地回退**（两边逐字节一致）。
+
+- **C 侧**：`wn_argon2(algo, …, lanes, keylen, memcost, iter, out)` —— `EVP_KDF_fetch(NULL, "ARGON2D|I|ID")` + `EVP_KDF_derive`，参数名照 `deps/ncrypto/ncrypto.cc`（`OSSL_KDF_PARAM_PASSWORD/SALT/ARGON2_LANES/ARGON2_MEMCOST/ITER/SECRET/ARGON2_AD`）。
+- **刻意不传 `OSSL_KDF_PARAM_THREADS`**：ncrypto 只在 `lanes > 1` 时建私有 `OSSL_LIB_CTX` 并 `OSSL_set_max_threads` 把 lane 分给 OS 线程，而我们的 wasi 构建是 `thread_scheme=(none)`；**lane 数是独立于线程数的算法参数**，不传只是不在多 lane 上并行，输出不变。
+- **验收**：`test/crypto-openssl-engine.test.ts` 的 KDF 段增加 Argon2 用例（argon2d/i/id 各一组 + 一组带 `secret`/`associatedData`/4 lanes/64 字节 tag），对 **wasm / 纯 JS / 宿主 `node:crypto.argon2Sync`** 三方逐字节比对。
+
+---
+
+### 2026-09-24 · M119（第四增量）—— 修好 OpenSSL 的 BIGNUM（wasm32 是用 32 位的 `long`），非对称切到 wasm
+
+**里程碑**：把 RSA / EC / Ed25519 的**签名、验签、密钥生成**与 **RSA 加解密**迁到 wasm 的 OpenSSL。刚上手就撞到一个**一直被藏着的大雷**：整个 M119 的 OpenSSL 构建其实一直是坏的（BIGNUM 全错）。
+
+- **抓到的真 bug（根因）**：`native/openssl/99-wasi.conf` 的 `bn_ops` 写成了 **`SIXTY_FOUR_BIT_LONG`**，它把 `BN_ULONG` 定义为 **`unsigned long`**、`BN_BITS2` 定义为 **64**。而 wasm32 是 **ILP32**（`long` 32 位、`long long` 64 位）——于是“字长 32、位数当 64”，**每一个 BIGNUM 运算都在错**。摘要/密码/KDF 不碰 BN，所以前三个增量全绿也看不出问题；一旦碰 RSA/EC（`d2i_PUBKEY` 解 INTEGER、EC 建域、keygen）就现形：`bn_div_words` 内的 `assert` 失败 → wasm `unreachable`。**改成 `SIXTY_FOUR_BIT`**（用 `unsigned long long`，即 Windows x64/LLP64 的路子）后修复。
+- **顺带让缓存失效机制可信**：`native/build.mjs` 的 OpenSSL 缓存标记原本只写时间戳——改了 `99-wasi.conf` 会**静默复用旧库**。现在标记里写入配置文件内容的 **sha256**，改了配置就自动重建。
+- **C 侧扩面（通用 EVP_PKEY，不按算法分开）**：新增 `wn_pkey_keygen`（按名取算法 + 可选 group + RSA bits）、`wn_pkey_from_der`（`d2i_AutoPrivateKey`/`d2i_PUBKEY`）、`wn_pkey_from_raw`、`wn_pkey_to_der`/`wn_pkey_der_size`、`wn_pkey_to_raw`/`wn_pkey_raw_size`、`wn_pkey_size`、`wn_pkey_free`，以及 `wn_pkey_sign`/`wn_pkey_verify`（空 md 名即*直接签消息*，对应 Ed25519）、`wn_pkey_encrypt`/`wn_pkey_decrypt`（PPP/OAEP+digest+label）、`wn_pkey_derive`（ECDH/DH）、`wn_pkey_encapsulate`/`wn_pkey_decapsulate`（ML-KEM，留给下一增量）。padding 值直接收 Node 的 `crypto.constants` 数值。
+- **JS 侧接入（原地回退）**：`crypto/asym.ts` 在 `opensslReady()` 时优先走 wasm——`sign`/`verify`（RSA PKCS#1/PSS、ECDSA DER/**ieee-p1363**、Ed25519）、`generateKeyPairSync`（rsa/ec/ed25519）、`publicEncrypt`/`privateDecrypt`（PKCS#1/OAEP/NO_PADDING）；密钥经**现有 DER 编码器**导出再 `d2i` 进 OpenSSL（材料仍是那套 `KeyMaterial`，下游无感）。新增 `asymEngine()` 供诊断/测试。**只在 JS 也能如实覆盖的模式下路由**（如 RSA 只走 PKCS#1/PSS，其余 padding 继续走 JS），保证“翻转对调用者不可见”。
+- **顺手修了一个真语义偏差（PSS 默认盐长）**：Node 把盐长交给 OpenSSL——**签名默认最大盐**（不是摘要长）、**验签默认 AUTO**（接受对方选的盐长）。我们对 `resolvedPssSaltLength` 之前默认取摘要长，于是“用默认参数签、用默认参数验”能过，但**验不了 Node/其他实现用默认参数签的 PSS 签名**（互操作 bug，旧测试只用了显式 `saltLength: 32` 所以没暴露）。现在两边都按 Node 对齐，且 JS 路径的 `emsaPssVerify` 支持 AUTO。
+- **验收**：新增差分门禁 `test/crypto-openssl-pkey.test.ts`（8 例）——对 Ed25519 / RSA PKCS#1 / RSA-PSS（含默认盐长与显式 32）/ ECDSA（三条曲线 × DER 与 P1363）/ RSA 加解密（PPP、OAEP-sha1/256/384+label）做**双向互验**：我们签→Node 验、Node 签→我们验，**且在每个方向上都把 wasm 引擎关掉再跑一遍**（纯 JS 与 OpenSSL 同一标准）；另抽 PKCS#1 签名（无随机）做**两引擎 + Node 逐字节相等**。既有 `crypto-asym`/`crypto-keygen`/`crypto-enc` 等全成了回归网。`tsc --noEmit` 净 · `vitest run` **1037 passed / 2 skipped（124 文件）** · build（`wn_openssl-ClALQSg4.wasm` **2355.62 kB** 独立资产、`runtime.worker-BP0PvCge.js` 706.99 kB）。
+- **剩余**：DH/ECDH 的 `diffieHellman()`、ML-KEM 的 `encapsulate`/`decapsulate`（C 侧已就位，只差接线）、X509/SPKAC 仍纯 JS。
+
+---
+
 ### 2026-09-24 · M119（第二增量）—— OpenSSL 的**对称密码与 KDF** 切到 wasm，与纯 JS 实现逐字节等价（阶段 H P4）
 
 **里程碑**：摘要/HMAC 已在首增量切到真 OpenSSL；这一步把**对称密码族**（AES/DES/Camellia/ARIA/SM4 的全部模式，含 CCM/OCB/SIV/GCM-SIV/XTS/CBC-CTS/wrap/des3-wrap）与**KDF**（`pbkdf2`/`hkdf`/`scrypt`）也迁过去。两者在 `crypto` 里比摘要复杂得多：它们是**流式 + 有状态**的，而且 Node 的错误语义一半来自 OpenSSL、一半来自 `src/crypto/crypto_cipher.cc` 的状态机——**只换算法、不复刻状态机**的话，字节对得上、错误对不上。

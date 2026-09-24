@@ -1,5 +1,5 @@
 /**
- * Asymmetric keys and signatures, in pure JS.
+ * Asymmetric keys and signatures.
  *
  * WebCrypto can import/export/generate keys and sign, but only asynchronously;
  * Node's `createPrivateKey`, `crypto.sign`, `generateKeyPairSync` and friends are
@@ -9,6 +9,10 @@
  * Covers the formats Node emits/accepts for RSA, EC (P-256/P-384/P-521) and
  * Ed25519: PKCS#1, PKCS#8, SPKI and SEC1, PEM and DER. Signatures cover
  * RSA (PKCS#1 v1.5 and PSS), ECDSA (DER and IEEE P1363) and Ed25519.
+ *
+ * Where the wasi OpenSSL subset (M119) is loaded, key generation and the
+ * RSA/EC/Ed25519 signature paths run on it instead; the pure-JS code below
+ * stays as the fallback, so callers see no difference.
  */
 import { outputBytes } from './byte-out';
 import {
@@ -66,6 +70,18 @@ import {
   mlKemPublicKeyLength,
   type MlKemParam,
 } from './mlkem';
+import {
+  opensslPkeyDecrypt,
+  opensslPkeyEncrypt,
+  opensslPkeyFree,
+  opensslPkeyFromDer,
+  opensslPkeyKeygen,
+  opensslPkeySign,
+  opensslPkeyToDer,
+  opensslPkeyVerify,
+  opensslReady,
+  PKEY_PADDING,
+} from '../bindings/openssl';
 
 // --- OIDs -------------------------------------------------------------------
 
@@ -877,7 +893,7 @@ function emsaPssEncode(hash: string, digest: Uint8Array, emBits: number, saltLen
 function emsaPssVerify(hash: string, digest: Uint8Array, em: Uint8Array, emBits: number, saltLength: number): boolean {
   const hLen = digestFor(hash, new Uint8Array(0)).length;
   const emLen = em.length;
-  if (emLen < hLen + saltLength + 2) return false;
+  if (emLen < hLen + saltLength + 2 && saltLength !== RSA_PSS_SALTLEN_AUTO) return false;
   if (em[emLen - 1] !== 0xbc) return false;
   const maskedDB = em.subarray(0, emLen - hLen - 1);
   const h = em.subarray(emLen - hLen - 1, emLen - 1);
@@ -890,17 +906,30 @@ function emsaPssVerify(hash: string, digest: Uint8Array, em: Uint8Array, emBits:
   let index = 0;
   while (index < db.length && db[index] === 0) index++;
   if (index >= db.length || db[index] !== 1) return false;
-  if (db.length - index - 1 !== saltLength) return false;
+  // AUTO accepts whatever salt length the signer chose; an explicit length must match.
+  if (saltLength !== RSA_PSS_SALTLEN_AUTO && db.length - index - 1 !== saltLength) return false;
   const salt = db.subarray(index + 1);
   const expected = digestFor(hash, concat([new Uint8Array(8), digest, salt]));
   return toHex(expected) === toHex(h);
 }
 
-function resolvePssSaltLength(alg: SignAlgorithm, emLen: number, hLen: number): number {
-  const requested = alg.saltLength ?? hLen;
-  if (requested >= 0) return requested;
+/**
+ * The salt length an RSA-PSS operation uses. Node leaves it to OpenSSL: a
+ * signature defaults to the *maximum* salt (`RSA_PSS_SALTLEN_AUTO`, which
+ * behaves as MAX when signing), and verification defaults to AUTO — recover
+ * the salt from the encoded block rather than demanding a specific length.
+ * `RSA_PSS_SALTLEN_AUTO` is returned as-is so callers can special-case it.
+ */
+function resolvePssSaltLength(alg: SignAlgorithm, emLen: number, hLen: number, verifying: boolean): number {
+  const requested = alg.saltLength;
+  // Verification defaults to AUTO (accept the signer's salt); signing defaults
+  // to the largest salt that fits — both are what OpenSSL does when Node
+  // leaves `saltLength` unset.
+  if (requested === undefined) return verifying ? RSA_PSS_SALTLEN_AUTO : emLen - hLen - 2;
   if (requested === RSA_PSS_SALTLEN_DIGEST) return hLen;
-  // MAX_SIGN / MAX / AUTO: the largest salt that fits.
+  if (requested >= 0) return requested;
+  if (verifying && requested === RSA_PSS_SALTLEN_AUTO) return RSA_PSS_SALTLEN_AUTO;
+  // MAX_SIGN / MAX: the largest salt that fits.
   return emLen - hLen - 2;
 }
 
@@ -912,7 +941,7 @@ function rsaSign(alg: SignAlgorithm, data: Uint8Array, key: KeyObject): Uint8Arr
   const hLen = digestFor(alg.hash, new Uint8Array(0)).length;
   const em =
     alg.padding === RSA_PKCS1_PSS_PADDING
-      ? emsaPssEncode(alg.hash, digestFor(alg.hash, data), rsaModulusLength(m.rsa) - 1, resolvePssSaltLength(alg, emLen, hLen))
+      ? emsaPssEncode(alg.hash, digestFor(alg.hash, data), rsaModulusLength(m.rsa) - 1, resolvePssSaltLength(alg, emLen, hLen, false))
       : emsaPkcs1(alg.hash, digestFor(alg.hash, data), k);
   const s = rsaPrivateOp(m.rsa, bytesToBigInt(em));
   return bigIntToBytes(s, k);
@@ -928,7 +957,7 @@ function rsaVerify(alg: SignAlgorithm, data: Uint8Array, key: KeyObject, signatu
     const hLen = digestFor(alg.hash, new Uint8Array(0)).length;
     const emBits = rsaModulusLength(m.rsa) - 1;
     const emLen = Math.ceil(emBits / 8);
-    const saltLength = resolvePssSaltLength(alg, emLen, hLen);
+    const saltLength = resolvePssSaltLength(alg, emLen, hLen, true);
     return emsaPssVerify(alg.hash, digestFor(alg.hash, data), em, emBits, saltLength);
   }
   const expected = emsaPkcs1(alg.hash, digestFor(alg.hash, data), k);
@@ -1022,10 +1051,188 @@ function unwrapKeyOptions(alg: SignAlgorithm, key: unknown): unknown {
   return options.key;
 }
 
+// --- OpenSSL-backed operations -----------------------------------------
+//
+// The wasi OpenSSL subset (M119) is the same library Node runs, so the
+// signature and RSA-cipher paths route through it once it is loaded. Every
+// helper returns `null` when OpenSSL cannot take the operation (unknown key
+// type, a mode that awaits an OpenSSL-supported backing, a name it does not
+// know), and the caller falls back to the pure-JS implementation.
+
+/** The OpenSSL `EVP_MD_fetch` name for a Node hash name, or `undefined`. */
+function opensslDigestName(hash: string): string | undefined {
+  return resolveHash(hash)?.openssl;
+}
+
+/** Build an `EVP_PKEY` from our key material, or `0` when it cannot be encoded. */
+function opensslHandleFor(m: KeyMaterial, isPrivate: boolean): number {
+  try {
+    const der = isPrivate ? encodePrivateKeyInfo(m) : encodeSubjectPublicKeyInfo(m);
+    return opensslPkeyFromDer(der, isPrivate);
+  } catch {
+    return 0;
+  }
+}
+
+/** The key types the OpenSSL signature paths cover. */
+const OPENSSL_SIGN_ASYM: ReadonlySet<string> = new Set(['rsa', 'ec', 'ed25519']);
+
+/** Node's `padding`/`saltLength` as OpenSSL wants them, or `null` to fall back. */
+function opensslSignPadding(alg: SignAlgorithm, asym: string): { padding: number; saltLength: number } | null {
+  if (asym !== 'rsa') return { padding: 0, saltLength: 0 };
+  const padding = alg.padding ?? RSA_PKCS1_PADDING;
+  // Only the two paddings the pure-JS path implements, so the swap is invisible.
+  if (padding !== RSA_PKCS1_PADDING && padding !== RSA_PKCS1_PSS_PADDING) return null;
+  if (padding === RSA_PKCS1_PSS_PADDING) {
+    // 0 leaves OpenSSL's default (max salt on sign, auto on verify).
+    return { padding: PKEY_PADDING.PSS, saltLength: alg.saltLength ?? 0 };
+  }
+  return { padding: PKEY_PADDING.PKCS1, saltLength: 0 };
+}
+
+/** Sign through OpenSSL, or `null` when the call cannot be routed. */
+function opensslSign(alg: SignAlgorithm, data: Uint8Array, m: KeyMaterial): Uint8Array | null {
+  const asym = m.asym;
+  if (asym === undefined || !OPENSSL_SIGN_ASYM.has(asym)) return null;
+  const isEd = asym === 'ed25519';
+  const md = isEd ? '' : opensslDigestName(alg.hash) ?? '';
+  if (!isEd && md === '') return null;
+  const padding = opensslSignPadding(alg, asym);
+  if (padding === null) return null;
+  const handle = opensslHandleFor(m, true);
+  if (!handle) return null;
+  try {
+    const signature = opensslPkeySign(handle, md, padding.padding, padding.saltLength, data);
+    if (signature === null) return null;
+    if (asym === 'ec' && alg.dsaEncoding === 'ieee-p1363' && m.ec) {
+      const { r, s } = derDecodeEcdsa(signature);
+      return concat([coordToBytes(r, m.ec.curve), coordToBytes(s, m.ec.curve)]);
+    }
+    return signature;
+  } catch {
+    return null;
+  } finally {
+    opensslPkeyFree(handle);
+  }
+}
+
+/** Verify through OpenSSL: `true`/`false`, or `null` to fall back. */
+function opensslVerify(alg: SignAlgorithm, data: Uint8Array, m: KeyMaterial, signature: Uint8Array): boolean | null {
+  const asym = m.asym;
+  if (asym === undefined || !OPENSSL_SIGN_ASYM.has(asym)) return null;
+  const isEd = asym === 'ed25519';
+  const md = isEd ? '' : opensslDigestName(alg.hash) ?? '';
+  if (!isEd && md === '') return null;
+  const padding = opensslSignPadding(alg, asym);
+  if (padding === null) return null;
+
+  let sig = signature;
+  if (asym === 'ec' && alg.dsaEncoding === 'ieee-p1363' && m.ec) {
+    const len = m.ec.curve.byteLength;
+    if (signature.length !== 2 * len) return false;
+    sig = derEncodeEcdsa({
+      r: bytesToBigInt(signature.subarray(0, len)),
+      s: bytesToBigInt(signature.subarray(len)),
+    });
+  }
+
+  const handle = opensslHandleFor(m, false);
+  if (!handle) return null;
+  try {
+    return opensslPkeyVerify(handle, md, padding.padding, padding.saltLength, data, sig);
+  } catch {
+    return null;
+  } finally {
+    opensslPkeyFree(handle);
+  }
+}
+
+/**
+ * RSA public/private-key encrypt/decrypt through OpenSSL. `null` when the
+ * operation cannot be routed (non-RSA key, or a failure the JS path should
+ * turn into Node's specific exception).
+ */
+function opensslRsaCipher(
+  direction: 'encrypt' | 'decrypt',
+  m: KeyMaterial,
+  padding: number,
+  oaepHash: string,
+  oaepLabel: Uint8Array,
+  data: Uint8Array,
+): Uint8Array | null {
+  if (m.asym !== 'rsa' || !m.rsa) return null;
+  if (padding !== RSA_PKCS1_PADDING && padding !== RSA_PKCS1_OAEP_PADDING && padding !== RSA_NO_PADDING) return null;
+  let md = '';
+  if (padding === RSA_PKCS1_OAEP_PADDING) {
+    const name = opensslDigestName(oaepHash);
+    if (name === undefined) return null;
+    md = name;
+  }
+  const handle = opensslHandleFor(m, direction === 'decrypt');
+  if (!handle) return null;
+  try {
+    const out = direction === 'encrypt'
+      ? opensslPkeyEncrypt(handle, padding, md, oaepLabel, data)
+      : opensslPkeyDecrypt(handle, padding, md, oaepLabel, data);
+    return out;
+  } catch {
+    return null;
+  } finally {
+    opensslPkeyFree(handle);
+  }
+}
+
+/**
+ * Generate a key pair on OpenSSL, handing back material parsed from the DER it
+ * emits. Returns `null` for options the JS generator must handle (unusual RSA
+ * exponents, DH groups, ML-KEM, …).
+ */
+function opensslGenerateMaterial(
+  type: string,
+  options: GenerateKeyPairOptions,
+): { private: KeyMaterial; public: KeyMaterial } | null {
+  let handle = 0;
+  if (type === 'rsa') {
+    const exponent = options.publicExponent ?? 65537;
+    // OpenSSL's keygen takes `e` as a bignum parameter; only the default is
+    // routed here, and anything else stays on the JS generator.
+    if (exponent !== 65537) return null;
+    handle = opensslPkeyKeygen('RSA', undefined, options.modulusLength ?? 2048);
+  } else if (type === 'ec') {
+    const curve = options.namedCurve;
+    if (typeof curve !== 'string' || !curveByNodeName(curve)) return null;
+    handle = opensslPkeyKeygen('EC', curve);
+  } else if (type === 'ed25519') {
+    handle = opensslPkeyKeygen('ED25519');
+  } else {
+    return null;
+  }
+  if (!handle) return null;
+  try {
+    const privDer = opensslPkeyToDer(handle, true);
+    const pubDer = opensslPkeyToDer(handle, false);
+    if (privDer === null || pubDer === null) return null;
+    return { private: parsePrivateDer(privDer), public: parsePublicDer(pubDer) };
+  } catch {
+    return null;
+  } finally {
+    opensslPkeyFree(handle);
+  }
+}
+
+/** Which engine {@link sign}/{@link verify} would use right now (diagnostics). */
+export function asymEngine(): 'openssl' | 'js' {
+  return opensslReady() ? 'openssl' : 'js';
+}
+
 export function sign(algorithm: unknown, data: Uint8Array, key: unknown): Uint8Array {
   const alg = parseSignAlgorithm(algorithm);
   const k = resolveKey(unwrapKeyOptions(alg, alg.key ?? key), 'private');
   const m = keyMaterialOf(k);
+  if (opensslReady()) {
+    const viaOpenSsl = opensslSign(alg, data, m);
+    if (viaOpenSsl !== null) return viaOpenSsl;
+  }
   if (m.asym === 'rsa') return rsaSign(alg, data, k);
   if (m.asym === 'ec') return ecdsaSignBytes(alg, data, k);
   if (m.asym === 'ed25519') return edSignBytes(data, k);
@@ -1036,6 +1243,10 @@ export function verify(algorithm: unknown, data: Uint8Array, key: unknown, signa
   const alg = parseSignAlgorithm(algorithm);
   const k = resolveKey(unwrapKeyOptions(alg, alg.key ?? key), 'public');
   const m = keyMaterialOf(k);
+  if (opensslReady()) {
+    const viaOpenSsl = opensslVerify(alg, data, m, signature);
+    if (viaOpenSsl !== null) return viaOpenSsl;
+  }
   if (m.asym === 'rsa') return rsaVerify(alg, data, k, signature);
   if (m.asym === 'ec') return ecdsaVerifyBytes(alg, data, k, signature);
   if (m.asym === 'ed25519') return edVerifyBytes(data, k, signature);
@@ -1139,7 +1350,12 @@ export function publicEncrypt(key: unknown, buffer: Uint8Array, options?: Encryp
   const k = resolveKey(args.key, 'public');
   const m = keyMaterialOf(k);
   if (m.asym !== 'rsa' || !m.rsa) throw keyTypeError('publicEncrypt');
-  return rsaEncryptBlock(m.rsa, args.padding ?? RSA_PKCS1_OAEP_PADDING, buffer, args.oaepHash ?? 'sha1', args.oaepLabel ?? new Uint8Array(0));
+  const padding = args.padding ?? RSA_PKCS1_OAEP_PADDING;
+  if (opensslReady()) {
+    const viaOpenSsl = opensslRsaCipher('encrypt', m, padding, args.oaepHash ?? 'sha1', args.oaepLabel ?? new Uint8Array(0), buffer);
+    if (viaOpenSsl !== null) return viaOpenSsl;
+  }
+  return rsaEncryptBlock(m.rsa, padding, buffer, args.oaepHash ?? 'sha1', args.oaepLabel ?? new Uint8Array(0));
 }
 
 export function privateDecrypt(key: unknown, buffer: Uint8Array, options?: EncryptOptions): Uint8Array {
@@ -1147,7 +1363,12 @@ export function privateDecrypt(key: unknown, buffer: Uint8Array, options?: Encry
   const k = resolveKey(args.key, 'private');
   const m = keyMaterialOf(k);
   if (m.asym !== 'rsa' || !m.rsa) throw keyTypeError('privateDecrypt');
-  return rsaDecryptBlock(m.rsa, args.padding ?? RSA_PKCS1_OAEP_PADDING, buffer, args.oaepHash ?? 'sha1', args.oaepLabel ?? new Uint8Array(0));
+  const padding = args.padding ?? RSA_PKCS1_OAEP_PADDING;
+  if (opensslReady()) {
+    const viaOpenSsl = opensslRsaCipher('decrypt', m, padding, args.oaepHash ?? 'sha1', args.oaepLabel ?? new Uint8Array(0), buffer);
+    if (viaOpenSsl !== null) return viaOpenSsl;
+  }
+  return rsaDecryptBlock(m.rsa, padding, buffer, args.oaepHash ?? 'sha1', args.oaepLabel ?? new Uint8Array(0));
 }
 
 /** `privateEncrypt` / `publicDecrypt` are the inverse pair used for raw signing. */
@@ -1336,6 +1557,10 @@ export function generateKeyPairSync(type: string, options: GenerateKeyPairOption
 }
 
 function generateMaterial(type: string, options: GenerateKeyPairOptions): { private: KeyMaterial; public: KeyMaterial } {
+  if (opensslReady()) {
+    const viaOpenSsl = opensslGenerateMaterial(type, options);
+    if (viaOpenSsl !== null) return viaOpenSsl;
+  }
   if (type === 'rsa') {
     const modulusLength = options.modulusLength ?? 2048;
     const e = BigInt(options.publicExponent ?? 65537);

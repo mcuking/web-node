@@ -86,6 +86,60 @@ declare module 'node:crypto' {
       associatedData?: Uint8Array;
     },
   ): Uint8Array;
+
+  /** Only the members the asymmetric tests compare against are declared. */
+  interface KeyObject {
+    export(options: { type: 'pkcs8' | 'spki'; format: 'pem' | 'der' }): string | Uint8Array;
+  }
+  interface KeyPairSyncResult {
+    publicKey: KeyObject;
+    privateKey: KeyObject;
+  }
+  interface SignOptions {
+    key: unknown;
+    padding?: number;
+    saltLength?: number;
+    dsaEncoding?: 'der' | 'ieee-p1363';
+  }
+  interface EncryptOptions {
+    key: unknown;
+    padding?: number;
+    oaepHash?: string;
+    oaepLabel?: Uint8Array;
+  }
+  export const constants: {
+    RSA_PKCS1_PADDING: number;
+    RSA_PKCS1_OAEP_PADDING: number;
+    RSA_NO_PADDING: number;
+    RSA_PKCS1_PSS_PADDING: number;
+    RSA_PSS_SALTLEN_DIGEST: number;
+    RSA_PSS_SALTLEN_MAX: number;
+    RSA_PSS_SALTLEN_AUTO: number;
+    RSA_PSS_SALTLEN_MAX_SIGN: number;
+  };
+  export function generateKeyPairSync(
+    type: string,
+    options?: Record<string, unknown>,
+  ): KeyPairSyncResult;
+  export function createPrivateKey(key: string | Uint8Array): KeyObject;
+  export function createPublicKey(key: string | Uint8Array | KeyObject): KeyObject;
+  export function sign(algorithm: unknown, data: Uint8Array, key: unknown): Uint8Array;
+  export function verify(
+    algorithm: unknown,
+    data: Uint8Array,
+    key: unknown,
+    signature: Uint8Array,
+  ): boolean;
+  export function publicEncrypt(
+    key: unknown,
+    buffer: Uint8Array,
+    options?: Omit<EncryptOptions, 'key'>,
+  ): Uint8Array;
+  export function privateDecrypt(
+    key: unknown,
+    buffer: Uint8Array,
+    options?: Omit<EncryptOptions, 'key'>,
+  ): Uint8Array;
 }
 
 declare module 'node:url' {

@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-24（**阶段 H：M119 第二增量 ✅**——OpenSSL 的对称密码族与 KDF 切到 wasm，`test/crypto-openssl-engine.test.ts` 对同组操作做「wasm / 纯 JS / 真 Node」三方逐字节比对全绿；阶段 H 进度 **5/8**，M119 余非对称/X509）
+> - **最后更新**：2026-09-24（**阶段 H：M119 第四增量 ✅**——修好 OpenSSL BIGNUM（wasm32 是 32 位 `long`），RSA/EC/Ed25519 签验与 RSA 加解密切到 wasm；`test/crypto-openssl-pkey.test.ts` 双向互验全绿；阶段 H 进度 **5/8**，M119 余 DH/ECDH、ML-KEM、X509/SPKAC）
 
 ---
 
@@ -97,13 +97,16 @@
   - **解锁**：`brotliCompress(Sync)` / `brotliDecompress(Sync)` / `zstdCompress(Sync)` / `zstdDecompress(Sync)`、四个流类、全部 `BROTLI_PARAM_*`/`ZSTD_c_*`/`ZSTD_d_*` 参数、字典、`pledgedSrcSize`、`stream/web` 的 `CompressionStream('brotli')`；仅 zip 存档助手仍响亮抛错。
   - **验收**：差分装置扩到 `tools/zlib-probe.cjs`（+ oracle → `test/fixtures/zlib.json`，**56 个观测键**），真 Node v26.9.0 vs web-node **逐字段 0 diff**（含参数、字典、流式、异步、错误形状、`stream/web` brotli）；`tsc --noEmit` 净 · `vitest run` **1011 passed / 2 skipped（120 文件）** · build（worker **689.29 kB**）。
 
-- [~] **M119 · `crypto` → OpenSSL 子集编 wasm（P4）**  ← 承接 M106 的 crypto 部分 🚧 2026-09-24（**摘要/HMAC ✅ + 对称密码与 KDF ✅；非对称/X509 未迁**）
+- [~] **M119 · `crypto` → OpenSSL 子集编 wasm（P4）**  ← 承接 M106 的 crypto 部分 🚧 2026-09-24（**摘要/HMAC ✅ + 对称密码与 KDF ✅ + Argon2 ✅ + RSA/EC/Ed25519 签名与 RSA 加解密 ✅；DH/ECDH、ML-KEM、X509/SPKAC 未迁**）
   - **可行性（已退险）**：真 OpenSSL **3.5.8**（`deps/openssl/openssl`）用 wasi-sdk 编出 `libcrypto.a` 5.75 MB / `libssl.a` 0.85 MB，**0 error**；薄模块 `wn_openssl.wasm` **2.29 MB**，SHA-256/MD5/HMAC-SHA256 与真 Node **逐字节一致**。OpenSSL 没有 WASI target，新增自包含 target `native/openssl/99-wasi.conf`（`no-asm/no-shared/no-threads/no-sock/no-engine/no-legacy/no-secure-memory`）；构建走 OpenSSL 自己的 `Configure`+`make build_libs`，缓存到 `native/.openssl-build`。
   - **已交付增量（摘要路径）**：`native/src/wn_openssl.c` 的通用名 ABI（`EVP_MD_fetch` / 一次性+流式 digest / HMAC / XOF），`bindings/openssl.ts` 薄封装，`wasm/lazy.ts` 惰性加载（**不进启动期 `WASM_MODULES`**，避免 M107 的启动回退——解密后立刻后台拉取），`crypto/hash.ts` 在模块就绪后把全部摘要（md5/sha1/sha2/sha3/keccak/blake2/sm3/ripemd160/md5-sha1/shake）切到 OpenSSL，**未就绪或其他名则回退纯 JS**（两者逐字节相同，切换对调用者不可见）。
   - **剩余**：cipher（AES/ChaCha/DES/Camellia/ARIA/SM4/OCB/SIV/XTS/CCM/CBC-CTS）、KDF（pbkdf2/hkdf/scrypt/argon2）、非对称（RSA/EC/DH/ML-KEM）、X509/SPKAC 仍在纯 JS；后续增量逐个迁。
   - **已交付增量②（对称密码 + KDF）**：`wn_openssl` 扩出密码族 ABI（`wn_cipher_info|new|free` + `set_ivlen|set_data_len|set_key_iv|set_padding|aad|set_tag|set_tag_len|get_tag|update|final`）与 `wn_pbkdf2|wn_hkdf|wn_scrypt`；新增驱动 `crypto/openssl-cipher.ts`（`OpenSslCipher implements SyncCipher`，照搬 `CipherBase::Update`/`Final` 的一次性模式集合、CCM/SIV 认证失败延后、错误分支），`createCipher()` 优先走它、否则原地回退。**难点在错误语义而非算法**：`update()` 因 `MarkPopErrorOnReturn` 会弹掉 OSSL 错误 → 一律落回 Node 文案（无 `code`），只有 `final()` 会报 OSSL 错误；`ERR_OSSL_*` 码要按 Node 的库名清单拼（**无 `PROV`** → `PROV_R_BAD_DECRYPT` 即 `ERR_OSSL_BAD_DECRYPT`）；`setAuthTag` 非幂等。KDF 在 `crypto/hash.ts` 接入（参数校验仍留 JS）。
   - 验收②：差分门禁 `test/crypto-openssl-engine.test.ts`（7 例）用测试开关 `setOpensslEnabled()` 对同一操作跑 **wasm / 纯 JS / `node:crypto`** 三方逐字节比对（14 个模式 + KDF 参数组 + 错误文案）**全绿**；`vitest run` **1028 passed / 2 skipped**，`wn_openssl.wasm` 2298.46 kB 独立资产。
   - **剩余**：非对称（RSA/EC/DH/ML-KEM）、X509/SPKAC、argon2 仍在纯 JS；后续增量逐个迁。
+  - **已交付增量③（Argon2）**：`wn_argon2(algo,…)` 接 default provider 的 ARGON2D/I/ID；`crypto/argon2.ts` 优先走它、否则回退纯 JS。**刻意不传 `OSSL_KDF_PARAM_THREADS`**（ncrypto 只拿它把 lane 分到 OS 线程，而 wasi 构建 `thread_scheme=(none)`；lane 数是独立算法参数，不传不改输出）。差分测试扩了 argon2d/i/id + `secret`/`associatedData`/4-lane 组。
+  - **已交付增量④（非对称）**：**先修了一个被掩着的真 bug**——`99-wasi.conf` 的 `bn_ops` 写了 `SIXTY_FOUR_BIT_LONG`，而 wasm32 是 ILP32（`long` 32 位），于是 `BN_ULONG` 是 32 位、`BN_BITS2` 却当 64 → **整个 BIGNUM 都是错的**；摘要/密码/KDF 不碰 BN 所以三个增量全绿都没暴露。改 `SIXTY_FOUR_BIT` 后修复；顺带让 `native/build.mjs` 的 OpenSSL 缓存标记写入配置的 sha256（改配置会重建，不再静默复用旧库）。C 侧新增通用 `wn_pkey_*`（keygen / DER+raw 导入导出 / size / sign+verify（空 md 名=直接签消息）/ encrypt+decrypt（PKCS#1/OAEP+md+label）/ derive；encapsulate/decapsulate 已写好但未接线）。JS 侧 `asym.ts` 在就绪时把 **RSA PKCS#1/PSS、ECDSA（DER/ieee-p1363）、Ed25519 的签/验、RSA 加解密、rsa/ec/ed25519 的 keygen** 走 wasm（密钥经现有 DER 编码器 `d2i` 进 OpenSSL，材料仍是 `KeyMaterial`，下游无感），其余原地回退。**又抓出一个互操作真偏差**：PSS 默认盐长——Node 签名默认**最大盐**、验签默认 **AUTO**，我们之前两边都按摘要长，导致「验不了其他实现用默认参数签的 PSS」。验收：新差分门禁 `test/crypto-openssl-pkey.test.ts`（8 例）对 Ed25519 / RSA PKCS#1 / RSA-PSS（含默认与显式盐长）/ ECDSA（3 曲线 × DER/P1363）/ RSA 加解密做**双向互验**，且**每个方向都把 wasm 关掉再跑一遍**。`vitest run` **1037 passed / 2 skipped（124 文件）**，`wn_openssl-ClALQSg4.wasm` **2355.62 kB** 独立资产。
+  - **剩余**：DH/ECDH 的 `diffieHellman()`、ML-KEM 的 `encapsulate`/`decapsulate`（C 侧就位，只差接线）、X509/SPKAC 仍纯 JS。
 
 - [ ] **M120 · 同步 syscall：SAB + `Atomics.wait` + FS-worker（P5）**  ← 吸收 M114、承接 M106 的 fs 部分
   - 真·同步 `fs` 在独立 worker 完成、主线程可阻塞等待；前置跨源隔离（COOP/COEP）；与现有 fs 语义差分 0 diff。

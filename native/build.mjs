@@ -241,12 +241,18 @@ const MODULES = {
 
 /**
  * Configure + build the wasi OpenSSL subset once, into `native/.openssl-build`.
- * Cached via a marker file so repeat `npm run build:native` runs stay fast.
+ * Cached via a marker file holding the target config's digest, so editing
+ * `openssl/99-wasi.conf` invalidates the cache instead of silently reusing a
+ * library built with the old settings.
  */
 function ensureOpensslLibs() {
   const marker = join(opensslBuildDir, '.wn-built');
   const lib = join(opensslBuildDir, 'libcrypto.a');
-  if (existsSync(marker) && existsSync(lib)) return lib;
+  const configPath = join(here, 'openssl', '99-wasi.conf');
+  const configDigest = createHash('sha256').update(readFileSync(configPath)).digest('hex');
+  if (existsSync(marker) && existsSync(lib) && readFileSync(marker, 'utf8').startsWith(configDigest)) {
+    return lib;
+  }
   if (!existsSync(join(opensslSrcDir, 'Configure'))) {
     throw new Error(
       `OpenSSL source not found at ${opensslSrcDir}. Set NODE_SRC to a Node checkout with deps/openssl.`,
@@ -256,10 +262,7 @@ function ensureOpensslLibs() {
   rmSync(opensslBuildDir, { recursive: true, force: true });
   mkdirSync(opensslBuildDir, { recursive: true });
   cpSync(opensslSrcDir, opensslBuildDir, { recursive: true });
-  copyFileSync(
-    join(here, 'openssl', '99-wasi.conf'),
-    join(opensslBuildDir, 'Configurations', '99-wasi.conf'),
-  );
+  copyFileSync(configPath, join(opensslBuildDir, 'Configurations', '99-wasi.conf'));
   const env = { ...process.env, PATH: `${join(sdk, 'bin')}:${process.env.PATH ?? ''}` };
   const prefix = join(opensslBuildDir, 'out');
   execFileSync('perl', ['./Configure', 'wasm32-wasip1', `--prefix=${prefix}`], {
@@ -269,7 +272,7 @@ function ensureOpensslLibs() {
   });
   const jobs = Math.max(2, Number(process.env.WN_JOBS ?? 0) || 8);
   execFileSync('make', [`-j${jobs}`, 'build_libs'], { cwd: opensslBuildDir, env, stdio: 'inherit' });
-  writeFileSync(marker, `${new Date().toISOString()}\n`);
+  writeFileSync(marker, `${configDigest} ${new Date().toISOString()}\n`);
   return lib;
 }
 

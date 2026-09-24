@@ -490,3 +490,274 @@ export function opensslArgon2(
     free(algoPtr);
   }
 }
+
+// --- public keys (EVP_PKEY) -------------------------------------------------
+
+/**
+ * A short-lived, opaque EVP_PKEY handle held in wasm memory. The caller owns
+ * it and must {@link opensslPkeyFree} it.
+ */
+export type OpenSslPkey = number;
+
+/** Node's `crypto.constants` padding numbers, passed straight through. */
+export const PKEY_PADDING = {
+  PKCS1: 1,
+  NO_PADDING: 3,
+  OAEP: 4,
+  X931: 5,
+  PSS: 6,
+} as const;
+
+/** Generate a key pair; returns a handle to the **private** key, or `0`. */
+export function opensslPkeyKeygen(name: string, group?: string, bits?: number): OpenSslPkey {
+  const [namePtr, nameLen] = pushName(name);
+  const [groupPtr, groupLen] = group === undefined ? [0, 0] : pushName(group);
+  try {
+    begin();
+    return call<number>('wn_pkey_keygen', namePtr, nameLen, groupPtr, groupLen, bits ?? 0);
+  } finally {
+    free(groupPtr);
+    free(namePtr);
+  }
+}
+
+/** Import a DER key (PKCS#8/PKCS#1/SEC1 when private; SPKI/PKCS#1 when not). */
+export function opensslPkeyFromDer(der: Uint8Array, isPrivate: boolean): OpenSslPkey {
+  const [derPtr, derLen] = push(der);
+  try {
+    begin();
+    return call<number>('wn_pkey_from_der', derPtr, derLen, isPrivate ? 1 : 0);
+  } finally {
+    free(derPtr);
+  }
+}
+
+/** Import a fixed-length raw key (Ed25519, X25519, ML-KEM, …). */
+export function opensslPkeyFromRaw(name: string, raw: Uint8Array, isPrivate: boolean): OpenSslPkey {
+  const [namePtr, nameLen] = pushName(name);
+  const [rawPtr, rawLen] = push(raw);
+  try {
+    begin();
+    return call<number>('wn_pkey_from_raw', namePtr, nameLen, rawPtr, rawLen, isPrivate ? 1 : 0);
+  } finally {
+    free(rawPtr);
+    free(namePtr);
+  }
+}
+
+/** Serialise a key as DER, or `null` when OpenSSL refuses. */
+export function opensslPkeyToDer(handle: OpenSslPkey, isPrivate: boolean): Uint8Array | null {
+  const size = call<number>('wn_pkey_der_size', handle, isPrivate ? 1 : 0);
+  if (size <= 0) return null;
+  const outPtr = call<number>('wn_alloc', size);
+  try {
+    const written = call<number>('wn_pkey_to_der', handle, isPrivate ? 1 : 0, outPtr, size);
+    if (written < 0) return null;
+    return bytes().slice(outPtr, outPtr + written);
+  } finally {
+    free(outPtr);
+  }
+}
+
+/** Serialise a key in its fixed-length raw form, or `null` when it has none. */
+export function opensslPkeyToRaw(handle: OpenSslPkey, isPrivate: boolean): Uint8Array | null {
+  const size = call<number>('wn_pkey_raw_size', handle, isPrivate ? 1 : 0);
+  if (size <= 0) return null;
+  const outPtr = call<number>('wn_alloc', size);
+  try {
+    const written = call<number>('wn_pkey_to_raw', handle, isPrivate ? 1 : 0, outPtr, size);
+    if (written < 0) return null;
+    return bytes().slice(outPtr, outPtr + written);
+  } finally {
+    free(outPtr);
+  }
+}
+
+/** `EVP_PKEY_get_size` — the key's maximum ciphertext/signature length. */
+export function opensslPkeySize(handle: OpenSslPkey): number {
+  return call<number>('wn_pkey_size', handle);
+}
+
+/** Release a key handle. Safe to call with `0`. */
+export function opensslPkeyFree(handle: OpenSslPkey): void {
+  if (handle) call<number>('wn_pkey_free', handle);
+}
+
+/**
+ * Sign `data`. `md` is the OpenSSL digest name, or `''` to sign the message
+ * directly (Ed25519). `padding`/`saltLength` are Node's constants; `0` leaves
+ * OpenSSL's defaults. Returns `null` on failure.
+ */
+export function opensslPkeySign(
+  handle: OpenSslPkey,
+  md: string,
+  padding: number,
+  saltLength: number,
+  data: Uint8Array,
+): Uint8Array | null {
+  const [mdPtr, mdLen] = pushName(md);
+  const [dataPtr, dataLen] = push(data);
+  const size = opensslPkeySize(handle);
+  // EC/Ed25519 signatures can exceed the field size, so leave slack.
+  const cap = Math.max(size > 0 ? size * 2 + 64 : 1024, 256);
+  const outPtr = call<number>('wn_alloc', cap);
+  try {
+    begin();
+    const written = call<number>(
+      'wn_pkey_sign', handle, mdPtr, mdLen, padding, saltLength, dataPtr, dataLen, outPtr, cap,
+    );
+    if (written < 0) return null;
+    return bytes().slice(outPtr, outPtr + written);
+  } finally {
+    free(outPtr);
+    free(dataPtr);
+    free(mdPtr);
+  }
+}
+
+/**
+ * Verify `signature`. Returns `true`/`false`, or `null` when the call itself
+ * failed (so the caller can fall back rather than report a bogus `false`).
+ */
+export function opensslPkeyVerify(
+  handle: OpenSslPkey,
+  md: string,
+  padding: number,
+  saltLength: number,
+  data: Uint8Array,
+  signature: Uint8Array,
+): boolean | null {
+  const [mdPtr, mdLen] = pushName(md);
+  const [dataPtr, dataLen] = push(data);
+  const [sigPtr, sigLen] = push(signature);
+  try {
+    begin();
+    const result = call<number>(
+      'wn_pkey_verify', handle, mdPtr, mdLen, padding, saltLength, dataPtr, dataLen, sigPtr, sigLen,
+    );
+    if (result < 0) return null;
+    return result === 1;
+  } finally {
+    free(sigPtr);
+    free(dataPtr);
+    free(mdPtr);
+  }
+}
+
+function rsaEncryptOrDecrypt(
+  entry: 'wn_pkey_encrypt' | 'wn_pkey_decrypt',
+  handle: OpenSslPkey,
+  padding: number,
+  md: string,
+  label: Uint8Array,
+  data: Uint8Array,
+): Uint8Array | null {
+  const [mdPtr, mdLen] = pushName(md);
+  const [labelPtr, labelLen] = push(label);
+  const [dataPtr, dataLen] = push(data);
+  const size = opensslPkeySize(handle);
+  const cap = size > 0 ? size : Math.max(data.length, 1);
+  const outPtr = call<number>('wn_alloc', Math.max(cap, 1));
+  try {
+    begin();
+    const written = call<number>(
+      entry, handle, padding, mdPtr, mdLen, labelPtr, labelLen, dataPtr, dataLen, outPtr, cap,
+    );
+    if (written < 0) return null;
+    return bytes().slice(outPtr, outPtr + written);
+  } finally {
+    free(outPtr);
+    free(dataPtr);
+    free(labelPtr);
+    free(mdPtr);
+  }
+}
+
+/** RSA-encrypt (or any `EVP_PKEY_encrypt`-capable key). `null` on failure. */
+export function opensslPkeyEncrypt(
+  handle: OpenSslPkey,
+  padding: number,
+  md: string,
+  label: Uint8Array,
+  data: Uint8Array,
+): Uint8Array | null {
+  return rsaEncryptOrDecrypt('wn_pkey_encrypt', handle, padding, md, label, data);
+}
+
+/** RSA-decrypt. `null` on failure (including a padding-check failure). */
+export function opensslPkeyDecrypt(
+  handle: OpenSslPkey,
+  padding: number,
+  md: string,
+  label: Uint8Array,
+  data: Uint8Array,
+): Uint8Array | null {
+  return rsaEncryptOrDecrypt('wn_pkey_decrypt', handle, padding, md, label, data);
+}
+
+/** ECDH / DH shared secret between a private handle and a peer's public one. */
+export function opensslPkeyDerive(handle: OpenSslPkey, peer: OpenSslPkey): Uint8Array | null {
+  const size = opensslPkeySize(handle);
+  const cap = size > 0 ? size : 1024;
+  const outPtr = call<number>('wn_alloc', cap);
+  try {
+    begin();
+    const written = call<number>('wn_pkey_derive', handle, peer, outPtr, cap);
+    if (written < 0) return null;
+    return bytes().slice(outPtr, outPtr + written);
+  } finally {
+    free(outPtr);
+  }
+}
+
+/** ML-KEM encapsulation: `{ ciphertext, sharedKey }`, or `null`. */
+export function opensslPkeyEncapsulate(
+  handle: OpenSslPkey,
+): { ciphertext: Uint8Array; sharedKey: Uint8Array } | null {
+  // ML-KEM ciphertexts top out at 1568 bytes and the shared secret is 32.
+  const ctCap = 2048;
+  const ssCap = 256;
+  const ctPtr = call<number>('wn_alloc', ctCap);
+  const ssPtr = call<number>('wn_alloc', ssCap);
+  const lensPtr = call<number>('wn_alloc', 8);
+  try {
+    begin();
+    if (call<number>('wn_pkey_encapsulate', handle, ctPtr, ctCap, ssPtr, ssCap, lensPtr) !== 0) {
+      return null;
+    }
+    const lens = new DataView(memory().buffer, lensPtr, 8);
+    const ctLen = lens.getInt32(0, true);
+    const ssLen = lens.getInt32(4, true);
+    return {
+      ciphertext: bytes().slice(ctPtr, ctPtr + ctLen),
+      sharedKey: bytes().slice(ssPtr, ssPtr + ssLen),
+    };
+  } finally {
+    free(lensPtr);
+    free(ssPtr);
+    free(ctPtr);
+  }
+}
+
+/** ML-KEM decapsulation: the shared secret, or `null`. */
+export function opensslPkeyDecapsulate(
+  handle: OpenSslPkey,
+  ciphertext: Uint8Array,
+): Uint8Array | null {
+  const [ctPtr, ctLen] = push(ciphertext);
+  const ssCap = 256;
+  const ssPtr = call<number>('wn_alloc', ssCap);
+  const lensPtr = call<number>('wn_alloc', 8);
+  try {
+    begin();
+    if (call<number>('wn_pkey_decapsulate', handle, ctPtr, ctLen, ssPtr, ssCap, lensPtr) !== 0) {
+      return null;
+    }
+    const ssLen = new DataView(memory().buffer, lensPtr, 8).getInt32(0, true);
+    return bytes().slice(ssPtr, ssPtr + ssLen);
+  } finally {
+    free(lensPtr);
+    free(ssPtr);
+    free(ctPtr);
+  }
+}
