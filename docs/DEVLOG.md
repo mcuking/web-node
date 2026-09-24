@@ -244,6 +244,24 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M119（第二增量）—— OpenSSL 的**对称密码与 KDF** 切到 wasm，与纯 JS 实现逐字节等价（阶段 H P4）
+
+**里程碑**：摘要/HMAC 已在首增量切到真 OpenSSL；这一步把**对称密码族**（AES/DES/Camellia/ARIA/SM4 的全部模式，含 CCM/OCB/SIV/GCM-SIV/XTS/CBC-CTS/wrap/des3-wrap）与**KDF**（`pbkdf2`/`hkdf`/`scrypt`）也迁过去。两者在 `crypto` 里比摘要复杂得多：它们是**流式 + 有状态**的，而且 Node 的错误语义一半来自 OpenSSL、一半来自 `src/crypto/crypto_cipher.cc` 的状态机——**只换算法、不复刻状态机**的话，字节对得上、错误对不上。
+
+- **C 侧扩面**：`native/src/wn_openssl.c` 加 `#include <openssl/kdf.h>`；新增密码族 `wn_cipher_info`（回 **5 个 int**：key_length / iv_length / block_size / mode / flags）、`wn_cipher_new|free`、`wn_cipher_set_ivlen|set_data_len|set_key_iv|set_padding`、`wn_cipher_aad`、`wn_cipher_set_tag|set_tag_len|get_tag`、`wn_cipher_update|final`，以及 `wn_pbkdf2`/`wn_hkdf`/`wn_scrypt`。**错误分类不嗅探英文**：`wn_capture_error()` 记下 `ERR_error_string_n` 原文 + `ERR_GET_LIB` + `ERR_reason_error_string`，并用 `EVP_R_*` 宏做粗分类（`wn_openssl_error_kind()`），另加 `wn_openssl_clear_error()` 供每次调用前清队列。
+- **JS 驱动**：新增 `src/node-runtime/crypto/openssl-cipher.ts`（`OpenSslCipher implements SyncCipher`）。它把 `CipherBase::Update` / `CipherBase::Final` 的**决策**照搬过来——一次性模式集（`ccm-decipher`/`siv`/`cts`/`xts`/`wrap`）、CCM/SIV 的**认证失败延后到 `final()`**、以及各分支该报哪条错。`crypto/cipher.ts` 的 `createCipher()` 在 `opensslReady()` 且名字解析得到时优先走它，否则**原地回退纯 JS**。
+- **三个反直觉的 Node 语义（都靠真 Node 实测敲定，不是猜）**：
+  1. **`update()` 永远不会抛出 OpenSSL 错误**。`CipherBase::Update` 在自己内部开了一个 `MarkPopErrorOnReturn`，它析构时 `ERR_pop_to_mark()` 会**把这次新增的错误全部弹掉**，于是外层 lambda 的 `peekError()` 是 0 → 一律落回 Node 自己的文案 `Trying to add data in unsupported state`（无 `code`）。**只有 `final()` 会把 OSSL 错误报出来**（如 CBC 填充错误 `ERR_OSSL_BAD_DECRYPT`、块长不对 `ERR_OSSL_WRONG_FINAL_BLOCK_LENGTH`）。首版驱动在 update 路径上抛了 OSSL 错误 → wrap 那组差分立刻红；改对后转绿。
+  2. **`ERR_OSSL_*` 的码由「库名 + reason 字串」拼**（`crypto_util.cc` 的 `error::Decorate`），映射表是 **Node 自己的库名清单**——里面**没有 `PROV`**，而密码错误大多由 provider 抛（`ERR_LIB_PROV`=57）→ 库名片段为空 → `PROV_R_BAD_DECRYPT` 变成 `ERR_OSSL_BAD_DECRYPT`（不是 `ERR_OSSL_PROV_...`）。`SSL` 是唯一去掉 `OSSL_` 前缀的库。
+  3. **`setAuthTag` 不是幂等的**：Node 第二次调用因 `auth_tag_state_ != kAuthTagUnknown` 返回 false → 抛 `ERR_CRYPTO_INVALID_STATE('setAuthTag')`；SIV/GCM-SIV 在其一次性 `update` 之后也一律拒绝（差分抓出这一条：`sivErr.setTagAfterUpdate`）。
+- **GCM 的两个真坑**：① `EVP_CIPHER_get_mode` 是 `EVP_CIPH_GCM_MODE`（枚举值 6），**不是** flags 的 `EVP_CIPH_FLAG_AEAD_CIPHER`（0x200000）——首版拿 `mode` 去 `&` AEAD 位，`6 & 0x200000 = 0`，于是把 GCM 当成非 AEAD、`setAAD` 直接 `Invalid state for operation setAAD`；`wn_cipher_info` 因此回 **5 元组**（多带 `EVP_CIPHER_get_flags`），绑定的 handle 同时暴露 `mode` 与 `flags`。② **`update()` 要往输出缓冲多留一个块**（`EVP_EncryptUpdate` 内部按 `inl + block_size` 算容量），驱动按 `in_length + block_size + 16` 分配。
+- **KDF**：`crypto/hash.ts` 的 `pbkdf2`/`hkdf`/`scrypt` 在模块就绪时走 `wn_pbkdf2`/`wn_hkdf`/`wn_scrypt`，否则回退纯 JS（`scrypt` 的**参数校验**仍留在 JS——那是 Node 自己的 `ERR_CRYPTO_INVALID_SCRYPT_PARAMS`，与 OpenSSL 无关）。
+- **验收**：新增差分门禁 `test/crypto-openssl-engine.test.ts`（7 例）——用新加的 `setOpensslEnabled()`（**仅测试用**，同一进程内切换引擎）对**同一组操作跑两遍**（wasm vs 纯 JS vs `node:crypto`）逐字节比对：模式覆盖 ecb/cbc/ctr/cfb/cfb8/ofb/gcm/chacha20-poly1305/des-ede3-cbc/camellia/aria/sm4/cbc-cts，另有「名字解析表」与「AEAD 失败文案两引擎一致」；KDF 则对 PBKDF2/HKDF/scrypt 各参数组三方对齐。`tsc --noEmit` 净 · `vitest run` **1028 passed / 2 skipped（123 文件）** · build（`wn_openssl-CPoAr2TG.wasm` **2298.46 kB** 独立资产、`runtime.worker-BwuTHExX.js` **702.62 kB**）。
+- **顺带**：`plugins/node-builtins.d.ts` 补上 `createCipheriv`/`createDecipheriv`/`pbkdf2Sync`/`hkdfSync`/`scryptSync` 的声明（测试直接拿宿主 `node:crypto` 当 oracle）；清理一次性探针 `test/_openssl-probe.test.ts`。
+- **剩余（后续增量）**：非对称（RSA/EC/DH/ML-KEM）、X509/SPKAC、argon2 仍在纯 JS。
+
+---
+
 ### 2026-09-23 · M101 — `zlib/iter`（可迭代压缩）：vendor 真 `internal/streams/iter/transform.js` + `lib/zlib/iter.js`（阶段 H P1+）
 
 **里程碑**：把 Node 新的可迭代压缩 API `zlib/iter` 在页内跑起来。它是 `lib/zlib/iter.js` 一层薄壳，底下是 `lib/internal/streams/iter/transform.js`——后者**裸调 `internalBinding('zlib')` 造 handle**（`new binding.Zlib(mode)`），再逐次 `write`/`writeSync` 驱动，从**调用方拥有的 `Uint32Array(2)`** 读回 `[availOut, availIn]` 并据此循环（`availOut === 0` 就再下发一次）。这就是 `src/node_zlib.cc` 的 `CompressionStream` 原生表面——M116 的 wasm zlib 就绪后它才可能被 vendor。

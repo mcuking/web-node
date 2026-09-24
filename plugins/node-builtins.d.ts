@@ -33,6 +33,46 @@ declare module 'node:crypto' {
   export function createHash(algorithm: string, options?: { outputLength?: number }): Hash;
   export function createHmac(algorithm: string, key: Uint8Array | string): Hmac;
   export function getHashes(): string[];
+  export interface Cipher {
+    setAutoPadding(autoPadding?: boolean): this;
+    setAAD(aad: Uint8Array, options?: { plaintextLength?: number }): this;
+    setAuthTag(tag: Uint8Array): this;
+    getAuthTag(): Uint8Array;
+    update(data: Uint8Array): Uint8Array;
+    final(): Uint8Array;
+  }
+  export function createCipheriv(
+    algorithm: string,
+    key: Uint8Array,
+    iv: Uint8Array | null,
+    options?: { authTagLength?: number },
+  ): Cipher;
+  export function createDecipheriv(
+    algorithm: string,
+    key: Uint8Array,
+    iv: Uint8Array | null,
+    options?: { authTagLength?: number },
+  ): Cipher;
+  export function pbkdf2Sync(
+    password: Uint8Array,
+    salt: Uint8Array,
+    iterations: number,
+    keylen: number,
+    digest: string,
+  ): Uint8Array;
+  export function hkdfSync(
+    digest: string,
+    ikm: Uint8Array,
+    salt: Uint8Array,
+    info: Uint8Array,
+    keylen: number,
+  ): ArrayBuffer;
+  export function scryptSync(
+    password: Uint8Array,
+    salt: Uint8Array,
+    keylen: number,
+    options: { N: number; r: number; p: number; maxmem: number },
+  ): Uint8Array;
 }
 
 declare module 'node:url' {

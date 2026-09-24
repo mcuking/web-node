@@ -33,7 +33,14 @@ import { blake2s } from './blake2s';
 import { sm3 } from './sm3';
 import { ripemd160 } from './ripemd160';
 
-import { opensslDigest, opensslDigestSize, opensslReady } from '../bindings/openssl';
+import {
+  opensslDigest,
+  opensslDigestSize,
+  opensslHkdf,
+  opensslPbkdf2,
+  opensslReady,
+  opensslScrypt,
+} from '../bindings/openssl';
 
 export type DigestFn = (bytes: Uint8Array, outputLength?: number) => Uint8Array;
 
@@ -500,6 +507,12 @@ export function pbkdf2(
   iterations: number,
   keylen: number,
 ): Uint8Array {
+  // Prefer the wasi OpenSSL subset (M119) once it is loaded; it is the same
+  // code Node runs, and both produce identical bytes.
+  if (algo.openssl !== undefined && opensslReady()) {
+    const viaOpenSsl = opensslPbkdf2(algo.openssl, password, salt, iterations, keylen);
+    if (viaOpenSsl !== null) return viaOpenSsl;
+  }
   const hLen = algo.digestSize;
   const blocks = Math.ceil(keylen / hLen);
   const out = new Uint8Array(blocks * hLen);
@@ -532,6 +545,10 @@ export function hkdf(
   info: Uint8Array,
   keylen: number,
 ): Uint8Array {
+  if (algo.openssl !== undefined && opensslReady()) {
+    const viaOpenSsl = opensslHkdf(algo.openssl, ikm, salt, info, keylen);
+    if (viaOpenSsl !== null) return viaOpenSsl;
+  }
   const zeroSalt = new Uint8Array(algo.digestSize);
   const prk = hmac(algo, salt.length ? salt : zeroSalt, ikm);
 
@@ -669,6 +686,14 @@ export function scrypt(
     const err = new Error('Invalid scrypt params');
     (err as { code?: string }).code = 'ERR_CRYPTO_INVALID_SCRYPT_PARAMS';
     throw err;
+  }
+
+  // The parameters are *validated* above (that is Node's own check), so only
+  // the KDF itself moves to wasm. A `null` means OpenSSL refused them anyway
+  // (a stricter memory bound); the pure-JS path then still produces the answer.
+  if (opensslReady()) {
+    const viaOpenSsl = opensslScrypt(password, salt, keylen, { N, r, p, maxmem });
+    if (viaOpenSsl !== null) return viaOpenSsl;
   }
 
   const b = pbkdf2(sha256Algo, password, salt, 1, p * 128 * r);

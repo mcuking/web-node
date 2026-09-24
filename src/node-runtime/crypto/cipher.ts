@@ -108,6 +108,7 @@ import { AesWrap } from './wrap';
 import { Des3Wrap } from './des3-wrap';
 import { CbcCts } from './cbc-cts';
 import { AesXts, gbTweakDbl } from './xts';
+import { createOpenSslCipher } from './openssl-cipher';
 
 export type { SyncCipher };
 
@@ -521,6 +522,11 @@ export function createCipher(
   authTagLength = 16,
   plaintextLength?: number,
 ): SyncCipher {
+  // Prefer the real OpenSSL subset (M119) whenever it is loaded and knows the
+  // cipher; everything below is the byte-identical pure-JS fallback used before
+  // the module lands (or if it never does).
+  const viaOpenSsl = createOpenSslCipher(spec, key, iv, encrypt, { authTagLength, plaintextLength });
+  if (viaOpenSsl !== null) return viaOpenSsl;
   if (spec.mode === 'chacha20') return new ChaCha20Cipher(key, iv as Uint8Array);
   if (spec.mode === 'chacha20-poly1305') {
     return new ChaCha20Poly1305(key, iv as Uint8Array, encrypt, authTagLength);

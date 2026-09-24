@@ -22,6 +22,7 @@
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#include <openssl/kdf.h>
 
 /* WASI has no getpid; OpenSSL only uses it for DRBG fork-detection. */
 int getpid(void) { return 1; }
@@ -40,15 +41,64 @@ WN_EXPORT(wn_dealloc)(void *ptr) {
 WN_EXPORT(wn_openssl_version)(void) { return (int32_t)OpenSSL_version_num(); }
 
 static char wn_error[256];
+/**
+ * Coarse classification of the last error, so JS can reproduce Node's exact
+ * exception *without* sniffing English text or hard-coding OpenSSL's reason
+ * codes (they are compared against the `EVP_R_*` macros here instead).
+ */
+enum {
+    WN_ERR_NONE = 0,
+    WN_ERR_WRONG_FINAL_BLOCK_LENGTH = 1,
+    WN_ERR_BAD_DECRYPT = 2,
+    WN_ERR_BAD_IV_LENGTH = 3,
+    WN_ERR_OTHER = 4,
+};
+static int32_t wn_error_kind = WN_ERR_NONE;
+static int32_t wn_error_lib = 0;
+static char wn_error_reason[128];
+
 static void wn_capture_error(void) {
+    wn_error_kind = WN_ERR_NONE;
+    wn_error_lib = 0;
+    wn_error_reason[0] = '\0';
     unsigned long e = ERR_get_error();
+    /* Drop anything queued behind the first error: Node reports the oldest
+     * one too (`ERR_peek_error()`), and a stale tail confuses later reads. */
+    while (ERR_get_error() != 0) { }
     if (e == 0) {
         wn_error[0] = '\0';
         return;
     }
     ERR_error_string_n(e, wn_error, sizeof(wn_error));
+    wn_error_lib = (int32_t)ERR_GET_LIB(e);
+    const char *reason = ERR_reason_error_string(e);
+    if (reason != NULL) {
+        strncpy(wn_error_reason, reason, sizeof(wn_error_reason) - 1);
+        wn_error_reason[sizeof(wn_error_reason) - 1] = '\0';
+    }
+    switch (ERR_GET_REASON(e)) {
+        case EVP_R_WRONG_FINAL_BLOCK_LENGTH: wn_error_kind = WN_ERR_WRONG_FINAL_BLOCK_LENGTH; break;
+        case EVP_R_BAD_DECRYPT: wn_error_kind = WN_ERR_BAD_DECRYPT; break;
+        case EVP_R_INVALID_IV_LENGTH: wn_error_kind = WN_ERR_BAD_IV_LENGTH; break;
+        default: wn_error_kind = WN_ERR_OTHER; break;
+    }
 }
 WN_PTR(wn_openssl_last_error)(void) { return wn_error; }
+/** Clear the OpenSSL error queue (JS calls this before each fallible entry). */
+WN_EXPORT(wn_openssl_clear_error)(void) {
+    ERR_clear_error();
+    wn_error[0] = '\0';
+    wn_error_kind = WN_ERR_NONE;
+    wn_error_lib = 0;
+    wn_error_reason[0] = '\0';
+    return 0;
+}
+/** One of `WN_ERR_*` for the last captured error (0 when there was none). */
+WN_EXPORT(wn_openssl_error_kind)(void) { return wn_error_kind; }
+/** `ERR_GET_LIB` of the last captured error (used to rebuild `ERR_OSSL_*` codes). */
+WN_EXPORT(wn_openssl_error_lib)(void) { return wn_error_lib; }
+/** `ERR_reason_error_string` of the last captured error, or an empty string. */
+WN_PTR(wn_openssl_error_reason)(void) { return wn_error_reason; }
 
 /* --- digests ---------------------------------------------------------------- */
 
@@ -212,4 +262,234 @@ WN_EXPORT(wn_hmac_free)(int32_t handle) {
     HMAC_CTX *ctx = (HMAC_CTX *)(intptr_t)handle;
     if (ctx != NULL) HMAC_CTX_free(ctx);
     return 0;
+}
+
+/* --- ciphers ---------------------------------------------------------------- */
+
+/** Fetch a cipher by its OpenSSL name (`AES-128-CBC`, `ChaCha20-Poly1305`, …). */
+static const EVP_CIPHER *cipher_by_name(const char *name, int32_t nlen) {
+    char buf[64];
+    if (nlen <= 0 || nlen >= (int32_t)sizeof(buf)) return NULL;
+    memcpy(buf, name, (size_t)nlen);
+    buf[nlen] = '\0';
+    return EVP_CIPHER_fetch(NULL, buf, NULL);
+}
+
+/**
+ * Metadata for a cipher, or -1 when OpenSSL cannot fetch the name.
+ * `out` receives `[key_length, iv_length, block_size, mode, flags]` where mode
+ * is the `EVP_CIPH_*_MODE` value (`0 stream`, `1 ECB`, `2 CBC`, `3 CFB`,
+ * `4 OFB`, `5 CTR`, `6 GCM`, `7 CCM`, `0x10001 XTS`, `0x10002 WRAP`,
+ * `0x10003 OCB`, `0x10004 SIV`, `0x10005 GCM-SIV`) and flags is the
+ * `EVP_CIPH_FLAG_*` bitmask (`0x4000` CTS, `0x200000` AEAD, `0x2000000` MAC).
+ */
+WN_EXPORT(wn_cipher_info)(const char *name, int32_t nlen, int32_t *out) {
+    const EVP_CIPHER *cipher = cipher_by_name(name, nlen);
+    if (cipher == NULL) { wn_capture_error(); return -1; }
+    out[0] = EVP_CIPHER_get_key_length(cipher);
+    out[1] = EVP_CIPHER_get_iv_length(cipher);
+    out[2] = EVP_CIPHER_get_block_size(cipher);
+    out[3] = EVP_CIPHER_get_mode(cipher);
+    out[4] = (int32_t)EVP_CIPHER_get_flags(cipher);
+    EVP_CIPHER_free((EVP_CIPHER *)cipher);
+    return 0;
+}
+
+/**
+ * Create a cipher context in the "cipher only" state — no key, no IV yet, so
+ * the caller can still adjust the IV length (and, for CCM, the tag).
+ */
+WN_EXPORT(wn_cipher_new)(const char *name, int32_t nlen, int32_t encrypt) {
+    const EVP_CIPHER *cipher = cipher_by_name(name, nlen);
+    if (cipher == NULL) { wn_capture_error(); return 0; }
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    int ok = ctx != NULL
+          && (encrypt ? EVP_EncryptInit_ex(ctx, cipher, NULL, NULL, NULL)
+                      : EVP_DecryptInit_ex(ctx, cipher, NULL, NULL, NULL)) == 1;
+    EVP_CIPHER_free((EVP_CIPHER *)cipher);
+    if (!ok) {
+        if (ctx != NULL) EVP_CIPHER_CTX_free(ctx);
+        wn_capture_error();
+        return 0;
+    }
+    return (int32_t)(intptr_t)ctx;
+}
+
+/** Override the IV length (GCM/CCM/OCB take 12 by default, Node allows more). */
+WN_EXPORT(wn_cipher_set_ivlen)(int32_t handle, int32_t length) {
+    EVP_CIPHER_CTX *ctx = (EVP_CIPHER_CTX *)(intptr_t)handle;
+    if (ctx == NULL) return -1;
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, length, NULL) != 1) {
+        wn_capture_error();
+        return -1;
+    }
+    return 0;
+}
+
+/** CCM's mandatory "how long is the plaintext" declaration. */
+WN_EXPORT(wn_cipher_set_data_len)(int32_t handle, int32_t length) {
+    EVP_CIPHER_CTX *ctx = (EVP_CIPHER_CTX *)(intptr_t)handle;
+    if (ctx == NULL) return -1;
+    int outl = 0;
+    if (EVP_CIPHER_CTX_is_encrypting(ctx)) {
+        if (EVP_EncryptUpdate(ctx, NULL, &outl, NULL, length) != 1) { wn_capture_error(); return -1; }
+    } else {
+        if (EVP_DecryptUpdate(ctx, NULL, &outl, NULL, length) != 1) { wn_capture_error(); return -1; }
+    }
+    return 0;
+}
+
+/** Bind the key (and IV) once the context has been fully configured. */
+WN_EXPORT(wn_cipher_set_key_iv)(int32_t handle, const uint8_t *key, int32_t klen,
+                                const uint8_t *iv, int32_t ivlen) {
+    EVP_CIPHER_CTX *ctx = (EVP_CIPHER_CTX *)(intptr_t)handle;
+    if (ctx == NULL) return -1;
+    /* The context already knows its key/IV lengths; these are for the record. */
+    (void)klen;
+    int ok = EVP_CIPHER_CTX_is_encrypting(ctx)
+           ? EVP_EncryptInit_ex(ctx, NULL, NULL, key, ivlen > 0 ? iv : NULL)
+           : EVP_DecryptInit_ex(ctx, NULL, NULL, key, ivlen > 0 ? iv : NULL);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return 0;
+}
+
+/** PKCS#7 padding on/off (must be set before the key is bound in Node, but
+ * OpenSSL accepts it any time before the first update). */
+WN_EXPORT(wn_cipher_set_padding)(int32_t handle, int32_t padding) {
+    EVP_CIPHER_CTX *ctx = (EVP_CIPHER_CTX *)(intptr_t)handle;
+    if (ctx == NULL) return -1;
+    if (EVP_CIPHER_CTX_set_padding(ctx, padding) != 1) { wn_capture_error(); return -1; }
+    return 0;
+}
+
+/** Additional authenticated data (GCM/CCM/OCB/SIV). */
+WN_EXPORT(wn_cipher_aad)(int32_t handle, const uint8_t *aad, int32_t len) {
+    EVP_CIPHER_CTX *ctx = (EVP_CIPHER_CTX *)(intptr_t)handle;
+    if (ctx == NULL) return -1;
+    int outl = 0;
+    int ok = EVP_CIPHER_CTX_is_encrypting(ctx)
+           ? EVP_EncryptUpdate(ctx, NULL, &outl, aad, len)
+           : EVP_DecryptUpdate(ctx, NULL, &outl, aad, len);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return 0;
+}
+
+/** Expected authentication tag (decryption only). CCM wants this before the
+ * key is bound; GCM/OCB accept it any time before `final`. */
+WN_EXPORT(wn_cipher_set_tag)(int32_t handle, const uint8_t *tag, int32_t len) {
+    EVP_CIPHER_CTX *ctx = (EVP_CIPHER_CTX *)(intptr_t)handle;
+    if (ctx == NULL) return -1;
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, len, (void *)tag) != 1) {
+        wn_capture_error();
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * Declare an AEAD tag length without a tag. CCM and OCB require this before the
+ * key is bound (there is no default); GCM and ChaCha20-Poly1305 have defaults
+ * and are validated on the JS side instead.
+ */
+WN_EXPORT(wn_cipher_set_tag_len)(int32_t handle, int32_t length) {
+    EVP_CIPHER_CTX *ctx = (EVP_CIPHER_CTX *)(intptr_t)handle;
+    if (ctx == NULL) return -1;
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, length, NULL) != 1) {
+        wn_capture_error();
+        return -1;
+    }
+    return 0;
+}
+
+/** Extract the tag produced by an encrypting AEAD context. */
+WN_EXPORT(wn_cipher_get_tag)(int32_t handle, uint8_t *out, int32_t len) {
+    EVP_CIPHER_CTX *ctx = (EVP_CIPHER_CTX *)(intptr_t)handle;
+    if (ctx == NULL) return -1;
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, len, out) != 1) {
+        wn_capture_error();
+        return -1;
+    }
+    return len;
+}
+
+/** One `update` step. Returns the number of bytes written to `out`, or -1. */
+WN_EXPORT(wn_cipher_update)(int32_t handle, const uint8_t *in, int32_t inlen, uint8_t *out) {
+    EVP_CIPHER_CTX *ctx = (EVP_CIPHER_CTX *)(intptr_t)handle;
+    if (ctx == NULL) return -1;
+    int outl = 0;
+    int ok = EVP_CIPHER_CTX_is_encrypting(ctx)
+           ? EVP_EncryptUpdate(ctx, out, &outl, in, inlen)
+           : EVP_DecryptUpdate(ctx, out, &outl, in, inlen);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return (int32_t)outl;
+}
+
+/** Finish the stream. Returns the number of bytes written to `out`, or -1. */
+WN_EXPORT(wn_cipher_final)(int32_t handle, uint8_t *out) {
+    EVP_CIPHER_CTX *ctx = (EVP_CIPHER_CTX *)(intptr_t)handle;
+    if (ctx == NULL) return -1;
+    int outl = 0;
+    int ok = EVP_CIPHER_CTX_is_encrypting(ctx)
+           ? EVP_EncryptFinal_ex(ctx, out, &outl)
+           : EVP_DecryptFinal_ex(ctx, out, &outl);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return (int32_t)outl;
+}
+
+WN_EXPORT(wn_cipher_free)(int32_t handle) {
+    EVP_CIPHER_CTX *ctx = (EVP_CIPHER_CTX *)(intptr_t)handle;
+    if (ctx != NULL) EVP_CIPHER_CTX_free(ctx);
+    return 0;
+}
+
+/* --- KDFs ------------------------------------------------------------------- */
+
+/** RFC 8018 PBKDF2 with `md` in the same name-based spelling as the digests. */
+WN_EXPORT(wn_pbkdf2)(const char *name, int32_t nlen,
+                     const uint8_t *pw, int32_t pwlen,
+                     const uint8_t *salt, int32_t saltlen,
+                     int32_t iterations, uint8_t *out, int32_t keylen) {
+    int32_t h = md_by_name(name, nlen);
+    if (h == 0) { wn_capture_error(); return -1; }
+    EVP_MD *md = (EVP_MD *)(intptr_t)h;
+    int ok = PKCS5_PBKDF2_HMAC((const char *)pw, pwlen, salt, saltlen, iterations, md, keylen, out);
+    EVP_MD_free(md);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return keylen;
+}
+
+/** RFC 5869 HKDF (extract-then-expand). */
+WN_EXPORT(wn_hkdf)(const char *name, int32_t nlen,
+                   const uint8_t *ikm, int32_t ikmlen,
+                   const uint8_t *salt, int32_t saltlen,
+                   const uint8_t *info, int32_t infolen,
+                   uint8_t *out, int32_t keylen) {
+    int32_t h = md_by_name(name, nlen);
+    if (h == 0) { wn_capture_error(); return -1; }
+    EVP_MD *md = (EVP_MD *)(intptr_t)h;
+    EVP_PKEY_CTX *pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, NULL);
+    size_t outlen = (size_t)keylen;
+    int ok = pctx != NULL
+          && EVP_PKEY_derive_init(pctx) == 1
+          && EVP_PKEY_CTX_set_hkdf_md(pctx, md) == 1
+          && (saltlen == 0 || EVP_PKEY_CTX_set1_hkdf_salt(pctx, salt, saltlen) == 1)
+          && EVP_PKEY_CTX_set1_hkdf_key(pctx, ikm, ikmlen) == 1
+          && (infolen == 0 || EVP_PKEY_CTX_add1_hkdf_info(pctx, info, infolen) == 1)
+          && EVP_PKEY_derive(pctx, out, &outlen) == 1;
+    if (pctx != NULL) EVP_PKEY_CTX_free(pctx);
+    EVP_MD_free(md);
+    if (!ok) { wn_capture_error(); return -1; }
+    return (int32_t)outlen;
+}
+
+/** RFC 7914 scrypt. `maxmem` is enforced by OpenSSL exactly as Node does. */
+WN_EXPORT(wn_scrypt)(const uint8_t *pw, int32_t pwlen,
+                     const uint8_t *salt, int32_t saltlen,
+                     int32_t N, int32_t r, int32_t p, uint32_t maxmem,
+                     uint8_t *out, int32_t keylen) {
+    int ok = EVP_PBE_scrypt((const char *)pw, (size_t)pwlen, salt, (size_t)saltlen,
+                            (uint64_t)N, (uint64_t)r, (uint64_t)p,
+                            (uint64_t)maxmem, out, (size_t)keylen);
+    if (ok != 1) { wn_capture_error(); return -1; }
+    return keylen;
 }
