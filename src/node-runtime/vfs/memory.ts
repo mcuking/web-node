@@ -9,6 +9,7 @@ import {
   type PathLike,
   VfsError,
 } from './types';
+import type { ReadSource } from './persistence';
 import * as p from './posix';
 import { encodeBase64, decodeBase64 } from './base64';
 
@@ -20,10 +21,20 @@ interface Entry {
   ctimeMs: number;
   birthtimeMs: number;
   ino: number;
+  /**
+   * Came from backing storage and has not been read into memory yet (M120).
+   *
+   * A cold *file* has an empty `data` and a `coldSize`; a cold *directory* has no
+   * children yet. Both are resolved on first use, through `#readSource`.
+   */
+  cold?: boolean;
+  /** Byte length the store reported; only meaningful while `cold`. */
+  coldSize?: number;
 }
 
 const S_IFDIR = 0o040000;
 const S_IFREG = 0o100000;
+const EMPTY = new Uint8Array(0);
 
 /**
  * In-memory, inode-style VFS. This is the authoritative store; a persistence
@@ -59,6 +70,137 @@ export class MemoryVfs implements Vfs {
   }
 
   /**
+   * Where a lookup that misses goes next (M120). Injected by the runtime when the
+   * backing store can answer *synchronously*; without it the tree is the only
+   * source of truth, which is how this VFS behaved before M120.
+   */
+  #readSource: ReadSource | null = null;
+
+  /** Where paths removed by `rm`/`rename` are reported, so the store drops them too. */
+  #deletedSink: ((paths: string[]) => void) | null = null;
+
+  /** Install (or clear with `null`) the backing-store read path. */
+  setReadSource(source: ReadSource | null): void {
+    this.#readSource = source;
+  }
+
+  /** Install (or clear with `null`) the deletion sink. */
+  setDeletedSink(sink: ((paths: string[]) => void) | null): void {
+    this.#deletedSink = sink;
+  }
+
+  /* ---------------------------------------------------------------- hydration */
+
+  /**
+   * Pull `abs` — or, failing that, its nearest existing ancestor — out of backing
+   * storage and into the tree.
+   *
+   * Stopping at the nearest ancestor is the point: it is what lets a lookup tell
+   * `ENOENT` from `ENOTDIR` for a path the store only partly knows. Everything
+   * found is inserted cold, so the bytes (and a directory's children) are still
+   * fetched on demand.
+   */
+  #hydrate(abs: string): void {
+    const source = this.#readSource;
+    if (!source) return;
+    if (this.#entries.has(abs)) return;
+    let cur = abs;
+    for (;;) {
+      const info = source.info(cur);
+      if (info) {
+        this.#insertCold(cur, info);
+        return;
+      }
+      const parent = p.dirname(cur);
+      if (parent === cur) return;
+      cur = parent;
+    }
+  }
+
+  #insertCold(abs: string, info: { type: 'file' | 'dir'; size: number }): void {
+    if (info.type === 'dir') {
+      const entry = this.#makeDir();
+      entry.cold = true;
+      this.#entries.set(abs, entry);
+      return;
+    }
+    const entry = this.#makeFile(EMPTY);
+    entry.cold = true;
+    entry.coldSize = info.size;
+    this.#entries.set(abs, entry);
+  }
+
+  /** Fetch a cold file's bytes. Throws if the store cannot produce them. */
+  #materializeFile(abs: string, entry: Entry): void {
+    const source = this.#readSource;
+    if (!source) return;
+    entry.data = source.read(abs);
+    entry.cold = false;
+    entry.coldSize = undefined;
+  }
+
+  /** Fetch a cold directory's immediate children. */
+  #materializeChildren(abs: string, entry: Entry): void {
+    entry.cold = false;
+    const children = this.#readSource?.list(abs) ?? null;
+    if (!children) return;
+    for (const child of children) {
+      if (child.name === '' || child.name.includes('/')) continue;
+      const childPath = abs === '/' ? '/' + child.name : abs + '/' + child.name;
+      if (this.#entries.has(childPath)) continue;
+      if (child.type === 'dir') {
+        const dir = this.#makeDir();
+        dir.cold = true;
+        this.#entries.set(childPath, dir);
+        continue;
+      }
+      const file = this.#makeFile(EMPTY);
+      file.cold = true;
+      file.coldSize = child.size;
+      this.#entries.set(childPath, file);
+    }
+  }
+
+  /**
+   * Make `entry` real, and so is every cold entry beneath it.
+   *
+   * Mutating operations need this: a rename has to know every path it moved, and
+   * an `rm` has to name every path it removed down to the store, which a cold
+   * entry alone cannot say.
+   */
+  #materialize(abs: string, entry: Entry): void {
+    if (entry.cold) {
+      if (entry.type === 'file') {
+        this.#materializeFile(abs, entry);
+        return;
+      }
+      this.#materializeChildren(abs, entry);
+    } else if (entry.type !== 'dir') {
+      return;
+    }
+    for (const child of this.#childEntries(abs)) {
+      if (child.entry.cold) this.#materialize(child.path, child.entry);
+    }
+  }
+
+  /** Entries whose parent is exactly `abs`, one level down. */
+  #childEntries(abs: string): Array<{ path: string; entry: Entry }> {
+    const prefix = abs === '/' ? '/' : abs + '/';
+    const out: Array<{ path: string; entry: Entry }> = [];
+    for (const [key, entry] of this.#entries) {
+      if (!key.startsWith(prefix)) continue;
+      const rest = key.slice(prefix.length);
+      if (rest.length === 0 || rest.includes('/')) continue;
+      out.push({ path: key, entry });
+    }
+    return out;
+  }
+
+  #reportDeleted(paths: string[]): void {
+    if (paths.length > 0) this.#deletedSink?.(paths);
+  }
+
+  /**
    * `fs.fsyncSync` / `fdatasyncSync`: block until this file's bytes are durable.
    *
    * The bytes come from the tree, which is the authority — the backing store may
@@ -71,6 +213,9 @@ export class MemoryVfs implements Vfs {
     const resolved = p.resolve(this.#cwd, path);
     const entry = this.#entries.get(resolved);
     if (!entry || entry.type !== 'file') return;
+    // A file that is only in the store is already durable there — it came from
+    // it. Reading it back just to write it out again would be pure waste.
+    if (entry.cold) return;
     this.#syncSink?.(resolved, entry.data);
   }
 
@@ -125,6 +270,7 @@ export class MemoryVfs implements Vfs {
 
   chdir(dir: string): void {
     const abs = this.resolve(dir);
+    this.#hydrate(abs);
     const e = this.#entries.get(abs);
     if (!e) throw new VfsError('ENOENT', 'chdir', dir);
     if (e.type !== 'dir') throw new VfsError('ENOTDIR', 'chdir', dir);
@@ -139,6 +285,7 @@ export class MemoryVfs implements Vfs {
   }
 
   #requireDir(dir: string, syscall: string, path: string): Entry {
+    this.#hydrate(dir);
     const e = this.#entries.get(dir);
     if (!e) throw new VfsError('ENOENT', syscall, path);
     if (e.type !== 'dir') throw new VfsError('ENOTDIR', syscall, path);
@@ -152,6 +299,7 @@ export class MemoryVfs implements Vfs {
     } catch {
       return false;
     }
+    this.#hydrate(abs);
     return this.#entries.has(abs);
   }
 
@@ -181,6 +329,7 @@ export class MemoryVfs implements Vfs {
    * is genuinely absent, `ENOTDIR` when an ancestor is a regular file.
    */
   #entryOrThrow(abs: string, path: string, syscall: string): Entry {
+    this.#hydrate(abs);
     const e = this.#entries.get(abs);
     if (e) return e;
     if (this.#ancestorFile(abs) !== undefined) throw new VfsError('ENOTDIR', syscall, path);
@@ -203,6 +352,7 @@ export class MemoryVfs implements Vfs {
   /** `fs.realpath`: resolve the path and verify it exists (syscall `lstat`). */
   realpath(input: PathLike): string {
     const abs = this.resolve(input);
+    this.#hydrate(abs);
     const e = this.#entries.get(abs);
     if (!e) {
       if (this.#ancestorFile(abs) !== undefined) throw new VfsError('ENOTDIR', 'lstat', abs);
@@ -212,9 +362,10 @@ export class MemoryVfs implements Vfs {
   }
 
   #toStat(e: Entry): Stat {
+    const size = e.type !== 'file' ? 0 : e.cold ? e.coldSize ?? 0 : e.data.byteLength;
     return {
       type: e.type,
-      size: e.type === 'file' ? e.data.byteLength : 0,
+      size,
       mode: e.mode | (e.type === 'dir' ? S_IFDIR : S_IFREG),
       mtimeMs: e.mtimeMs,
       ctimeMs: e.ctimeMs,
@@ -227,7 +378,7 @@ export class MemoryVfs implements Vfs {
       gid: 0,
       rdev: 0,
       blksize: 4096,
-      blocks: e.type === 'file' ? Math.ceil(e.data.byteLength / 512) : 0,
+      blocks: e.type === 'file' ? Math.ceil(size / 512) : 0,
     };
   }
 
@@ -235,6 +386,7 @@ export class MemoryVfs implements Vfs {
     const abs = this.resolve(path);
     const e = this.#entryOrThrow(abs, path, 'open');
     if (e.type === 'dir') throw new VfsError('EISDIR', 'read', path);
+    if (e.cold) this.#materializeFile(abs, e);
     return e.data.slice();
   }
 
@@ -245,6 +397,11 @@ export class MemoryVfs implements Vfs {
     if (abs === '/') throw new VfsError('EISDIR', 'open', path);
     this.#requireDir(dir, 'open', path);
 
+    // An append has to start from what is already there, and the tree may not
+    // hold it yet. A plain write replaces the contents, so it has no reason to
+    // look: hydrating there would cost a round trip on every new file.
+    if (flag === 'a' || flag === 'ax') this.#hydrate(abs);
+
     const existing = this.#entries.get(abs);
     if (existing?.type === 'dir') throw new VfsError('EISDIR', 'open', path);
     if (existing && (flag === 'wx' || flag === 'ax')) {
@@ -253,10 +410,14 @@ export class MemoryVfs implements Vfs {
 
     if (flag === 'a' || flag === 'ax') {
       if (existing) {
+        // A cold entry has no bytes yet; the append needs them.
+        if (existing.cold) this.#materializeFile(abs, existing);
         const merged = new Uint8Array(existing.data.byteLength + data.byteLength);
         merged.set(existing.data, 0);
         merged.set(data, existing.data.byteLength);
         existing.data = merged;
+        existing.cold = false;
+        existing.coldSize = undefined;
         existing.mtimeMs = Date.now();
         this.#touch(abs, 'change');
         return;
@@ -265,6 +426,8 @@ export class MemoryVfs implements Vfs {
 
     if (existing) {
       existing.data = data.slice();
+      existing.cold = false;
+      existing.coldSize = undefined;
       existing.mtimeMs = Date.now();
       if (opts.mode !== undefined) existing.mode = opts.mode & 0o777;
     } else {
@@ -317,12 +480,14 @@ export class MemoryVfs implements Vfs {
 
   readdir(path: string, opts: ReaddirOptions = {}): Dirent[] {
     const abs = this.resolve(path);
+    this.#hydrate(abs);
     const e = this.#entries.get(abs);
     if (!e) {
       if (this.#ancestorFile(abs) !== undefined) throw new VfsError('ENOTDIR', 'scandir', path);
       throw new VfsError('ENOENT', 'scandir', path);
     }
     if (e.type !== 'dir') throw new VfsError('ENOTDIR', 'scandir', path);
+    if (e.cold) this.#materializeChildren(abs, e);
 
     const prefix = abs === '/' ? '/' : abs + '/';
     const out: Dirent[] = [];
@@ -351,6 +516,7 @@ export class MemoryVfs implements Vfs {
 
   rm(path: string, opts: { recursive?: boolean; force?: boolean; syscall?: 'unlink' | 'rmdir' | 'lstat' } = {}): void {
     const abs = this.resolve(path);
+    this.#hydrate(abs);
     const e = this.#entries.get(abs);
     if (!e) {
       if (opts.force) return;
@@ -362,6 +528,10 @@ export class MemoryVfs implements Vfs {
     if (e.type === 'dir') {
       // `unlink` never removes a directory (libuv reports EPERM on macOS).
       if (opts.syscall === 'unlink' && !opts.recursive) throw new VfsError('EPERM', 'unlink', path);
+      // Resolve what is under it first: a cold directory only knows that it
+      // exists, and both the emptiness check and the store's copy of the
+      // deletion need the real child paths.
+      this.#materialize(abs, e);
       const prefix = abs + '/';
       const children = [...this.#entries.keys()].filter((k) => k.startsWith(prefix));
       if (children.length > 0) {
@@ -369,10 +539,12 @@ export class MemoryVfs implements Vfs {
         for (const c of children) this.#entries.delete(c);
       }
       this.#entries.delete(abs);
+      this.#reportDeleted([abs, ...children]);
     } else {
       // `rmdir` requires a directory; a regular file yields ENOTDIR.
       if (opts.syscall === 'rmdir') throw new VfsError('ENOTDIR', 'rmdir', path);
       this.#entries.delete(abs);
+      this.#reportDeleted([abs]);
     }
     this.#touch(abs, 'delete');
   }
@@ -380,6 +552,8 @@ export class MemoryVfs implements Vfs {
   rename(from: string, to: string): void {
     const src = this.resolve(from);
     const dst = this.resolve(to);
+    this.#hydrate(src);
+    this.#hydrate(dst);
     const e = this.#entries.get(src);
     if (!e) {
       if (this.#ancestorFile(src) !== undefined) throw new VfsError('ENOTDIR', 'rename', from, undefined, to);
@@ -389,8 +563,12 @@ export class MemoryVfs implements Vfs {
     const dstDirEntry = this.#entries.get(dstDir);
     if (!dstDirEntry) throw new VfsError('ENOENT', 'rename', from, undefined, to);
     if (dstDirEntry.type !== 'dir') throw new VfsError('ENOTDIR', 'rename', from, undefined, to);
+    // A rename has to name every path it moves: the store still holds the old
+    // ones, and nothing else will ever take them away.
+    this.#materialize(src, e);
     this.#entries.delete(src);
     this.#entries.set(dst, e);
+    const movedFrom: string[] = [];
     if (e.type === 'dir') {
       const prefix = src + '/';
       for (const key of [...this.#entries.keys()]) {
@@ -399,15 +577,18 @@ export class MemoryVfs implements Vfs {
           const ce = this.#entries.get(key)!;
           this.#entries.delete(key);
           this.#entries.set(moved, ce);
+          movedFrom.push(key);
         }
       }
     }
+    this.#reportDeleted([src, ...movedFrom]);
     this.#touch(src, 'delete');
     this.#touch(dst, 'create');
   }
 
   copyFile(from: string, to: string, mode = 0): void {
     const src = this.resolve(from);
+    this.#hydrate(src);
     const srcE = this.#entries.get(src);
     if (!srcE) {
       if (this.#ancestorFile(src) !== undefined) throw new VfsError('ENOTDIR', 'copyfile', from, undefined, to);
@@ -419,6 +600,7 @@ export class MemoryVfs implements Vfs {
     if ((mode & 1) !== 0 && this.exists(to)) {
       throw new VfsError('EEXIST', 'copyfile', from, undefined, to);
     }
+    if (srcE.cold) this.#materializeFile(src, srcE);
     this.writeFile(to, srcE.data.slice());
   }
 
@@ -428,7 +610,6 @@ export class MemoryVfs implements Vfs {
     e.mode = mode & 0o777;
     this.#touch(abs, 'change');
   }
-
   /** Snapshot the whole tree (used for persistence + tests). */
   snapshot(): Array<{ path: string; type: 'file' | 'dir'; data?: string; mode: number }> {
     const out: Array<{ path: string; type: 'file' | 'dir'; data?: string; mode: number }> = [];

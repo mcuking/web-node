@@ -10,11 +10,19 @@
 
 import { SyncChannelError } from '../../sync/sab-rpc';
 import {
+  FS_OP_GET,
+  FS_OP_LIST,
   FS_OP_PUT,
+  FS_OP_STAT,
+  decodePath,
   decodePut,
+  encodeListingBody,
+  encodeInfoBody,
+  encodeReadResult,
   type FsAsyncCall,
   type PersistedEntry,
   type PersistedSnapshot,
+  type StoreEntry,
 } from '../../sync/fs-protocol';
 import { decodeBase64 } from './base64';
 
@@ -40,6 +48,12 @@ export interface FileStore {
   readText(path: string): Promise<string>;
   remove(path: string): Promise<void>;
   clearAll(): Promise<void>;
+  /** Bytes, or `null` when nothing lives at `path`. */
+  readOrNull(path: string): Promise<Uint8Array | null>;
+  /** Type and size of `path`, or `null` when it is absent. */
+  info(path: string): Promise<{ type: 'file' | 'dir'; size: number } | null>;
+  /** Immediate children of `path`, or `null` when it is not a directory. */
+  list(path: string): Promise<StoreEntry[] | null>;
 }
 
 /** VFS paths are absolute; store paths are relative to the root directory. */
@@ -56,16 +70,52 @@ export class FsService {
     this.#snapshotFile = options.snapshotFile ?? SNAPSHOT_FILE;
   }
 
-  /** Handle the one synchronous operation: write a file and make it durable. */
+  /**
+   * Handle one synchronous operation.
+   *
+   * Every branch may return a promise: the runtime worker is parked in
+   * `Atomics.wait` regardless, so the FS worker is free to `await` OPFS here.
+   * A lookup that misses answers "absent" (`present: false`) rather than
+   * throwing — that is a real answer, and the caller turns it into whatever
+   * errno its own syscall calls for.
+   */
   sync(op: number, payload: Uint8Array): Uint8Array | Promise<Uint8Array> {
     switch (op) {
       case FS_OP_PUT: {
         const { path, data } = decodePut(payload);
         return this.#store.put(relativePath(path), data).then(() => EMPTY);
       }
+      case FS_OP_GET:
+        return this.#read(decodePath(payload));
+      case FS_OP_STAT:
+        return this.#stat(decodePath(payload));
+      case FS_OP_LIST:
+        return this.#list(decodePath(payload));
       default:
         throw new SyncChannelError(`unknown synchronous FS operation ${op}`);
     }
+  }
+
+  async #read(path: string): Promise<Uint8Array> {
+    const data = await this.#store.readOrNull(relativePath(path));
+    return data === null ? encodeReadResult(false) : encodeReadResult(true, data);
+  }
+
+  async #stat(path: string): Promise<Uint8Array> {
+    const info = await this.#store.info(relativePath(path));
+    return info === null ? encodeReadResult(false) : encodeReadResult(true, encodeInfoBody(info));
+  }
+
+  async #list(path: string): Promise<Uint8Array> {
+    const rel = relativePath(path);
+    const entries = await this.#store.list(rel);
+    if (entries === null) return encodeReadResult(false);
+    // The snapshot index is a store artifact, not a user file, and it lives in
+    // the root directory — which is exactly where a listing would otherwise
+    // expose it. Deeper directories are untouched, so a user file that happens
+    // to share the name stays visible.
+    const visible = rel === '' ? entries.filter((entry) => entry.name !== this.#snapshotFile) : entries;
+    return encodeReadResult(true, encodeListingBody(visible));
   }
 
   async async(request: FsAsyncCall): Promise<unknown> {
@@ -75,9 +125,30 @@ export class FsService {
       case 'snapshot':
         await this.writeSnapshot(request.snapshot);
         return undefined;
+      case 'delete':
+        await this.#delete(request.paths);
+        return undefined;
       case 'clear':
         await this.#store.clearAll();
         return undefined;
+    }
+  }
+
+  /**
+   * Remove paths from the store, deepest first.
+   *
+   * Order matters: OPFS refuses to remove a non-empty directory, so a child must
+   * go before its parent. A path that is already absent is not an error — the
+   * caller is reporting what it removed, not asking a question.
+   */
+  async #delete(paths: string[]): Promise<void> {
+    const ordered = [...paths].sort((a, b) => b.length - a.length);
+    for (const path of ordered) {
+      try {
+        await this.#store.remove(relativePath(path));
+      } catch {
+        /* already gone, or a directory whose children were never mirrored */
+      }
     }
   }
 

@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-24（**阶段 H：M119 ✅ 结清**——自定义 DH 参数与 ml-kem keygen 全走 wasm OpenSSL；**M120 已交付本体**：FS-worker + SAB 同步通道，`fs.fsyncSync` 真阻塞到落盘，端到端证据齐全）
+> - **最后更新**：2026-09-24（**阶段 H：M119 ✅ 结清**——自定义 DH 参数与 ml-kem keygen 全走 wasm OpenSSL；**M120 ✅ 结清**：FS-worker + SAB 同步通道——`fs.fsyncSync` 真阻塞到落盘，读也能阻塞回源，端到端证据齐全。下一步 M121）
 
 ---
 
@@ -45,7 +45,7 @@
 | — | 已判定不做 | 1 | — | — |
 | **合计** | | **51** | **43** | **8**（+1 不做） |
 
-> **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 ✅ · M120 · M121。
+> **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 ✅ · M120 ✅ · M121。
 > 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 130 个里程碑，剩余 8 个规划任务**。
 > 注：本表按**叶子任务**计数——M90（拆 M90.1–M90.9）、M92（拆 M92.1/M92.2）、M93（拆 M93.1–M93.4）、M93.4（拆 a–h）、M97（拆 M97.1）的**父项为拆分占位、不计入**。（旧表 A=22 系拆分前的陈旧值，本次一并修正为 26。）
 
@@ -96,7 +96,7 @@
 >
 > **⑤ 不需要（编译/模块机制）**：`builtins` `cjs_lexer` `module_wrap` `ipc_serdes` `options` `internal_only_v8` `locks` `watchdog` —— 本运行时的 loader/图是自研的，没有 V8 编译缓存或原生源码文本要发。
 >
-> **⑥ 阻塞式系统调用（M120，已交付）**：浏览器没有阻塞式系统调用，而 OPFS 句柄只能 `await` 拿——**这与「运行时 worker 必须能阻塞」直接矛盾**。于是开一个 **FS-worker**：它在自己的线程里跑 `await`、干同步句柄的活；运行时 worker 把请求写进 `SharedArrayBuffer` 后 `Atomics.wait` 停车，答案也从同一块内存回传（**`postMessage` 送不到一个停着的线程**）。`fs.fsyncSync` / `fdatasyncSync` 已真同步；非跨源隔离时如实降级（无 SAB → `sync fs: async`）。详见 DEVLOG 的 M120 条目。
+> **⑥ 阻塞式系统调用（M120，已结清）**：浏览器没有阻塞式系统调用，而 OPFS 句柄只能 `await` 拿——**这与「运行时 worker 必须能阻塞」直接矛盾**。于是开一个 **FS-worker**：它在自己的线程里跑 `await`、干同步句柄的活；运行时 worker 把请求写进 `SharedArrayBuffer` 后 `Atomics.wait` 停车，答案也从同一块内存回传（**`postMessage` 送不到一个停着的线程**）。**上行**（`FS_OP_PUT`）让 `fs.fsyncSync`/`fdatasyncSync` 真同步；**下行**（`FS_OP_GET`/`FS_OP_STAT`/`FS_OP_LIST`）让内存树成为 OPFS 的缓存——不命中就在同步通道上回源，不必改 `readFileSync` 的签名。删除经异步 `{kind:'delete'}` 传到存储，否则被删文件会从 OPFS「复活」。非跨源隔离时如实降级（无 SAB → `sync fs: async`、无回源能力）。详见 DEVLOG 的 M120 条目。
 >
 > **附：registered binding 的三个来源**（共 41 个，含 `wn_stub`）——**wasm 支撑** 3（`wn_stub`/`zlib`/`performance`）、**TS 手写 shim** 38（`fs`/`buffer`/`timers`/`errors`/`serdes`/`contextify`/`v8`/`url`/…，多为小表面或宿主能力桥接）、**刻意不提供** 32（见 `UNSUPPORTED_BINDINGS`，由 `test/bindings-surface.test.ts` + `test/fixtures/node-bindings.json` 锁死）。JS 模块层的真源码 vendored（119+ 文件：stream/events/util/assert/perf_hooks/…）不算 native，但正是「JS 层用 Node 自己的 `lib/`」这一半目标。
 >
@@ -165,14 +165,14 @@
   - **已交付增量⑧（自定义 DH 参数 + ml-kem keygen，M119 结清）**：`wn_dh_keygen(p, g)` 覆盖 `group` 与 `prime`/`generator`（与 Node 一样把名字解成 p/g；p/g 命中已知组时 OpenSSL 自己缓存 `q`/`keylength`），`wn_dh_keygen_params(bits, generator)` 覆盖 `primeLength`（`paramgen_init` → `paramgen` → 再从参数 keygen，**两步不可少**：`keygen_init` 的 selection 不含 `DOMAIN_PARAMETERS`）。ML-KEM keygen 直接 `wn_pkey_keygen('ML-KEM-*')`；**坑在导出格式**：Node 用 `seed-only`（`[0]` 隐式标签，86 字节），**OpenSSL 默认是 `seed-priv`**（`SEQUENCE { OCTET STRING(seed), OCTET STRING(dk) }`，用全域 tag）——旧解析器把整个 dk 当种子展开，造出的私钥 Node 导入报 `DECODER routines::unsupported`；现三种拼写都识别。**顺手修一个真 hang**：JS `generatePrime` 把首字节无条件置 0x80，导致 `bits % 8 !== 0` 时死循环（`generateSafePrime(512)` → `generatePrime(511)` 永远不满足位宽守门）。新增共享模块 `crypto/openssl-error.ts`（把 `ERR_LIB_*` → Node 名表从 `openssl-cipher.ts` 抽出），**OSSL 错误码补齐库名前缀**（`ERR_OSSL_DH_MODULUS_TOO_SMALL`、`ERR_OSSL_EVP_PROVIDER_KEYMGMT_FAILURE`；`PROV` 不在表里 → 维持 `ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS`）。DH 选项校验按 Node 对齐（三写法互斥、`validateInt32`、`ERR_MISSING_OPTION`），且 **OpenSSL 拒绝时如实抛错、不静默回退**。验收：`test/crypto-openssl-pkey.test.ts` **18 例**（含 `primeLength ∈ {0,256,511,512.5,-1}` 与 Node 逐字同错）。
   - **剩余**：无（M119 结清）。下一步 **M120 同步 syscall**。
 
-- [~] **M120 · 同步 syscall：SAB + `Atomics.wait` + FS-worker（P5）**  ← 吸收 M114、承接 M106 的 fs 部分 🚧 2026-09-24（**FS-worker + 同步通道 ✅**；`fsyncSync` 已真同步，待扩到其他可阻塞表面）
+- [x] **M120 · 同步 syscall：SAB + `Atomics.wait` + FS-worker（P5）**  ← 吸收 M114、承接 M106 的 fs 部分 ✅ 2026-09-24 结清
   - 真·同步 `fs` 在独立 worker 完成、主线程可阻塞等待；前置跨源隔离（COOP/COEP）；与现有 fs 语义差分 0 diff。
   - **已交付**：`src/sync/sab-rpc.ts`（SAB 请求/应答通道，超时抛错不挂死、响应装不下回 `STATUS_RETRY` 并重发且不重跑）、`src/worker/fs.worker.ts`（OPFS 唯一写入者）+ `vfs/fs-service.ts`（可脱离 worker 单测的决策层）+ `vfs/opfs-store.ts`（同步句柄、写+flush 即持久）。同步与异步通道**共用一个 FIFO 队列**。
   - **`fs.fsyncSync`/`fdatasyncSync` 已真同步**（fd 强制转换在原生层，已逐字复刻）；**非隔离时如实降级**（gh-pages 无 COOP/COEP → `sync fs: async`，`sync()` 为 no-op）。
-  - **已交付验收**：`tsc --noEmit` 净 · `vitest run` **1083 passed / 2 skipped（126 文件）** · build（新 chunk `fs.worker.js` 4.89 kB；worker 719.97 kB）· 差分夹具 51→65 键与真 Node 逐字相等。
-  - **端到端证据**：本地 dev（跨源隔离）页面跑「写文件 → `fsyncSync` → 自旋 4 s」，页面在自旋窗口内**从 OPFS 直接读回相同字节**（debounce 快照不可能已跑）→ 字节只能来自同步通道。
-  - **待做**：把同步通道扩到其他需从 OPFS 读回的同步操作（`read`/`stat`），使「只在 OPFS 里的文件」也能被 `readFileSync` 看见。
-  - **线上限制（已写明）**：gh-pages 不发 COOP/COEP → `crossOriginIsolated` 为 false → SAB 不可用，本条验收只能在**本地 dev/preview** 做。
+  - **读也走同步通道**（第三增量）：`FS_OP_GET`/`FS_OP_STAT`/`FS_OP_LIST`，内存树成为 OPFS 的缓存——不命中时**阻塞回源**，于是「`fsync` 已落盘、而快照未跑（标签页关掉/崩掉）」的文件、以及**别的上下文**写进共享 OPFS 的文件，都能被 `readFileSync`/`statSync`/`existsSync`/`readdirSync` 看见；删除通过异步 `{kind:'delete'}` 传到存储（否则会从 OPFS「复活」）。
+  - **已交付验收**：`tsc --noEmit` 净 · `vitest run` **1106 passed / 2 skipped（127 文件）** · build（`fs.worker.js` 7.16 kB；worker 723.10 kB）· 差分夹具 51→65 键与真 Node 逐字相等。
+  - **端到端证据**：本地 dev（跨源隔离）页面：① 写文件 → `fsyncSync` → 自旋 4 s，页面在自旋窗口内**从 OPFS 直接读回相同字节**（debounce 快照不可能已跑）；② 绕过运行时直接把文件/目录写进 OPFS、**重载页面**后（文件树看不见它们）仍能 `readFileSync`/`readdirSync` 读到；③ `rmSync` 后页面直接查 OPFS → 已删。
+  - **已知边界（已写明）**：不回源重建列表（内存树已知的目录只列内存子项）；非跨源隔离时无 SAB → 无回源能力（`readSource()` 为 `null`），验收只能在**本地 dev/preview** 做。
 
 - [ ] **M121 · 页内跑通 webpack / rspack 生产构建（P6）**  ← **B1 北极星**，汇合 M108/M111
   - 目标：这个浏览器 Node 环境能跑 **webpack / rspack** 生产构建；本 runtime 构建与宿主构建**产物一致**。

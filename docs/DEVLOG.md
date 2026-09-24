@@ -244,6 +244,30 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M120（第三增量）—— 让读也走同步通道：内存树成为 OPFS 的缓存
+
+**里程碑**：M120 本体最后一块。同步通道原本只会上行（`fsyncSync` 写穿），现在下行也通了：`FS_OP_GET`/`FS_OP_STAT`/`FS_OP_LIST` 让内存树**缺席的路径**仍能**同步**问到 OPFS。于是内存树从「唯一真相」变成「缓存」，而缓存不命中时能回源——且回源是阻塞的，所以 `fs.readFileSync` 不用改签名。
+
+**为什么需要**（真实场景）：上一增量让 `fsync` 真的落盘，但读取仍只看内存——于是「`fsync` 落盘了、而 400ms 的 debounce 快照还没跑（标签页被关掉/崩掉）」这种情况下，文件在 OPFS 里却谁也看不见；下次启动从 `.wvm.json` 恢复，它就成了孤儿。现在它能被 `readFileSync` 读回来。同理，**别的上下文**（另一个标签页、service worker）写进共享 OPFS 树的东西也可见了。
+
+- **协议（`src/sync/fs-protocol.ts`）**：三个只读同步操作。响应统一框成 `[u8 present][u32 len][body]`——**「不存在」是一个答案，不是一次失败的调用**（把它当错误会有两个后果：一处错译成异常，且「没有」这种正常结果反而要占错误信封的额度）。`present` 那一个字节也是「空请求也得装下响应」的原因：通道的 `STATUS_RETRY` 扩容逻辑正是为它而生。
+- **`FS_OP_STAT` 不读文件**：`OpfsFileStore.info` 用 `getFileHandle` + `getFile()` 拿大小，**不碰同步句柄**——`stat` 不该为一个句柄付账，更不该为一次读取付账。
+- **`FS_OP_LIST` 顺带带上 size**：`readdirSync` 后面几乎总是跟着逐个 `statSync`（Node 工具链里到处是），把大小一次性带回来就把 N 次往返压成 1 次。
+- **回源只问「内存树不知道的路径」**：`MemoryVfs` 新增 `setReadSource`。命中内存则一次都不问；不命中则 `info` 一次，找到就**以 cold 态**插入（文件只有大小、无字节；目录只有自身、无子项），**字节/子项到真正用的时候再取**。
+  - **cold 文件的 `stat` 零额外开销**：大小在 `FS_OP_STAT` 就拿到了，于是 `statSync` 不需要读文件体。
+  - **向上找最近的已存在祖先**（而非只查目标）才能让 `ENOENT` 与 `ENOTDIR` 在存储部分已知的路径上仍然分得清：`/project/a` 在存储里是文件时，`/project/a/b` 必须报 `ENOTDIR` 而不是 `ENOENT`。
+- **写入 / append / copy / rename / rm 都先实体化**：cold 目录只知道自己存在，而 `rm` 必须能逐个点名要删的子路径（OPFS 拒绝删非空目录）；append 必须拿到旧字节（否则会把文件截成新尾巴）。实现上 `#materialize` 递归把 cold 子树变真。
+- **删除要传给存储（否则会「复活」）**：存储本身是只增的（快照只写不删），所以一旦读会回源，内存里删掉的文件下次查找就会从 OPFS 又被找回来。解法：`rm`/`rename` 把删掉的路径通过 `deletedSink` 报告给后端，走**异步**通道（`{kind:'delete'}`，与快照同一个 FIFO 队列，不会被它该跟着的写入超车）——`fs.rm` 在 Node 里也不是持久化点，不必阻塞，更不能让 `rm -rf` 按条目数付往返。存入端按**路径由深到浅**删，否则删不掉非空目录。
+- **`fsync` 对 cold 文件直接返回**：它本来就在存储里、已经持久——读回来再写回去纯属浪费。
+- **不做的事（已知边界，已写明）**：**不回源重建列表**——内存树已知的目录只列内存里的子项（`readdirSync` 不会把 OPFS 的新内容合并进来）。也就是说这是**路径级**的发现，不是跨上下文的一致性模型；写入仍走原有的快照/`PUT`。另外，`OpfsPersistence`（非隔离时的直接后端）没有同步通道，`readSource()` 返回 `null`——回源能力在它那里**如实关闭**（而非静默给错值）。
+- **验收**：`tsc --noEmit` 净 · `vitest run` **1106 passed / 2 skipped（127 文件）** · build（`fs.worker-*.js` **7.16 kB**、worker **723.10 kB**）。新增 `test/fs-hydrate.test.ts`（15 例：回源、stat 不读文件、cold 目录列表、`ENOENT`/`ENOTDIR` 区分、append/copy/rename/rm 实体化、删除不复活、只问不在内存里的路径）。
+- **端到端证据（真浏览器，两条）**：
+  1. **同会话**：页面绕过运行时**直接把 `lost.txt` 写进 OPFS**（录 `.wvm.json` 里 0 命中），随即在运行时里跑程序：`existsSync` true · `statSync().size` = 22 · `readFileSync().utf8` = 植的 token。
+  2. **跨会话（本条的靶心场景）**：同样植入一个文件 + 一个目录后**重载页面** → 启动日志 `restored from OPFS`、文件树里**看不到** `lost.txt`，但运行时里 `readFileSync('/project/lost.txt')` 读出同样的 token，且 `readdirSync('/project/foreign')` 正确列出**只在 OPFS 里存在**的目录的子项。
+  3. **删除真的到达存储**：运行时 `fs.rmSync` 之后，页面直接从 OPFS 查那个文件 → 不存在（所以不会复活）。
+
+---
+
 ### 2026-09-24 · M120（第二增量）—— FS-worker + SAB 同步通道：`fsyncSync` 真的阻塞到落盘
 
 **里程碑**：浏览器没有阻塞式系统调用，而 OPFS 的句柄**只能用 `await` 拿**。这就死锁了：运行时 worker 想阻塞，但那个被阻塞的事件循环正是本该跑 `await` 的那个。解法是把 OPFS 挪到**第二个 worker**，两边用共享内存对话。现在 `fs.fsyncSync` / `fdatasyncSync` 是真同步：不返回则一定已写入 OPFS。

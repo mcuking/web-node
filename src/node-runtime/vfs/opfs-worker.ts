@@ -11,15 +11,22 @@
  * park: nothing is waiting on it, and its payload would dwarf a shared buffer.
  */
 
-import { CONTROL_BYTES, SyncChannel } from '../../sync/sab-rpc';
+import { CONTROL_BYTES, SyncChannel, SyncChannelError } from '../../sync/sab-rpc';
 import {
+  FS_OP_GET,
+  FS_OP_LIST,
   FS_OP_PUT,
+  FS_OP_STAT,
+  decodeInfoBody,
+  decodeListingBody,
+  decodeReadResult,
+  encodePath,
   encodePut,
   type FsAsyncCall,
   type FsAsyncResponse,
   type PersistedSnapshot,
 } from '../../sync/fs-protocol';
-import type { Persistence, SnapshotSource } from './persistence';
+import type { Persistence, ReadSource, SnapshotSource } from './persistence';
 
 /** Why the FS worker could not be started; the caller keeps the async backend. */
 export type FsWorkerUnavailable =
@@ -123,6 +130,19 @@ export class OpfsWorkerPersistence implements Persistence {
   }
 
   /**
+   * Report removed paths to the store, without blocking.
+   *
+   * Deliberately not a synchronous call: `fs.rm` is not a durability point, and
+   * an `rm -rf` of a large tree would otherwise pay a round trip per entry. The
+   * request still rides the same queue as the snapshots, so it cannot overtake a
+   * write it is supposed to follow.
+   */
+  deleted(paths: string[]): void {
+    if (this.#closed || paths.length === 0) return;
+    void this.#request({ kind: 'delete', paths }).catch(() => undefined);
+  }
+
+  /**
    * Write one file and make it durable, blocking this thread until it is.
    *
    * `data` comes from the memory tree, which is authoritative: the file may not
@@ -131,6 +151,37 @@ export class OpfsWorkerPersistence implements Persistence {
    */
   sync(path: string, data: Uint8Array): void {
     this.#channel.call(FS_OP_PUT, encodePut(path, data));
+  }
+
+  /**
+   * The synchronous read path (M120).
+   *
+   * Same channel as `sync()`, opposite direction: the runtime worker parks while
+   * the FS worker reads OPFS. That is what lets a file which exists only in the
+   * store — a `fsync` whose snapshot never ran, or something another context
+   * wrote — still be reached by `fs.readFileSync`.
+   */
+  readSource(): ReadSource {
+    return {
+      info: (path) => {
+        const result = decodeReadResult(this.#channel.call(FS_OP_STAT, encodePath(path)));
+        return result.present ? decodeInfoBody(result.body) : null;
+      },
+      read: (path) => {
+        const result = decodeReadResult(this.#channel.call(FS_OP_GET, encodePath(path)));
+        // The caller only asks about paths `info()` has already confirmed, so
+        // "absent" here means the store changed underneath it mid-flight.
+        if (!result.present) {
+          throw new SyncChannelError(`no such file in backing storage: ${path}`, 'ENOENT');
+        }
+        // `decodeReadResult` is a view onto bytes `call()` already copied out.
+        return result.body;
+      },
+      list: (path) => {
+        const result = decodeReadResult(this.#channel.call(FS_OP_LIST, encodePath(path)));
+        return result.present ? decodeListingBody(result.body) : null;
+      },
+    };
   }
 
   async clear(): Promise<void> {

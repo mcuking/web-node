@@ -1,4 +1,4 @@
-import type { Persistence, SnapshotSource } from './persistence';
+import type { Persistence, ReadSource, SnapshotSource } from './persistence';
 import { encodeBase64, decodeBase64 } from './base64';
 
 /**
@@ -122,6 +122,42 @@ export class OpfsPersistence implements Persistence {
     } catch {
       /* ignore */
     }
+  }
+
+  /**
+   * Drop removed paths, deepest first.
+   *
+   * Same reasoning as the FS worker's version, and it matters here too: reads do
+   * not reach through from this backend, but the snapshot that restores a page
+   * reload does not delete anything either — without this, a removed file would
+   * sit in OPFS indefinitely and come back if the store is ever consulted.
+   */
+  deleted(paths: string[]): void {
+    if (!OpfsPersistence.supported || paths.length === 0) return;
+    void this.#removePaths(paths).catch(() => undefined);
+  }
+
+  async #removePaths(paths: string[]): Promise<void> {
+    for (const path of [...paths].sort((a, b) => b.length - a.length)) {
+      try {
+        const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
+        const name = parts.pop();
+        if (name === undefined) continue;
+        let dir = await this.#ensureDir();
+        for (const part of parts) dir = await dir.getDirectoryHandle(part);
+        await (dir as any).removeEntry(name);
+      } catch {
+        /* already gone, or a directory still holding children we never mirrored */
+      }
+    }
+  }
+
+  /**
+   * No synchronous read path: reaching through needs the shared-memory channel,
+   * which is exactly what is missing when this backend is the one in use.
+   */
+  readSource(): ReadSource | null {
+    return null;
   }
 
   /**

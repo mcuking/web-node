@@ -223,6 +223,11 @@ async function init(id: number): Promise<void> {
   // to wait for, so the sink stays unset and `fsync` degrades to a no-op — the
   // same answer a real filesystem gives when its writes sit in a page cache.
   if (persistence.durable) v.setSyncSink((path, data) => persistence.sync(path, data));
+  // The other half of M120: a lookup the memory tree misses can still reach the
+  // store, synchronously. `null` from the direct backend leaves the tree as the
+  // only source of truth, which is how this ran before.
+  v.setReadSource(persistence.readSource());
+  v.setDeletedSink((paths) => persistence.deleted(paths));
 
   vfs = v;
   runtime = new NodeRuntime({
