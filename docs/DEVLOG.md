@@ -244,6 +244,18 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M120（首个增量）—— 退险 spike：runtime worker 里 `Atomics.wait` 真的能阻塞
+
+**背景**：M120（同步 syscall）的前置是**跨源隔离**（COOP/COEP）→ 才有 `SharedArrayBuffer`；而 gh-pages **不发这两个头**，所以线上验证只能走本地 dev/preview。先做一次性 spike，确认机制可行再投入。
+
+- **环境**：`npm run dev`（`vite.config.ts` 已配 `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp`，实测响应头确实带上了；5173 被占用，自动落 5174）。
+- **spike 结果（在 `src/worker/runtime.worker.ts` 那个 worker 里实测，不是主页面）**：`crossOriginIsolated === true`、`SharedArrayBuffer` 可用、**`Atomics.wait(ia, 0, 0, 50)` 真阻塞（返回 `timed-out`，实测耗时 54 ms）**、嵌套 `new Worker(Blob, {type:'module'})` 允许创建。
+- **关键结论**：本运行时的 Node realm 本来就住在**专用 worker** 里（不是页面主线程），所以 `Atomics.wait` 合法——这正是「主线程阻塞、FS-worker 干活」这条路能成立的前提。`Atomics.wait` 在**页面主线程**是被禁止的，所以 FS-worker 必须与 runtime worker 对等，而不是把阻塞搬回页面。
+- **线上受限已在文档写明**：gh-pages 无 COOP/COEP → `crossOriginIsolated` 为 false → SAB 不可用，M120 的验收只能在本地 dev/preview 做（roadmap 验收标准里“部署 gh-pages”一条对 M120 不适用）。
+- **下一步（M120 本体）**：FS-worker + SAB 请求/应答环（主线程写参→`Atomics.wait`；FS-worker 用 `FileSystemSyncAccessHandle` 干完 → `Atomics.notify`），把 `OpfsPersistence` 从「防抖旁路（fire-and-forget）」改成**同步可阻塞的持久化**，让 `writeFileSync` 返回时真的落了盘；差分验收沿用现有 fs 语料，加“无 `Atomics.wait` 死锁”的门禁。
+
+---
+
 ### 2026-09-24 · M119（第八增量）—— keygen 收尾：自定义 DH 参数与 ml-kem，外加一套 lib 前缀保真的 OSSL 错误
 
 **里程碑**：把 `generateKeyPair`/`generateKeyPairSync` 上**最后两类还得靠 JS 兜底**的请求（自定义 DH 参数、ML-KEM）换成 OpenSSL；顺带把 OSSL 错误的 **错误码保真**补齐到 Node 的形状。至此**非对称 keygen 的全部形状都走 wasm OpenSSL**。

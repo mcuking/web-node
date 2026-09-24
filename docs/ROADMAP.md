@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-24（**阶段 H：M119 第八增量 ✅ 且 M119 结清**——自定义 DH 参数（`group`/`prime`/`primeLength`）与 ml-kem keygen 全部走 wasm OpenSSL，OSSL 错误码补齐库名前缀，**非对称 keygen 的全部形状都在 wasm 上了**；下一站 **M120 同步 syscall**）
+> - **最后更新**：2026-09-24（**阶段 H：M119 ✅ 结清**——自定义 DH 参数（`group`/`prime`/`primeLength`）与 ml-kem keygen 全部走 wasm OpenSSL，OSSL 错误码补齐库名前缀，**非对称 keygen 的全部形状都在 wasm 上了**；**M120 已开工**，退险 spike ✅：dev 下 COOP/COEP 生效、runtime worker 里 `Atomics.wait` 真阻塞）
 
 ---
 
@@ -163,9 +163,11 @@
   - **已交付增量⑧（自定义 DH 参数 + ml-kem keygen，M119 结清）**：`wn_dh_keygen(p, g)` 覆盖 `group` 与 `prime`/`generator`（与 Node 一样把名字解成 p/g；p/g 命中已知组时 OpenSSL 自己缓存 `q`/`keylength`），`wn_dh_keygen_params(bits, generator)` 覆盖 `primeLength`（`paramgen_init` → `paramgen` → 再从参数 keygen，**两步不可少**：`keygen_init` 的 selection 不含 `DOMAIN_PARAMETERS`）。ML-KEM keygen 直接 `wn_pkey_keygen('ML-KEM-*')`；**坑在导出格式**：Node 用 `seed-only`（`[0]` 隐式标签，86 字节），**OpenSSL 默认是 `seed-priv`**（`SEQUENCE { OCTET STRING(seed), OCTET STRING(dk) }`，用全域 tag）——旧解析器把整个 dk 当种子展开，造出的私钥 Node 导入报 `DECODER routines::unsupported`；现三种拼写都识别。**顺手修一个真 hang**：JS `generatePrime` 把首字节无条件置 0x80，导致 `bits % 8 !== 0` 时死循环（`generateSafePrime(512)` → `generatePrime(511)` 永远不满足位宽守门）。新增共享模块 `crypto/openssl-error.ts`（把 `ERR_LIB_*` → Node 名表从 `openssl-cipher.ts` 抽出），**OSSL 错误码补齐库名前缀**（`ERR_OSSL_DH_MODULUS_TOO_SMALL`、`ERR_OSSL_EVP_PROVIDER_KEYMGMT_FAILURE`；`PROV` 不在表里 → 维持 `ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS`）。DH 选项校验按 Node 对齐（三写法互斥、`validateInt32`、`ERR_MISSING_OPTION`），且 **OpenSSL 拒绝时如实抛错、不静默回退**。验收：`test/crypto-openssl-pkey.test.ts` **18 例**（含 `primeLength ∈ {0,256,511,512.5,-1}` 与 Node 逐字同错）。
   - **剩余**：无（M119 结清）。下一步 **M120 同步 syscall**。
 
-- [ ] **M120 · 同步 syscall：SAB + `Atomics.wait` + FS-worker（P5）**  ← 吸收 M114、承接 M106 的 fs 部分
+- [~] **M120 · 同步 syscall：SAB + `Atomics.wait` + FS-worker（P5）**  ← 吸收 M114、承接 M106 的 fs 部分 🚧 2026-09-24（**退险 spike ✅**，本体待做）
   - 真·同步 `fs` 在独立 worker 完成、主线程可阻塞等待；前置跨源隔离（COOP/COEP）；与现有 fs 语义差分 0 diff。
-  - 验收：无 `Atomics.wait` 死锁；同步 `fs` 逐字节对齐。
+  - **spike 已过（2026-09-24）**：dev 下 COOP/COEP 响应头已生效；在 **runtime worker** 里实测 `crossOriginIsolated === true`、SAB 可用、**`Atomics.wait` 真阻塞**（50ms 超时实测 54ms）、可再 spawn 嵌套 worker。结论：机制可行——runtime 本就住在专用 worker（不是页面主线程），所以 `Atomics.wait` 合法。
+  - **本体计划**：FS-worker + SAB 请求/应答环（`Atomics.wait`/`notify`），把 `OpfsPersistence` 从「防抖旁路」改成同步可阻塞的持久化。验收：无 `Atomics.wait` 死锁；同步 `fs` 逐字节对齐。
+  - **线上限制（已写明）**：gh-pages 不发 COOP/COEP → `crossOriginIsolated` 为 false → SAB 不可用，本条验收只能在**本地 dev/preview** 做。
 
 - [ ] **M121 · 页内跑通 webpack / rspack 生产构建（P6）**  ← **B1 北极星**，汇合 M108/M111
   - 目标：这个浏览器 Node 环境能跑 **webpack / rspack** 生产构建；本 runtime 构建与宿主构建**产物一致**。
