@@ -140,6 +140,9 @@ declare module 'node:crypto' {
     buffer: Uint8Array,
     options?: Omit<EncryptOptions, 'key'>,
   ): Uint8Array;
+  export function diffieHellman(options: { privateKey: unknown; publicKey: unknown }): Uint8Array;
+  export function encapsulate(key: unknown): { sharedKey: Uint8Array; ciphertext: Uint8Array };
+  export function decapsulate(key: unknown, ciphertext: Uint8Array): Uint8Array;
 }
 
 declare module 'node:url' {

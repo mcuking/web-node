@@ -13,6 +13,9 @@ import {
   constants as nodeConstants,
   createPrivateKey as nodeCreatePrivateKey,
   createPublicKey as nodeCreatePublicKey,
+  decapsulate as nodeDecapsulate,
+  diffieHellman as nodeDiffieHellman,
+  encapsulate as nodeEncapsulate,
   generateKeyPairSync as nodeGenerateKeyPairSync,
   privateDecrypt as nodePrivateDecrypt,
   publicEncrypt as nodePublicEncrypt,
@@ -21,7 +24,20 @@ import {
 } from 'node:crypto';
 import { opensslReady, setOpensslEnabled } from '../src/node-runtime/bindings/openssl';
 import {
+  opensslPkeyDecapsulate,
+  opensslPkeyEncapsulate,
+  opensslPkeyFree,
+  opensslPkeyFromDer,
+  opensslPkeyFromRaw,
+} from '../src/node-runtime/bindings/openssl';
+import { mlKemDecapsulate, mlKemExpandSeed } from '../src/node-runtime/crypto/mlkem';
+import {
   asymEngine,
+  createPrivateKey,
+  createPublicKey,
+  decapsulate,
+  diffieHellman,
+  encapsulate,
   generateKeyPairSync,
   publicEncrypt,
   privateDecrypt,
@@ -221,6 +237,149 @@ describe('wn_openssl public-key engine', () => {
           nodeSign(spec.hash ?? (null as never), MESSAGE, nodeKey(spec, pair.nodePrivate) as never),
         );
         expect(verify(ours(spec), MESSAGE, pair.publicKey, signature), `${engine} ${type}`).toBe(true);
+      }
+    }
+  });
+
+  it('agrees with Node on ECDH and DH shared secrets', () => {
+    // ECDH secrets are deterministic, so both engines and Node must agree byte
+    // for byte; DH secrets likewise once the private exponents are pinned.
+    for (const namedCurve of ['prime256v1', 'secp384r1', 'secp521r1']) {
+      const alice = makePair('ec', { namedCurve }, 'openssl');
+      const bob = makePair('ec', { namedCurve }, 'openssl');
+
+      const ab = diffieHellman({
+        privateKey: createPrivateKey(alice.privateKey),
+        publicKey: createPublicKey(bob.publicKey),
+      });
+      const ba = diffieHellman({
+        privateKey: createPrivateKey(bob.privateKey),
+        publicKey: createPublicKey(alice.publicKey),
+      });
+      expect(ab, `${namedCurve} symmetric`).toEqual(ba);
+      expect(ab, `${namedCurve} js engine`).toEqual(
+        withJsEngine(() =>
+          diffieHellman({
+            privateKey: createPrivateKey(alice.privateKey),
+            publicKey: createPublicKey(bob.publicKey),
+          }),
+        ),
+      );
+      expect(ab, `${namedCurve} node`).toEqual(
+        new Uint8Array(
+          nodeDiffieHellman({
+            privateKey: nodeCreatePrivateKey(alice.privateKey),
+            publicKey: nodeCreatePublicKey(bob.publicKey),
+          } as never),
+        ),
+      );
+    }
+
+    // A DH pair over an OpenSSL-generated (well, Node-generated) group.
+    const dh = nodeGenerateKeyPairSync('dh', {
+      group: 'modp14',
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    } as never);
+    const alice = nodeGenerateKeyPairSync('dh', {
+      group: 'modp14',
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    } as never);
+    const ours = diffieHellman({
+      privateKey: createPrivateKey(dh.privateKey as never as string),
+      publicKey: createPublicKey(alice.publicKey as never as string),
+    });
+    const theirs = new Uint8Array(
+      nodeDiffieHellman({ privateKey: dh.privateKey, publicKey: alice.publicKey } as never),
+    );
+    expect(ours).toEqual(theirs);
+  });
+
+  it('agrees with Node on ML-KEM encapsulation', () => {
+    for (const type of ['ml-kem-512', 'ml-kem-768', 'ml-kem-1024']) {
+      const { privateKey, publicKey } = generateKeyPairSync(type, {
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+      } as never) as unknown as { privateKey: string; publicKey: string };
+
+      // Ours -> ours.
+      const { sharedKey, ciphertext } = encapsulate(publicKey);
+      expect(decapsulate(privateKey, ciphertext), `${type} round trip`).toEqual(sharedKey);
+
+      // Ours -> Node's decapsulator, and Node's encapsulation -> ours.
+      expect(
+        new Uint8Array(
+          nodeDecapsulate(nodeCreatePrivateKey(privateKey), ciphertext as never) as never,
+        ),
+        `${type} ours->node`,
+      ).toEqual(sharedKey);
+      const theirs = nodeEncapsulate(nodeCreatePublicKey(publicKey));
+      expect(
+        decapsulate(privateKey, new Uint8Array(theirs.ciphertext as never)),
+        `${type} node->ours`,
+      ).toEqual(new Uint8Array(theirs.sharedKey as never));
+
+      // The pure-JS engine must agree with the wasm one for the same input.
+      expect(withJsEngine(() => decapsulate(privateKey, ciphertext)), `${type} js`).toEqual(sharedKey);
+
+      // A truncated ciphertext is rejected the same way Node rejects it.
+      expect(() => decapsulate(privateKey, ciphertext.subarray(0, ciphertext.length - 1))).toThrow(
+        /Decapsulation failed/,
+      );
+    }
+  });
+
+  it('hands OpenSSL the DER it accepts, so the routes are really taken', () => {
+    // Our own `export({ format: 'der' })` runs the same encoders the routing
+    // hands to `wn_pkey_from_der`; if OpenSSL could not import them the code
+    // would silently fall back to JS for every operation.
+    for (const [type, options] of [
+      ['ed25519', {}],
+      ['ec', { namedCurve: 'prime256v1' }],
+      ['rsa', { modulusLength: 2048 }],
+      ['ml-kem-768', {}],
+    ] as Array<[string, Record<string, unknown>]>) {
+      const pair = makePair(type, options, 'openssl');
+      const privateDer = createPrivateKey(pair.privateKey).export({
+        type: 'pkcs8',
+        format: 'der',
+      }) as Uint8Array;
+      const publicDer = createPublicKey(pair.publicKey).export({
+        type: 'spki',
+        format: 'der',
+      }) as Uint8Array;
+      const privateHandle = opensslPkeyFromDer(privateDer, true);
+      const publicHandle = opensslPkeyFromDer(publicDer, false);
+      expect(privateHandle, `${type} private DER`).toBeGreaterThan(0);
+      expect(publicHandle, `${type} public DER`).toBeGreaterThan(0);
+      opensslPkeyFree(privateHandle);
+      opensslPkeyFree(publicHandle);
+    }
+  });
+
+  it('decapsulates ML-KEM on the wasm engine, agreeing with the pure-JS implementation', () => {
+    // OpenSSL's *raw* private key for ML-KEM is the expanded `dk` (the seed is
+    // only reachable through PKCS#8, which the routing test above covers), so
+    // round-trip through `dk` and check it matches our own FIPS 203 code.
+    const seed = new Uint8Array(64);
+    globalThis.crypto.getRandomValues(seed);
+    for (const param of ['ml-kem-512', 'ml-kem-768', 'ml-kem-1024'] as const) {
+      const { ek, dk } = mlKemExpandSeed(seed, param);
+      const publicHandle = opensslPkeyFromRaw(param.toUpperCase(), ek, false);
+      const privateHandle = opensslPkeyFromRaw(param.toUpperCase(), dk, true);
+      expect(publicHandle, `${param} public`).toBeGreaterThan(0);
+      expect(privateHandle, `${param} private`).toBeGreaterThan(0);
+      try {
+        const encapsulated = opensslPkeyEncapsulate(publicHandle);
+        expect(encapsulated, `${param} encapsulate`).not.toBeNull();
+        const { ciphertext, sharedKey } = encapsulated!;
+        expect(opensslPkeyDecapsulate(privateHandle, ciphertext), `${param} decapsulate`).toEqual(sharedKey);
+        // The same ciphertext through the pure-JS decapsulator.
+        expect(mlKemDecapsulate(dk, ciphertext, param), `${param} js`).toEqual(sharedKey);
+      } finally {
+        opensslPkeyFree(privateHandle);
+        opensslPkeyFree(publicHandle);
       }
     }
   });

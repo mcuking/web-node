@@ -71,7 +71,10 @@ import {
   type MlKemParam,
 } from './mlkem';
 import {
+  opensslPkeyDecapsulate,
   opensslPkeyDecrypt,
+  opensslPkeyDerive,
+  opensslPkeyEncapsulate,
   opensslPkeyEncrypt,
   opensslPkeyFree,
   opensslPkeyFromDer,
@@ -1220,6 +1223,34 @@ function opensslGenerateMaterial(
   }
 }
 
+/** Wrap an ML-KEM (or EC/DH) material slice as a `KeyMaterial` for encoding. */
+function mlkemKeyMaterial(m: MlKemMaterial, type: 'private' | 'public'): KeyMaterial {
+  return { type, asym: m.param, mlkem: m };
+}
+
+/**
+ * ECDH / DH shared secret through OpenSSL, or `null` when the keys cannot be
+ * routed there (so the caller falls back and reports the JS path's error).
+ */
+function opensslDerive(privMat: KeyMaterial, pubMat: KeyMaterial): Uint8Array | null {
+  if (privMat.asym !== 'dh' && privMat.asym !== 'ec') return null;
+  const privHandle = opensslHandleFor(privMat, true);
+  if (!privHandle) return null;
+  try {
+    const pubHandle = opensslHandleFor(pubMat, false);
+    if (!pubHandle) return null;
+    try {
+      return opensslPkeyDerive(privHandle, pubHandle);
+    } finally {
+      opensslPkeyFree(pubHandle);
+    }
+  } catch {
+    return null;
+  } finally {
+    opensslPkeyFree(privHandle);
+  }
+}
+
 /** Which engine {@link sign}/{@link verify} would use right now (diagnostics). */
 export function asymEngine(): 'openssl' | 'js' {
   return opensslReady() ? 'openssl' : 'js';
@@ -1447,6 +1478,17 @@ function decapsulateMaterial(key: unknown): MlKemMaterial {
 
 export function encapsulate(key: unknown): { sharedKey: Uint8Array; ciphertext: Uint8Array } {
   const m = encapsulateMaterial(key);
+  if (opensslReady()) {
+    const handle = opensslHandleFor(mlkemKeyMaterial(m, 'public'), false);
+    if (handle) {
+      try {
+        const result = opensslPkeyEncapsulate(handle);
+        if (result !== null) return { sharedKey: result.sharedKey, ciphertext: result.ciphertext };
+      } finally {
+        opensslPkeyFree(handle);
+      }
+    }
+  }
   return mlKemEncapsulate(m.publicKey, m.param, randomBytes);
 }
 
@@ -1456,6 +1498,17 @@ export function decapsulate(key: unknown, ciphertext: Uint8Array): Uint8Array {
     throw coded('Error', 'ERR_CRYPTO_OPERATION_FAILED', 'Decapsulation failed');
   }
   if (!m.privateKey) throw notImplementedError('api', 'crypto.decapsulate');
+  if (opensslReady()) {
+    const handle = opensslHandleFor(mlkemKeyMaterial(m, 'private'), true);
+    if (handle) {
+      try {
+        const secret = opensslPkeyDecapsulate(handle, ciphertext);
+        if (secret !== null) return secret;
+      } finally {
+        opensslPkeyFree(handle);
+      }
+    }
+  }
   return mlKemDecapsulate(m.privateKey, ciphertext, m.param);
 }
 
@@ -1816,6 +1869,10 @@ export function diffieHellman(options: unknown): Uint8Array {
   }
   const mismatch = (): Error =>
     coded('Error', 'ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS', 'error:1C8000CB:Provider routines::mismatching domain parameters');
+  if (opensslReady()) {
+    const viaOpenSsl = opensslDerive(privMat, pubMat);
+    if (viaOpenSsl !== null) return viaOpenSsl;
+  }
   if (privMat.asym === 'dh') {
     const priv = privMat.dh!;
     const pub = pubMat.dh!;

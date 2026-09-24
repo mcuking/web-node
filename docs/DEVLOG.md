@@ -244,6 +244,19 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-24 · M119（第五增量）—— DH/ECDH 与 ML-KEM 切到 wasm
+
+**里程碑**：C 侧的 `wn_pkey_*` 上一增量已经写好（含 `derive`/`encapsulate`/`decapsulate`），这一步把 JS 侧接上。
+
+- **`diffieHellman()`**：`ec`/`dh` 密钥都经现有 DER 编码器建 `EVP_PKEY` 后走 `wn_pkey_derive`；域参数不匹配等失败会返回 `null` 并**原地回退**，仍由 JS 抛 `ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS`。
+- **ML-KEM**：`encapsulate`/`decapsulate` 走 `wn_pkey_encapsulate`/`decapsulate`（密钥经 **SPKI / PKCS#8** 导入——`[0]` seed 与 `[1]` expanded 两种 ML-KEM 私钥形式 OpenSSL 都认，所以 seed 与 dk 两条路径共用同一套导入）。密文长度不对仍是 JS 先拦、报 `ERR_CRYPTO_OPERATION_FAILED`/`Decapsulation failed`（与 Node 一致）。**keygen 暂留 JS**（输出是随机的，迁移收益只是“真上游”；且需支持自定义 DH group/prime 等参数，另开增量）。
+- **裸私钥的一个细节**：ML-KEM 的 `EVP_PKEY_new_raw_private_key_ex` 期望的是 **扩展后的 `dk`**（tkem-512 1632 字节），**不是 64 字节 seed**（seed 只能过 PKCS#8）。测试里两种形式都驗了。
+- **验收**：`test/crypto-openssl-pkey.test.ts` 扩到 12 例，新增：① ECDH 三条曲线的共享密钥与 **Node 逐字节相等**（且两引擎一致）；② Node 生成的 `modp14` DH 对，我们与 Node 算出的密钥相等；③ ML-KEM 三个参数集的 `encapsulate`/`decapsulate` 与 **Node 双向互验**、与纯 JS 一致、密文截断报错一致；④ 一个“**路由真的走了**”的探针：把我们 `export({format:'der'})` 产出的 PKCS#8/SPKI 直接喂 `wn_pkey_from_der`，RSA/EC/Ed25519/ML-KEM 四种都必须导入成功（若不行就是静默回退了）；⑤ 用 `wn_pkey_from_raw` 拿 `dk` 直接做 wasm 侧截装，再与**纯 JS FIPS 203 实现**对同一密文截装结果相等。
+- `tsc --noEmit` 净 · `vitest run` **1041 passed / 2 skipped（124 文件）** · build（`wn_openssl-ClALQSg4.wasm` **2355.62 kB** 独立资产、`runtime.worker-Dqsd3PXF.js` 708.27 kB）。
+- **剩余**：非对称的 **keygen**（rsa 非默认幂/ec 其他曲线/自定义 DH 参数/ml-kem）、**X509/SPKAC** 仍纯 JS。
+
+---
+
 ### 2026-09-24 · M119（第三增量）—— Argon2 切到 wasm OpenSSL 的 ARGON2D/I/ID
 
 **里程碑**：`crypto.argon2(Sync)` 之前跑纯 JS 的 RFC 9106 实现（BLAKE2b + BlaMka + 索引生成），现在优先跑 default provider 的 Argon2 KDF，未就绪/名字取不到则**原地回退**（两边逐字节一致）。
