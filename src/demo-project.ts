@@ -21,6 +21,7 @@ export const DEMO_FILES: Record<string, string> = {
         'esbuild-wasm': '^0.21.5',
         '@rollup/wasm-node': '^4.63.3',
         vite: '^5.4.0',
+        webpack: '^5.111.1',
         vue: '^3.5.0',
         '@vitejs/plugin-vue': '^5.2.0',
         postcss: '^8.4.43',
@@ -1712,6 +1713,179 @@ function vfsWatchPlugin() {
 })().catch(function (err) {
   console.log('vite dev failed : ' + (err && err.message ? err.message : err));
 });
+`,
+
+  // Milestone 110: webpack in watch mode, fronted by a hand-rolled dev server.
+  //
+  // webpack's own `watch` API rebuids on every VFS change (fs.watch is wired to
+  // the virtual file system). A real webpack-dev-server needs express, ws and
+  // chokidar; a tab has none of those, so this serves the bundle over the
+  // virtual TCP layer and pushes a full-reload over the same BroadcastChannel
+  // bridge Vite HMR uses. The app deliberately imports the *same* message.js as
+  // the Vite demo, so one edit drives both dev servers.
+  '/project/webpack-dev.mjs': `// Click "Webpack dev" to run: webpack watches and serves wp/ in the tab.
+import fs from 'fs';
+import path from 'path';
+import http from 'http';
+
+const ROOT = '/project';
+const APP = path.join(ROOT, 'wp');
+const NM = path.join(ROOT, 'node_modules');
+const PORT = 5174;
+// One reload channel per port, matching the name the preview shim builds
+// (web-node-hmr:<port> in public/sw.js).
+const HMR_CHANNEL = 'web-node-hmr:' + PORT;
+
+// The object the preview's WebSocket shim talks to. A ServiceWorker cannot
+// proxy a WebSocket, so the shim routes every loopback socket through a
+// same-origin BroadcastChannel instead. We speak the same tiny JSON protocol
+// Vite's HMR bridge does: open / message / close.
+function createReloadBridge() {
+  const channel = new BroadcastChannel(HMR_CHANNEL);
+  const clients = new Set();
+  channel.onmessage = function (event) {
+    const msg = event.data;
+    if (!msg) return;
+    if (msg.t === 'open') {
+      clients.add(msg.id);
+      channel.postMessage({ t: 'open', id: msg.id });
+      console.log('client      : preview connected (' + clients.size + ' client/s)');
+    } else if (msg.t === 'close') {
+      clients.delete(msg.id);
+    }
+  };
+  return {
+    get size() { return clients.size; },
+    send(payload) {
+      const data = JSON.stringify(payload);
+      clients.forEach(function (id) { channel.postMessage({ t: 'message', id: id, data: data }); });
+    },
+    close() { clients.clear(); channel.close(); },
+  };
+}
+
+(async function () {
+  console.log('-- webpack dev server (milestone 110) --');
+  if (!fs.existsSync(path.join(NM, 'webpack'))) {
+    console.log('webpack: not installed yet - click "Install deps" first');
+    return;
+  }
+  const mod = await import('webpack');
+  const webpack = mod.default || mod;
+  console.log('tool        : webpack v' + webpack.version + ' (watching in the tab)');
+
+  const compiler = webpack({
+    mode: 'development',
+    context: APP,
+    entry: './src/index.js',
+    output: { path: path.join(APP, 'dist'), filename: 'bundle.js' },
+    // The project's package.json is type: commonjs, so webpack would parse every
+    // .js as CommonJS and reject the demo's ESM import/export. Force the flexible
+    // type (accepts both), which is what Node itself does for the preview shim.
+    module: { rules: [{ test: (f) => /[.]m?js$/.test(f), type: 'javascript/auto' }] },
+    // No eval: the bundle runs in the preview page, so emit plain source.
+    devtool: false,
+    infrastructureLogging: { level: 'error' },
+  });
+
+  const bridge = createReloadBridge();
+
+  const server = http.createServer(function (req, res) {
+    const url = new URL(req.url, 'http://127.0.0.1:' + PORT);
+    if (url.pathname === '/' || url.pathname === '/index.html') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(fs.readFileSync(path.join(APP, 'index.html'), 'utf8'));
+      return;
+    }
+    if (url.pathname === '/bundle.js') {
+      const file = path.join(APP, 'dist', 'bundle.js');
+      if (!fs.existsSync(file)) {
+        res.writeHead(503, { 'content-type': 'text/plain' });
+        res.end('building...');
+        return;
+      }
+      const body = fs.readFileSync(file);
+      res.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8' });
+      res.end(body);
+      return;
+    }
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('not found');
+  });
+
+  let builds = 0;
+  const watching = compiler.watch({ aggregateTimeout: 200 }, function (err, stats) {
+    if (err) { console.log('webpack     : ' + err.message); return; }
+    if (stats.hasErrors()) {
+      console.log('webpack     : build failed');
+      console.log(stats.toString({ all: false, errors: true }));
+      return;
+    }
+    builds++;
+    let size = 0;
+    try { size = fs.statSync(path.join(APP, 'dist', 'bundle.js')).size; } catch (e) {}
+    console.log('webpack     : ' + (builds === 1 ? 'built' : 'rebuilt') + ' bundle.js (' + size + ' bytes)');
+    if (builds > 1) {
+      console.log('reload      : full-reload -> ' + bridge.size + ' client/s');
+      bridge.send({ type: 'full-reload', path: '*' });
+    }
+  });
+
+  server.listen(PORT, function () {
+    console.log('listening   : http://127.0.0.1:' + PORT);
+    console.log('watching    : /project/wp (webpack, VFS events -> rebuild -> reload)');
+    console.log('preview     : open Preview (:' + PORT + '), then edit site/src/message.js');
+  });
+  server.on('close', function () {
+    watching.close(function () {});
+    bridge.close();
+  });
+})().catch(function (err) {
+  console.log('webpack dev failed : ' + (err && err.message ? err.message : err));
+});
+`,
+
+  // The little app webpack bundles. Plain ES modules on purpose: the point is
+  // the toolchain, and the shared message.js makes "edit once, two dev servers
+  // rebuild" literal.
+  '/project/wp/index.html': `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>web-node · webpack dev server</title>
+    <style>
+      body { margin: 0; font: 16px/1.6 ui-monospace, Menlo, monospace; background: #0b0e14; color: #d7dee9; padding: 40px; }
+      #app { color: #7cc4ff; font-weight: 600; font-size: 22px; }
+      .hint { color: #7b8798; font-size: 13px; margin-top: 12px; max-width: 560px; }
+    </style>
+  </head>
+  <body>
+    <div id="app">building…</div>
+    <p class="hint">Bundled by webpack in the tab. Edit site/src/message.js and save (Cmd/Ctrl+S): the bundle rebuilds and this page reloads itself.</p>
+    <script src="bundle.js"></script>
+    <script>
+      // Live reload. The dev server pushes a full-reload over the same
+      // BroadcastChannel bridge Vite HMR uses; the preview shim swaps this
+      // WebSocket for that channel, so no real socket is involved.
+      (function () {
+        var ws = new WebSocket('ws://127.0.0.1:5174/wn-reload');
+        ws.onmessage = function (event) {
+          try {
+            var msg = JSON.parse(event.data);
+            if (msg && msg.type === 'full-reload') location.reload();
+          } catch (err) {}
+        };
+      })();
+    </script>
+  </body>
+</html>
+`,
+
+  '/project/wp/src/index.js': `// The entry webpack bundles. It imports the *same* message module the Vite
+// demo uses, so one edit drives both dev servers.
+import { greet } from '../../site/src/message.js';
+
+document.getElementById('app').textContent = greet('webpack');
 `,
 
   '/project/notes.md': `# web-node demo project

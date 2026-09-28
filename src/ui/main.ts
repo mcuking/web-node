@@ -38,6 +38,7 @@ const buildBtn = $<HTMLButtonElement>('build');
 const bundleBtn = $<HTMLButtonElement>('bundle');
 const viteBtn = $<HTMLButtonElement>('vite');
 const viteDevBtn = $<HTMLButtonElement>('vitedev');
+const wpDevBtn = $<HTMLButtonElement>('wpdev');
 const hmrEditBtn = $<HTMLButtonElement>('hmred');
 const hmrCssBtn = $<HTMLButtonElement>('hmrcss');
 const installBtn = $<HTMLButtonElement>('install');
@@ -156,6 +157,10 @@ async function viteBuildProject(): Promise<void> {
 
 async function viteDevProject(): Promise<void> {
   await runEntry('/project/vite-dev.mjs', 'node /project/vite-dev.mjs', viteDevBtn);
+}
+
+async function webpackDevProject(): Promise<void> {
+  await runEntry('/project/webpack-dev.mjs', 'node /project/webpack-dev.mjs', wpDevBtn);
 }
 
 // A VFS write is what the dev server watches, so saving a source file makes the
@@ -346,6 +351,7 @@ buildBtn.addEventListener('click', () => void buildProject());
 bundleBtn.addEventListener('click', () => void bundleProject());
 viteBtn.addEventListener('click', () => void viteBuildProject());
 viteDevBtn.addEventListener('click', () => void viteDevProject());
+wpDevBtn.addEventListener('click', () => void webpackDevProject());
 
 async function installDeps(): Promise<void> {
   await save();

@@ -36,7 +36,7 @@
 |---|---|---|---|---|
 | **H** | **native → WASM（主线，P0–P6）** | 9 | 8 | 1 |
 | E | 启动与加载性能 | 1 | 0 | 1 |
-| F | 构建工具链（**用户愿景，最后做**） | 3 | 0 | 3 |
+| F | 构建工具链（**用户愿景，最后做**） | 3 | 1 | 2 |
 | G | 预览与路由 | 1 | 0 | 1 |
 | **I** | **借鉴 WebContainer（活体调研 2026-09-24）** | 3 | 0 | 3 |
 | A | crypto 收尾（**已归档**） | 26 | 26 | 0 |
@@ -44,10 +44,10 @@
 | C | 平台无对应物（**已解散**，条目已分流） | 2 | 2 | 0 |
 | D | 运行时常量小项（**已归档**） | 4 | 4 | 0 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **55** | **45** | **10**（+1 不做） |
+| **合计** | | **55** | **46** | **9**（+1 不做） |
 
 > **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 ✅ · M120 ✅ · M121 ✅ · **M125 ✅**。
-> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 132 个里程碑，剩余 10 个规划任务**。
+> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 133 个里程碑，剩余 9 个规划任务**。
 > 注：本表按**叶子任务**计数——M90（拆 M90.1–M90.9）、M92（拆 M92.1/M92.2）、M93（拆 M93.1–M93.4）、M93.4（拆 a–h）、M97（拆 M97.1）的**父项为拆分占位、不计入**。（旧表 A=22 系拆分前的陈旧值，本次一并修正为 26。）
 
 ---
@@ -230,7 +230,14 @@
   - 验收证据：`webpack@5.111.1` 生产构建 `hasErrors=false`、`14.3s`，产物 `bundle.js(1278B) + index.html(163B) + styles.css(32B)`；babel `preset-env`（`targets: ie11`）已降级可选链/class（`JS_HAS_OPTCHAIN=false`、`JS_HAS_CLASS=false`），`HtmlWebpackPlugin` 注入 script/link，`MiniCssExtractPlugin` 抽出样式表。
   - 途中修掉 3 个真 bug：**VFS 结构索引化**（`.wvm.json` 曾 130.8MB 内联全部文件内容 → boot 期 OOM；v3 改为只存结构，体量回到 KB 级）、**同步读绕开写队列**（大快照 drain 期间读被 10s `Atomics.wait` 超时）、**npm 解包剥首段**（`@types/*` 的 tarball 根目录是包名而非 `package/`，此前多套一层使 TypeScript 找不到自身类型）。另：忽略 `package.json` 的 **object 形式** `browser` 字段（真 Node 行为；它会把内建/文件替换成浏览器变体）。
 
-- [ ] **M110 · webpack watch / dev-server**
+- [x] **M110 · webpack watch / dev-server** ✅ 2026-09-28
+  - **watch 模式**：`webpack(config).watch(...)` 在页内工作——webpack 的 `watchpack` 走 `fs.watch`，而本运行时的 `fs.watch` 直接挂在虚拟文件系统上，所以任何 `fs.writeFileSync` / 编辑器保存都触发重编译（保留 `aggregateTimeout`）。
+  - **手写 dev-server**（`/project/webpack-dev.mjs`）：真 webpack-dev-server 要 express + ws + chokidar，标签页里都没有；于是用虚拟 `http.createServer().listen(5174)` 托管 `/` 与 `/bundle.js`，并把重编译通过 **Vite HMR 同一条 BroadcastChannel 桥**（`web-node-hmr:5174`）以 `full-reload` 推给预览——预览页里的 `WebSocket` 被 sw.js 的 shim 换成该通道，所以没有真 socket。
+  - **演示**：新增 `/project/wp/`（纯 ES 模块小应用）+ UI 按钮 **📦 Webpack dev**；该应用**故意 import Vite demo 的同一个 `site/src/message.js`**，于是「改一次源码，两个 dev-server 同时重编译」。
+  - **一个真 bug（已修）**：项目根 `package.json` 是 `type: commonjs`，webpack 据此把每个 `.js` 当 CommonJS（`javascript/dynamic`）→ demo 的 `import`/`export` 报 `Module parse failed`。修法是在 config 里加一条 `module.rules` 把 `.m?(j)s` 强制为 `javascript/auto`（同时接受 ESM/CJS，与 Node 对预览 shim 的处理一致）。
+  - **验收（页内真实 E2E，CDP）**：① `built bundle.js (3632 bytes)` → 改 `site/src/message.js` → `rebuilt bundle.js (3624 bytes)` → `reload : full-reload -> N client/s`；② `fetch('preview/5174/')` 与 `preview/5174/bundle.js` 均 **200**，bundle 内容随编辑更新（`hasHotUpdated=true`）；③ 预览（`5174.localhost`）连上 reload 通道，每次重编译自动 `location.reload()`（client 计数 1→2→3→4→5）。
+  - 门禁：`tsc --noEmit` 净 · `vitest run` **1137 passed / 3 skipped（134 文件）** · build（`runtime.worker-BU2S-_dG.js` **745.71 kB**）。
+  - **附**：`webpack` 加入 demo 的 `devDependencies`（`^5.111.1`），「Install deps」即可装齐。
 
 - [⤳] **M111 · rspack（wasm32-wasi + emnapi）** → **已并入阶段 H 的 M121**（wasm 工具链与阶段 H 共用）
   - 现状：核心是 Rust napi 原生插件（`.node`）页面跑不了；但官方有 `@rspack/binding-wasm32-wasi`（2.2.6，基于 `@emnapi/core` + `@napi-rs/wasm-runtime`）。
