@@ -14,6 +14,19 @@ import { DEMO_FILES } from '../demo-project';
 const decoder = new TextDecoder();
 
 /**
+ * Base-prefixed URL of the emnapi **thread-child** bootstrap (M125).
+ *
+ * `@emnapi/wasi-threads` spawns real threads by handing a real browser `Worker`
+ * a compiled `WebAssembly.Module` + the shared memory; a `Worker` can only be
+ * created from a URL, and only this worker knows the deploy's base path
+ * (`__WASI_THREAD_CHILD_URL__` is a build-time define). Adapters that supply
+ * `onCreateWorker` read this global instead of guessing the path. The asset is
+ * produced by `tools/build-wasi-thread-child.mjs`.
+ */
+(globalThis as { __webnodeWasiThreadChildUrl?: string }).__webnodeWasiThreadChildUrl =
+  __WASI_THREAD_CHILD_URL__;
+
+/**
  * Fetch the vendored-sources bundle (M107) and install it.
  *
  * The bundle is emitted as a plain-text asset and preloaded from `index.html`, so

@@ -387,6 +387,16 @@ export class NodeRuntime {
       const value = (globalThis as unknown as Record<string, unknown>)[name];
       if (value !== undefined) sandboxGlobal[name] = value;
     }
+    // The emnapi thread-child bootstrap URL (M125) is a build-time constant of
+    // this bundle, published on the worker global by `runtime.worker.ts`. It is
+    // not a host global, so mirror it explicitly: adapters that spawn *real*
+    // threads (e.g. a napi-rs wasm32-wasi binding) need it, and only this worker
+    // knows the deploy's base path.
+    const wasiThreadChildUrl = (globalThis as unknown as Record<string, unknown>)
+      .__webnodeWasiThreadChildUrl;
+    if (typeof wasiThreadChildUrl === 'string') {
+      sandboxGlobal.__webnodeWasiThreadChildUrl = wasiThreadChildUrl;
+    }
     // `fetch` is the one host API a sandboxed program can park on, and the
     // request outlives the synchronous return: wrap it so an in-flight request
     // counts as live work (see `#trackHostRequest`).

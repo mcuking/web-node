@@ -21,6 +21,12 @@ const base = process.env.BASE_PATH || '/';
 const vendoredJson = vendoredBundleText();
 const vendoredUrl = `${base}${VENDORED_ASSET_FILE}?v=${createHash('sha256').update(vendoredJson).digest('hex').slice(0, 12)}`;
 
+// The emnapi **thread-child** bootstrap (M125). A real browser `Worker` can only
+// load a script by URL, so it is served as a plain same-origin asset (build it
+// with `npm run build:wasi-thread-child`). It lives under `base`, so the runtime
+// worker resolves it against `location` rather than assuming the origin root.
+const wasiThreadChildUrl = `${base}wasi-thread-child.js`;
+
 export default defineConfig(({ mode }) => {
   // Tests run in Node and need the sources synchronously, so they get the eager
   // glob; every other mode gets the browser stub and fetches the bundle instead.
@@ -32,7 +38,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     base,
-    define: { __VENDORED_URL__: JSON.stringify(vendoredUrl) },
+    define: {
+      __VENDORED_URL__: JSON.stringify(vendoredUrl),
+      __WASI_THREAD_CHILD_URL__: JSON.stringify(wasiThreadChildUrl),
+    },
     resolve: { alias: { 'web-node:vendor-sources': vendorSources } },
     plugins: [vendoredSourcePlugin(), vendoredBundlePlugin(vendoredJson, vendoredUrl), devSubdomains()],
     server: {

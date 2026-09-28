@@ -37,3 +37,45 @@ describe('esm-transform — import.meta rewrite is code-only', () => {
     expect(code).toContain('__wn_import(');
   });
 });
+
+describe('esm-transform — string-literal module export names (ES2022)', () => {
+  // @rspack/core ships `export { src_rspack as "module.exports", … }`; the
+  // specifier used to fall through to `${EX}.${s} = ${s}`, which left the `as`
+  // token in place and failed to compile.
+  it('rewrites `x as "name"` in an export clause to a computed property', () => {
+    const code = run(`const foo = 1;\nexport { foo as "module.exports" };\n`);
+    expect(code).toContain('__wn_exports["module.exports"] = foo;');
+    expect(code).not.toContain('as "module.exports"');
+  });
+
+  it('handles string names alongside plain and `as` entries in one clause', () => {
+    const code = run(`const a = 1, b = 2;\nexport { a, b as c, a as "a b" };\n`);
+    expect(code).toContain('__wn_exports.a = a;');
+    expect(code).toContain('__wn_exports.c = b;');
+    expect(code).toContain('__wn_exports["a b"] = a;');
+  });
+
+  it('supports string names across a multi-line export block', () => {
+    const code = run(`const a = 1, b = 2;\nexport {\n  a,\n  b as "b c",\n};\n`);
+    expect(code).toContain('__wn_exports.a = a;');
+    expect(code).toContain('__wn_exports["b c"] = b;');
+  });
+
+  it('supports a string imported name in an import clause', () => {
+    const code = run(`import { "a b" as ab } from './m.js';\n`);
+    expect(code).toContain('"a b": ab');
+    expect(code).not.toContain('as ab');
+  });
+
+  it('supports string names in a re-export clause', () => {
+    const code = run(`export { a as "a b" } from './m.js';\n`);
+    expect(code).toContain('"a b":');
+    expect(code).not.toContain('as "a b"');
+  });
+
+  it('supports a string namespace name on `export * as`', () => {
+    const code = run(`export * as "ns x" from './m.js';\n`);
+    expect(code).toContain('__wn_exports["ns x"] =');
+    expect(code).not.toContain('as "ns x"');
+  });
+});

@@ -40,11 +40,8 @@ import App from './App.vue';
 createApp(App, { greeting: 'hi' }).mount('#app');
 `;
 
-describe('M18 feasibility: a Vue SFC through Vite inside the runtime', () => {
+describe.skipIf(!existsSync(NM))('M18 feasibility: a Vue SFC through Vite inside the runtime', () => {
   it('compiles and bundles a .vue app, and the dev server transforms it', async () => {
-    if (!existsSync(NM)) {
-      throw new Error('fixture missing: npm i vite vue @vitejs/plugin-vue esbuild-wasm@0.21.5 in /tmp/v18');
-    }
     const vfs = new MemoryVfs({ cwd: '/project' });
     vfs.mkdir('/project', { recursive: true });
     vfs.mkdir('/project/node_modules', { recursive: true });

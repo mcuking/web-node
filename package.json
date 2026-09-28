@@ -13,6 +13,7 @@
     "deploy": "tools/deploy-pages.sh",
     "vendor": "node tools/vendor.mjs",
     "build:native": "node native/build.mjs",
+    "build:wasi-thread-child": "node tools/build-wasi-thread-child.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

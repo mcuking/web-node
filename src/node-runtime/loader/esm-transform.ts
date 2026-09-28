@@ -283,14 +283,67 @@ function leadTrim(s: string): string {
   return t;
 }
 
+/**
+ * One side of an import/export clause: an identifier, or a string literal.
+ *
+ * Import and export clauses accept a **string-literal module export name**
+ * ("arbitrary module namespace names", ES2022): `export { x as "a b" }`,
+ * `import { "a b" as x } from 'm'`. Both sides must be modelled, because the
+ * emitted code has to use a computed property for a name that is not a valid
+ * identifier — `exports["a b"] = x`, not `exports."a b" = x`.
+ */
+interface SpecPart {
+  name: string;
+  isString: boolean;
+}
+
+function parseSpecPart(text: string): SpecPart | null {
+  const t = text.trim();
+  const str = t.match(/^(['"])([\s\S]*)\1$/);
+  if (str) return { name: str[2] ?? '', isString: true };
+  if (/^[A-Za-z_$][\w$]*$/.test(t)) return { name: t, isString: false };
+  return null;
+}
+
+/**
+ * Parse one entry of an import/export clause: `x`, `x as y`, `x as "y"`,
+ * `"x" as y`. Returns both sides (equal when there is no `as`), or `null` for
+ * anything unrecognized so the caller can fall back to the raw text.
+ */
+function parseSpecifier(s: string): { left: SpecPart; right: SpecPart } | null {
+  const t = s.trim();
+  const m = t.match(/^([\s\S]+?)\s+as\s+([\s\S]+)$/);
+  if (m) {
+    const left = parseSpecPart(m[1]);
+    const right = parseSpecPart(m[2]);
+    if (!left || !right) return null;
+    return { left, right };
+  }
+  const only = parseSpecPart(t);
+  if (!only) return null;
+  return { left: only, right: only };
+}
+
+/** `expr.name` when `name` is an identifier, `expr["name"]` when it is a string. */
+function member(expr: string, part: SpecPart): string {
+  return part.isString ? `${expr}[${JSON.stringify(part.name)}]` : `${expr}.${part.name}`;
+}
+
+/** `{ imported: local }` destructuring pattern for an import clause. */
 function transformNamedSpecifiers(spec: string): string {
   return spec
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) => {
-      const m = s.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
-      return m ? `${m[1]}: ${m[2]}` : s;
+      const p = parseSpecifier(s);
+      // In an import clause the binding target (`right`) must be an identifier;
+      // only the imported name (`left`) may be a string. Anything else is left
+      // verbatim so the parser reports it against the original source.
+      if (!p || p.right.isString) return s;
+      if (!p.left.isString && p.left.name === p.right.name) return p.right.name;
+      const key = p.left.isString ? JSON.stringify(p.left.name) : p.left.name;
+      return `${key}: ${p.right.name}`;
     })
     .join(', ');
 }
@@ -387,8 +440,9 @@ export function transformEsmToCjs(source: string, moduleUrl: string): TransformR
       if (clause === '*') {
         out.push(`Object.assign(${EX}, ${RQ}(${JSON.stringify(mod)}));`);
       } else if (/^\*\s+as\s+/.test(clause)) {
-        const name = clause.replace(/^\*\s+as\s+/, '');
-        out.push(`${EX}.${name} = ${RQ}(${JSON.stringify(mod)});`);
+        const part = parseSpecPart(clause.replace(/^\*\s+as\s+/, ''));
+        if (part) out.push(`${member(EX, part)} = ${RQ}(${JSON.stringify(mod)});`);
+        else out.push(piece);
       } else {
         const block = clause.match(/^\{([\s\S]*)\}$/);
         if (block) {
@@ -401,8 +455,10 @@ export function transformEsmToCjs(source: string, moduleUrl: string): TransformR
             .map((s) => s.trim())
             .filter(Boolean)
             .map((s) => {
-              const m = s.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
-              return m ? `${m[2]}: ${tmp}.${m[1]}` : `${s}: ${tmp}.${s}`;
+              const p = parseSpecifier(s);
+              if (!p) return `${s}: ${tmp}.${s}`;
+              const key = p.right.isString ? JSON.stringify(p.right.name) : p.right.name;
+              return `${key}: ${member(tmp, p.left)}`;
             })
             .join(', ');
           out.push(`Object.assign(${EX}, { ${pairs} });`);
@@ -434,8 +490,11 @@ export function transformEsmToCjs(source: string, moduleUrl: string): TransformR
         .map((s) => s.trim())
         .filter(Boolean)
         .map((s) => {
-          const m = s.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
-          return m ? `${EX}.${m[2]} = ${m[1]};` : `${EX}.${s} = ${s};`;
+          const p = parseSpecifier(s);
+          // The local binding (`left`) is read from module scope, so it must be
+          // an identifier; only the exported name (`right`) may be a string.
+          if (!p || p.left.isString) return `${EX}.${s} = ${s};`;
+          return `${member(EX, p.right)} = ${p.left.name};`;
         })
         .join(' ');
       out.push(pairs);
