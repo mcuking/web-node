@@ -28,8 +28,17 @@ import { decodeBase64 } from './base64';
 
 /** The index file: a cheap way to rebuild the tree without walking OPFS. */
 export const SNAPSHOT_FILE = '.wvm.json';
-/** Bumped when the on-disk shape changes; `load()` still reads older versions. */
-export const SNAPSHOT_VERSION = 2;
+/**
+ * Bumped when the on-disk shape changes; `load()` still reads older versions.
+ *
+ * v3: the index carries only **structure** (`path`, `type`, `mode`, `size`) — no
+ * file bodies. The mirror next to it holds the bytes, and the FS-worker backend
+ * reads them back synchronously, so the runtime restores a v3 tree cold. v2 kept
+ * every body base64-inlined in `.wvm.json`, which grew without bound (a
+ * `node_modules` pushed the index past 100MB and the boot-time decode OOM'd the
+ * renderer) and made every debounce re-read the whole tree.
+ */
+export const SNAPSHOT_VERSION = 3;
 
 const EMPTY = new Uint8Array(0);
 
@@ -61,9 +70,35 @@ export function relativePath(path: string): string {
   return path.replace(/^\/+/, '');
 }
 
+/**
+ * Byte length a base64 payload decodes to.
+ *
+ * Used only to backfill `size` for an entry that carries `data` but no explicit
+ * size — a legacy v2 entry, which kept everything inline. A structure-index entry
+ * has no `data` and always ships its own `size`.
+ */
+function decodedLength(base64: string | undefined): number {
+  if (!base64) return 0;
+  const len = base64.length;
+  const padding = len > 0 && base64[len - 1] === '=' ? (base64[len - 2] === '=' ? 2 : 1) : 0;
+  return (len * 3) / 4 - padding;
+}
+
 export class FsService {
   #store: FileStore;
   #snapshotFile: string;
+  /**
+   * Paths the in-flight snapshot is (re)writing.
+   *
+   * Reads bypass the write queue (see `serveSyncChannel`) so a lookup is never
+   * parked behind a draining snapshot. That would let a read observe a file
+   * mid-`truncate(0)→write` — empty or partial — so a read that lands on a path
+   * being rewritten waits for the snapshot to finish first. Only that file, and
+   * only while it is actually being written; the mirror is small because a
+   * structure index leaves untouched files alone.
+   */
+  #writing = new Set<string>();
+  #snapshotInFlight: Promise<void> | null = null;
 
   constructor(store: FileStore, options: { snapshotFile?: string } = {}) {
     this.#store = store;
@@ -96,18 +131,34 @@ export class FsService {
     }
   }
 
+  /**
+   * Wait out a snapshot that is rewriting `rel`, if one is.
+   *
+   * Reads run off the write queue, so without this a read could catch a file
+   * between `truncate(0)` and `write`. Cheap in practice: a structure-index
+   * snapshot only rewrites files the session actually touched.
+   */
+  async #joinWrite(rel: string): Promise<void> {
+    if (this.#snapshotInFlight && this.#writing.has(rel)) await this.#snapshotInFlight;
+  }
+
   async #read(path: string): Promise<Uint8Array> {
-    const data = await this.#store.readOrNull(relativePath(path));
+    const rel = relativePath(path);
+    await this.#joinWrite(rel);
+    const data = await this.#store.readOrNull(rel);
     return data === null ? encodeReadResult(false) : encodeReadResult(true, data);
   }
 
   async #stat(path: string): Promise<Uint8Array> {
-    const info = await this.#store.info(relativePath(path));
+    const rel = relativePath(path);
+    await this.#joinWrite(rel);
+    const info = await this.#store.info(rel);
     return info === null ? encodeReadResult(false) : encodeReadResult(true, encodeInfoBody(info));
   }
 
   async #list(path: string): Promise<Uint8Array> {
     const rel = relativePath(path);
+    await this.#joinWrite(rel);
     const entries = await this.#store.list(rel);
     if (entries === null) return encodeReadResult(false);
     // The snapshot index is a store artifact, not a user file, and it lives in
@@ -155,19 +206,55 @@ export class FsService {
   /**
    * Rewrite the whole tree: the `.wvm.json` index plus a real file per entry.
    *
-   * The index is what makes a reload cheap (no directory walk); the mirrored
-   * files are what keep OPFS browsable and byte-exact. Contents travel
-   * base64-encoded, exactly as `MemoryVfs.snapshot()` produces them.
+   * The index is **structure only** (`path`, `type`, `mode`, `size`) since v3. The
+   * mirrored files are the bytes, and the runtime reads them back synchronously
+   * (the FS worker is the only writer), so there is nothing to duplicate here.
+   *
+   * Only entries that actually carry `data` are written to the mirror. A cold
+   * entry (`data` absent) is one the runtime never touched this session: its bytes
+   * are already byte-for-byte on disk, and re-writing it would be a pointless
+   * `truncate(0)` that risks a reader catching the empty window. Leaving it alone
+   * is also what keeps a large `node_modules` snapshot cheap — only the handful of
+   * files a session edits travel.
+   *
+   * The snapshot is tracked as in-flight and the files it writes are marked, so a
+   * synchronous read that races one waits it out (see `#joinWrite`).
    */
-  async writeSnapshot(entries: PersistedEntry[]): Promise<void> {
-    await this.#store.putText(
-      this.#snapshotFile,
-      JSON.stringify({ v: SNAPSHOT_VERSION, entries }, null, 0),
-    );
-    for (const item of entries) {
-      if (item.type !== 'file') continue;
-      await this.#store.put(relativePath(item.path), decodeBase64(item.data ?? ''));
-    }
+  writeSnapshot(entries: PersistedEntry[]): Promise<void> {
+    const run = (async (): Promise<void> => {
+      const index = entries.map((item) =>
+        item.type === 'dir'
+          ? { path: item.path, type: item.type, mode: item.mode }
+          : {
+              path: item.path,
+              type: item.type,
+              mode: item.mode,
+              size: item.size ?? decodedLength(item.data),
+              // Inline the body only when the snapshot carries one. A backend with
+              // no synchronous read path (`OpfsPersistence`) is the only copy its
+              // tree has, so `snapshot()` hands over bodies and they must travel
+              // here. The FS-worker backend drops cold bodies — the mirror is the
+              // copy — and this branch stays empty, so its index stays structure.
+              ...(item.data !== undefined ? { data: item.data } : {}),
+            },
+      );
+      for (const item of entries) {
+        if (item.type !== 'file' || item.data === undefined) continue;
+        const rel = relativePath(item.path);
+        this.#writing.add(rel);
+        try {
+          await this.#store.put(rel, decodeBase64(item.data));
+        } finally {
+          this.#writing.delete(rel);
+        }
+      }
+      await this.#store.putText(this.#snapshotFile, JSON.stringify({ v: SNAPSHOT_VERSION, entries: index }, null, 0));
+    })();
+    this.#snapshotInFlight = run;
+    run.finally(() => {
+      if (this.#snapshotInFlight === run) this.#snapshotInFlight = null;
+    });
+    return run;
   }
 
   async load(): Promise<PersistedSnapshot | null> {

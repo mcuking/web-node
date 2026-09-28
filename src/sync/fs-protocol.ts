@@ -26,6 +26,17 @@ export const FS_OP_LIST = 4;
 
 export type FsOp = typeof FS_OP_PUT | typeof FS_OP_GET | typeof FS_OP_STAT | typeof FS_OP_LIST;
 
+/**
+ * Is this op read-only (it never mutates the store)?
+ *
+ * The FS worker lets such ops bypass the write queue, so a lookup is never stuck
+ * behind a whole-tree snapshot that happens to be draining (see
+ * `serveSyncChannel`). `FS_OP_PUT` is the only writer on this channel.
+ */
+export function isReadOnlyFsOp(op: number): boolean {
+  return op === FS_OP_GET || op === FS_OP_STAT || op === FS_OP_LIST;
+}
+
 /** Frame a bare path (`[u32 len][UTF-8]`). */
 export function encodePath(path: string): Uint8Array {
   const bytes = new TextEncoder().encode(path);
@@ -157,12 +168,19 @@ export function decodePut(payload: Uint8Array): { path: string; data: Uint8Array
   return { path, data: payload.slice(4 + pathLen) };
 }
 
-/** A snapshot entry, as `MemoryVfs.snapshot()` produces them (file data is base64). */
+/** A snapshot entry, as `MemoryVfs.snapshot()` produces them (file data is base64).
+ *
+ * `data` may be absent on a file: a **structure index** (version 3, written by the
+ * FS-worker backend) names every file but leaves its bytes in the mirror, so only
+ * `size` travels. `load()` hands those entries back unchanged and the runtime
+ * restores them as cold (`MemoryVfs.fromSnapshot(..., { cold: true })`). */
 export interface PersistedEntry {
   path: string;
   type: 'file' | 'dir';
   data?: string;
   mode?: number;
+  /** Byte length of a file's contents; present in a structure index. */
+  size?: number;
 }
 
 export interface PersistedSnapshot {

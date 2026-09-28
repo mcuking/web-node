@@ -241,6 +241,21 @@ describe('tarball', () => {
     expect(new TextDecoder().decode(index.data)).toBe('module.exports = 1;');
   });
 
+  it('strips whatever the wrapper directory is named, not just package/', async () => {
+    // Every `@types/*` package npm publishes uses its unscoped name as the
+    // tarball root (`@types/node` → `node/…`). A fixed `package/` strip left
+    // them one level deep and TypeScript could not find its own typings.
+    const entries = untar(
+      makeTar([
+        { path: 'node/package.json', data: '{"name":"@types/node"}' },
+        { path: 'node/index.d.ts', data: 'declare const x: number;' },
+        { path: 'node/assert/strict.d.ts', data: 'declare const y: number;' },
+      ]),
+    );
+    const files = entries.filter((e) => e.type === 'file').map((e) => e.path).sort();
+    expect(files).toEqual(['assert/strict.d.ts', 'index.d.ts', 'package.json']);
+  });
+
   it('applies pax extended headers for long paths', async () => {
     const longPath = `package/${'nested/'.repeat(20)}file.js`;
     const entries = untar(makeTarWithPax(longPath, 'long'));

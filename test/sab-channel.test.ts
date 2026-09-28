@@ -241,3 +241,88 @@ describe('sync channel async requests', () => {
     expect(result).toEqual({ id: 7, kind: 'ok', result: { echoed: 42 } });
   });
 });
+
+/**
+ * A peer draining a slow async op must not block a read-only sync op — but a
+ * *write* still waits its turn. This is the M109 regression: a whole-tree
+ * snapshot can occupy the queue for seconds, and a lookup issued while it runs
+ * used to be parked behind it until the caller's `Atomics.wait` timed out.
+ */
+describe('sync channel read/write lanes', () => {
+  /** Fires one async request, then a blocking sync call `gapMs` later. */
+  const ASYNC_THEN_SYNC = `
+const { parentPort, workerData } = require('node:worker_threads');
+const h = new Int32Array(workerData.control);
+const H_STATE = 0, H_SEQ = 1, H_OP = 2, H_STATUS = 3, H_REQ_LEN = 4, H_RES_LEN = 5;
+const data = new SharedArrayBuffer(64);
+const payload = new TextEncoder().encode('req');
+new Uint8Array(data).set(payload, 0);
+// Fire the async op first so it is already draining the peer before the sync call.
+workerData.port.postMessage({ id: 1, kind: 'slow' });
+setTimeout(() => {
+  Atomics.store(h, H_SEQ, 1);
+  Atomics.store(h, H_OP, workerData.op);
+  Atomics.store(h, H_STATUS, 0);
+  Atomics.store(h, H_REQ_LEN, payload.length);
+  Atomics.store(h, H_RES_LEN, 0);
+  Atomics.store(h, H_STATE, 1);
+  workerData.port.postMessage({ seq: 1, op: workerData.op, len: payload.length, data });
+  const started = Date.now();
+  const deadline = started + workerData.timeoutMs;
+  while (Atomics.load(h, H_STATE) !== 2) {
+    const left = deadline - Date.now();
+    if (left <= 0) { parentPort.postMessage({ timedOut: true, elapsed: Date.now() - started }); return; }
+    Atomics.wait(h, H_STATE, 1, left);
+  }
+  const len = Atomics.load(h, H_RES_LEN);
+  parentPort.postMessage({
+    status: Atomics.load(h, H_STATUS),
+    bytes: Array.from(new Uint8Array(data, 0, len)).map((b) => String.fromCharCode(b)).join(''),
+    elapsed: Date.now() - started,
+  });
+}, workerData.gapMs);
+`;
+
+  async function run(
+    op: number,
+    opts: { asyncMs: number; gapMs: number; timeoutMs: number },
+  ): Promise<{ status?: number; bytes?: string; elapsed: number; timedOut?: boolean }> {
+    const { control, client, port2 } = openChannel();
+    serveSyncChannel(client, control, {
+      sync: (_op, payload) => new Uint8Array(payload).reverse(),
+      async: () => new Promise((r) => setTimeout(() => r(null), opts.asyncMs)),
+      // op 2 is declared read-only (like `FS_OP_GET`); op 1 is a write.
+      isReadOp: (o) => o === 2,
+    });
+    const worker = new Worker(ASYNC_THEN_SYNC, {
+      eval: true,
+      workerData: { control, port: port2, op, gapMs: opts.gapMs, timeoutMs: opts.timeoutMs },
+      transferList: [port2],
+    });
+    const reply = await new Promise<{ status?: number; bytes?: string; elapsed: number; timedOut?: boolean }>(
+      (resolve, reject) => {
+        worker.on('message', resolve as (value: unknown) => void);
+        worker.on('error', reject);
+      },
+    );
+    await worker.terminate();
+    return reply;
+  }
+
+  it('answers a read-only op while a slow async op drains the queue', async () => {
+    // The async op runs for 600ms; the read's own deadline is 300ms. Without the
+    // read lane this call parks behind the async op and times out.
+    const reply = await run(2, { asyncMs: 600, gapMs: 20, timeoutMs: 300 });
+    expect(reply.timedOut).toBeUndefined();
+    expect(reply.status).toBe(0);
+    expect(reply.bytes).toBe('qer');
+    expect(reply.elapsed).toBeLessThan(250);
+  });
+
+  it('still makes a write wait for the async op ahead of it', async () => {
+    const reply = await run(1, { asyncMs: 300, gapMs: 20, timeoutMs: 3000 });
+    expect(reply.timedOut).toBeUndefined();
+    expect(reply.status).toBe(0);
+    expect(reply.elapsed).toBeGreaterThanOrEqual(200);
+  });
+});

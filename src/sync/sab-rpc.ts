@@ -270,11 +270,19 @@ export class SyncChannel {
 /**
  * Peer side: wire a `MessagePort` to a handler.
  *
- * Handles **both** channels of the protocol on one port, through **one** queue.
- * The shared payload buffer is only safe because requests are processed strictly
- * in arrival order — and that ordering has to span the async channel too, or a
+ * Mutating operations run through **one** queue, in arrival order. The shared
+ * payload buffer is only safe because such requests are processed strictly in
+ * arrival order — and that ordering has to span the async channel too, or a
  * fire-and-forget snapshot could interleave with the durable write it is
  * supposed to precede.
+ *
+ * An operation the caller declares read-only via `isReadOp` skips the queue: it
+ * touches neither the store nor another op's result, so it cannot reorder a
+ * write and must not wait behind one. That matters in practice — a whole-tree
+ * snapshot can occupy the queue for seconds, and a lookup that only reads OPFS
+ * would otherwise be parked behind it until the caller's `Atomics.wait` times
+ * out. Read-only work is also idempotent, so a buffer-size retry recomputes it
+ * rather than relying on the (single-slot) answer cache.
  *
  * `sync` answers through the shared-memory control block (the caller is parked
  * in `Atomics.wait` and can receive nothing else); `async` answers with an
@@ -283,7 +291,15 @@ export class SyncChannel {
 export function serveSyncChannel<Req extends SyncAsyncRequest>(
   port: MessagePort,
   control: SharedArrayBuffer,
-  options: { sync: SyncHandler; async?: (request: Req) => Promise<unknown> },
+  options: {
+    sync: SyncHandler;
+    async?: (request: Req) => Promise<unknown>;
+    /**
+     * Mark a synchronous op as read-only. Such an op bypasses the write queue
+     * (see the function doc). Omitted ⇒ every op is ordered.
+     */
+    isReadOp?: (op: number) => boolean;
+  },
 ): () => void {
   const h = new Int32Array(control, 0, CONTROL_WORDS);
   let queue: Promise<void> = Promise.resolve();
@@ -292,25 +308,29 @@ export function serveSyncChannel<Req extends SyncAsyncRequest>(
   let answeredResult: Uint8Array | null = null;
   let answeredStatus = STATUS_OK;
 
-  const runSync = async (msg: { data: SharedArrayBuffer; op: number; len: number }): Promise<void> => {
+  const runSync = async (msg: { data: SharedArrayBuffer; op: number; len: number }, cache: boolean): Promise<void> => {
     const seq = Atomics.load(h, H_SEQ);
     // A retry re-sends the same request with a bigger buffer. Re-running the
-    // work would be a bug for anything that is not idempotent, so the answer is
-    // kept and replayed instead.
-    let result = seq === answeredSeq ? answeredResult : null;
+    // work would be a bug for anything that is not idempotent, so a queued
+    // answer is kept and replayed instead. A bypassed read skips this: it is
+    // idempotent, and the single cache slot must stay owned by the write lane.
+    let result = cache && seq === answeredSeq ? answeredResult : null;
+    let status = STATUS_OK;
     if (result === null) {
       const payload = new Uint8Array(msg.data, 0, msg.len);
-      let status = STATUS_OK;
       try {
         result = await options.sync(msg.op, payload, Atomics.load(h, H_ARG0), Atomics.load(h, H_ARG1));
       } catch (err) {
         result = encodeError(err);
         status = STATUS_ERROR;
       }
-      answeredSeq = seq;
-      answeredResult = result;
-      answeredStatus = status;
+      if (cache) {
+        answeredSeq = seq;
+        answeredResult = result;
+        answeredStatus = status;
+      }
     }
+    const finalStatus = cache ? answeredStatus : status;
     if (result.byteLength > msg.data.byteLength) {
       // Too big for the caller's buffer: say how much is needed and let it retry.
       Atomics.store(h, H_RES_LEN, result.byteLength);
@@ -321,7 +341,7 @@ export function serveSyncChannel<Req extends SyncAsyncRequest>(
     }
     if (result.byteLength > 0) new Uint8Array(msg.data).set(result, 0);
     Atomics.store(h, H_RES_LEN, result.byteLength);
-    Atomics.store(h, H_STATUS, answeredStatus);
+    Atomics.store(h, H_STATUS, finalStatus);
     // Status and length first; the wake-up flag last.
     Atomics.store(h, H_STATE, STATE_RESPONSE);
     Atomics.notify(h, H_STATE);
@@ -346,7 +366,13 @@ export function serveSyncChannel<Req extends SyncAsyncRequest>(
     const msg = event.data as (SyncAsyncRequest & { data?: SharedArrayBuffer; op?: number; len?: number }) | null;
     if (stopped || msg === null || typeof msg !== 'object') return;
     if (typeof msg.seq === 'number' && msg.data instanceof SharedArrayBuffer) {
-      queue = queue.then(() => runSync(msg as { data: SharedArrayBuffer; op: number; len: number }));
+      const sync = msg as { data: SharedArrayBuffer; op: number; len: number };
+      if (options.isReadOp?.(sync.op)) {
+        // Read-only: never touches the store, so it must not wait behind a write.
+        void runSync(sync, false);
+      } else {
+        queue = queue.then(() => runSync(sync, true));
+      }
       return;
     }
     if (typeof msg.id === 'number' && options.async) {

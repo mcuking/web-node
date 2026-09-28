@@ -3,8 +3,8 @@
  *
  * npm publishes packages as `*.tgz` — a gzipped tar (ustar + pax/GNU long-name
  * extensions). We don't need a full tar implementation: we only ever read
- * regular files and directories, and always strip the leading `package/`
- * directory npm wraps everything in.
+ * regular files and directories, and always strip the one leading directory npm
+ * wraps everything in — whichever it is named (see `stripRootSegment`).
  *
  * Decompression uses the platform `DecompressionStream` (browser + Node 18+),
  * so there is no zlib dependency in the bundle.
@@ -97,12 +97,26 @@ function parsePax(data: Uint8Array): PaxRecord {
   return out;
 }
 
-function stripPackagePrefix(rawPath: string): string {
+/**
+ * Drop a tarball entry's leading path segment — npm's `strip: 1`.
+ *
+ * An npm tarball wraps every file in a single directory so it can be unpacked
+ * without knowing the package name. `package/` is the convention, but it is not
+ * what the field means: npm strips exactly one component whatever its name, and
+ * the `@types/*` packages npm publishes prove it — their tarball root is the
+ * *unscoped package name* (`@types/node` → `node/…`, `@types/estree` →
+ * `estree/…`). Only matching the literal `package/` left those packages nested
+ * one level too deep (`@types/node/node/index.d.ts`, so TypeScript could not
+ * find `@types/node`) and broke every loader that pulls in typings.
+ *
+ * The wrapper directory itself (a path with no `/`, e.g. `package` or `node`)
+ * strips to the empty string and is dropped by the caller, exactly as npm does.
+ */
+function stripRootSegment(rawPath: string): string {
   let p = rawPath;
   if (p.startsWith('./')) p = p.slice(2);
-  if (p.startsWith('package/')) p = p.slice('package/'.length);
-  else if (p === 'package') p = '';
-  return p;
+  const slash = p.indexOf('/');
+  return slash === -1 ? '' : p.slice(slash + 1);
 }
 
 /**
@@ -157,7 +171,7 @@ export function untar(input: Uint8Array): TarEntry[] {
     if (pending.size !== undefined) size = pending.size;
     pending = {};
 
-    const path = stripPackagePrefix(name);
+    const path = stripRootSegment(name);
     if (path === '') continue;
 
     if (typeflag === '5' || path.endsWith('/')) {

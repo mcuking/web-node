@@ -613,37 +613,77 @@ export class MemoryVfs implements Vfs {
   /**
    * Snapshot the whole tree (used for persistence + tests).
    *
-   * Cold entries are materialised first. A cold file (or directory) is a
-   * placeholder the read source confirmed but nobody has touched this session,
-   * so it holds no bytes. Encoding it as-is would emit an empty payload, and the
-   * mirror write on the other side (`truncate(0)` then write) would overwrite the
-   * real file in the store with zero bytes — silently destroying every file a
-   * session never reads. Pull the bytes in so the snapshot is complete and a
-   * mirror is only ever written with real content.
+   * A cold file (or directory) is a placeholder the read source confirmed but
+   * nobody has touched this session, so it holds no bytes. Two callers want
+   * different things from one:
+   *
+   *  - A backend with **no** synchronous read path (the direct `OpfsPersistence`)
+   *    must receive the bytes, because the mirror is its only copy. Encoding a
+   *    cold file as-is would emit an empty payload, and the mirror write
+   *    (`truncate(0)` then write) would overwrite the real file with zero bytes —
+   *    silently destroying every file a session never reads. So the default pulls
+   *    the bytes in.
+   *  - A backend that **can** read back synchronously (`OpfsWorkerPersistence`, via
+   *    the FS worker) only needs *structure*: the file is already mirrored
+   *    byte-for-byte, so re-sending its contents would (a) inflate the index with
+   *    the whole tree's base64 and (b) force every cold file to be read on every
+   *    debounce. `dropColdBodies` emits such a file as `{ path, size }` and leaves
+   *    the bytes where they are. Directories are still expanded, because a cold
+   *    directory's children are not in the tree yet and the index has to name them.
    */
-  snapshot(): Array<{ path: string; type: 'file' | 'dir'; data?: string; mode: number }> {
-    const out: Array<{ path: string; type: 'file' | 'dir'; data?: string; mode: number }> = [];
+  snapshot(opts: { dropColdBodies?: boolean } = {}): Array<{
+    path: string;
+    type: 'file' | 'dir';
+    data?: string;
+    mode: number;
+    size?: number;
+  }> {
+    const out: Array<{
+      path: string;
+      type: 'file' | 'dir';
+      data?: string;
+      mode: number;
+      size?: number;
+    }> = [];
     for (const [path, e] of this.#entries) {
       if (path === '/') continue;
       if (e.cold) {
-        // Iterating the Map while `#materialize` inserts children is safe: new
+        // Iterating the Map while materialising inserts children is safe: new
         // entries are visited later in this same loop.
         try {
-          this.#materialize(path, e);
+          if (e.type === 'file') {
+            if (opts.dropColdBodies) {
+              // Structure only: the mirror already holds these exact bytes, and
+              // rewriting them would only risk truncating a file nothing changed.
+              out.push({ path, type: 'file', mode: e.mode, size: e.coldSize ?? 0 });
+              continue;
+            }
+            this.#materializeFile(path, e);
+          } else if (opts.dropColdBodies) {
+            // One level: a cold child is expanded when the loop reaches it.
+            this.#materializeChildren(path, e);
+          } else {
+            this.#materialize(path, e);
+          }
         } catch {
           // Gone from the store between the info() probe and now. Drop it rather
           // than resurrect it as an empty file.
           continue;
         }
       }
-      out.push({
-        path,
-        type: e.type,
-        mode: e.mode,
-        // base64, not text: contents are arbitrary bytes (wasm, images) and a
-        // UTF-8 round-trip would corrupt and inflate them.
-        data: e.type === 'file' ? encodeBase64(e.data) : undefined,
-      });
+      if (e.type === 'file') {
+        out.push({
+          path,
+          type: 'file',
+          mode: e.mode,
+          // base64, not text: contents are arbitrary bytes (wasm, images) and a
+          // UTF-8 round-trip would corrupt and inflate them.
+          data: encodeBase64(e.data),
+          size: e.data.byteLength,
+        });
+      } else {
+        out.push({ path, type: 'dir', mode: e.mode });
+      }
     }
     return out.sort((a, b) => a.path.localeCompare(b.path));
   }
@@ -652,16 +692,31 @@ export class MemoryVfs implements Vfs {
    *
    * `encoding` selects how `data` is interpreted: `base64` (current) or `text`
    * (legacy snapshots written before binary-safe persistence).
+   *
+   * With `opts.cold`, files come back as **cold** entries carrying only their
+   * size — no base64 to decode — and the caller is expected to install a read
+   * source straight after, so the bytes are fetched on first use. This is what
+   * makes restoring a large `node_modules` cheap: the index is structure, and a
+   * boot never has to hold every file's contents in memory at once. The entries
+   * therefore must carry a `size` (the structure index always writes one); a
+   * zero stands in for a file the writer could not size.
    */
   static fromSnapshot(
-    snapshot: Array<{ path: string; type: 'file' | 'dir'; data?: string; mode?: number }>,
-    opts: { cwd?: string; onChange?: (path: string | null) => void } = {},
+    snapshot: Array<{ path: string; type: 'file' | 'dir'; data?: string; mode?: number; size?: number }>,
+    opts: { cwd?: string; onChange?: (path: string | null) => void; cold?: boolean } = {},
     encoding: 'base64' | 'text' = 'base64',
   ): MemoryVfs {
     const vfs = new MemoryVfs(opts);
     const dirs = snapshot.filter((s) => s.type === 'dir').sort((a, b) => a.path.length - b.path.length);
     for (const d of dirs) vfs.mkdir(d.path, { recursive: true, mode: d.mode });
     for (const f of snapshot.filter((s) => s.type === 'file')) {
+      if (opts.cold) {
+        const entry = vfs.#makeFile(EMPTY, f.mode !== undefined ? f.mode & 0o777 : 0o644);
+        entry.cold = true;
+        entry.coldSize = f.size ?? 0;
+        vfs.#entries.set(f.path, entry);
+        continue;
+      }
       const bytes = encoding === 'base64' ? decodeBase64(f.data ?? '') : new TextEncoder().encode(f.data ?? '');
       vfs.writeFile(f.path, bytes, { mode: f.mode });
     }

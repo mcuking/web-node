@@ -225,8 +225,10 @@
   - 顺手已修：`browser` 字段替换目标的解析基准（`78f8a59`）。
   - 验收（移交 M121）：页内 `webpack` 生产构建产出 bundle。
 
-- [ ] **M109 · webpack loader / plugin 生态**
-  - `babel-loader` / `ts-loader` / `css-loader` / `style-loader` / `html-webpack-plugin` / `terser-webpack-plugin`。
+- [x] **M109 · webpack loader / plugin 生态**（2026-09-28 完成）
+  - `babel-loader` / `ts-loader` / `css-loader` / `style-loader` / `html-webpack-plugin` / `mini-css-extract-plugin` 全部在页内跑通。
+  - 验收证据：`webpack@5.111.1` 生产构建 `hasErrors=false`、`14.3s`，产物 `bundle.js(1278B) + index.html(163B) + styles.css(32B)`；babel `preset-env`（`targets: ie11`）已降级可选链/class（`JS_HAS_OPTCHAIN=false`、`JS_HAS_CLASS=false`），`HtmlWebpackPlugin` 注入 script/link，`MiniCssExtractPlugin` 抽出样式表。
+  - 途中修掉 3 个真 bug：**VFS 结构索引化**（`.wvm.json` 曾 130.8MB 内联全部文件内容 → boot 期 OOM；v3 改为只存结构，体量回到 KB 级）、**同步读绕开写队列**（大快照 drain 期间读被 10s `Atomics.wait` 超时）、**npm 解包剥首段**（`@types/*` 的 tarball 根目录是包名而非 `package/`，此前多套一层使 TypeScript 找不到自身类型）。另：忽略 `package.json` 的 **object 形式** `browser` 字段（真 Node 行为；它会把内建/文件替换成浏览器变体）。
 
 - [ ] **M110 · webpack watch / dev-server**
 

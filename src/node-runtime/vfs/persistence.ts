@@ -11,7 +11,13 @@ import type { PersistedEntry, PersistedSnapshot, StoreEntry } from '../../sync/f
 
 /** Just enough of `MemoryVfs` for the backend; keeps this file import-free of it. */
 export interface SnapshotSource {
-  snapshot(): PersistedEntry[];
+  /**
+   * The whole tree. `dropColdBodies` asks for a **structure** snapshot: files no
+   * session touched travel as `{ path, size }` without their bytes, because this
+   * backend can read them back (see `ReadSource`). A backend without a read path
+   * must omit it, or it would persist such a file as empty.
+   */
+  snapshot(opts?: { dropColdBodies?: boolean }): PersistedEntry[];
 }
 
 /**

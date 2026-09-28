@@ -29,6 +29,18 @@ function boot(files: Record<string, string>, entry = '/project/index.js') {
   return { runtime, vfs, out, err, run };
 }
 
+/**
+ * `browser` field handling.
+ *
+ * Only the **string** form is honoured: it selects which *build* of a package to
+ * load, which is what lets a Node-only `main` (esbuild-wasm spawns child
+ * processes) resolve to its browser build.
+ *
+ * The **object** form is a bundler substitution table — it swaps the package's
+ * own files or Node builtins for browser variants, on the assumption that a
+ * browser has no `fs`/`os`/`path`. This runtime provides those builtins, and real
+ * Node ignores `browser` entirely, so the table is deliberately not applied.
+ */
 describe('package.json "browser" field', () => {
   it('redirects a string browser entry away from the Node main', () => {
     const { run, out } = boot({
@@ -45,7 +57,8 @@ describe('package.json "browser" field', () => {
     expect(out.join('')).toBe('browser\n');
   });
 
-  it('honours an object browser map (relative file replacement)', () => {
+  it('ignores an object map: the real Node file loads, not the browser variant', () => {
+    // Bundlers pick `./browser.js`; Node (and this runtime) pick `./node.js`.
     const { run, out } = boot({
       '/project/node_modules/dual/package.json': JSON.stringify({
         name: 'dual',
@@ -58,39 +71,48 @@ describe('package.json "browser" field', () => {
       '/project/index.js': `console.log(require('dual'));`,
     });
     run();
-    expect(out.join('')).toBe('browser\n');
+    expect(out.join('')).toBe('node\n');
   });
 
-  it('maps a dropped Node builtin (browser: false) to an empty module', () => {
+  it('does not drop a provided builtin the object map lists as false', () => {
+    // TypeScript declares exactly `{ "fs": false, "os": false, "path": false, … }`
+    // yet its loader calls `os.platform()`. Honouring the table would hand it `{}`.
     const { run, out } = boot({
       '/project/node_modules/shiny/package.json': JSON.stringify({
         name: 'shiny',
         main: 'index.js',
-        browser: { fs: false },
+        browser: { fs: false, os: false, path: false },
       }),
-      '/project/node_modules/shiny/index.js': `module.exports = typeof require('fs').readFileSync;`,
+      '/project/node_modules/shiny/index.js': [
+        `const fs = require('fs');`,
+        `const os = require('os');`,
+        `const path = require('path');`,
+        `module.exports = [typeof fs.readFileSync, typeof os.platform, typeof path.join].join('/');`,
+      ].join('\n'),
       '/project/index.js': `console.log(require('shiny'));`,
     });
     run();
-    expect(out.join('')).toBe('undefined\n');
+    expect(out.join('')).toBe('function/function/function\n');
   });
 
-  it('resolves bare-specifier map targets against the package root', () => {
-    // tapable does exactly this: `{ "util": "./lib/util-browser.js" }`. The
-    // target is relative to the package root, not to the file that tripped it.
+  it('does not stub a false bare specifier — Node would refuse it too', () => {
+    // Neither `browser` nor the bundler's empty module applies: the runtime
+    // provides no `nodereport`, so the require fails exactly as it does on real
+    // Node (MODULE_NOT_FOUND), rather than silently yielding `{}`.
     const { run, out } = boot({
-      '/project/node_modules/taplike/package.json': JSON.stringify({
-        name: 'taplike',
+      '/project/node_modules/telemetry/package.json': JSON.stringify({
+        name: 'telemetry',
         main: 'index.js',
-        browser: { util: './lib/util-browser.js' },
+        browser: { nodereport: false },
       }),
-      '/project/node_modules/taplike/lib/hook.js': `module.exports = require('util').tag;`,
-      '/project/node_modules/taplike/lib/util-browser.js': `module.exports = { tag: 'browser-util' };`,
-      '/project/node_modules/taplike/index.js': `module.exports = require('./lib/hook.js');`,
-      '/project/index.js': `console.log(require('taplike'));`,
+      '/project/node_modules/telemetry/index.js': `module.exports = require('nodereport');`,
+      '/project/index.js': [
+        `try { require('telemetry'); console.log('no-throw'); }`,
+        `catch (e) { console.log('threw:' + e.code); }`,
+      ].join('\n'),
     });
     run();
-    expect(out.join('')).toBe('browser-util\n');
+    expect(out.join('')).toBe('threw:MODULE_NOT_FOUND\n');
   });
 
   it('leaves packages without a browser field on their main entry', () => {

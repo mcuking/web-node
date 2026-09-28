@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryVfs } from '../src/node-runtime/vfs';
+import type { ReadSource } from '../src/node-runtime/vfs/persistence';
 import { FsService, SNAPSHOT_FILE, type FileStore } from '../src/node-runtime/vfs/fs-service';
 import {
   FS_OP_GET,
@@ -258,14 +259,67 @@ function makeVfs(): MemoryVfs {
   return vfs;
 }
 
+/** A synchronous `ReadSource` over the `FakeStore`, as the OPFS bridge is. */
+function readSourceFor(store: FakeStore): ReadSource {
+  const strip = (path: string): string => path.replace(/^\//, '');
+  return {
+    info: (path) => {
+      const rel = strip(path);
+      if (rel === '') return { type: 'dir', size: 0 };
+      const file = store.files.get(rel);
+      if (file) return { type: 'file', size: file.byteLength };
+      if (store.dirs.has(rel)) return { type: 'dir', size: 0 };
+      return null;
+    },
+    read: (path) => {
+      const file = store.files.get(strip(path));
+      if (!file) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      return file.slice();
+    },
+    list: () => null,
+  };
+}
+
 describe('fs service snapshots', () => {
-  it('writes the index first, then a file per entry', async () => {
+  it('mirrors each file, then writes the index last', async () => {
     const { store, service: fs } = service();
     await fs.writeSnapshot(makeVfs().snapshot());
-    expect(store.writes[0]).toBe(SNAPSHOT_FILE);
+    // The index lands last: a reader must never see it name files the same
+    // write has not mirrored yet.
+    expect(store.writes.at(-1)).toBe(SNAPSHOT_FILE);
     expect([...store.writes].sort()).toEqual(['.wvm.json', 'project/blob.bin', 'project/src/a.js']);
     // Directories are index-only: OPFS makes them on demand.
     expect(store.files.has('project/src')).toBe(false);
+  });
+
+  it('keeps bodies inline for a backend with no synchronous read path', async () => {
+    const store = new FakeStore();
+    await new FsService(store).writeSnapshot(makeVfs().snapshot());
+    const index = JSON.parse(decoder.decode(store.files.get(SNAPSHOT_FILE)!));
+    expect(index.v).toBe(3);
+    const ajs = index.entries.find((e: { path: string }) => e.path === '/project/src/a.js');
+    expect(typeof ajs.data).toBe('string');
+    expect(ajs.size).toBe(20);
+    // Self-contained: `load()` alone reproduces the tree, no mirror reads.
+    const loaded = await new FsService(store).load();
+    const vfs = MemoryVfs.fromSnapshot(loaded!.entries, { cwd: '/project', cold: false }, 'base64');
+    expect(decoder.decode(vfs.readFile('/project/src/a.js'))).toBe('export const a = 1;\n');
+  });
+
+  it('writes a structure-only index when cold bodies are dropped', async () => {
+    const cold = MemoryVfs.fromSnapshot(
+      makeVfs().snapshot(),
+      { cwd: '/project', cold: true },
+      'base64',
+    );
+    const { store, service: fs } = service();
+    await fs.writeSnapshot(cold.snapshot({ dropColdBodies: true }));
+    // Nothing to mirror: the bytes are already on disk, untouched.
+    expect(store.writes).toEqual([SNAPSHOT_FILE]);
+    const index = JSON.parse(decoder.decode(store.files.get(SNAPSHOT_FILE)!));
+    const ajs = index.entries.find((e: { path: string }) => e.path === '/project/src/a.js');
+    expect(ajs.data).toBeUndefined();
+    expect(ajs.size).toBe(20);
   });
 
   it('mirrors binary contents byte-for-byte', async () => {
@@ -274,13 +328,30 @@ describe('fs service snapshots', () => {
     expect(Array.from(store.files.get('project/blob.bin')!)).toEqual([0, 255, 128]);
   });
 
-  it('reloads what it wrote', async () => {
+  it('reloads a structure index and restores bodies cold', async () => {
     const store = new FakeStore();
-    const written = makeVfs().snapshot();
-    await new FsService(store).writeSnapshot(written);
+    const fs = new FsService(store);
+    // Seed the mirror + a self-contained index, the way the direct backend does.
+    await fs.writeSnapshot(makeVfs().snapshot());
+    const seeded = await new FsService(store).load();
+    const cold = MemoryVfs.fromSnapshot(seeded!.entries, { cwd: '/project', cold: true }, 'base64');
+    cold.setReadSource(readSourceFor(store));
+    // The FS-worker backend then rewrites the index as structure only.
+    await fs.writeSnapshot(cold.snapshot({ dropColdBodies: true }));
+
     const loaded = await new FsService(store).load();
-    expect(loaded?.version).toBe(2);
-    expect(loaded?.entries).toEqual(written);
+    expect(loaded?.version).toBe(3);
+    expect(loaded?.entries.map((e) => [e.path, e.type, e.size])).toEqual([
+      ['/project', 'dir', undefined],
+      ['/project/blob.bin', 'file', 3],
+      ['/project/src', 'dir', undefined],
+      ['/project/src/a.js', 'file', 20],
+    ]);
+    // Restore cold + a read source: the bytes come back from the mirror on use.
+    const vfs = MemoryVfs.fromSnapshot(loaded!.entries, { cwd: '/project', cold: true }, 'base64');
+    vfs.setReadSource(readSourceFor(store));
+    expect(decoder.decode(vfs.readFile('/project/src/a.js'))).toBe('export const a = 1;\n');
+    expect(Array.from(vfs.readFile('/project/blob.bin'))).toEqual([0, 255, 128]);
   });
 
   it('still reads a v1 snapshot (a bare array of UTF-8 entries)', async () => {

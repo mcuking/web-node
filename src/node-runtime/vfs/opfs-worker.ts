@@ -138,7 +138,9 @@ export class OpfsWorkerPersistence implements Persistence {
   }
 
   async flush(source: SnapshotSource): Promise<void> {
-    await this.#request({ kind: 'snapshot', snapshot: source.snapshot() });
+    // Structure index: this backend reads bodies back synchronously, so untouched
+    // files must not have their bytes re-shipped (or their mirror rewritten).
+    await this.#request({ kind: 'snapshot', snapshot: source.snapshot({ dropColdBodies: true }) });
   }
 
   /**

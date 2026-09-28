@@ -106,13 +106,6 @@ export function stripShebang(source: string): string {
   return newline === -1 ? '' : source.slice(newline + 1);
 }
 
-/**
- * Sentinel returned when a `browser` field maps a specifier to `false`
- * ("this module is empty in the browser"). Resolving to a real VFS path would
- * either miss or pick up the Node-only file we were told to drop.
- */
-export const EMPTY_MODULE = '\u0000web-node:empty';
-
 /** A source map registered for a loaded module (`internal/source_map/source_map_cache`). */
 interface SourceMapEntry {
   filename: string;
@@ -418,94 +411,25 @@ export class ModuleLoader {
       return null;
     }
   }
-
-  /** The package directory that owns `fromDir` (nearest `package.json` upward). */
-  #owningPackage(fromDir: string): { dir: string; json: PackageJson } | null {
-    let dir = fromDir;
-    for (let i = 0; i < 40; i++) {
-      const json = this.#packageJson(dir);
-      if (json) return { dir, json };
-      const parent = p.dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-    return null;
-  }
-
   /**
-   * Apply a package's `browser` field to a specifier — the map bundlers use to
-   * swap Node-only files for browser ones (`{ "fs": false, "./node.js": "./browser.js" }`),
-   * or a bare string that redirects the package entry point.
+   * Resolve a package directory's entry point.
    *
-   * Returns the replacement specifier, `EMPTY_MODULE` for `false`, or `null`
-   * when nothing applies. This is what lets a package whose `main` is a Node
-   * build (spawning child processes, reading files) resolve to its browser
-   * build instead — required for real tooling like esbuild-wasm.
+   * The `browser` field's **string** form is honoured: it selects which *build*
+   * of the package to load, which is what lets a package whose `main` is Node-only
+   * (esbuild-wasm spawns child processes) resolve to its browser build.
+   *
+   * Its **object** form is deliberately ignored. That form is a bundler
+   * substitution table (`{ "fs": false, "./lib/x.js": "./lib/x-browser.js" }`)
+   * which exists because a real browser has no `fs`/`os`/`path`. This runtime is
+   * not that bundler — it *provides* those builtins — and real Node ignores the
+   * field entirely. Applying the table would swap working Node files for crippled
+   * browser variants: TypeScript declares `{ "os": false, … }` yet its loader
+   * calls `os.platform()`, and @babel/core maps its config-file reader to an
+   * `-browser` variant that throws "Cannot load preset … in a browser".
    */
-  #browserRemap(request: string, fromFile: string): string | null {
-    const owner = this.#owningPackage(p.dirname(fromFile));
-    if (!owner) return null;
-    const browser = owner.json.browser;
-    if (!browser || typeof browser !== 'object') return null;
-    const map = browser as Record<string, string | false>;
-
-    // `browser` field *targets* are resolved relative to the package root, not
-    // the requesting file (`{ "util": "./lib/util-browser.js" }` in tapable
-    // means `<pkg>/lib/util-browser.js`). A bare target is a plain specifier.
-    const target = (value: string | false): string => {
-      if (value === false) return EMPTY_MODULE;
-      if (value.startsWith('.')) return p.resolve(owner.dir, value);
-      return value;
-    };
-
-    const apply = (key: string): string | null | undefined => {
-      if (!Object.prototype.hasOwnProperty.call(map, key)) return undefined;
-      return target(map[key]);
-    };
-
-    // Bare specifier: remap by exact name.
-    if (!request.startsWith('.') && !p.isAbsolute(request)) {
-      const hit = apply(request);
-      return hit === undefined ? null : hit;
-    }
-
-    // Relative/absolute: keys are `./`-prefixed, relative to the package root.
-    const abs = p.resolve(p.dirname(fromFile), request);
-    const rel = './' + this.#relative(owner.dir, abs);
-    const stem = rel.replace(/\.(js|cjs|mjs|json)$/, '');
-    for (const key of [rel, stem, stem + '.js', stem + '.cjs', stem + '.mjs', stem + '.json']) {
-      const hit = apply(key);
-      if (hit !== undefined) return hit;
-    }
-    return null;
-  }
-
-  /** Path of `to` relative to `from` (both absolute, normalized). */
-  #relative(from: string, to: string): string {
-    const a = p.segments(from);
-    const b = p.segments(to);
-    let i = 0;
-    while (i < a.length && i < b.length && a[i] === b[i]) i++;
-    return [...a.slice(i).map(() => '..'), ...b.slice(i)].join('/');
-  }
-
-  /** Resolve a package directory's entry point, honouring `browser` + `main`. */
   #packageEntry(dir: string, json: PackageJson): string | null {
     const candidates: string[] = [];
-    if (typeof json.browser === 'string') {
-      candidates.push(json.browser);
-    } else if (json.browser && typeof json.browser === 'object') {
-      const map = json.browser as Record<string, string | false>;
-      const main = json.main ?? 'index.js';
-      const stem = './' + main.replace(/^\.\//, '').replace(/\.js$/, '');
-      for (const key of ['.', main, './' + main.replace(/^\.\//, ''), stem, stem + '.js']) {
-        const value = map[key];
-        if (typeof value === 'string') {
-          candidates.push(value);
-          break;
-        }
-      }
-    }
+    if (typeof json.browser === 'string') candidates.push(json.browser);
     if (json.main) candidates.push(json.main);
     if (json.module) candidates.push(json.module);
     candidates.push('index.js', 'index.cjs', 'index.mjs', 'index.json');
@@ -545,12 +469,9 @@ export class ModuleLoader {
     if (typeof request !== 'string') {
       throw new TypeError(`The "id" argument must be of type string. Received ${typeof request}`);
     }
-    // The `browser` field is applied before the builtin check: bundlers let a
-    // package drop a Node builtin entirely (`"fs": false` → `{}`).
-    const remapped = this.#browserRemap(request, fromFile);
-    if (remapped === EMPTY_MODULE) return {};
-    if (remapped !== null) request = remapped;
-
+    // `browser` is intentionally not consulted here: only its string form (in
+    // `#packageEntry`) is honoured, so a specifier resolves to the real Node
+    // module or the provided builtin. See `#packageEntry` for the rationale.
     const override = this.#builtinOverrides[request];
     if (override !== undefined) return override;
     if (this.#realm.hasBuiltin(request)) return this.#realm.require(request);
@@ -877,8 +798,7 @@ export class ModuleLoader {
       {
         resolve: (request: string, options?: { paths?: string[] }): string => {
           const fromDir = options?.paths?.[0] ?? dirname;
-          const remapped = this.#browserRemap(request, absPath);
-          return this.resolve(remapped && remapped !== EMPTY_MODULE ? remapped : request, fromDir, reqCondition);
+          return this.resolve(request, fromDir, reqCondition);
         },
       },
     );

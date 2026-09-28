@@ -19,6 +19,7 @@
  */
 
 import { CONTROL_WORDS, serveSyncChannel, SyncChannelError } from '../sync/sab-rpc';
+import { isReadOnlyFsOp } from '../sync/fs-protocol';
 import type { FsAsyncRequest, FsInitMessage } from '../sync/fs-protocol';
 import { OpfsFileStore } from '../node-runtime/vfs/opfs-store';
 import { FsService } from '../node-runtime/vfs/fs-service';
@@ -35,6 +36,8 @@ function initialise(message: FsInitMessage): void {
   serveSyncChannel<FsAsyncRequest>(message.port, message.control, {
     sync: (op, payload) => service.sync(op, payload),
     async: (request) => service.async(request),
+    // Reads never write, so they must not be parked behind a draining snapshot.
+    isReadOp: isReadOnlyFsOp,
   });
 }
 

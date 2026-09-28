@@ -222,10 +222,18 @@ async function init(id: number): Promise<void> {
   const loaded = await persistence.load();
   const hasRestored = Boolean(loaded && loaded.entries.length > 0);
 
+  // The read source decides how a restore is decoded. With one, the tree comes
+  // back **cold**: the index (v3, or a v2 the FS worker can also read through)
+  // names files, and the bytes are fetched from the mirror on first use — so a
+  // large `node_modules` never has to fit in memory at boot. Without one (the
+  // direct backend, which has no synchronous read path), bodies must already be
+  // inline in the index and are decoded eagerly, because the tree is the only
+  // copy. v1 predates both and kept text bodies inline, so it stays eager.
+  const readSource = persistence.readSource();
   const v = hasRestored
     ? MemoryVfs.fromSnapshot(
         loaded!.entries,
-        { cwd: '/project' },
+        { cwd: '/project', cold: readSource !== null && loaded!.version >= 2 },
         loaded!.version >= 2 ? 'base64' : 'text',
       )
     : new MemoryVfs({ cwd: '/project' });
@@ -239,7 +247,7 @@ async function init(id: number): Promise<void> {
   // The other half of M120: a lookup the memory tree misses can still reach the
   // store, synchronously. `null` from the direct backend leaves the tree as the
   // only source of truth, which is how this ran before.
-  v.setReadSource(persistence.readSource());
+  v.setReadSource(readSource);
   v.setDeletedSink((paths) => persistence.deleted(paths));
 
   vfs = v;
