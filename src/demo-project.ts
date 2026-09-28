@@ -2060,6 +2060,43 @@ export default function App() {
 }
 `,
 
+  '/project/cluster-demo.mjs': `// Click "Cluster" to fork two workers that share one port (milestone 123).
+import cluster from 'cluster';
+import net from 'net';
+
+if (cluster.isPrimary) {
+  console.log('-- cluster demo (milestone 123) --');
+  const N = 2;
+  let listening = 0;
+  let done = false;
+  cluster.on('online', (w) => console.log('online   : worker ' + w.id + ' pid ' + w.process.pid));
+  cluster.on('listening', (w, addr) => { listening++; if (listening === N && !done) { done = true; go(addr.port); } });
+  for (let i = 0; i < N; i++) cluster.fork();
+
+  function go(port) {
+    const n = Object.keys(cluster.workers).length;
+    console.log('workers  : ' + n + ' sharing :' + port);
+    const answers = [];
+    let left = 6;
+    const tick = () => { if (--left === 0) finish(); };
+    for (let i = 0; i < 6; i++) {
+      const s = net.connect(port, '127.0.0.1', () => s.write('ping'));
+      let b = '';
+      s.on('data', (c) => (b += c));
+      s.on('end', () => { answers.push(b); tick(); });
+      s.on('error', () => { answers.push('ERR'); tick(); });
+    }
+    function finish() {
+      console.log('dispatch : ' + answers.join(' '));
+      cluster.disconnect(() => console.log('done     : primary disconnected, workers exited'));
+    }
+  }
+} else {
+  const server = net.createServer((sock) => { sock.end('w' + cluster.worker.id); });
+  server.listen(3000, () => console.log('worker   : id ' + cluster.worker.id + ' up on :3000'));
+}
+`,
+
   '/project/react-site/tailwind.config.js': `const path = require('path');
 
 module.exports = {

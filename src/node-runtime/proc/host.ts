@@ -573,7 +573,26 @@ export function createProcessHost(deps: ProcessHostDeps): ProcessHost {
         g: Record<string, unknown>,
       ) => ModuleLoader)(realm, deps.vfs, globals);
       loader.setAliases(deps.aliases());
+      const clusterOverrides = this.#clusterWorkerOverrides(childProcess);
+      if (clusterOverrides) loader.setBuiltinOverrides(clusterOverrides);
       loader.loadModule(filename, source);
+    }
+
+    /**
+     * A `cluster.fork()`ed child carries `NODE_UNIQUE_ID` in its env. When it
+     * does, its registry must see the worker-side `cluster` and the shared-port
+     * `net`/`http`/`https` (M123) instead of the primary's. Built by the cluster
+     * builtin itself so this file stays out of its internals.
+     */
+    #clusterWorkerOverrides(childProcess: Record<string, unknown>): Record<string, unknown> | null {
+      const uniqueId = this.env.NODE_UNIQUE_ID;
+      if (uniqueId === undefined) return null;
+      const mod = deps.realm().require('cluster') as {
+        _workerOverrides?: (id: number, proc: Record<string, unknown>) => Record<string, unknown>;
+      };
+      const build = mod._workerOverrides;
+      if (typeof build !== 'function') return null;
+      return build(Number(uniqueId), childProcess);
     }
 
     #wrapTimer(kind: 'setTimeout' | 'setInterval' | 'setImmediate'): (...args: unknown[]) => number {

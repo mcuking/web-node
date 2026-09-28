@@ -146,20 +146,29 @@ export type ConnectionHandler = (socket: VirtualSocket) => void;
 
 export class VirtualNetwork {
   #servers = new Map<number, ConnectionHandler>();
+  /**
+   * Ports bound by **more than one** listener at once (cluster workers). Real
+   * Node lets the primary own the socket and round-robins connections to the
+   * workers; here every listener gets a turn at the network layer, which is
+   * observationally the same for user code (connections are spread across the
+   * workers) without a separate handle-passing protocol.
+   */
+  #shared = new Map<number, ConnectionHandler[]>();
+  #rr = new Map<number, number>();
   #nextId = 1;
 
   /** Ports currently bound, ascending. */
   get ports(): number[] {
-    return [...this.#servers.keys()].sort((a, b) => a - b);
+    return [...new Set([...this.#servers.keys(), ...this.#shared.keys()])].sort((a, b) => a - b);
   }
 
   isListening(port: number): boolean {
-    return this.#servers.has(port);
+    return this.#servers.has(port) || (this.#shared.get(port)?.length ?? 0) > 0;
   }
 
   /** Bind a port. Throws EADDRINUSE like `net.Server#listen`. */
   listen(port: number, handler: ConnectionHandler): void {
-    if (this.#servers.has(port)) {
+    if (this.isListening(port)) {
       throw Object.assign(new Error(`listen EADDRINUSE: address already in use :::${port}`), {
         code: 'EADDRINUSE',
         errno: -98,
@@ -170,8 +179,35 @@ export class VirtualNetwork {
     this.#servers.set(port, handler);
   }
 
+  /**
+   * Bind a port that may be listened on by several owners at once (a cluster
+   * worker's server). Only an existing *exclusive* binding conflicts.
+   */
+  listenShared(port: number, handler: ConnectionHandler): void {
+    if (this.#servers.has(port)) {
+      throw Object.assign(new Error(`listen EADDRINUSE: address already in use :::${port}`), {
+        code: 'EADDRINUSE',
+        errno: -98,
+        syscall: 'listen',
+        port,
+      });
+    }
+    const list = this.#shared.get(port);
+    if (list) list.push(handler);
+    else this.#shared.set(port, [handler]);
+  }
+
   unlisten(port: number): void {
     this.#servers.delete(port);
+  }
+
+  /** Remove one of several shared listeners (its server closed). */
+  unlistenShared(port: number, handler: ConnectionHandler): void {
+    const list = this.#shared.get(port);
+    if (!list) return;
+    const i = list.indexOf(handler);
+    if (i >= 0) list.splice(i, 1);
+    if (list.length === 0) this.#shared.delete(port);
   }
 
   /**
@@ -182,15 +218,16 @@ export class VirtualNetwork {
    * microtasks, so they never hold the loop open the way a libuv handle does.
    */
   activeResources(): string[] {
-    return Array.from({ length: this.#servers.size }, () => 'TCPServerWrap');
+    return Array.from({ length: this.ports.length }, () => 'TCPServerWrap');
   }
 
   /**
    * Dial a bound port from the outside world (or from another part of the same
    * program). Returns the *client* half; the server's handler receives the other.
+   * When several owners share the port (cluster), they take turns.
    */
   dial(port: number): VirtualSocket {
-    const handler = this.#servers.get(port);
+    const handler = this.#pickHandler(port);
     if (!handler) {
       throw Object.assign(new Error(`connect ECONNREFUSED 127.0.0.1:${port}`), {
         code: 'ECONNREFUSED',
@@ -209,8 +246,21 @@ export class VirtualNetwork {
     return client;
   }
 
+  /** Round-robin across a port's listeners, preferring a lone exclusive one. */
+  #pickHandler(port: number): ConnectionHandler | undefined {
+    const exclusive = this.#servers.get(port);
+    if (exclusive) return exclusive;
+    const list = this.#shared.get(port);
+    if (!list || list.length === 0) return undefined;
+    const i = (this.#rr.get(port) ?? 0) % list.length;
+    this.#rr.set(port, i + 1);
+    return list[i];
+  }
+
   /** Drop every binding and close live sockets. Called between program runs. */
   reset(): void {
     this.#servers.clear();
+    this.#shared.clear();
+    this.#rr.clear();
   }
 }

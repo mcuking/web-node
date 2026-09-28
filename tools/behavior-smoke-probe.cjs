@@ -171,6 +171,13 @@ rep('dns/promises:lookup:shape', () => shape(require('dns/promises').lookup));
 // --- worker_threads / module / process / perf_hooks ----------------------
 rep('worker_threads:isMainThread', () => require('worker_threads').isMainThread);
 rep('worker_threads:Worker:shape', () => shape(require('worker_threads').Worker));
+// cluster: this probe runs as the primary in both runtimes.
+rep('cluster:isPrimary', () => require('cluster').isPrimary);
+rep('cluster:isWorker', () => require('cluster').isWorker);
+rep('cluster:Worker:shape', () => shape(require('cluster').Worker));
+rep('cluster:fork:shape', () => shape(require('cluster').fork));
+rep('cluster:disconnect:shape', () => shape(require('cluster').disconnect));
+rep('cluster:workers:shape', () => shape(require('cluster').workers));
 rep('module:builtinModules:hasFs', () => require('module').builtinModules.includes('fs'));
 rep('module:builtinModules:hasNodeFs', () => require('module').builtinModules.includes('node:fs'));
 rep('module:createRequire:shape', () => shape(require('module').createRequire));

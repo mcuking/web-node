@@ -40,6 +40,7 @@ const viteBtn = $<HTMLButtonElement>('vite');
 const viteDevBtn = $<HTMLButtonElement>('vitedev');
 const viteReactBtn = $<HTMLButtonElement>('vitereact');
 const wpDevBtn = $<HTMLButtonElement>('wpdev');
+const clusterBtn = $<HTMLButtonElement>('cluster');
 const hmrEditBtn = $<HTMLButtonElement>('hmred');
 const hmrCssBtn = $<HTMLButtonElement>('hmrcss');
 const installBtn = $<HTMLButtonElement>('install');
@@ -166,6 +167,10 @@ async function viteReactBuildProject(): Promise<void> {
 
 async function webpackDevProject(): Promise<void> {
   await runEntry('/project/webpack-dev.mjs', 'node /project/webpack-dev.mjs', wpDevBtn);
+}
+
+async function clusterProject(): Promise<void> {
+  await runEntry('/project/cluster-demo.mjs', 'node /project/cluster-demo.mjs', clusterBtn);
 }
 
 // A VFS write is what the dev server watches, so saving a source file makes the
@@ -357,6 +362,7 @@ bundleBtn.addEventListener('click', () => void bundleProject());
 viteBtn.addEventListener('click', () => void viteBuildProject());
 viteDevBtn.addEventListener('click', () => void viteDevProject());
 viteReactBtn.addEventListener('click', () => void viteReactBuildProject());
+clusterBtn.addEventListener('click', () => void clusterProject());
 wpDevBtn.addEventListener('click', () => void webpackDevProject());
 
 async function installDeps(): Promise<void> {

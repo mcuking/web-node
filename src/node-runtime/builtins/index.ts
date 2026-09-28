@@ -33,6 +33,7 @@ import { httpSpec } from './http';
 import { httpsSpec } from './https';
 import { tlsSpec } from './tls';
 import { childProcessSpec } from './child_process';
+import { clusterSpec } from './cluster';
 
 /** Every builtin the runtime knows about, in dependency-friendly order. */
 export const ALL_BUILTINS: BuiltinSpec[] = [
@@ -79,6 +80,8 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   tlsSpec,
   // milestone 7: the controlled spawn surface
   childProcessSpec,
+  // M123: `cluster` — one worker per forked child, shared ports on the vnet
+  clusterSpec,
 ];
 
 /** Ids that are user-visible core modules (no `internal/` prefix). */

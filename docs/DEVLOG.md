@@ -246,6 +246,17 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-28 · M123 —— `cluster`：1 进程 = 1 独立 worker，共享端口轮询分发（阶段 I 第二项）
+
+**背景**：真 WebContainer 每个「进程」是独立 Web Worker，故多进程天然可用。web-node 的 `fork` 子进程本来就已是独立 runtime worker（自己的注册表 / `process` 视图 / pid / IPC——M7/M40），缺的是 **`cluster`** 与**共享端口**。
+
+- **新 builtin `cluster`**：primary 视图与真 Node 对齐（`isPrimary`/`isWorker`、`fork()`、`workers`、`settings`、`setupPrimary`、`disconnect`、`Worker` 类，及 `fork`/`online`/`listening`/`exit`/`message` 事件）；worker 侧由 `buildClusterWorkerOverrides` 注入（子进程注册表里 `cluster.isWorker=true`、`cluster.worker` 就位）。内部帧用 `{cmd:'NODE_CLUSTER'}` 封包，**不冒泡成用户 `'message'`**。
+- **共享端口**（复用 M102 虚拟 TCP）：`VirtualNetwork` 加 `listenShared`/`unlistenShared` + 轮询；`net.Server` 支持 `exclusive`；worker 视图把 `net`/`http`/`https` 的 `Server`/`createServer` 包成默认 `exclusive:false` 并在 `listening` 时回传 primary。
+- **两个真坑（已修）**：① `net.createServer()` 内部 `new Server(...)` 用的是**原始类**——只包 `Server` 导出不够，要直接 `new SharedServer(...)`；② **`process.argv[1]` 长期写死 `/project/index.js`**：`runMain()` 不更新 `process.argv`，于是 `cluster.fork()`（重跑 argv[1]）会**跑错文件**（真 Node 是重跑当前脚本）。
+- **页内 E2E**（新按钮 **🖧 Cluster**）：`worker : id 1 up on :3000` / `online : worker 1 pid 100` / id 2 pid 101 / `dispatch : w1 w2 w1 w2 w1 w2` / `primary disconnected`。
+- **差分**：`test/cluster.test.ts` 的 2-worker 程序**原样在真 Node v26.9.0 跑，输出逐行一致**；行为门禁加 6 条 `cluster:*` 观测。
+- **门禁**：`tsc --noEmit` 净 · `vitest run` **1144 passed / 3 skipped（136 文件）** · build（`runtime.worker-B08TO-iy.js` **759.6 kB**）。
+
 ### 2026-09-28 · M124 —— 「加载 OK ≠ 可用」行为门禁（阶段 I 第一项）
 
 **动机（WebContainer 的反面教训）**：真开容器实测时看到 `http2` require 成功却在连接时崩、`node:sqlite` 类在但原型无方法、`node:sea` 是桩——**加载成功什么也不能证明**。web-node 一直以行为差分为验收，但缺一个**常设**巡查专抓「require-OK 但首次实调用崩」。

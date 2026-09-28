@@ -510,6 +510,15 @@ export const netSpec: BuiltinSpec = {
       #host = '127.0.0.1';
       #listening = false;
       #closeEmitted = false;
+      /**
+       * Whether this server owns its port alone. Node's cluster workers listen
+       * with `exclusive: false` so the primary can share the handle; the worker
+       * view of `net` (see proc/cluster.ts) flips this default. `undefined`
+       * means "not stated", which behaves exclusively.
+       */
+      exclusive: boolean | undefined = undefined;
+      /** The handler handed to the network, kept so `close()` can release it. */
+      #handler: ((sock: VirtualSocket) => void) | null = null;
 
       constructor(connectionListener?: (socket: Socket) => void) {
         super();
@@ -522,9 +531,10 @@ export const netSpec: BuiltinSpec = {
         let cb: (() => void) | undefined;
 
         if (typeof args[0] === 'object' && args[0] !== null) {
-          const opts = args[0] as { port?: number; host?: string };
+          const opts = args[0] as { port?: number; host?: string; exclusive?: boolean };
           port = opts.port ?? 0;
           host = opts.host ?? host;
+          if (opts.exclusive !== undefined) this.exclusive = opts.exclusive;
           if (typeof args[1] === 'function') cb = args[1] as () => void;
         } else {
           port = typeof args[0] === 'number' ? args[0] : Number(args[0] ?? 0);
@@ -564,7 +574,7 @@ export const netSpec: BuiltinSpec = {
       ): void {
         this.#host = address;
         this.#port = port;
-        network.listen(port, (vsock) => {
+        const handler = (vsock: VirtualSocket): void => {
           this.connections++;
           const socket = new Socket();
           this._sockets.add(socket);
@@ -576,7 +586,11 @@ export const netSpec: BuiltinSpec = {
           });
           socket._attach(vsock, 'server');
           this.emit('connection', socket);
-        });
+        };
+        this.#handler = handler;
+        // `exclusive: false` shares the port with a cluster worker's siblings.
+        if (this.exclusive === false) network.listenShared(port, handler);
+        else network.listen(port, handler);
         this.#listening = true;
       }
 
@@ -608,7 +622,9 @@ export const netSpec: BuiltinSpec = {
         // the last live connection has drained.
         if (typeof cb === 'function') this.once('close' as never, cb as never);
         if (this.#listening) {
-          network.unlisten(this.#port);
+          if (this.#handler && this.exclusive === false) network.unlistenShared(this.#port, this.#handler);
+          else network.unlisten(this.#port);
+          this.#handler = null;
           this.#listening = false;
         }
         this._emitCloseIfDrained();

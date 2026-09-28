@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-28（**阶段 I：M124 ✅**——「加载 OK ≠ 可用」行为门禁（104 观测的差分巡查；当场扑出 3 处真缺口 + 1 个真 bug）。**阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅**——React（`@vitejs/plugin-react`）+ PostCSS/Tailwind 管线页内构建并真渲染成功。**阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅**。**M121（北星）全结清**：webpack 5 + **rspack 2.2.7** 生产构建（含 minify）均已页内跑通）
+> - **最后更新**：2026-09-28（**阶段 I：M124 ✅ · M123 ✅**——「加载 OK ≠ 可用」行为门禁（104 观测的差分巡查；当场扑出 3 处真缺口 + 1 个真 bug）；**`cluster` 多进程**（1 进程 = 1 独立 worker，共享端口轮询分发；顺带修真 bug：`runMain` 未更新 `process.argv[1]` 致 fork 跑错入口）。**阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅**——React（`@vitejs/plugin-react`）+ PostCSS/Tailwind 管线页内构建并真渲染成功。**阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅**。**M121（北星）全结清**：webpack 5 + **rspack 2.2.7** 生产构建（含 minify）均已页内跑通）
 
 ---
 
@@ -38,16 +38,16 @@
 | E | 启动与加载性能 | 1 | 0 | 1 |
 | F | 构建工具链（**用户愿景，最后做**） | 3 | 3 | 0 |
 | G | 预览与路由 | 1 | 0 | 1 |
-| **I** | **借鉴 WebContainer（活体调研 2026-09-24）** | 3 | 1 | 2 |
+| **I** | **借鉴 WebContainer（活体调研 2026-09-24）** | 3 | 2 | 1 |
 | A | crypto 收尾（**已归档**） | 26 | 26 | 0 |
 | B | 语义深度（**已归档**） | 5 | 5 | 0 |
 | C | 平台无对应物（**已解散**，条目已分流） | 2 | 2 | 0 |
 | D | 运行时常量小项（**已归档**） | 4 | 4 | 0 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **55** | **50** | **4**（+1 不做） |
+| **合计** | | **55** | **51** | **3**（+1 不做） |
 
 > **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 ✅ · M120 ✅ · M121 ✅ · **M125 ✅**。
-> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 137 个里程碑，剩余 4 个规划任务**。
+> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 138 个里程碑，剩余 3 个规划任务**。
 > 注：本表按**叶子任务**计数——M90（拆 M90.1–M90.9）、M92（拆 M92.1/M92.2）、M93（拆 M93.1–M93.4）、M93.4（拆 a–h）、M97（拆 M97.1）的**父项为拆分占位、不计入**。（旧表 A=22 系拆分前的陈旧值，本次一并修正为 26。）
 
 ---
@@ -292,11 +292,15 @@
   - **验收**：页内 `fetch('https://registry.npmjs.org/ms')` 成功；`npm install` 可选走真 registry/proxy；入站虚拟网络与现有差分 **0 回归**；无第三方托管依赖。
   - **风险**：跨源/CORS；企业出口合规；需自备 proxy。工作量：中–大。
 
-- [ ] **M123 · 多进程模型：1 进程 = 1 worker（`fork` / `cluster`）** —— 借 WebContainer 的「worker-per-process」
+- [x] **M123 · 多进程模型：1 进程 = 1 worker（`fork` / `cluster`）** ✅ 2026-09-28 —— 借 WebContainer 的「worker-per-process」
   - **对标（实测）**：WebContainer 每个「进程」是**独立 Web Worker**（CDP 实测 `Node.js Worker PID 2…22`），故 `fork`/`cluster`/多进程**天然支持**。
-  - **现状**：web-node **1 Run = 1 runtime worker**；`child_process` 为**同 realm 协作式** ProcessHost（M7）。
-  - **方案**：让 `child_process.fork` **真起独立 worker**（复用 M57 的「第二注册表 + MessageChannel」范式），`cluster` 在**虚拟 TCP** 上做共享监听分发（复用 M102 `net.BoundSocket`）。
-  - **验收**：`fork` 子进程为独立 worker 且有独立 `process.pid`；`cluster` 多 worker 监听同端口可分流；差分 **0 回归**。工作量：中–大。
+  - **落地**：`fork` 子进程本就是**独立 runtime worker**（自己的模块注册表、`process` 视图、`process.pid`、IPC 通道——M7/M40），故这步真正要补的是 **`cluster`** 与**共享端口**。
+  - **`cluster`（新 builtin）**：primary 视图与真 Node 对齐（`isPrimary`/`isWorker`、`fork()`、`workers`、`settings`、`setupPrimary`、`disconnect`、`Worker` 类、`fork`/`online`/`listening`/`exit`/`message` 事件）；worker 视图由 `buildClusterWorkerOverrides` 注入（子进程注册表里 `cluster.isWorker=true`、`cluster.worker` 就位）。内部帧走 `{cmd:'NODE_CLUSTER'}` 封包，**绝不冒泡成用户 `'message'`**（与 Node 同）。
+  - **共享端口（复用 M102 虚拟 TCP）**：`VirtualNetwork` 新增 `listenShared`/`unlistenShared` + 轮询（`#rr`）；`net.Server` 支持 `exclusive`（Node 的 cluster 共享监听标志）。worker 视图把 `net`/`http`/`https` 的 `Server`/`createServer` 包成默认 `exclusive:false` 并在 `listening` 时向 primary 回传一帧。
+  - **两个真坑（已修）**：① `net.createServer()` 内部 `new Server(...)` 用的是**原始类**，只包 `Server` 导出不够——必须让 `createServer` 直接 `new SharedServer(...)`；② **`process.argv[1]` 长期写死 `/project/index.js`**——`runMain()` 不更新 `process.argv`，于是 `cluster.fork()`（重跑 argv[1]）会**跑错文件**（真 Node 重跑当前脚本）。已在 `runMain` 里把 `argv[1]` 设为实际入口。
+  - **验收**：`test/cluster.test.ts`（3 例）——① 2 worker 共享 :3000，primary 收到两个 `listening`，连接**轮询**分发（`answers=["w1","w1","w2","w2"]`）；② fork 子进程有独立 pid/env/注册表/IPC；③ **fork 重跑当前入口**（非默认）。程序**原样在真 Node v26.9.0 跑，输出逐行一致**。行为门禁加 6 条 `cluster:*` 观测（both runtimes as primary）。
+  - **页内 E2E**（新按钮 **🖧 Cluster** → `/project/cluster-demo.mjs`）：`worker : id 1 up on :3000` / `online : worker 1 pid 100` / id 2 pid 101 / `dispatch : w1 w2 w1 w2 w1 w2` / `primary disconnected`。
+  - 门禁：`tsc --noEmit` 净 · `vitest run` **1144 passed / 3 skipped（136 文件）** · build（`runtime.worker-B08TO-iy.js` **759.6 kB**）。
 
 - [x] **M124 · 「加载 OK ≠ 可用」行为门禁（跨模块巡查）** ✅ 2026-09-28 —— 借 WebContainer 的**反面教训**
   - **对标（实测）**：WebContainer 里 `http2` **require 成功但连接崩**（缺 `consume`）、`node:sqlite` **类在但原型无方法**、`node:sea` **是桩**（`isSea()` 返回 `undefined`）——**表面可用、行为不可用**。

@@ -649,6 +649,17 @@ export class NodeRuntime {
    */
   runMain(entryPath: string): unknown {
     this.resetRunState();
+    // A run is a fresh process invocation, so `process.argv` must name the script
+    // being executed — user code reads it, and `cluster.fork()` re-runs argv[1].
+    // Without this the entry stayed at whatever the runtime was constructed with
+    // and a fork of a non-default entry re-ran the wrong file.
+    try {
+      const proc = this.realm.require('process') as { argv: string[] };
+      if (proc.argv.length < 2) proc.argv.push(entryPath);
+      else proc.argv[1] = entryPath;
+    } catch {
+      // No process view (shouldn't happen): the loader still runs the entry.
+    }
     try {
       return this.loader.loadModule(entryPath);
     } catch (err) {

@@ -177,10 +177,11 @@ describe('NodeRuntime — core', () => {
 
   it('emits a loud error for modules outside the whitelist', () => {
     const { error } = run({
-      '/project/index.js': `require('cluster');`,
+      '/project/index.js': `require('node:dgram');`,
     });
     expect(error).toBeInstanceOf(Error);
-    expect(String((error as Error).message)).toContain('cluster');
+    expect(String((error as Error).message)).toContain('dgram');
+    expect(String((error as Error).message)).toContain('whitelisted');
   });
 
   it('loads stub modules for side-effect imports but throws when used', () => {
