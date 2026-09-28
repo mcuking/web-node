@@ -19,7 +19,11 @@ import { notImplemented } from '../errors';
  */
 
 function throwingFn(moduleName: string, prop: string): (...args: unknown[]) => never {
-  return () => {
+  // A *function expression*, not an arrow: arrow functions are not
+  // constructable, so `new DatabaseSync(...)` would fail with a confusing
+  // "is not a constructor" TypeError before the body ran. As a plain function
+  // the body runs and the caller gets the honest NotImplementedError instead.
+  return function (): never {
     throw notImplemented('api', `${moduleName}.${prop}`);
   };
 }
@@ -51,4 +55,30 @@ export function unsupported(moduleName: string, provided: Record<string, unknown
   });
 }
 
-export const unsupportedSpecs: BuiltinSpec[] = [];
+/**
+ * Core modules that exist in Node but have no browser-tab implementation.
+ *
+ * They must still **load**: tooling sometimes does `import 'node:http2'` for
+ * side effects (so a bundler keeps the dep), and a bare `MODULE_NOT_FOUND`
+ * there would take the whole module graph down. So they resolve to a module
+ * whose properties throw a loud, typed `NotImplementedError` on *use* — the
+ * failure stays at the call site, where it belongs, and never looks like a
+ * missing file.
+ *
+ * `http2` needs a full HTTP/2 (HPACK + frame/stream) stack; `sqlite` needs a
+ * bundled native SQLite. Both are deliberately out of scope, so they get the
+ * "loads but is not usable" treatment rather than silent stubs.
+ */
+export const unsupportedSpecs: BuiltinSpec[] = [
+  {
+    id: 'http2',
+    origin: 'web-node',
+    init: () => unsupported('http2'),
+  },
+  {
+    id: 'sqlite',
+    aliases: ['node:sqlite'],
+    origin: 'web-node',
+    init: () => unsupported('sqlite'),
+  },
+];

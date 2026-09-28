@@ -246,6 +246,19 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-28 · M124 —— 「加载 OK ≠ 可用」行为门禁（阶段 I 第一项）
+
+**动机（WebContainer 的反面教训）**：真开容器实测时看到 `http2` require 成功却在连接时崩、`node:sqlite` 类在但原型无方法、`node:sea` 是桩——**加载成功什么也不能证明**。web-node 一直以行为差分为验收，但缺一个**常设**巡查专抓「require-OK 但首次实调用崩」。
+
+- **新增**：`tools/behavior-smoke-probe.cjs`（**104 个观测**，对每个已实现内建做一次**真实首次调用**）、`tools/behavior-smoke-oracle.mjs`（真 Node v26.9.0 → `test/fixtures/behavior-smoke.json`）、`test/behavior-smoke.test.ts`（四项断言，见 ROADMAP）。
+- **门禁当场扑出 3 处真缺口 + 1 个真 bug**：
+  1. 裸 `require('http2')` 走包解析 → `MODULE_NOT_FOUND`（而 `node:http2` 才是类型化报错）——名字不对称，且 tooling 的 side-effect import 会把整个 module graph 弄崩。
+  2. `node:sqlite` 未登记进内建表。
+  3. `unsupported()` 的抛错函数是**箭头函数** → **不可 `new`** → `new DatabaseSync()` 得到令人困惑的 `TypeError: not a constructor` 而非诚实的 `NotImplementedError`。
+- **修复**：把 `http2` / `node:sqlite` 登记进 `builtins/unsupported.ts` 的 `unsupportedSpecs`（**导入不炸、使用才响亮抛错**）；把 `throwingFn` 改为**可构造的普通函数表达式**。
+- **负向验证**：临时摘掉 `http2` 登记 → 门禁立即失败并指名 `expected throw:ERR_WEB_NODE_NOT_IMPLEMENTED, got "throw:MODULE_NOT_FOUND"`；恢复复绿。
+- **门禁**：`tsc --noEmit` 净 · `vitest run` **1141 passed / 3 skipped（135 文件）** · build 通过。
+
 ### 2026-09-28 · M112 —— React（`@vitejs/plugin-react`）+ PostCSS/Tailwind 管线页内打通
 
 **里程碑**：阶段 F「构建工具链」最后一项。此前 Vite 已能构建 Vue（M5c–M5f）与 webpack 全家桶（M109/M110）；这一步补上 **React** 与 **样式管线**。

@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-28（**阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅**——React（`@vitejs/plugin-react`）+ PostCSS/Tailwind 管线页内构建并真渲染成功。**阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅**。**M121（北星）全结清**：webpack 5 + **rspack 2.2.7** 生产构建（含 minify）均已页内跑通。**M125 两增量均 ✅**：① `node:wasi`（VFS 支撑的 46-syscall 宿主）；② 解开 rspack 线程 wedge（真浏览器 `Worker` 承载 emnapi 线程池 + 自建 binding 入口 + 预打包 thread-child），页内 `compiled successfully in 46s`，产物写进 VFS）
+> - **最后更新**：2026-09-28（**阶段 I：M124 ✅**——「加载 OK ≠ 可用」行为门禁（104 观测的差分巡查；当场扑出 3 处真缺口 + 1 个真 bug）。**阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅**——React（`@vitejs/plugin-react`）+ PostCSS/Tailwind 管线页内构建并真渲染成功。**阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅**。**M121（北星）全结清**：webpack 5 + **rspack 2.2.7** 生产构建（含 minify）均已页内跑通）
 
 ---
 
@@ -38,16 +38,16 @@
 | E | 启动与加载性能 | 1 | 0 | 1 |
 | F | 构建工具链（**用户愿景，最后做**） | 3 | 3 | 0 |
 | G | 预览与路由 | 1 | 0 | 1 |
-| **I** | **借鉴 WebContainer（活体调研 2026-09-24）** | 3 | 0 | 3 |
+| **I** | **借鉴 WebContainer（活体调研 2026-09-24）** | 3 | 1 | 2 |
 | A | crypto 收尾（**已归档**） | 26 | 26 | 0 |
 | B | 语义深度（**已归档**） | 5 | 5 | 0 |
 | C | 平台无对应物（**已解散**，条目已分流） | 2 | 2 | 0 |
 | D | 运行时常量小项（**已归档**） | 4 | 4 | 0 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **55** | **49** | **5**（+1 不做） |
+| **合计** | | **55** | **50** | **4**（+1 不做） |
 
 > **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 ✅ · M120 ✅ · M121 ✅ · **M125 ✅**。
-> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 136 个里程碑，剩余 5 个规划任务**。
+> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 137 个里程碑，剩余 4 个规划任务**。
 > 注：本表按**叶子任务**计数——M90（拆 M90.1–M90.9）、M92（拆 M92.1/M92.2）、M93（拆 M93.1–M93.4）、M93.4（拆 a–h）、M97（拆 M97.1）的**父项为拆分占位、不计入**。（旧表 A=22 系拆分前的陈旧值，本次一并修正为 26。）
 
 ---
@@ -298,11 +298,13 @@
   - **方案**：让 `child_process.fork` **真起独立 worker**（复用 M57 的「第二注册表 + MessageChannel」范式），`cluster` 在**虚拟 TCP** 上做共享监听分发（复用 M102 `net.BoundSocket`）。
   - **验收**：`fork` 子进程为独立 worker 且有独立 `process.pid`；`cluster` 多 worker 监听同端口可分流；差分 **0 回归**。工作量：中–大。
 
-- [ ] **M124 · 「加载 OK ≠ 可用」行为门禁（跨模块巡查）** —— 借 WebContainer 的**反面教训**
+- [x] **M124 · 「加载 OK ≠ 可用」行为门禁（跨模块巡查）** ✅ 2026-09-28 —— 借 WebContainer 的**反面教训**
   - **对标（实测）**：WebContainer 里 `http2` **require 成功但连接崩**（缺 `consume`）、`node:sqlite` **类在但原型无方法**、`node:sea` **是桩**（`isSea()` 返回 `undefined`）——**表面可用、行为不可用**。
-  - **现状**：web-node 已以**行为差分**为验收（M79–M81 + 67 模块表面），但尚无**常设巡查**专门抓「require-OK 但首次实调用崩」。
-  - **方案**：把「关键路径行为」纳入 `tools/*-probe.cjs` 语料（每个「已实现」模块至少覆盖一次**首次实调用**）；门禁对「加载成功但关键方法缺失/抛错」报警。
-  - **验收**：能自动揪出「require-OK 但运行期崩」的回归；现有模块**零告警**。工作量：小–中。
+  - **落地**：新增 `tools/behavior-smoke-probe.cjs`（**104 个观测**）——对每个「已实现」内建做**一次真实首次调用**（不是只 `typeof`），产 `__OBS__`；`tools/behavior-smoke-oracle.mjs` 在真 Node v26.9.0 上生成 `test/fixtures/behavior-smoke.json`；`test/behavior-smoke.test.ts` 在 web-node 跑同一程序并比对。四项断言：① oracle 能调用而 web-node 不能（含**值不等**，API “能用但撒谎”也算失败）→ 挂；② web-node 不得多出观测键；③ DEVIATIONS 里的每条都必须**真的存在差异**（否则报 stale）；④ 偏离必须**响亮抛类型化** `ERR_WEB_NODE_NOT_IMPLEMENTED`，不许退化成 `MODULE_NOT_FOUND`。
+  - **门禁当场扑出 3 处真缺口 + 1 个真 bug**：① **裸 `require('http2')` → `MODULE_NOT_FOUND`**（靠包解析），而 `require('node:http2')` 才是类型化报错——名字不对称、且 side-effect import 会把 module graph 弄崩；② `node:sqlite` 未登记；③ 更深的一层：`unsupported()` 的抛错函数是**箭头函数**，**不可 `new`** → `new DatabaseSync()` 得到的是令人困惑的 `TypeError: not a constructor`，而不是诚实的 `NotImplementedError`。
+  - **修复**：① 把 `http2` / `node:sqlite` 登记进 `builtins/unsupported.ts` 的 `unsupportedSpecs`（**导入不炸、使用才响亮抛错**——正是 `unsupported()` 这个 helper 的设计意图）；② 把 `throwingFn` 由箭头函数改为**普通函数表达式**（可构造，`new` 也走报错分支）。
+  - **负向验证**：临时摘掉 `http2` 登记 → 门禁立即失败并指名 `expected throw:ERR_WEB_NODE_NOT_IMPLEMENTED, got "throw:MODULE_NOT_FOUND"`；恢复后复绿。证明它真能揪「require-OK 但运行期崩/消失」。
+  - **验收**：现有模块**零未记录告警**（仅 `http2` / `sqlite` 两条已在 DEVIATIONS 写明原因）。门禁：`tsc --noEmit` 净 · `vitest run` **1141 passed / 3 skipped（135 文件）** · build 通过。
 
 ---
 
