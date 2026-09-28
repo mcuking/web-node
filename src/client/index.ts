@@ -7,6 +7,8 @@ export interface RuntimeEvents {
   stderr: (data: string) => void;
   exit: (code: number) => void;
   ready: (info: RuntimeInfo) => void;
+  /** Worker-clock ms when the deferred WASM codecs finished loading (M107). */
+  deferredReady: (ms: number) => void;
 }
 
 interface BridgeHttpRequest {
@@ -93,6 +95,9 @@ export class RuntimeClient {
       case 'ready':
         this.#listeners.ready?.(msg.info as RuntimeInfo);
         break; // fall through: settle the pending init() promise
+      case 'deferredReady':
+        this.#listeners.deferredReady?.(Number(msg.ms));
+        return;
       case 'exit':
         this.#listeners.exit?.(Number(msg.code));
         break; // fall through: settle the pending run() promise

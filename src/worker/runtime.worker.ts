@@ -8,10 +8,20 @@ import {
 } from '../node-runtime/vfs';
 import { VENDORED, installVendored, vendoredLoaded } from '../node-runtime/vendored';
 import { loadWasmModule } from '../node-runtime/wasm/lazy';
-import { loadWasmModules, wasmModuleNames } from '../node-runtime/wasm';
+import { loadWasmModules, loadDeferredWasmModules, wasmModuleNames, DEFERRED_WASM_MODULES } from '../node-runtime/wasm';
 import { DEMO_FILES } from '../demo-project';
 
 const decoder = new TextDecoder();
+
+/**
+ * Cold-start breakdown (M107), in ms on the **worker's** clock (its time origin
+ * is worker creation, not the document). Reported back in the `ready` message so
+ * the page can attribute the gap between worker spawn and runtime ready to a
+ * specific phase: `vendoredMs` (fetch+parse the source bundle), `wasmMs`
+ * (fetch+instantiate the native modules) and `realmMs` (build the realm).
+ */
+const bootAt = performance.now();
+const bootPhases = { evalAt: Math.round(bootAt), vendoredMs: 0, wasmMs: 0, realmMs: 0 };
 
 /**
  * Base-prefixed URL of the emnapi **thread-child** bootstrap (M125).
@@ -39,7 +49,9 @@ const vendoredSourcesReady: Promise<void> = (async (): Promise<void> => {
   const res = await fetch(__VENDORED_URL__);
   if (!res.ok) throw new Error(`vendored sources: HTTP ${res.status}`);
   installVendored(await res.text());
-})();
+})().finally(() => {
+  if (!bootPhases.vendoredMs) bootPhases.vendoredMs = Math.round(performance.now() - bootAt);
+});
 
 /**
  * Fetch + instantiate the native→WASM modules (M115).
@@ -50,7 +62,46 @@ const vendoredSourcesReady: Promise<void> = (async (): Promise<void> => {
  * arrive as separate hashed assets, so this costs a parallel download, not a JS
  * parse. Starts at module-eval — as early as it can go.
  */
-const wasmReady: Promise<void> = loadWasmModules();
+/**
+ * Fetch + instantiate the **boot-critical** native→WASM modules (M115).
+ *
+ * Same rule as the vendored sources: they must be in place before the realm is
+ * built, because the binding table is constructed synchronously and
+ * `internalBinding('zlib')` & co. read their exports at module-eval. The bytes
+ * arrive as separate hashed assets, so this costs a parallel download, not a JS
+ * parse. Starts at module-eval — as early as it can go. Since M107 this is only
+ * the small set (`wn_stub`, `wn_zlib`); the codecs live in {@link ensureDeferredWasm}.
+ */
+const wasmReady: Promise<void> = loadWasmModules().finally(() => {
+  if (!bootPhases.wasmMs) bootPhases.wasmMs = Math.round(performance.now() - bootAt);
+});
+
+/**
+ * The big codecs (brotli / zstd / histogram) are **not** awaited at boot (M107).
+ * The realm and the binding table never touch them, so they only need to be in
+ * place before *user code runs*. They are prefetched in parallel with the
+ * critical payloads but at `priority: 'low'`, so they use spare bandwidth
+ * instead of competing for it; every request that can execute user code awaits
+ * {@link ensureDeferredWasm} first, so a synchronous API can never run against a
+ * module that is still in flight.
+ */
+let wasmDeferred: Promise<void> | null = null;
+function ensureDeferredWasm(): Promise<void> {
+  if (wasmDeferred === null) {
+    wasmDeferred = (async () => {
+      await loadDeferredWasmModules();
+      // Report the moment (on the worker clock) so the page can show when the
+      // codecs became usable — relative to `ready` this makes the deferral visible.
+      post({ id: 0, type: 'deferredReady', ms: Math.round(performance.now() - bootAt) });
+    })();
+  }
+  return wasmDeferred;
+}
+
+// Kick the prefetch off as soon as the module evaluates — as early as it can go.
+// The catch keeps a failed fire-and-forget load from being an unhandled rejection;
+// a caller that awaits it (i.e. before running user code) still sees the failure.
+void ensureDeferredWasm().catch(() => {});
 
 /**
  * Big native→WASM modules are **not** awaited at boot (M119): the OpenSSL
@@ -114,7 +165,15 @@ export interface RuntimeInfo {
   bindings: string[];
   /** 已加载的 native→WASM 模块（M115）。 */
   wasmModules: string[];
+  /** 启动期后台加载的大模块（M107）——执行用户代码前保证就位。 */
+  deferredWasmModules: string[];
   vendoredFiles: string[];
+  /**
+   * Cold-start phase breakdown (M107), all ms on the worker's clock. The page
+   * adds `evalAt`+phase to the worker-spawn timestamp to get an absolute
+   * figure; the phases are reported as durations so they stay meaningful.
+   */
+  timing: { evalAt: number; vendoredMs: number; wasmMs: number; realmMs: number };
 }
 
 type Response =
@@ -126,7 +185,8 @@ type Response =
   | { id: number; type: 'httpHead'; status: number; statusMessage: string; headers: Record<string, string | string[]> }
   | { id: number; type: 'httpChunk'; data: Uint8Array }
   | { id: number; type: 'httpEnd' }
-  | { id: number; type: 'ready'; info: RuntimeInfo };
+  | { id: number; type: 'ready'; info: RuntimeInfo }
+  | { id: number; type: 'deferredReady'; ms: number };
 
 /**
  * Storage backend.
@@ -262,6 +322,8 @@ async function init(id: number): Promise<void> {
 
   persistence.schedule(v);
 
+  bootPhases.realmMs = Math.round(performance.now() - bootAt);
+
   post({
     id,
     type: 'ready',
@@ -272,7 +334,9 @@ async function init(id: number): Promise<void> {
       files: listTree(v),
       bindings: runtime.realm.bindingIds,
       wasmModules: wasmModuleNames(),
+      deferredWasmModules: Object.keys(DEFERRED_WASM_MODULES).sort(),
       vendoredFiles: Object.keys(VENDORED).sort(),
+      timing: { ...bootPhases },
     },
   });
 }
@@ -321,6 +385,7 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
         post({ id: req.id, type: 'ok', result: listTree(vfs) });
         return;
       case 'run':
+        await ensureDeferredWasm();
         run(req.id, req.entry);
         return;
       case 'writeFile':
@@ -348,6 +413,7 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
         return;
       case 'npmInstall': {
         if (!runtime) throw new Error('runtime not initialised');
+        await ensureDeferredWasm();
         const result = await runtime.installDependencies({
           cwd: req.cwd,
           includeDev: req.includeDev,
@@ -363,12 +429,14 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
       }
       case 'http': {
         if (!runtime) throw new Error('runtime not initialised');
+        await ensureDeferredWasm();
         const result = await serveVirtualRequest(runtime, req);
         post({ id: req.id, type: 'ok', result });
         return;
       }
       case 'httpStream': {
         if (!runtime) throw new Error('runtime not initialised');
+        await ensureDeferredWasm();
         const http = runtime.realm.require('http') as unknown as HttpStreamModule;
         http._stream(
           req.port,

@@ -12,12 +12,22 @@ export interface BootTiming {
   workerSpawnMs: number;
   runtimeReadyMs: number;
   firstRunMs: number;
+  /** Breakdown of the worker's work, all ms (M107). */
+  vendoredMs: number;
+  wasmMs: number;
+  realmMs: number;
+  /** Worker-clock ms when the deferred WASM codecs landed (after `ready`). */
+  deferredMs: number;
 }
 const bootTiming: BootTiming = {
   moduleEvalMs: performance.now(),
   workerSpawnMs: 0,
   runtimeReadyMs: 0,
   firstRunMs: 0,
+  vendoredMs: 0,
+  wasmMs: 0,
+  realmMs: 0,
+  deferredMs: 0,
 };
 (globalThis as { __wnBoot?: BootTiming }).__wnBoot = bootTiming;
 
@@ -336,13 +346,22 @@ client.on('exit', (code) => {
   if (code !== 0) writeTerminal(`[exit code ${code}]\n`, 'err');
 });
 
+client.on('deferredReady', (ms) => {
+  bootTiming.deferredMs = ms;
+});
+
 client.on('ready', (runtimeInfo) => {
   info = runtimeInfo;
   bootTiming.runtimeReadyMs = Math.round(performance.now());
+  if (runtimeInfo.timing) {
+    bootTiming.vendoredMs = runtimeInfo.timing.vendoredMs;
+    bootTiming.wasmMs = runtimeInfo.timing.wasmMs;
+    bootTiming.realmMs = runtimeInfo.timing.realmMs;
+  }
   bootEl.textContent = runtimeInfo.restored ? 'runtime ready (restored from OPFS)' : 'runtime ready (fresh project)';
   factsEl.textContent = [
     `${runtimeInfo.bindings.length} bindings`,
-    `${runtimeInfo.wasmModules.length} wasm modules`,
+    `${runtimeInfo.wasmModules.length + (runtimeInfo.deferredWasmModules?.length ?? 0)} wasm modules`,
     `${runtimeInfo.vendoredFiles.length} vendored node files`,
     runtimeInfo.persistSupported ? 'OPFS: on' : 'OPFS: unavailable',
     runtimeInfo.persistence === 'fs-worker' ? 'sync fs: durable' : 'sync fs: async',

@@ -29,6 +29,15 @@ export function wasmLoaded(name: string): boolean {
   return installed.has(name);
 }
 
+/**
+ * 清空注册表（**仅供测试**）。真实路径从不卸载：一个已实例化的 wasm 模块没有释放
+ * 句柄，卸载只会让绑定在下次调用时以 “is not loaded” 炸开。测试用它来验证某个模块
+ * 真的「只在用到时才需要」。
+ */
+export function resetWasm(): void {
+  installed.clear();
+}
+
 /** 已加载的模块名（排序）。 */
 export function wasmModuleNames(): string[] {
   return [...installed.keys()].sort();

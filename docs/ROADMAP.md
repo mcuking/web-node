@@ -6,8 +6,8 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[⤳]` **已并入其他里程碑**（保留条目作决策痕迹，**不单独计数**） · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-28（**阶段 I：M124 ✅ · M123 ✅**——「加载 OK ≠ 可用」行为门禁（104 观测的差分巡查；当场扑出 3 处真缺口 + 1 个真 bug）；**`cluster` 多进程**（1 进程 = 1 独立 worker，共享端口轮询分发；顺带修真 bug：`runMain` 未更新 `process.argv[1]` 致 fork 跑错入口）。**阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅**——React（`@vitejs/plugin-react`）+ PostCSS/Tailwind 管线页内构建并真渲染成功。**阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅**。**M121（北星）全结清**：webpack 5 + **rspack 2.2.7** 生产构建（含 minify）均已页内跑通）
+> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。**当前剩余：G·M113（子域名静态托管）· I·M122（沙箱出站网络）**。
+> - **最后更新**：2026-09-28（**阶段 E 结清：M107 ✅**——启动性能：把 brotli/zstd/histogram 三个大 wasm（563 KB gzip）从启动关键路径上移走；Realm 不再等它们，只在**执行用户代码前**保证就位；并给启动加了 `vendored/wasm/realm/deferred` 四段分解计时。**阶段 I：M124 ✅ · M123 ✅**——「加载 OK ≠ 可用」行为门禁（104 观测的差分巡查；当场扑出 3 处真缺口 + 1 个真 bug）；**`cluster` 多进程**（1 进程 = 1 独立 worker，共享端口轮询分发；顺带修真 bug：`runMain` 未更新 `process.argv[1]` 致 fork 跑错入口）。**阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅**——React（`@vitejs/plugin-react`）+ PostCSS/Tailwind 管线页内构建并真渲染成功。**阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅**）
 
 ---
 
@@ -35,7 +35,7 @@
 | 阶段 | 主题 | 任务数 | 已完成 | 剩余 |
 |---|---|---|---|---|
 | **H** | **native → WASM（主线，P0–P6）** | 9 | 9 | 0 |
-| E | 启动与加载性能 | 1 | 0 | 1 |
+| E | 启动与加载性能 | 1 | 1 | 0 |
 | F | 构建工具链（**用户愿景，最后做**） | 3 | 3 | 0 |
 | G | 预览与路由 | 1 | 0 | 1 |
 | **I** | **借鉴 WebContainer（活体调研 2026-09-24）** | 3 | 2 | 1 |
@@ -44,10 +44,10 @@
 | C | 平台无对应物（**已解散**，条目已分流） | 2 | 2 | 0 |
 | D | 运行时常量小项（**已归档**） | 4 | 4 | 0 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **55** | **51** | **3**（+1 不做） |
+| **合计** | | **55** | **52** | **2**（+1 不做） |
 
 > **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 ✅ · M120 ✅ · M121 ✅ · **M125 ✅**。
-> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 138 个里程碑，剩余 3 个规划任务**。
+> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 139 个里程碑，剩余 2 个规划任务**。
 > 注：本表按**叶子任务**计数——M90（拆 M90.1–M90.9）、M92（拆 M92.1/M92.2）、M93（拆 M93.1–M93.4）、M93.4（拆 a–h）、M97（拆 M97.1）的**父项为拆分占位、不计入**。（旧表 A=22 系拆分前的陈旧值，本次一并修正为 26。）
 
 ---
@@ -198,7 +198,7 @@
 
 ---
 
-## 阶段 E — 启动与加载性能
+## 阶段 E — 启动与加载性能（**已结清 2026-09-28**）
 
 > **2026-09-23 收敛**：原「性能路线」两条中，**M106（热点 binding → wasm）已拆入阶段 H**（crypto → M119、fs / 同步 syscall → M120），本阶段只保留 **M107**。
 
@@ -206,11 +206,15 @@
   - 原内容：把热点（buffer/fs/crypto）替换为 wasm 实现；引入 **SharedArrayBuffer + Atomics** 做同步 syscall；前置 COOP/COEP 响应头（子域名隔离路由已就绪 M3.5d）。
   - 承接：crypto → **M119**；fs / 同步 syscall → **M120**。
 
-- [~] **M107 · 启动性能** 🚧 2026-09-23（**基准已立 + 载荷拆分已上线**）
-  - 新增只读启动计时（`globalThis.__wnBoot`：`moduleEvalMs`/`workerSpawnMs`/`runtimeReadyMs`/`firstRunMs`）+ 基准工具 `tools/e2e-startup-bench.mjs`（CDP，可打本地或 Pages）。
-  - **基线**（本地 preview、冷缓存）：`runtimeReady` **110–155ms**；热点 = worker 脚本（2.5MB，93% 是 vendored 源）的 fetch+compile，而非 JS 初始化（`new NodeRuntime` 仅 ~10ms）。
-  - **载荷拆分**：vendored 源不再内联进 worker，改为 emit 为 `assets/vendored-sources.txt`（预加载、body 带内容哈希），worker `fetch`+`JSON.parse` 注入。**worker 2510.84→653.76KB**（gzip ~558→203KB），大载荷 gzip 347KB 且与 worker 引导并行（CDP 实测预加载 543ms < worker 脚本 594ms）；`runtimeReady` 95–154ms（无回退）。门禁 `test/vendored-bundle.test.ts` 锁住 bundle 与 eager glob 一致。
-  - **下一步**：要再降只能动 2.3MB 文本本身的体积（按需子集/懒加载，`require` 同步 => 需“ready 后再补”策略）或上 V8 code cache/快照。
+- [x] **M107 · 启动性能** ✅ 2026-09-28（**基准 + 载荷拆分 + 大 wasm 移出关键路径**）
+  - 启动只读计时（`globalThis.__wnBoot`）+ 基准工具 `tools/e2e-startup-bench.mjs`（CDP，可打本地或 Pages）。计时先只有 `moduleEvalMs`/`workerSpawnMs`/`runtimeReadyMs`/`firstRunMs`；本次加了 worker 侧的**分段分解** `vendoredMs`/`wasmMs`/`realmMs`/`deferredMs`（worker 时钟，`ready` 消息里回报，页面并入 `__wnBoot` 并展示）。
+  - **第一轮（2026-09-23，已上线）**：vendored 源不再内联进 worker，改为 emit 为 `assets/vendored-sources.txt`（预加载、body 带内容哈希），worker `fetch`+`JSON.parse` 注入。worker **2510.84→653.76 KB**；`runtimeReady` 95–154ms。门禁 `test/vendored-bundle.test.ts`。
+  - **第二轮（本次）**：启动期**只在等**小 wasm（`wn_stub`+`wn_zlib`，gzip ~61 KB）；把 **brotli（331）+ zstd（132）+ histogram（100）= gzip ~563 KB** 三个大模块移到**后台预取**（`priority:'low'`，与关键载荷并行）。启动关键载荷 **gzip ~980→~416 KB**。
+    - **为何安全**：Realm 与绑定表**完全不碰**这三个（`ex()` 只在 codec / 直方图的**构造器与方法**里调用）。已加不变式测试：清空 wasm 注册表后 Realm 照常构建、`console.log` 照常跑，而 `zlib.brotliCompressSync` 则**响亮报 `wn_brotli` 未加载**。
+    - **同步竞态不存在**：所有**会跑用户代码**的请求（`run` / `npmInstall` / `http` / `httpStream`）在分发前 `await ensureDeferredWasm()`——模块未就位就等，绝不半执行。
+    - 新增 `wasm-tiers.test.ts`（4 例）：层级不重叠 · 大模块必须在 deferred 层 · 加载器低优先级且幂等 · 坏模块响亮报错 · **无这三个模块也能建 Realm 跑 JS**。
+  - **验收**：`tsc --noEmit` 净 · `vitest run` **1148 passed / 3 skipped（137 文件）** · build（`runtime.worker-*.js` **760 KB**）· 页内 + **线上**探针：`brotli rt=true` / `zstd rt=true` / `histogram count=3 max=5 p50=3`。
+  - **下一步**：再降要看 1.97 MB 源文本本身（按需子集/懒加载，`require` 同步 => 需「ready 后再补」策略）或 V8 code cache/快照。
 
 ---
 

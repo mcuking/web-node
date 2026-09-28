@@ -246,6 +246,16 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-28 · M107 —— 启动性能：把大 wasm 移出启动关键路径（阶段 E 结清）
+
+**背景**：M107 第一轮（2026-09-23）已把 2.3 MB vendored 源从 worker JS 图里拆出（emit 为预加载的 `assets/vendored-sources.txt`）。剩下的启动载荷里，**native→WASM 模块已成为最大的一块**：启动期曾 await 全部 5 个模块（brotli 847 KB + zstd 484 KB + histogram 258 KB + zlib 109 KB + stub 46 KB，gzip 合计 ~686 KB），而后三个大模块只在**真正用到时**才被取用。
+
+- **wasm/index.ts**：拆成两层——`WASM_MODULES`（启动 await：`wn_stub`+`wn_zlib`，gzip ~61 KB）与 `DEFERRED_WASM_MODULES`（brotli/zstd/histogram，gzip ~563 KB）。新增 `loadDeferredWasmModules()`，以 `priority:'low'` 与关键载荷**并行预取**。
+- **worker**：`ensureDeferredWasm()` 在模块评估期就发起预取，但**不 await**；所有**会执行用户代码**的请求（`run`/`npmInstall`/`http`/`httpStream`）在分发前 `await` 它——模块未就位就等，**同步 API 绝不会在模块缺席时被调用**。加载完成时回报 `deferredReady`（worker 时钟），页面写入 `__wnBoot.deferredMs`。
+- **为何 realm 不需要它们**：`ex()` 只在 codec / 直方图的**构造器与方法**里调用，绑定表构建时不碰。新增不变式测试：清空 wasm 注册表后 Realm 照常建、`console.log` 照常跑，而 `brotliCompressSync` 响亮报 `wn_brotli` 未加载。
+- **可见性**：`__wnBoot` 新增 `vendoredMs`/`wasmMs`/`realmMs`/`deferredMs`（worker 时钟的分段耗时），`e2e-startup-bench.mjs` 打印出来。
+- **验收**：`tsc --noEmit` 净 · `vitest run` **1148 passed / 3 skipped（137 文件）** · build `runtime.worker-*.js` **760 KB** · 页内 + 线上探针 `brotli rt=true` / `zstd rt=true` / `histogram count=3 max=5 p50=3`。启动关键载荷 **gzip ~980 → ~416 KB**。
+
 ### 2026-09-28 · M123 —— `cluster`：1 进程 = 1 独立 worker，共享端口轮询分发（阶段 I 第二项）
 
 **背景**：真 WebContainer 每个「进程」是独立 Web Worker，故多进程天然可用。web-node 的 `fork` 子进程本来就已是独立 runtime worker（自己的注册表 / `process` 视图 / pid / IPC——M7/M40），缺的是 **`cluster`** 与**共享端口**。
