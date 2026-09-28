@@ -25,6 +25,15 @@ export const DEMO_FILES: Record<string, string> = {
         vue: '^3.5.0',
         '@vitejs/plugin-vue': '^5.2.0',
         postcss: '^8.4.43',
+        // M112: React compiled by Vite (JSX + Fast Refresh via @vitejs/plugin-react),
+        // styled through a PostCSS pipeline (Tailwind + autoprefixer). plugin-react
+        // 4.x is the line that pairs with Vite 5; tailwindcss is pinned to the 3.x
+        // line because v4 ships a native (non-WASM) Rust engine.
+        react: '^18.3.1',
+        'react-dom': '^18.3.1',
+        '@vitejs/plugin-react': '^4.3.4',
+        tailwindcss: '^3.4.14',
+        autoprefixer: '^10.4.20',
         picocolors: '^1.0.0',
         'source-map-js': '^1.2.0',
         nanoid: '^3.3.7',
@@ -1886,6 +1895,190 @@ function createReloadBridge() {
 import { greet } from '../../site/src/message.js';
 
 document.getElementById('app').textContent = greet('webpack');
+`,
+
+  // Milestone 112: another framework + another style pipeline, both driven by
+  // the same Vite that already builds the Vue site. React's JSX goes through
+  // @vitejs/plugin-react (Babel + Fast Refresh); the CSS goes through a real
+  // PostCSS pipeline (Tailwind + autoprefixer). Nothing here is bespoke.
+  '/project/vite-react.mjs': `// Click "Vite React" to build react-site/ (JSX + Tailwind/PostCSS) in the tab.
+import fs from 'fs';
+import path from 'path';
+
+const ROOT = '/project';
+const SITE = path.join(ROOT, 'react-site');
+const NM = path.join(ROOT, 'node_modules');
+
+(async function () {
+  console.log('-- vite react build (milestone 112) --');
+  if (!fs.existsSync(path.join(NM, 'react'))) {
+    console.log('react: not installed yet - click "Install deps" first');
+    return;
+  }
+  const vite = await import('vite');
+  const { default: react } = await import('@vitejs/plugin-react');
+  console.log('tool        : vite v' + vite.version + ' + @vitejs/plugin-react');
+
+  // Vite reaches for the native esbuild addon; the runtime aliases 'esbuild' to
+  // its WASM build, which has to be started explicitly before Vite runs.
+  const esbuild = await import('esbuild');
+  const wasm = fs.readFileSync(path.join(NM, 'esbuild-wasm', 'esbuild.wasm'));
+  const t0 = Date.now();
+  await esbuild.initialize({ wasmModule: await WebAssembly.compile(wasm), worker: false });
+  console.log('esbuild     : wasm started in ' + (Date.now() - t0) + 'ms');
+
+  // A real project would drop postcss.config.js at the root and let Vite find
+  // it. The demo wires the same two plugins explicitly so the pipeline is
+  // visible here; tailwind.config.js is still what Tailwind reads (content
+  // globs included). CJS->ESM interop can nest the export, so unwrap it.
+  const unwrap = function (m) {
+    let d = m && m.default !== undefined ? m.default : m;
+    if (d && typeof d !== 'function' && d.default !== undefined) d = d.default;
+    return d;
+  };
+  const tailwindcss = unwrap(await import('tailwindcss'));
+  const autoprefixer = unwrap(await import('autoprefixer'));
+
+  const t1 = Date.now();
+  const result = await vite.build({
+    root: SITE,
+    // Relative asset URLs so the built site also works when served from a
+    // sub-path (the preview bridge mounts it at /preview/<port>/).
+    base: './',
+    logLevel: 'silent',
+    plugins: [react()],
+    css: {
+      postcss: {
+        plugins: [
+          tailwindcss({ config: path.join(SITE, 'tailwind.config.js') }),
+          autoprefixer(),
+        ],
+      },
+    },
+    build: { write: false, minify: false },
+  });
+  const bundle = Array.isArray(result) ? result[0] : result;
+
+  for (const chunk of bundle.output) {
+    const dest = path.join(SITE, 'dist', chunk.fileName);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, chunk.type === 'asset' ? String(chunk.source) : chunk.code);
+  }
+  console.log('built in    : ' + (Date.now() - t1) + 'ms');
+  console.log('written     : /project/react-site/dist/');
+  for (const chunk of bundle.output) console.log('  ' + chunk.fileName);
+
+  // Evidence that the PostCSS pipeline really ran: Tailwind emitted the utility
+  // class, and autoprefixer added the vendor prefix for backdrop-filter.
+  const css = bundle.output.find(function (c) { return c.fileName.slice(-4) === '.css'; });
+  if (css) {
+    const text = String(css.source);
+    console.log('tailwind    : utility .text-sky-400 emitted = ' + (text.indexOf('.text-sky-400') !== -1));
+    console.log('autoprefix  : -webkit-user-select added = ' + (text.indexOf('-webkit-user-select') !== -1));
+    const reactBundled = bundle.output.some(function (c) { return c.code && c.code.indexOf('createRoot') !== -1; });
+    console.log('jsx build   : react bundled = ' + reactBundled);
+  }
+
+  // Serve the built site on a virtual port so the React app can be previewed in
+  // the tab, exactly like the dev-server buttons do.
+  const http = await import('http');
+  const DIST = path.join(SITE, 'dist');
+  const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css' };
+  const server = http.createServer(function (req, res) {
+    let p = decodeURIComponent(new URL(req.url, 'http://127.0.0.1:5175').pathname);
+    if (p === '/' || p === '') p = '/index.html';
+    const file = path.join(DIST, p);
+    if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
+    res.end(fs.readFileSync(file));
+  });
+  server.listen(5175, function () {
+    console.log('preview     : serving /project/react-site/dist on http://127.0.0.1:5175');
+  });
+})().catch(function (err) {
+  console.log('vite react failed : ' + (err && err.message ? err.message : err));
+});
+`,
+
+  // The React app Vite builds. JSX + hooks, styled with Tailwind utilities and
+  // a hand-written rule that autoprefixer rewrites.
+  '/project/react-site/index.html': `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>web-node · react + tailwind</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+`,
+
+  '/project/react-site/src/main.jsx': `import { createRoot } from 'react-dom/client';
+import App from './App.jsx';
+import './index.css';
+
+createRoot(document.getElementById('root')).render(<App />);
+`,
+
+  '/project/react-site/src/App.jsx': `import { useState } from 'react';
+
+export default function App() {
+  const [count, setCount] = useState(0);
+  return (
+    <main className="card mx-auto mt-10 max-w-md rounded-xl p-8 text-center">
+      <h1 className="text-2xl font-bold text-sky-400">React + Tailwind, in a tab</h1>
+      <button
+        type="button"
+        className="mt-4 rounded-lg bg-sky-500 px-4 py-2 font-semibold text-white"
+        onClick={() => setCount((n) => n + 1)}
+      >
+        count is {count}
+      </button>
+      <p className="mt-4 text-sm text-slate-400">
+        JSX via @vitejs/plugin-react · styles via PostCSS + Tailwind + autoprefixer
+      </p>
+    </main>
+  );
+}
+`,
+
+  '/project/react-site/src/index.css': `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* autoprefixer expands user-select into -webkit-/-moz- variants. */
+.card {
+  backdrop-filter: blur(6px);
+  user-select: none;
+  background: rgba(15, 23, 42, 0.6);
+}
+`,
+
+  '/project/react-site/tailwind.config.js': `const path = require('path');
+
+module.exports = {
+  // Absolute globs so the scan is independent of the process cwd.
+  content: [
+    path.join(__dirname, 'index.html'),
+    path.join(__dirname, 'src/**/*.{js,jsx}'),
+  ],
+  theme: { extend: {} },
+  plugins: [],
+};
+`,
+
+  '/project/react-site/postcss.config.js': `module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
 `,
 
   '/project/notes.md': `# web-node demo project

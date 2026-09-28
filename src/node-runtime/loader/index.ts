@@ -274,6 +274,11 @@ export class ModuleLoader {
 
   /** Node's require resolution order, reduced to what the VFS supports. */
   resolve(request: string, fromDir: string, condition: Condition = 'require'): string {
+    // ESM allows a `file://` URL as a specifier (`import(url)`), and Node turns
+    // it into a path before resolving. postcss-load-config — which Vite's
+    // PostCSS integration uses — loads `postcss.config.js` this way, so a
+    // file: URL has to be understood here too.
+    if (request.startsWith('file://')) request = urlToCjsFilename(request);
     request = this.#applyAlias(request);
     if (request.startsWith('.') || p.isAbsolute(request)) {
       const base = p.resolve(fromDir, request);

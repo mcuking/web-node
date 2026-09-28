@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。
-> - **最后更新**：2026-09-28（**阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅**。**M121（北星）全结清**：webpack 5 + **rspack 2.2.7** 生产构建（含 minify）均已页内跑通。**M125 两增量均 ✅**：① `node:wasi`（VFS 支撑的 46-syscall 宿主）；② 解开 rspack 线程 wedge（真浏览器 `Worker` 承载 emnapi 线程池 + 自建 binding 入口 + 预打包 thread-child），页内 `compiled successfully in 46s`，产物写进 VFS）
+> - **最后更新**：2026-09-28（**阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅**——React（`@vitejs/plugin-react`）+ PostCSS/Tailwind 管线页内构建并真渲染成功。**阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅**。**M121（北星）全结清**：webpack 5 + **rspack 2.2.7** 生产构建（含 minify）均已页内跑通。**M125 两增量均 ✅**：① `node:wasi`（VFS 支撑的 46-syscall 宿主）；② 解开 rspack 线程 wedge（真浏览器 `Worker` 承载 emnapi 线程池 + 自建 binding 入口 + 预打包 thread-child），页内 `compiled successfully in 46s`，产物写进 VFS）
 
 ---
 
@@ -36,7 +36,7 @@
 |---|---|---|---|---|
 | **H** | **native → WASM（主线，P0–P6）** | 9 | 8 | 1 |
 | E | 启动与加载性能 | 1 | 0 | 1 |
-| F | 构建工具链（**用户愿景，最后做**） | 3 | 1 | 2 |
+| F | 构建工具链（**用户愿景，最后做**） | 3 | 3 | 0 |
 | G | 预览与路由 | 1 | 0 | 1 |
 | **I** | **借鉴 WebContainer（活体调研 2026-09-24）** | 3 | 0 | 3 |
 | A | crypto 收尾（**已归档**） | 26 | 26 | 0 |
@@ -44,10 +44,10 @@
 | C | 平台无对应物（**已解散**，条目已分流） | 2 | 2 | 0 |
 | D | 运行时常量小项（**已归档**） | 4 | 4 | 0 |
 | — | 已判定不做 | 1 | — | — |
-| **合计** | | **55** | **46** | **9**（+1 不做） |
+| **合计** | | **55** | **48** | **6**（+1 不做） |
 
 > **阶段 H 明细**：M115 ✅ · M116 ✅ · M117 ✅ · M118 ✅ · M101 ✅ · M119 ✅ · M120 ✅ · M121 ✅ · **M125 ✅**。
-> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 133 个里程碑，剩余 9 个规划任务**。
+> 加上已完成的 **M1–M87**（87 个），项目整体：**已完成 135 个里程碑，剩余 6 个规划任务**。
 > 注：本表按**叶子任务**计数——M90（拆 M90.1–M90.9）、M92（拆 M92.1/M92.2）、M93（拆 M93.1–M93.4）、M93.4（拆 a–h）、M97（拆 M97.1）的**父项为拆分占位、不计入**。（旧表 A=22 系拆分前的陈旧值，本次一并修正为 26。）
 
 ---
@@ -244,8 +244,15 @@
   - 需要 **WASI 宿主 + 线程（SharedArrayBuffer / COOP-COEP）**。**先做一次性 spike 验证 wasm 能否在页内初始化**，再决定投入。
   - 验收（移交 M121）：页内 rspack 生产构建产出 bundle。
 
-- [ ] **M112 · 其他框架 / 工具链**
-  - React（SWC / Babel）、Svelte、TypeScript 项目、Tailwind / PostCSS 管线。
+- [x] **M112 · 其他框架 / 工具链（React + PostCSS/Tailwind）** ✅ 2026-09-28
+  - **React**：新增 `/project/react-site/`（JSX + hooks 小应用）与 UI 按钮 **⚛ Vite React**；用 `vite.build({ plugins: [react()] })` 在页内构建，`@vitejs/plugin-react@4.3.4`（配 Vite 5 的线）经 Babel 处理 JSX。
+  - **PostCSS 管线**：同一构建跑真 **Tailwind v3.4 + autoprefixer 10.4**。插件通过 `css.postcss.plugins` 显式传入（`tailwind.config.js` 仍是 Tailwind 读的配置，content 用**绝对 glob** 以脱离 cwd）——见下「为何不靠 postcss.config.js 自动发现」。产物里 `.text-sky-400` 等工具类**真被生成**、`user-select` **真被 autoprefixer 展开**成 `-webkit-/-moz-` 前缀。
+  - **一个真 bug（已修）**：ESM loader 的 `resolve()` 不认 `file://` 说明符；而 `postcss-load-config` 等工具会用 `import(fileUrl)` 加载配置。已在 `resolve()` 开头把 `file://` 归一成路径（Node 的 ESM loader 正是这么做的）。
+  - **一个真互操作点**：`await import('tailwindcss')` 的返回值经 CJS→ESM 互操作可能再嵌一层 `default`，取插件函数要 unwrap（否则 `tailwindcss is not a function`）。
+  - **验收**：构建日志三项全 true（tailwind / autoprefix / react bundled）；`vite v5.4.21`、`built in 4.0s`。**页内真实渲染**（连预览 OOPIF 读同源子 iframe）：`#root` 文本正确；`h1` 颜色 `rgb(56,189,248)`（= `text-sky-400`）、按钮底色 `rgb(14,165,233)`（= `bg-sky-500`）且圆角 8px（= `rounded-lg`）、`.card` `backdrop-filter: blur(6px)`；点击按钮 React state 递增（count 0→1→2）。
+  - 门禁：`tsc --noEmit` 净 · `vitest run` **1137 passed / 3 skipped（134 文件）** · build（`runtime.worker-Czi1jJ7Z.js` **752.31 kB**）。
+  - **附**：`react`/`react-dom`/`@vitejs/plugin-react`/`tailwindcss`/`autoprefixer` 加入 demo 的 `devDependencies`。
+  - **为何不靠 `postcss.config.js` 自动发现**：Vite 用 `postcssrc({}, config.root)` 找配置，本运行时下未生效（`@tailwind` 原样留在产物里）；显式传插件是等价且确定的做法，`postcss.config.js` 仍随 demo 提供作参考。
 
 ---
 

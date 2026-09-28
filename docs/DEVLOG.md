@@ -246,6 +246,18 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-28 · M112 —— React（`@vitejs/plugin-react`）+ PostCSS/Tailwind 管线页内打通
+
+**里程碑**：阶段 F「构建工具链」最后一项。此前 Vite 已能构建 Vue（M5c–M5f）与 webpack 全家桶（M109/M110）；这一步补上 **React** 与 **样式管线**。
+
+- **React**：新增 `/project/react-site/`（JSX + hooks 小应用）与 UI 按钮 **⚛ Vite React**；页内 `vite.build({ plugins: [react()] })`。`@vitejs/plugin-react@4.3.4`（配 Vite 5 的那条线）经 Babel 处理 JSX；`esbuild` 仍是 WASM 版（显式 `initialize`）。
+- **PostCSS 管线**：同一构建跑真 **Tailwind v3.4 + autoprefixer 10.4**（`tailwindcss` v4 是原生 Rust 引擎，故钉在 3.x）。插件经 `css.postcss.plugins` 显式传入；`tailwind.config.js` 依旧是 Tailwind 读的配置（content 用**绝对 glob** 以脱离 process cwd）。
+- **一个真 bug（已修）**：ESM loader 的 `resolve()` **不认 `file://` 说明符**，而 `postcss-load-config` 之类工具会用 `import(fileUrl)` 加载配置。已在 `resolve()` 开头把 `file://` 归一成路径（Node 的 ESM loader 正是这么做的）。
+- **一个真互操作点**：`await import('tailwindcss')` 的返回值经 CJS→ESM 互操作可能再嵌一层 `default`，取插件函数要 unwrap（否则 `tailwindcss is not a function`）。
+- **为何不靠 `postcss.config.js` 自动发现**：Vite 用 `postcssrc({}, config.root)` 找配置，本运行时下未生效（`@tailwind` 原样留在产物里）；**显式传插件是等价且确定的做法**，`postcss.config.js` 仍随 demo 提供作参考。
+- **验收**：构建日志三项全 `true`（`tailwind : utility .text-sky-400 emitted` / `autoprefix : -webkit-user-select added` / `jsx build : react bundled`），`vite v5.4.21`、`built in 4.0s`。**页内真实渲染**（连预览 OOPIF、读其同源子 iframe）：`#root` 文本正确；`h1` 颜色 `rgb(56,189,248)`（= Tailwind `text-sky-400`）、按钮底色 `rgb(14,165,233)`（= `bg-sky-500`）且圆角 8px（= `rounded-lg`）、`.card` `backdrop-filter: blur(6px)`（autoprefixer 把 `user-select` 展开成 `-webkit-/-moz-`）；点击按钮 React state 递增（count 0→1→2）。
+- **门禁**：`tsc --noEmit` 净 · `vitest run` **1137 passed / 3 skipped（134 文件）** · build（`runtime.worker-Czi1jJ7Z.js` **752.31 kB**）。
+
 ### 2026-09-28 · M110 —— webpack watch / dev-server：改一次源码，两个 dev-server 同时重编译
 
 **里程碑**：阶段 F「构建工具链」再收一项。M109 让 webpack 能在页内**一次性**编译；这一步把它的**开发回路**（watch + 自动刷新）也跑通。

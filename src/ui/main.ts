@@ -38,6 +38,7 @@ const buildBtn = $<HTMLButtonElement>('build');
 const bundleBtn = $<HTMLButtonElement>('bundle');
 const viteBtn = $<HTMLButtonElement>('vite');
 const viteDevBtn = $<HTMLButtonElement>('vitedev');
+const viteReactBtn = $<HTMLButtonElement>('vitereact');
 const wpDevBtn = $<HTMLButtonElement>('wpdev');
 const hmrEditBtn = $<HTMLButtonElement>('hmred');
 const hmrCssBtn = $<HTMLButtonElement>('hmrcss');
@@ -157,6 +158,10 @@ async function viteBuildProject(): Promise<void> {
 
 async function viteDevProject(): Promise<void> {
   await runEntry('/project/vite-dev.mjs', 'node /project/vite-dev.mjs', viteDevBtn);
+}
+
+async function viteReactBuildProject(): Promise<void> {
+  await runEntry('/project/vite-react.mjs', 'node /project/vite-react.mjs', viteReactBtn);
 }
 
 async function webpackDevProject(): Promise<void> {
@@ -351,6 +356,7 @@ buildBtn.addEventListener('click', () => void buildProject());
 bundleBtn.addEventListener('click', () => void bundleProject());
 viteBtn.addEventListener('click', () => void viteBuildProject());
 viteDevBtn.addEventListener('click', () => void viteDevProject());
+viteReactBtn.addEventListener('click', () => void viteReactBuildProject());
 wpDevBtn.addEventListener('click', () => void webpackDevProject());
 
 async function installDeps(): Promise<void> {
