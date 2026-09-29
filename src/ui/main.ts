@@ -64,7 +64,7 @@ const viewPreview = $<HTMLDivElement>('view-preview');
 let files: string[] = [];
 let activeFile = '';
 let dirty = false;
-let activeProject: ProjectId = 'vite';
+let activeProject: ProjectId = 'node';
 let busy = false;
 let ports: number[] = [];
 

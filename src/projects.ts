@@ -24,4 +24,4 @@ export const DEMO_PROJECTS: Record<ProjectId, DemoProject> = {
 };
 
 /** Every project, in the order the UI shows them. */
-export const PROJECT_ORDER: ProjectId[] = ['vite', 'webpack', 'rspack', 'node'];
+export const PROJECT_ORDER: ProjectId[] = ['node', 'vite', 'webpack', 'rspack'];
