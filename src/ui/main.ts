@@ -1,6 +1,6 @@
 import { RuntimeClient } from '../client';
 import type { RuntimeInfo } from '../worker/runtime.worker';
-import { previewUrl as buildPreviewUrl, prefixPreviewUrl } from './preview-url';
+import { previewUrl as buildPreviewUrl, previewPortFromHost, prefixPreviewUrl } from './preview-url';
 
 /**
  * Cold-start timing (M107), in milliseconds since navigation start. Exposed
@@ -312,6 +312,10 @@ function previewEnv() {
     origin: location.origin,
     hostname: location.hostname,
     port: location.port,
+    // When the host serves `*.<domain>` from this app, previews get real
+    // subdomain origins here too (M113) — the static-hosting counterpart of the
+    // dev server's `*.localhost`.
+    previewDomain: import.meta.env.VITE_WEB_NODE_PREVIEW_DOMAIN,
   };
 }
 
@@ -532,9 +536,17 @@ function installHmrRelay(): void {
 
   window.addEventListener('message', (event) => {
     const data = event.data as { __wnHmr?: unknown; port?: number } | null;
-    if (data && data.__wnHmr !== undefined && typeof data.port === 'number') {
-      channelFor(data.port).postMessage(data.__wnHmr);
-    }
+    if (!data || data.__wnHmr === undefined || typeof data.port !== 'number') return;
+    // Only a real preview origin may push HMR frames at us.
+    const host = (() => {
+      try {
+        return new URL(event.origin).hostname;
+      } catch {
+        return '';
+      }
+    })();
+    if (previewPortFromHost(host, import.meta.env.VITE_WEB_NODE_PREVIEW_DOMAIN) === null) return;
+    channelFor(data.port).postMessage(data.__wnHmr);
   });
 
   hmrRelay = {

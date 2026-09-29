@@ -1,4 +1,5 @@
 import type { RuntimeInfo } from '../worker/runtime.worker';
+import { previewPortFromHost } from '../ui/preview-url';
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void };
 
@@ -175,19 +176,22 @@ export class RuntimeClient {
     navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
       this.#onRelayedRequest(event);
     });
-    // A preview on its own subdomain (`<port>.localhost`) is a *different
-    // origin*, so its ServiceWorker cannot post to this page directly: it relays
-    // through its own bootstrap page, which forwards here over `postMessage`.
-    // Same message shape, so it takes the same path from here on.
+    // A preview on its own subdomain (`<port>.localhost`, or `<port>.<domain>`
+    // when a wildcard preview domain is configured) is a *different origin*, so
+    // its ServiceWorker cannot post to this page directly: it relays through its
+    // own bootstrap page, which forwards here over `postMessage`. Same message
+    // shape, so it takes the same path from here on — but only if the sender is
+    // really a preview origin for this app.
+    const previewDomain = import.meta.env.VITE_WEB_NODE_PREVIEW_DOMAIN;
     window.addEventListener('message', (event: MessageEvent) => {
-      const from = (() => {
+      const host = (() => {
         try {
           return new URL(event.origin).hostname;
         } catch {
           return '';
         }
       })();
-      if (from !== location.hostname && !from.endsWith('.localhost')) return;
+      if (previewPortFromHost(host, previewDomain) === null) return;
       this.#onRelayedRequest(event);
     });
 

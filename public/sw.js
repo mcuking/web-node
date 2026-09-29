@@ -39,6 +39,14 @@ const BASE = new URL('./', self.location).pathname;
 const PREVIEW_PREFIX = BASE + 'preview/';
 
 /**
+ * The wildcard domain previews are addressed on, when the app was built with
+ * one (`VITE_WEB_NODE_PREVIEW_DOMAIN`, passed on the worker URL by the shell).
+ * `<port>.localhost` is always recognised; this adds `<port>.<domain>` so the
+ * same worker serves a real subdomain origin on a static host (M113).
+ */
+const PREVIEW_DOMAIN = (new URL(self.location.href).searchParams.get('domain') || '').toLowerCase();
+
+/**
  * The port this worker serves when it lives on a `<port>.localhost` subdomain,
  * or null on the main origin. Set by the dev-server bootstrap page, which is the
  * only thing that ever registers this file cross-origin.
@@ -82,14 +90,14 @@ function isShellRequest(pathname) {
  * dev servers can run side by side without seeing each other's clients. The
  * port is baked in from the preview URL the worker is answering.
  */
-function wsShim(port) {
+function wsShim(port, subdomain) {
   return `<script>(function () {
   var PORT = ${JSON.stringify(port)};
   var CH = 'web-node-hmr:' + PORT;
   var Native = window.WebSocket;
-  // A <port>.localhost preview is a different origin from the runtime, so the
-  // BroadcastChannel below is unreachable; relay through the top page instead.
-  var SUB = /^\\d+\\.localhost$/.test(location.hostname);
+  // A preview on its own subdomain is a different origin from the runtime, so
+  // the BroadcastChannel below is unreachable; relay through the top page.
+  var SUB = ${subdomain ? 'true' : 'false'};
   function isLoopback(host) {
     return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
   }
@@ -196,6 +204,10 @@ self.addEventListener('fetch', (event) => {
   // Subdomain mode: this whole origin *is* one virtual server. No prefix to
   // strip — every path is the app's own, except the shell that bootstraps us.
   if (SUBDOMAIN_MODE) {
+    if (url.pathname === SUBDOMAIN_SHELL_PATH) {
+      event.respondWith(withShellHeaders(event.request));
+      return;
+    }
     if (isShellRequest(url.pathname)) return;
     event.respondWith(handle(event, HOST_PORT, url, 'subdomain'));
     return;
@@ -223,12 +235,36 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(handle(event, port, url, 'prefix'));
 });
 
-/** Port encoded in `/<port>.localhost`, or null if this is not a preview subdomain. */
+/** Port encoded in a preview subdomain, or null if this is not one. */
 function portFromHost(hostname) {
-  const m = /^(\d+)\.localhost$/.exec(hostname);
-  if (!m) return null;
-  const port = Number(m[1]);
-  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
+  const host = hostname.replace(/:\d+$/, '').toLowerCase();
+  const suffixes = ['localhost'];
+  if (PREVIEW_DOMAIN && PREVIEW_DOMAIN !== 'localhost') suffixes.push(PREVIEW_DOMAIN);
+  for (const suffix of suffixes) {
+    if (host === suffix || !host.endsWith('.' + suffix)) continue;
+    const label = host.slice(0, host.length - suffix.length - 1);
+    if (!/^\d+$/.test(label)) continue;
+    const port = Number(label);
+    if (Number.isInteger(port) && port > 0 && port <= 65535) return port;
+  }
+  return null;
+}
+
+/**
+ * The preview shell is embedded by the app shell, which sets COEP: require-corp.
+ * An embedded cross-origin document must itself opt in with a COEP header, so
+ * once this worker controls the origin we add the isolation headers a static
+ * host cannot set. (The very first load, before we control the origin, still
+ * comes straight from the network — see DEVLOG for the wildcard-DNS caveat.)
+ */
+async function withShellHeaders(request) {
+  const res = await fetch(request);
+  const headers = new Headers(res.headers);
+  headers.set('cross-origin-embedder-policy', 'require-corp');
+  headers.set('cross-origin-opener-policy', 'same-origin');
+  headers.set('cross-origin-resource-policy', 'cross-origin');
+  headers.set('content-type', 'text/html; charset=utf-8');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
 /** Port encoded in `/<base>preview/<port>/…`, or null if the path is not a preview path. */
@@ -446,7 +482,7 @@ async function handle(event, port, url, mode) {
     const html = new TextDecoder().decode(merged);
     // In subdomain mode the document already sits at the origin root, so its
     // absolute paths are correct and no `<base>` is needed — only the shim.
-    const inject = mode === 'subdomain' ? wsShim(port) : `<base href="${PREVIEW_PREFIX}${port}/">` + wsShim(port);
+    const inject = mode === 'subdomain' ? wsShim(port, true) : `<base href="${PREVIEW_PREFIX}${port}/">` + wsShim(port, false);
     const patched = html.includes('<head>') ? html.replace('<head>', '<head>' + inject) : inject + html;
     return new Response(new TextEncoder().encode(patched), {
       status: head.status,
