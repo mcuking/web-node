@@ -246,6 +246,29 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-29 · M113 + M122 —— 预览子域名路由（静态托管跟进） + 沙箱出站网络（egress）
+
+**动机**：两项都是「对标 WebContainer」的收尾。M113：WebContainer 把 `listen(8080)` 编进唯一子域名再注册 DevServer SW 供给内存 FS；web-node dev 侧早有 `<port>.localhost`，但**静态托管仍走路径式** `/preview/<port>/`（站点根相对路径 / cookie / SW scope 都会踩坑）。M122：WebContainer 在**宿主源专用 Fetcher Worker** 里发 `fetch`（不受沙箱页 CORS），web-node 只有入站虚拟 TCP + 回环 DNS，**公网 `https`/`net.connect` 直接 `ECONNREFUSED`**。
+
+**M113 · 预览子域名路由**
+
+- 三策略（`src/ui/preview-url.ts`，纯函数）：dev `<port>.localhost` / 通配域 `<port>.<VITE_WEB_NODE_PREVIEW_DOMAIN>` / 路径式兜底。
+- 预览壳从「dev 中间件供页」改为**静态资产** `public/__webnode__/index.html`：`?base=` 告知子路径部署；`sw.js?domain=` 归一致通配域；经 `window.top` 转发 `web-node:http`，HMR 帧下发到子帧。
+- `public/sw.js`：`portFromHost` 认 `<port>.<PREVIEW_DOMAIN>`；`SUBDOMAIN_SHELL_PATH` 由 SW 供壳并补 COOP/COEP（静态托管设不了头）；`wsShim(port, subdomain)` 显式标明子域（不再靠 hostname 猜）。
+- 安全：`client`/`main` 的 `message` 监听改用 `previewPortFromHost` 校验来源（只认真预览 origin）。
+- 实测（真浏览器）：dev `http://3000.localhost:5199/__webnode__/`、静态服务器（`python3 -m http.server`）`http://3000.localhost:4180/__webnode__/` —— 子帧均从虚拟 FS 供给真应用（`title=web-node preview`、`body=Hello from your in-browser Node.js server`、`appUrl=…/`）；SW target `sw.js?domain=localhost` 存在。
+
+**M122 · 沙箱出站网络（egress）**
+
+- 新 `src/node-runtime/net/egress.ts`：`Egress.request()` 用宿主 `fetch` 执行；`proxy`（`{url}`/`%s` 模板或前缀）在直连失败时兜底；`applyProxy`/`isLoopbackHost` 纯函数；错误打 `code='ERR_WEB_NODE_EGRESS'` + `target`。
+- 接入缝：`Bindings.egress`（`bindings/context.ts`）+ `RuntimeOptions.egress`（`runtime.ts`）；worker `createWorkerEgress()` 以**宿主源 worker 的 `fetch`** 为传输，proxy 由 `VITE_WEB_NODE_EGRESS_PROXY`/`__WEB_NODE_EGRESS_PROXY__` 配置，**不硬编码第三方**。可选 `dialTcp`（WebSocket 裸 TCP 桥 `VITE_WEB_NODE_TCP_PROXY`）——**默认无**。
+- `http`/`https`：`acquire(port, host, protocol)` 非回环 → `EgressConnection`（请求序列化交给 egress，回包经**同一 `HttpMessageReader`** 复帧，状态行/头/体一致）；回包丢弃 `content-encoding`/`transfer-encoding` 并补 `content-length`（fetch 已解压/解帧）。
+- `net.connect` 非回环 → 无桥则**响亮 `ECONNREFUSED`**（带 `syscall/address/port`），绝不吊死或假装。
+- 实测（真浏览器、构建产物）：`fetch` 200 · `https.get('https://registry.npmjs.org/ms')` **200（改前 ECONNREFUSED）** · `net.connect` 诚实 ECONNREFUSED · 回环入站 0 回归（预览仍供 3000）。
+- 单测 `test/egress.test.ts`（13 例）+ 重写 `test/preview-url.test.ts`。
+
+**验收**：`tsc --noEmit` 净 · `vitest run` **1181 passed / 3 skipped（137 passed 文件）** · build `runtime.worker-CG9526ld.js` **774.68 kB** · gh-pages 已推。
+
 ### 2026-09-29 · M128 —— 真实工具链端到端：页内跑真 TypeScript 编译器
 
 **动机**：已跑通 webpack/rspack/vite（打包器）与 PostCSS/Tailwind（CSS 管线），但还缺一个真『编译器』的端到端闭环。`tsc` 纯 JS、无原生扩展、最广泛存在，适合作「类型层工具链在标签页内真能跑」的证据。

@@ -6,8 +6,8 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[⤳]` **已并入其他里程碑**（保留条目作决策痕迹，**不单独计数**） · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。**当前剩余：G·M113（子域名静态托管）· I·M122（沙箱出站网络）**（二者暂被搁置；新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I、**M128 真实工具链端到端（真 tsc）✅** 见阶段 F）。
-> - **最后更新**：2026-09-29（**M128 ✅ 真实工具链端到端**——页内跑真 TypeScript 编译器：解析 tsconfig → 类型检查 → 产出 `.js`/`.d.ts` → 执行编译产物（拿到 `{count:2,total:15.1416}`），全在标签页内闭环；阶段 F 至此结清。**M127 ✅ 行为门禁扩面**——把 M124 的门禁从「能调用」加深到「算得对」：观测 **104 → 187**，新增均为值/错误形状/async 往返；当场扑出 `trace_events` 的 `MODULE_NOT_FOUND` 并登记为类型化不支持。**M126 ✅ 启动载荷再降**——把 1.8 MB vendored 源拆成「启动 core 层（54 文件 / gzip 121.9 KB，预加载 + `ready` 前 await）」与「lazy 层（109 文件 / gzip 233.9 KB，后台低优先级预取，跑用户代码前 await）」，启动期 awaited 的源载荷 **gzip 344.6 → 121.9 KB**；顺带修一个真差异——`Realm#materialize` 在求值抛错后把记录留在 `loading`，二次 `require` 会静默拿到半成品导出，Node 是丢弃缓存并重跑，已改正）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅。
+> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 I。阶段 A/B/C/D 均已结清。**M113 · M122 ✅ 2026-09-29 后，阶段 G 与阶段 I 全部结清**（新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I、**M128 真实工具链端到端（真 tsc）✅** 见阶段 F）。
+> - **最后更新**：2026-09-29（**M113 ✅ 预览子域名路由（静态托管跟进）**——dev 侧 `<port>.localhost` 保留 + 新增**通配域** `VITE_WEB_NODE_PREVIEW_DOMAIN`：静态托管（GitHub Pages / 任意静态服务器 / 自定义域）把每个预览挂到 `<port>.<domain>` 真 origin；预览壳改为**静态资产**、SW `?domain=` 归一；三策略纯函数化 + 单测；真浏览器双路（dev 子域 / 静态服务器）均从虚拟 FS 供给真应用。**M122 ✅ 沙箱出站网络（egress）**——新增 `net/egress.ts` 传输层 + `Bindings.egress` 接入缝；`http`/`https` 公网目标经**宿主源 worker 的 `fetch`** 出网（可选自备 proxy 兜底，无第三方托管依赖），`net.connect` 无 TCP 桥则响亮 `ECONNREFUSED`；实测 `https.get('https://registry.npmjs.org/ms')` 200（改前 ECONNREFUSED）。**M128 ✅ 真实工具链端到端**——页内跑真 TypeScript 编译器：解析 tsconfig → 类型检查 → 产出 `.js`/`.d.ts` → 执行编译产物（拿到 `{count:2,total:15.1416}`）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅ · M127 ✅ · M122 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅ · M128 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅ · M126 ✅；阶段 G：M113 ✅。
 
 ---
 
@@ -287,12 +287,13 @@
 > **2026-09-24 活体复证**：真开容器后再次确认其预览形态——每端口独立子域 + DevServer SW，另有 `PreviewRelay` 共享 worker 与 `File System Worker`（详见调研第九–十一节）。
 > **与现有条目的关系**：M113 承接已完成的 M3.5d「子域名路由」（dev 侧已有，本条做静态托管补齐 + 每端口 DevServer SW）；**M114（真·同步 `fs`）已并入阶段 H 的 M120**（`[⤳]`），本阶段只保留 M113。
 
-- [ ] **M113 · 预览端口 → 子域名路由（静态托管跟进）**
+- [x] **M113 · 预览端口 → 子域名路由（静态托管跟进）** ✅ 2026-09-29
   - **对标**：WebContainer 把 `listen(8080)` **编进一个唯一子域名**（`<proj>--8080--<hash>.local-credentialless.webcontainer.io`），再在该域名注册一个 **DevServer Service Worker** 拦截所有请求、从内存 FS 供给。
   - **为何优于路径式**：路径式 `/preview/<port>/` 在**站点根相对路径**（`/assets/x.js`）、**cookie 作用域**、**SW scope**、刷新/离线 上都会踩坑；子域名天然避开。
   - **现状**：dev 侧已有 `<port>.localhost` 子域名路由（M3.5d）；静态托管（gh-pages）仍走路径式 `/preview/<port>/`（`src/ui/preview-url.ts` 已有子域名壳 `SUBDOMAIN_SHELL_PATH = '/__webnode__/'` 与 pop-out 分支）。
   - **难点**：静态托管需要**通配 DNS**（当前只有 dev 中间件 `plugins/dev-subdomains.ts` 能供壳），需自定义域 + 每端口 DevServer SW。
   - **验收**：静态托管下预览走子域名；站点根相对路径 / cookie / SW scope 均正确；pop-out 与嵌入两条路都通。
+  - **已实现（2026-09-29）**：dev 侧 `<port>.localhost` 保留；新增**通配域子域名**（`VITE_WEB_NODE_PREVIEW_DOMAIN`）——静态托管把每个预览挂到 `<port>.<domain>` 的**真 origin**；预览壳改为**静态资产** `public/__webnode__/index.html`（不再依赖 dev 中间件），寄存器 `sw.js?domain=<domain>` 后经顶层页转发 `web-node:http`、并把 HMR 帧下发到子帧；`src/ui/preview-url.ts` 三策略（dev 子域 / 通配域 / 路径式兜底）纯函数化 + 单测。实测（真浏览器）：dev 下 `http://3000.localhost:5199/__webnode__/` 与静态服务器（`python3 -m http.server`）下 `http://3000.localhost:4180/__webnode__/` **均从虚拟 FS 供给真应用**（标题 `web-node preview`、正文 `Hello from your in-browser Node.js server`、`appUrl=…/`），SW scope 正确。
 
 - [⤳] **M114 · 真·同步 `fs` 且不阻塞 UI（SAB + Atomics + FS-worker）** → **已并入阶段 H 的 M120**
   - **对标**：WebContainer 用 **`SharedArrayBuffer` + `Atomics.wait`** 把主线程"接"到另一个 worker 里的内存 FS（实测：14 个 worker 的 `Runtime.evaluate` 全超时，正是主线程卡在 `Atomics.wait`）——于是浏览器里能提供**真·同步 `readFileSync`**。
@@ -310,12 +311,13 @@
 > **筛选原则**：只登记**我们确实缺、且它已实证可行**的功能；纯差异项（如 crypto 非对称——它反而跑不了，我们已实现）与共性项（TLS 边缘终止）**不入表**。
 > **与现有条目的关系**：M113（子域名 + 每端口 DevServer SW）已存在，本次实测**复证并强化**；M121（rspack）不受影响（其 `.node` 同样加载不了 → 走 wasm 方案不变）。
 
-- [ ] **M122 · 沙箱出站网络（egress）** —— 借 WebContainer 的「宿主源 Fetcher Worker / 托管 proxy」
+- [x] **M122 · 沙箱出站网络（egress）** ✅ 2026-09-29 —— 借 WebContainer 的「宿主源 Fetcher Worker / 托管 proxy」
   - **对标（实测）**：WebContainer 容器内 `fetch` 由 **`stackblitz.com` 源的专用 `Fetcher Worker`** 发出，**不受沙箱页 CORS 约束**（实测 `httpbin.org`（无 ACAO）→ 200）；DNS 给每个域名分假 IP（`example.com→1.0.0.2`、`registry.npmjs.org→1.0.0.3`…），裸 TCP 落到 `127.0.0.1:1`；npm registry 走托管 proxy + server-side 加速。
-  - **现状（真差距）**：web-node 只有**入站虚拟 TCP + 回环 DNS**，**无真出网** → 页内 `fetch`/`https`/`net.connect` 到公网不可用。
+  - **现状（实现前）**：web-node 只有**入站虚拟 TCP + 回环 DNS**，**无真出网** → 页内 `https`/`net.connect` 到公网 `ECONNREFUSED`；`fetch` 仅因被包了一层宿主 `fetch` 而可用（受宿主 CORS）。
   - **方案**：出站调用（`fetch` / `https` / `net` 出站 socket）经消息通道**转发到「宿主源的专用 worker」**，用**宿主 `fetch`/网络**执行（受宿主 CORS，必要时由**自建受控 proxy** 兜底）；`dns` 保持回环或转由 proxy 侧解析；npm registry 走**可配置代理**——**不依赖 StackBlitz 托管服务**（官方 README 明确其 API 依赖 StackBlitz proxy，我们须自备）。
   - **验收**：页内 `fetch('https://registry.npmjs.org/ms')` 成功；`npm install` 可选走真 registry/proxy；入站虚拟网络与现有差分 **0 回归**；无第三方托管依赖。
   - **风险**：跨源/CORS；企业出口合规；需自备 proxy。工作量：中–大。
+  - **已实现（2026-09-29）**：新增 `src/node-runtime/net/egress.ts`（`Egress` 传输层：`request()` 走宿主 `fetch`；可选 `proxy` 模板/前缀兜底；可选 `dialTcp` WebSocket 裸 TCP 桥）。接入缝 `Bindings.egress`（`runtime.ts` 装配、worker 里用 `createWorkerEgress()` 以**宿主源 worker 的 `fetch`** 作传输，proxy 由 `VITE_WEB_NODE_EGRESS_PROXY`/`__WEB_NODE_EGRESS_PROXY__` 配置，**不硬编码任何第三方**）。`http`/`https` 的 `acquire()`：非回环主机 → `EgressConnection`（把请求序列化交给 egress，回包经同一 `HttpMessageReader` 复帧）；`net.connect` 非回环 → 无桥则**响亮 `ECONNREFUSED`**。实测（真浏览器、构建产物）：`https.get('https://registry.npmjs.org/ms')` **200**（改前 `ECONNREFUSED`）、`fetch` 200、`net.connect` 诚实失败；`test/egress.test.ts` 13 例（含 proxy 回退、`{url}`/`%s` 展开、错误打标、回环判定）。
 
 - [x] **M123 · 多进程模型：1 进程 = 1 worker（`fork` / `cluster`）** ✅ 2026-09-28 —— 借 WebContainer 的「worker-per-process」
   - **对标（实测）**：WebContainer 每个「进程」是**独立 Web Worker**（CDP 实测 `Node.js Worker PID 2…22`），故 `fork`/`cluster`/多进程**天然支持**。
