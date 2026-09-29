@@ -252,8 +252,9 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 - **做法**：demo 新增 `/project/ts-app/`（`tsconfig.json` + `src/geometry.ts`/`src/index.ts`）与入口 `/project/tsc-build.js`；UI 新按钮 **⌨ tsc build**；`typescript@^5.6.3` 入 demo `devDependencies`。入口走 `ts.readConfigFile → parseJsonConfigFileContent → createProgram → emit → getPreEmitDiagnostics`，然后 **`require()` 编译产物**并打印其导出。
 - **关键**：不是只看 API 报不报错，而是**把 emit 出来的 `dist/index.js` 真的 `require` 进去**（其内部再 `require('./geometry')`），拿到 `{count:2,total:15.1416}`——「解析 tsconfig → 类型检查 → 产出 `.js`+`.d.ts` → 执行产物」全在标签页内闭环。`ts.sys` 直接工作在 VFS 上，无需自定义 CompilerHost。
-- **验收**：单元 `test/build.test.ts` +2 例（缺依赖提示、demo 携带 ts-app 源）；**页内 E2E**（`vite preview` + raw CDP）`reset → install（195 包/914ms，含 typescript@5.9.3）→ ⌨ tsc build`：`tool: typescript v5.9.3` / `inputs: 2 file(s)` / `emit: geometry.d.ts, geometry.js, index.d.ts, index.js` / `program: 2 shapes, total area 15.1416` / `run result: {"count":2,"total":15.1416}` / `result: compiled, emitted and ran in the tab`。门禁：`tsc --noEmit` 净 · `vitest run` **1158 passed / 3 skipped（139 文件）** · build `runtime.worker-*.js` 768.50 kB。
+- **验收**：单元 `test/build.test.ts` +2 例（缺依赖提示、demo 携带 ts-app 源）；**页内 E2E**（`vite preview` + raw CDP）`reset → install（195 包/914ms，含 typescript@5.9.3）→ ⌨ tsc build`：`tool: typescript v5.9.3` / `inputs: 2 file(s)` / `emit: geometry.d.ts, geometry.js, index.d.ts, index.js` / `program: 2 shapes, total area 15.1416` / `run result: {"count":2,"total":15.1416}` / `result: compiled, emitted and ran in the tab`。门禁：`tsc --noEmit` 净 · `vitest run` **1160 passed / 3 skipped（139 文件）** · build `runtime.worker-*.js` 768.50 kB。
 - **线上 E2E**：部署 gh-pages 后同流程复现（见下方元数据）。
+- **关于 crypto-dh（顺带修的真 bug）**：M127 全套跑时 `test/crypto-dh.test.ts` 偶发失败，当时判为环境抖动；M128 期间再现后查明是**真偏离**：OpenSSL 对 `createDiffieHellman(bits, gen)`（及非标准显式素数）走 `dh->length` 未设的路径，用 `BN_priv_rand(BN_num_bits(p) - 1, TOP_ONE, TOP_ANY)`——TOP_ONE 钉死高比特，**私钥字节长固定**为 `ceil((bits(p)-1)/8)`；web-node 却画 `[2, p-2]` 均匀分布，于是 ~255/256 是 64 字节、余下是 63，语料便在罕见情况下抓到。实证（真 Node）：512→恒 64、1024→恒 128、非标准 512 素数→恒 64（各 3000/2000/400 次）；而**命名组**（modp14→29、modp5→25）与**匹配标准组的显式素数**（modp14 素数→27/28/29）保持各自语义。已改 `dh.ts` 的默认分支为 TOP_ONE 语义（固定长度），新增 2 例确定性单元测试（bits 表 200 次恒 64/128；非标准素数 200 次恒 64）。
 
 ### 2026-09-29 · M127 —— 行为门禁扩面：从「能调用」到「算得对」
 
@@ -264,7 +265,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
   - **修复**：把 `trace_events`（别名 `node:trace_events`）登记进 `unsupported.ts` 的 `unsupportedSpecs`——**导入不炸、使用才响亮抛 `ERR_WEB_NODE_NOT_IMPLEMENTED`**。定为「不支持」而非「实现」的理由：它的能力（V8 tracing 子系统）在标签页里**确实不存在**；且 **Node 自身在未编 tracing 的构建上也抛 `ERR_TRACE_EVENTS_UNAVAILABLE`**，所以「标签页无 tracing」是**上游正当**的能力缺口——申报为偏离比伪造 `hasTracing=true` 而实际不发 trace 事件诚实。
 - **负向验证**：临时摘掉 `trace_events` 登记 → 门禁立即失败并指名 `trace_events:createTracing: oracle="node" web-node="throw:MODULE_NOT_FOUND"`；恢复后复绿。
 - **验收**：`tsc --noEmit` 净 · `vitest run` **1156 passed / 3 skipped（139 文件）** · build：`runtime.worker-*.js` 765.39 kB、`vendored-core.txt` 614.66 kB/gzip 121.92 kB、`vendored-rest.txt` 1,357.81 kB/gzip 233.89 kB。
-- **附注**：全套首次跑时 `test/crypto-dh.test.ts` 偶发 1 次失败（DH 观测值不等）；**不可复现**——真 Node oracle 跑 10 次、web-node 探针跑 40 次均稳定一致，隔离跑该文件 8/8 绿；判为一次性环境抖动（与本次改动无关），保留观察。
+- **附注**：全套首次跑时 `test/crypto-dh.test.ts` 偶发 1 次失败（DH 观测值不等）；当时（隔离跑 8/8 绿、oracle 10 次 + 探针 40 次稳定）误判为环境抖动。**M128 期间它第二次复现，查明是真 bug，已修**（见 M128 条目「关于 crypto-dh」）。
 
 ### 2026-09-29 · M126 —— 启动载荷再降：vendored 源拆成 core / lazy 两层
 
