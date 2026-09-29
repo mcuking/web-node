@@ -260,12 +260,14 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 - `npm/tarball.ts` 新增流式路径：`streamOf` / `gunzipStream`（`DecompressionStream('gzip')`）/ `ByteQueue`（按需拉取的增量字节队列）/ `untarStream`（增量 tar 解析，逐 entry yield）/ `extractTarballStream`。缓冲版 `gunzip`/`untar`/`extractTarball` 保留（测试与小 `file:` 包用）。
 - `npm/install.ts`：下载+校验阶段**只缓存压缩包**（`client.tarball` 本就缓存，免二次下载；校验保持「先全下载校验、再写盘」的原子性）；解压阶段改用 `extractTarballStream` **逐文件流式写入 VFS**，不再物化整包。峰值与单文件同阶，与依赖树大小无关。
 
-**实测（真浏览器，冷装 Webpack；CDP `Runtime.getHeapUsage` 采样 worker 堆）**：
+**实测（真浏览器，冷装 Webpack；CDP `Runtime.getHeapUsage` 采样 runtime worker 的 V8 堆，多 isolate 取**当前页那个** worker）**：
 
-- install 峰值：**1942MB → 34MB**（约 56×降低）。
-- 文件落盘正确、install 正常完成（`installed`），`files`/`node_modules` 齐全。
+- install 峰值：**1942MB → 183MB（dev）/ 31MB（线上生产）**。
+- 文件落盘正确、install 正常完成（`installed 63`），`node_modules` 齐全。
 
-**遗留（下次打磨）**：build（冷启编译 webpack 模块图）仍有 ~1.3GB 瞬时峰值，GC 后可回落到 ~31MB。这次未改；install 修掉后已消除与 build 峰值叠加导致的崩溃。
+**踩过的测量坑（记录下来）**：`Runtime.getHeapUsage` 是**进程内多个 worker 共享**的吗？不——每个 worker 一个 isolate，各自独立；但 CDP target 列表会列出**同一 origin 上其它标签页遗留的 worker**，若脚本取「所有 runtime worker 的最大值」，会被一个早已飙到 1.2GB 的旧标签页污染，误报 install/build 峰值。**必须先关掉多余标签页、只留一个页面再采样**（本页 `cleanmeasure`/`onlinemem` 脚本的做法）。另外采样间隔太疏（>1s）会漏掉 1 秒内的尖峰，需 ≤300ms。
+
+**遗留（下次打磨）**：build（冷启编译 webpack 模块图）仍有峰值（dev ~479MB / 线上 ~51MB），GC 后可回落。对比基座：**原生 Node 跑同一个 webpack 生产构建堆峰仅 36MB**——说明运行时编译模块图有数倍放大，是下一个要攻的点；但当前峰值已远离崩溃阈值，把 install 的 1.9GB 修掉后已消除「install+build 叠加致崩」。
 
 **测试**：`test/npm.test.ts` 新增 4 条：流式结果与缓冲版逐条等价、7 字节小分块跨 chunk 解析、流式 pax 长路径、包装目录剥离。
 

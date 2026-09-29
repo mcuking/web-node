@@ -673,10 +673,10 @@
 
 - [x] **M131 · 依赖安装改流式解包（修内存爆表）** ✅ 2026-09-29
   - **做**：`npm/tarball.ts` 新增流式路径（`streamOf`/`gunzipStream`(`DecompressionStream`)/`ByteQueue`/`untarStream`/`extractTarballStream`）；`npm/install.ts` 下载阶段只缓存压缩包、解压阶段逐文件流式写入 VFS（不再缓存整包）。
-  - **实测**（真浏览器冷装 Webpack）：install 峰值 worker 堆 **1942MB → 34MB**（~56×）。
+  - **实测**（真浏览器冷装 Webpack，只留一个页面时采样）：install 峰值 worker 堆 **1942MB → 183MB(dev)/31MB(线上)**（~10−60×）。
   - **测试**：`test/npm.test.ts` +4（流式与缓冲版逐条等价 / 7 字节分块 / 流式 pax / 包装目录）。
   - **验收**：`typecheck` 净 · `vitest run` **1185 passed / 3 skipped** · `build` worker **776.2 kB**。
-  - **遗留**：build 冷启编译 webpack 模块图仍有 ~1.3GB 瞬时峰值（GC 可回收）——下次打磨。
+  - **遗留**：build 冷启（编译 webpack 模块图）仍有峰值（dev ~479MB / 线上 ~51MB；原生 Node 仅 36MB → 运行时编译有放大）——下次打磨。
 
 ---
 
