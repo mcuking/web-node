@@ -35,6 +35,9 @@ export const DEMO_FILES: Record<string, string> = {
         tailwindcss: '^3.4.14',
         autoprefixer: '^10.4.20',
         picocolors: '^1.0.0',
+        // M128: the real TypeScript compiler, run inside the tab (parse tsconfig ->
+        // typecheck -> emit -> execute the emitted JS). Pure JS, so no native addon.
+        typescript: '^5.6.3',
         'source-map-js': '^1.2.0',
         nanoid: '^3.3.7',
         // A `file:` dependency: installed straight out of this virtual file
@@ -2116,6 +2119,105 @@ module.exports = {
     autoprefixer: {},
   },
 };
+`,
+
+  '/project/ts-app/tsconfig.json': JSON.stringify(
+    {
+      compilerOptions: {
+        target: 'ES2020',
+        module: 'commonjs',
+        strict: true,
+        declaration: true,
+        outDir: 'dist',
+        rootDir: 'src',
+      },
+      include: ['src'],
+    },
+    null,
+    2,
+  ),
+
+  '/project/ts-app/src/geometry.ts': `// A tiny, typed module for the tsc build (see tsc-build.js).
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export type Shape =
+  | { kind: 'circle'; r: number }
+  | { kind: 'rect'; w: number; h: number };
+
+export function area(s: Shape): number {
+  switch (s.kind) {
+    case 'circle':
+      return Math.PI * s.r * s.r;
+    case 'rect':
+      return s.w * s.h;
+  }
+}
+`,
+
+  '/project/ts-app/src/index.ts': `import { area, Shape } from './geometry';
+
+const shapes: Shape[] = [
+  { kind: 'rect', w: 3, h: 4 },
+  { kind: 'circle', r: 1 },
+];
+
+let total = 0;
+for (const s of shapes) total += area(s);
+
+export const summary = { count: shapes.length, total: Number(total.toFixed(4)) };
+console.log('program     : ' + shapes.length + ' shapes, total area ' + total.toFixed(4));
+`,
+
+  '/project/tsc-build.js': `// Click "tsc" to run this: it compiles ts-app/ with the *real* TypeScript
+// compiler inside the tab - parse tsconfig, typecheck, emit, then execute the
+// emitted CommonJS to prove the output is real, not just written.
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = '/project';
+const APP = path.join(ROOT, 'ts-app');
+const NM = path.join(ROOT, 'node_modules');
+
+console.log('-- tsc build (milestone 128) --');
+if (!fs.existsSync(path.join(NM, 'typescript'))) {
+  console.log('typescript: not installed yet - click "Install deps" first');
+  process.exit(0);
+}
+
+const ts = require('typescript');
+console.log('tool        : typescript v' + ts.version);
+
+const configPath = path.join(APP, 'tsconfig.json');
+const read = ts.readConfigFile(configPath, ts.sys.readFile);
+if (read.error) {
+  console.log('config      : ' + ts.flattenDiagnosticMessageText(read.error.messageText, ' '));
+}
+const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, APP);
+console.log('inputs      : ' + parsed.fileNames.length + ' file(s), outDir ' + parsed.options.outDir);
+
+const program = ts.createProgram(parsed.fileNames, parsed.options);
+const emit = program.emit();
+const diags = ts.getPreEmitDiagnostics(program).concat(emit.diagnostics);
+for (const d of diags) {
+  const where = d.file ? path.basename(d.file.fileName) : 'tsconfig.json';
+  console.log('diagnostic  : TS' + d.code + ' ' + ts.flattenDiagnosticMessageText(d.messageText, ' ') + ' (' + where + ')');
+}
+if (diags.length) {
+  console.log('result      : ' + diags.length + ' diagnostic(s)');
+  process.exit(1);
+}
+
+const distDir = path.join(APP, 'dist');
+const emitted = fs.readdirSync(distDir).sort();
+console.log('emit        : ' + emitted.join(', '));
+
+// Execute the compiled output - proving the emitted JS is real, not just written.
+const mod = require(path.join(distDir, 'index.js'));
+console.log('run result  : ' + JSON.stringify(mod.summary));
+console.log('result      : compiled, emitted and ran in the tab');
 `,
 
   '/project/notes.md': `# web-node demo project

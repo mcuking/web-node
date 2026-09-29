@@ -101,6 +101,31 @@ describe('demo build script', () => {
     expect(out.join('')).toContain('not installed yet');
     expect(out.join('')).not.toContain('vite failed');
   });
+
+  it('explains how to install typescript when it is missing (M128)', async () => {
+    const { run, out } = boot(DEMO_FILES, '/project/tsc-build.js');
+    run();
+    await tick(20);
+    expect(out.join('')).toContain('tsc build (milestone 128)');
+    expect(out.join('')).toContain('not installed yet');
+  });
+
+  it('ships the ts-app sources the tsc demo compiles (M128)', () => {
+    const { run, out } = boot(
+      {
+        ...DEMO_FILES,
+        '/project/tsc-list.js': `
+          const fs = require('fs');
+          console.log('tsconfig ' + fs.existsSync('/project/ts-app/tsconfig.json'));
+          console.log('src ' + fs.readdirSync('/project/ts-app/src').sort().join(','));
+        `,
+      },
+      '/project/tsc-list.js',
+    );
+    run();
+    expect(out.join('')).toContain('tsconfig true');
+    expect(out.join('')).toContain('src geometry.ts,index.ts');
+  });
 });
 
 describe('fs/promises, perf_hooks and url builtins', () => {

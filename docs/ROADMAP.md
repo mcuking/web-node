@@ -6,8 +6,8 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[⤳]` **已并入其他里程碑**（保留条目作决策痕迹，**不单独计数**） · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。**当前剩余：G·M113（子域名静态托管）· I·M122（沙箱出站网络）**（二者暂被搁置；新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I）。
-> - **最后更新**：2026-09-29（**M127 ✅ 行为门禁扩面**——把 M124 的门禁从「能调用」加深到「算得对」：观测 **104 → 187**，新增均为值/错误形状/async 往返；当场扑出 `trace_events` 的 `MODULE_NOT_FOUND` 并登记为类型化不支持。**M126 ✅ 启动载荷再降**——把 1.8 MB vendored 源拆成「启动 core 层（54 文件 / gzip 121.9 KB，预加载 + `ready` 前 await）」与「lazy 层（109 文件 / gzip 233.9 KB，后台低优先级预取，跑用户代码前 await）」，启动期 awaited 的源载荷 **gzip 344.6 → 121.9 KB**；顺带修一个真差异——`Realm#materialize` 在求值抛错后把记录留在 `loading`，二次 `require` 会静默拿到半成品导出，Node 是丢弃缓存并重跑，已改正）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅。
+> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。**当前剩余：G·M113（子域名静态托管）· I·M122（沙箱出站网络）**（二者暂被搁置；新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I、**M128 真实工具链端到端（真 tsc）✅** 见阶段 F）。
+> - **最后更新**：2026-09-29（**M128 ✅ 真实工具链端到端**——页内跑真 TypeScript 编译器：解析 tsconfig → 类型检查 → 产出 `.js`/`.d.ts` → 执行编译产物（拿到 `{count:2,total:15.1416}`），全在标签页内闭环；阶段 F 至此结清。**M127 ✅ 行为门禁扩面**——把 M124 的门禁从「能调用」加深到「算得对」：观测 **104 → 187**，新增均为值/错误形状/async 往返；当场扑出 `trace_events` 的 `MODULE_NOT_FOUND` 并登记为类型化不支持。**M126 ✅ 启动载荷再降**——把 1.8 MB vendored 源拆成「启动 core 层（54 文件 / gzip 121.9 KB，预加载 + `ready` 前 await）」与「lazy 层（109 文件 / gzip 233.9 KB，后台低优先级预取，跑用户代码前 await）」，启动期 awaited 的源载荷 **gzip 344.6 → 121.9 KB**；顺带修一个真差异——`Realm#materialize` 在求值抛错后把记录留在 `loading`，二次 `require` 会静默拿到半成品导出，Node 是丢弃缓存并重跑，已改正）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅。
 
 ---
 
@@ -270,6 +270,13 @@
   - 门禁：`tsc --noEmit` 净 · `vitest run` **1137 passed / 3 skipped（134 文件）** · build（`runtime.worker-Czi1jJ7Z.js` **752.31 kB**）。
   - **附**：`react`/`react-dom`/`@vitejs/plugin-react`/`tailwindcss`/`autoprefixer` 加入 demo 的 `devDependencies`。
   - **为何不靠 `postcss.config.js` 自动发现**：Vite 用 `postcssrc({}, config.root)` 找配置，本运行时下未生效（`@tailwind` 原样留在产物里）；显式传插件是等价且确定的做法，`postcss.config.js` 仍随 demo 提供作参考。
+
+- [x] **M128 · 真实工具链端到端：页内跑真 TypeScript 编译器** ✅ 2026-09-29
+  - **动机**：M109/M110/M112/M121 已跑通打包器（webpack/rspack/vite）与 CSS 管线，但还没有一个**真『编译器』**端到端闭环。`tsc` 是纯 JS、无原生扩展、且是**最广泛存在的真工具链**，适合作为「类型层工具链在标签页内真能跑」的证据。
+  - **做法**：demo 新增 `/project/ts-app/`（`tsconfig.json` + `src/geometry.ts`/`src/index.ts`，带一个穷尽 switch 的联合类型与 `interface`）与入口 `/project/tsc-build.js`；UI 新按钮 **⌨ tsc build**；`typescript@^5.6.3` 加入 demo `devDependencies`。入口：`ts.readConfigFile` → `ts.parseJsonConfigFileContent` → `ts.createProgram` → `program.emit()` → `ts.getPreEmitDiagnostics`，然后 **`require()` 编译产物**、打印其导出。
+  - **关键点**：不是只调 API 看有没有报错——而是**把 emit 出来的 `dist/index.js` 真的 `require` 进去**（`dist/geometry.js` 也由它 `require('./geometry')` 解析），拿到 `{count:2,total:15.1416}`；即「**解析 tsconfig → 类型检查 → 产出 `.js`+`.d.ts` → 执行产物**」全在标签页内闭环。
+  - **`ts.sys` 直接工作在 VFS 上**：`ts.sys.readFile/readDirectory` 在本运行时指向虚拟 FS，无需自定义 CompilerHost；`outDir`/`rootDir` 与声明文件（`declaration:true`）均正常落盘。
+  - **验收**：单元 `test/build.test.ts` 新增 2 例（缺依赖时提示安装、demo 携带 ts-app 源）。**页内 E2E**（`vite preview` + raw CDP）：`reset → install（195 包 / 914ms，含 typescript@5.9.3）→ ⌨ tsc build`，终端：`tool: typescript v5.9.3` / `inputs: 2 file(s), outDir /project/ts-app/dist` / `emit: geometry.d.ts, geometry.js, index.d.ts, index.js` / `program: 2 shapes, total area 15.1416` / `run result: {"count":2,"total":15.1416}` / `result: compiled, emitted and ran in the tab`。门禁：`tsc --noEmit` 净 · `vitest run` **1158 passed / 3 skipped（139 文件）** · build（`runtime.worker-*.js` **768.50 kB**）。
 
 ---
 

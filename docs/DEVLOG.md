@@ -184,7 +184,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 > **固定路线图在 [`docs/ROADMAP.md`](ROADMAP.md)**——正序、带编号、可勾选。**阶段 A–I 已基本结清**；仅余 G·M113（子域名静态托管，卡在通配 DNS）与 I·M122（沙箱出站网络，需外部代理）两项，暂被搁置。2026-09-29 新开 **M126 启动载荷再降 ✅**（阶段 E）。
 >
-> **近期待办**：**M126（启动载荷再降：vendored 源拆 core/lazy 两层）✅ 2026-09-29** · **M127（行为门禁扩面：从「能调用」到「算得对」）✅ 2026-09-29**；下一步 **M128（真实工具链端到端）**。
+> **近期待办**：**M126 ✅ · M127 ✅ · M128（真实工具链端到端：页内跑真 TypeScript 编译器）✅ 2026-09-29**。阶段 F 至此全部结清；仅余 G·M113 与 I·M122（两者仍被搁置）。
 
 按优先级：
 
@@ -245,6 +245,15 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-29 · M128 —— 真实工具链端到端：页内跑真 TypeScript 编译器
+
+**动机**：已跑通 webpack/rspack/vite（打包器）与 PostCSS/Tailwind（CSS 管线），但还缺一个真『编译器』的端到端闭环。`tsc` 纯 JS、无原生扩展、最广泛存在，适合作「类型层工具链在标签页内真能跑」的证据。
+
+- **做法**：demo 新增 `/project/ts-app/`（`tsconfig.json` + `src/geometry.ts`/`src/index.ts`）与入口 `/project/tsc-build.js`；UI 新按钮 **⌨ tsc build**；`typescript@^5.6.3` 入 demo `devDependencies`。入口走 `ts.readConfigFile → parseJsonConfigFileContent → createProgram → emit → getPreEmitDiagnostics`，然后 **`require()` 编译产物**并打印其导出。
+- **关键**：不是只看 API 报不报错，而是**把 emit 出来的 `dist/index.js` 真的 `require` 进去**（其内部再 `require('./geometry')`），拿到 `{count:2,total:15.1416}`——「解析 tsconfig → 类型检查 → 产出 `.js`+`.d.ts` → 执行产物」全在标签页内闭环。`ts.sys` 直接工作在 VFS 上，无需自定义 CompilerHost。
+- **验收**：单元 `test/build.test.ts` +2 例（缺依赖提示、demo 携带 ts-app 源）；**页内 E2E**（`vite preview` + raw CDP）`reset → install（195 包/914ms，含 typescript@5.9.3）→ ⌨ tsc build`：`tool: typescript v5.9.3` / `inputs: 2 file(s)` / `emit: geometry.d.ts, geometry.js, index.d.ts, index.js` / `program: 2 shapes, total area 15.1416` / `run result: {"count":2,"total":15.1416}` / `result: compiled, emitted and ran in the tab`。门禁：`tsc --noEmit` 净 · `vitest run` **1158 passed / 3 skipped（139 文件）** · build `runtime.worker-*.js` 768.50 kB。
+- **线上 E2E**：部署 gh-pages 后同流程复现（见下方元数据）。
 
 ### 2026-09-29 · M127 —— 行为门禁扩面：从「能调用」到「算得对」
 

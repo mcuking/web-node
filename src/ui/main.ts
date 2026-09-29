@@ -53,6 +53,7 @@ const viteBtn = $<HTMLButtonElement>('vite');
 const viteDevBtn = $<HTMLButtonElement>('vitedev');
 const viteReactBtn = $<HTMLButtonElement>('vitereact');
 const wpDevBtn = $<HTMLButtonElement>('wpdev');
+const tscBtn = $<HTMLButtonElement>('tsc');
 const clusterBtn = $<HTMLButtonElement>('cluster');
 const hmrEditBtn = $<HTMLButtonElement>('hmred');
 const hmrCssBtn = $<HTMLButtonElement>('hmrcss');
@@ -180,6 +181,10 @@ async function viteReactBuildProject(): Promise<void> {
 
 async function webpackDevProject(): Promise<void> {
   await runEntry('/project/webpack-dev.mjs', 'node /project/webpack-dev.mjs', wpDevBtn);
+}
+
+async function tscBuildProject(): Promise<void> {
+  await runEntry('/project/tsc-build.js', 'node /project/tsc-build.js', tscBtn);
 }
 
 async function clusterProject(): Promise<void> {
@@ -390,6 +395,7 @@ viteDevBtn.addEventListener('click', () => void viteDevProject());
 viteReactBtn.addEventListener('click', () => void viteReactBuildProject());
 clusterBtn.addEventListener('click', () => void clusterProject());
 wpDevBtn.addEventListener('click', () => void webpackDevProject());
+tscBtn.addEventListener('click', () => void tscBuildProject());
 
 async function installDeps(): Promise<void> {
   await save();
