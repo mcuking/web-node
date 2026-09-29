@@ -47,19 +47,11 @@ const statusEl = $<HTMLSpanElement>('status');
 const bootEl = $<HTMLSpanElement>('boot');
 const factsEl = $<HTMLSpanElement>('facts');
 const runBtn = $<HTMLButtonElement>('run');
-const buildBtn = $<HTMLButtonElement>('build');
-const bundleBtn = $<HTMLButtonElement>('bundle');
-const viteBtn = $<HTMLButtonElement>('vite');
-const viteDevBtn = $<HTMLButtonElement>('vitedev');
-const viteReactBtn = $<HTMLButtonElement>('vitereact');
-const wpDevBtn = $<HTMLButtonElement>('wpdev');
-const tscBtn = $<HTMLButtonElement>('tsc');
-const clusterBtn = $<HTMLButtonElement>('cluster');
-const hmrEditBtn = $<HTMLButtonElement>('hmred');
-const hmrCssBtn = $<HTMLButtonElement>('hmrcss');
-const installBtn = $<HTMLButtonElement>('install');
 const clearBtn = $<HTMLButtonElement>('clear');
 const resetBtn = $<HTMLButtonElement>('reset');
+const chipsEl = $<HTMLDivElement>('scenario-chips');
+const stepsEl = $<HTMLDivElement>('steps');
+const nextHintEl = $<HTMLSpanElement>('next-hint');
 const portSelect = $<HTMLSelectElement>('port-select');
 const refreshBtn = $<HTMLButtonElement>('refresh');
 const openTab = $<HTMLAnchorElement>('open-tab');
@@ -127,24 +119,33 @@ async function save(): Promise<void> {
   }
 }
 
-async function runProject(): Promise<void> {
-  await runEntry('/project/index.js', 'node /project/index.js', runBtn);
-}
+// --- process runner --------------------------------------------------------
 
 /**
- * Run any VFS entry (`node <path>`) with the shared busy/status/terminal
- * handling. The Run/Build/Bundle/Vite buttons all go through here.
+ * `node <entry>` with shared terminal/status handling.
+ *
+ * `awaitExit` distinguishes the two shapes of demo entry: a build that runs to
+ * completion (await it, report the elapsed time, mark the step done) vs. a
+ * server that binds a port and then stays up (`index.js`, `vite-dev.mjs`,
+ * `webpack-dev.mjs`, `vite-react.mjs`). The latter never settles — awaiting it
+ * would freeze the button forever — so it is started and the UI moves on; the
+ * port watcher picks it up when it comes up.
  */
-async function runEntry(entry: string, label: string, button: HTMLButtonElement): Promise<void> {
+async function runProcess(entry: string, label: string, awaitExit: boolean): Promise<void> {
   await save();
-  button.disabled = true;
-  runBtn.disabled = true;
   setStatus('running…', 'running');
-  // Echo a header so consecutive runs are visually separated.
   writeTerminal(`\n$ ${label}\n`, 'sys');
   const started = performance.now();
+  const promise = client.run(entry);
+  if (!awaitExit) {
+    promise.catch((err: unknown) => {
+      writeTerminal(`[run failed] ${(err as Error).message}\n`, 'err');
+      setStatus('error', 'err');
+    });
+    return;
+  }
   try {
-    await client.run(entry);
+    await promise;
     const ms = (performance.now() - started).toFixed(0);
     if (!bootTiming.firstRunMs) bootTiming.firstRunMs = Math.round(performance.now());
     setStatus(`done in ${ms}ms`, 'ok');
@@ -152,44 +153,11 @@ async function runEntry(entry: string, label: string, button: HTMLButtonElement)
   } catch (err) {
     writeTerminal(`[run failed] ${(err as Error).message}\n`, 'err');
     setStatus('error', 'err');
-  } finally {
-    button.disabled = false;
-    runBtn.disabled = false;
-    await refreshPorts();
+    throw err;
   }
 }
 
-async function buildProject(): Promise<void> {
-  await runEntry('/project/build.js', 'node /project/build.js', buildBtn);
-}
-
-async function bundleProject(): Promise<void> {
-  await runEntry('/project/bundle.js', 'node /project/bundle.js', bundleBtn);
-}
-
-async function viteBuildProject(): Promise<void> {
-  await runEntry('/project/vite-build.mjs', 'node /project/vite-build.mjs', viteBtn);
-}
-
-async function viteDevProject(): Promise<void> {
-  await runEntry('/project/vite-dev.mjs', 'node /project/vite-dev.mjs', viteDevBtn);
-}
-
-async function viteReactBuildProject(): Promise<void> {
-  await runEntry('/project/vite-react.mjs', 'node /project/vite-react.mjs', viteReactBtn);
-}
-
-async function webpackDevProject(): Promise<void> {
-  await runEntry('/project/webpack-dev.mjs', 'node /project/webpack-dev.mjs', wpDevBtn);
-}
-
-async function tscBuildProject(): Promise<void> {
-  await runEntry('/project/tsc-build.js', 'node /project/tsc-build.js', tscBtn);
-}
-
-async function clusterProject(): Promise<void> {
-  await runEntry('/project/cluster-demo.mjs', 'node /project/cluster-demo.mjs', clusterBtn);
-}
+// --- HMR edits -------------------------------------------------------------
 
 // A VFS write is what the dev server watches, so saving a source file makes the
 // running preview hot-update. This button does exactly that write, on the file
@@ -218,8 +186,6 @@ async function hmrEdit(): Promise<void> {
   writeTerminal(`\n[hmr] wrote site/src/message.js (#${n}) — watch the Preview\n`, 'sys');
   if (activeFile === path) editorEl.value = source;
 }
-
-hmrEditBtn.addEventListener('click', () => void hmrEdit());
 
 // CSS HMR takes the other Vite update path: editing the stylesheet produces a
 // `css-update`, which Vite applies by swapping the injected `<style>` in place
@@ -257,13 +223,342 @@ async function hmrCssEdit(): Promise<void> {
   if (activeFile === path) editorEl.value = source;
 }
 
-hmrCssBtn.addEventListener('click', () => void hmrCssEdit());
+// --- scenario / step engine ------------------------------------------------
+
+/**
+ * The nav bar used to be a flat row of 13 buttons with no ordering, so it was
+ * easy to click a tool before its dependencies existed and get a confusing
+ * `MODULE_NOT_FOUND`. The UI is now a *scenario stepper*: pick a scenario, and
+ * the bar shows its steps in order, with prerequisites gated and the next
+ * action highlighted.
+ */
+type StepId =
+  | 'install'
+  | 'run'
+  | 'build'
+  | 'bundle'
+  | 'vite'
+  | 'vitedev'
+  | 'hmred'
+  | 'hmrcss'
+  | 'vitereact'
+  | 'wpdev'
+  | 'tsc'
+  | 'cluster'
+  | 'rspackInstall'
+  | 'rspackBuild';
+
+type Requirement = 'none' | 'deps' | 'rspackDeps' | 'viteDev';
+
+interface StepDef {
+  label: string;
+  /** What must be true before this step can run. */
+  needs: Requirement;
+  /** A server that binds a port and stays up — never awaited (see `runProcess`). */
+  long?: boolean;
+  exec: () => Promise<void>;
+}
+
+interface ScenarioDef {
+  id: string;
+  label: string;
+  blurp: string;
+  steps: StepId[];
+}
+
+const STEPS: Record<StepId, StepDef> = {
+  install: {
+    label: '⬇ Install deps',
+    needs: 'none',
+    exec: () => installDeps(),
+  },
+  run: {
+    label: '▶ Run',
+    needs: 'deps',
+    long: true,
+    exec: () => runProcess('/project/index.js', 'node /project/index.js', false),
+  },
+  build: {
+    label: '▦ Build',
+    needs: 'deps',
+    exec: () => runProcess('/project/build.js', 'node /project/build.js', true),
+  },
+  bundle: {
+    label: '⧉ Bundle',
+    needs: 'deps',
+    exec: () => runProcess('/project/bundle.js', 'node /project/bundle.js', true),
+  },
+  vite: {
+    label: '⚡ Vite build',
+    needs: 'deps',
+    exec: () => runProcess('/project/vite-build.mjs', 'node /project/vite-build.mjs', true),
+  },
+  vitedev: {
+    label: '🛠 Vite dev',
+    needs: 'deps',
+    long: true,
+    exec: () => runProcess('/project/vite-dev.mjs', 'node /project/vite-dev.mjs', false),
+  },
+  hmred: { label: '✏️ HMR JS', needs: 'viteDev', exec: () => hmrEdit() },
+  hmrcss: { label: '🎨 HMR CSS', needs: 'viteDev', exec: () => hmrCssEdit() },
+  vitereact: {
+    label: '⚛ Vite React',
+    needs: 'deps',
+    long: true,
+    exec: () => runProcess('/project/vite-react.mjs', 'node /project/vite-react.mjs', false),
+  },
+  wpdev: {
+    label: '📦 Webpack dev',
+    needs: 'deps',
+    long: true,
+    exec: () => runProcess('/project/webpack-dev.mjs', 'node /project/webpack-dev.mjs', false),
+  },
+  tsc: {
+    label: '⌨ tsc build',
+    needs: 'deps',
+    exec: () => runProcess('/project/tsc-build.js', 'node /project/tsc-build.js', true),
+  },
+  cluster: {
+    label: '🖧 Cluster',
+    needs: 'none',
+    exec: () => runProcess('/project/cluster-demo.mjs', 'node /project/cluster-demo.mjs', true),
+  },
+  rspackInstall: {
+    label: '⬇ Install rspack deps',
+    needs: 'none',
+    exec: () => installRspackDeps(),
+  },
+  rspackBuild: {
+    label: '🔷 rspack build',
+    needs: 'rspackDeps',
+    exec: () => runProcess('/project/rspack/build.cjs', 'node /project/rspack/build.cjs', true),
+  },
+};
+
+const SCENARIOS: ScenarioDef[] = [
+  {
+    id: 'run',
+    label: '▶ Run app',
+    blurp: 'start the demo HTTP server on :3000',
+    steps: ['install', 'run'],
+  },
+  {
+    id: 'vite',
+    label: '⚡ Vite',
+    blurp: 'Vite build + dev server + HMR, all in the tab',
+    steps: ['install', 'vite', 'vitedev', 'hmred', 'hmrcss'],
+  },
+  {
+    id: 'webpack',
+    label: '📦 Webpack',
+    blurp: 'webpack dev server (watch + reload)',
+    steps: ['install', 'wpdev'],
+  },
+  {
+    id: 'rspack',
+    label: '🔷 rspack',
+    blurp: 'Rust bundler via wasm32-wasi + a real Worker thread pool',
+    steps: ['rspackInstall', 'rspackBuild'],
+  },
+  {
+    id: 'react',
+    label: '⚛ React',
+    blurp: 'Vite + JSX + Tailwind/PostCSS',
+    steps: ['install', 'vitereact'],
+  },
+  {
+    id: 'esbuild',
+    label: '▦ esbuild',
+    blurp: 'bundle TypeScript with esbuild-wasm',
+    steps: ['install', 'build'],
+  },
+  {
+    id: 'rollup',
+    label: '⧉ rollup',
+    blurp: 'bundle ES modules with rollup-wasm',
+    steps: ['install', 'bundle'],
+  },
+  {
+    id: 'tsc',
+    label: '⌨ tsc',
+    blurp: 'the real TypeScript compiler: parse → typecheck → emit',
+    steps: ['install', 'tsc'],
+  },
+  {
+    id: 'cluster',
+    label: '🖧 Cluster',
+    blurp: 'two processes sharing one port',
+    steps: ['cluster'],
+  },
+];
+
+let activeScenario = SCENARIOS[0].id;
+let busy = false;
+let ports: number[] = [];
+let depsReady = false;
+let rspackDepsReady = false;
+let viteDevReady = false;
+/** Step ids that have actually run (derived gates are synced in `syncDerived`). */
+const completed = new Set<StepId>();
+
+function scenarioById(id: string): ScenarioDef {
+  return SCENARIOS.find((s) => s.id === id) ?? SCENARIOS[0];
+}
+
+/** Fold observed runtime state into `completed` (so gates survive a reload). */
+function syncDerived(): void {
+  const sync = (id: StepId, done: boolean): void => {
+    if (done) completed.add(id);
+    else completed.delete(id);
+  };
+  sync('install', depsReady);
+  sync('rspackInstall', rspackDepsReady);
+  sync('vitedev', viteDevReady);
+}
+
+function stepEnabled(id: StepId): boolean {
+  switch (STEPS[id].needs) {
+    case 'deps':
+      return depsReady;
+    case 'rspackDeps':
+      return rspackDepsReady;
+    case 'viteDev':
+      return viteDevReady;
+    default:
+      return true;
+  }
+}
+
+function requirementText(needs: Requirement): string {
+  switch (needs) {
+    case 'deps':
+      return 'needs step 1 — Install deps first';
+    case 'rspackDeps':
+      return 'needs step 1 — Install rspack deps first';
+    case 'viteDev':
+      return 'needs the Vite dev server running';
+    default:
+      return '';
+  }
+}
+
+function renderChips(): void {
+  chipsEl.innerHTML = '';
+  for (const scenario of SCENARIOS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chip';
+    btn.dataset.scenario = scenario.id;
+    btn.textContent = scenario.label;
+    btn.title = scenario.blurp;
+    if (scenario.id === activeScenario) btn.classList.add('active');
+    btn.addEventListener('click', () => selectScenario(scenario.id));
+    chipsEl.appendChild(btn);
+  }
+}
+
+/**
+ * Rebuild the step bar for the active scenario and refresh the "next step"
+ * guidance. A step is:
+ *   - *done*    (✓) once its effect is observed (deps installed, dev server up)
+ *                  or it has run to completion this session;
+ *   - *blocked* (grey, disabled) while its prerequisite is unmet;
+ *   - *next*    (highlighted) when it is the first runnable, not-yet-done step.
+ */
+function renderSteps(): void {
+  const scenario = scenarioById(activeScenario);
+  stepsEl.innerHTML = '';
+  let nextId: StepId | null = null;
+
+  scenario.steps.forEach((id, index) => {
+    const def = STEPS[id];
+    const enabled = stepEnabled(id);
+    const done = completed.has(id);
+    const isNext = nextId === null && enabled && !done;
+    if (isNext) nextId = id;
+
+    if (index > 0) {
+      const arrow = document.createElement('span');
+      arrow.className = 'step-arrow';
+      arrow.textContent = '→';
+      stepsEl.appendChild(arrow);
+    }
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'step';
+    btn.dataset.step = id;
+    const num = document.createElement('span');
+    num.className = 'step-num';
+    num.textContent = done ? '✓' : String(index + 1);
+    const text = document.createElement('span');
+    text.className = 'step-text';
+    text.textContent = def.label;
+    btn.append(num, text);
+    if (done) btn.classList.add('done');
+    if (isNext) btn.classList.add('next');
+    if (!enabled) {
+      btn.classList.add('blocked');
+      btn.disabled = true;
+      btn.title = requirementText(def.needs);
+    } else {
+      btn.title = scenario.blurp;
+      btn.disabled = busy;
+      btn.addEventListener('click', () => void runStep(id));
+    }
+    stepsEl.appendChild(btn);
+  });
+
+  updateHint(nextId);
+  runBtn.disabled = busy || !depsReady;
+}
+
+function updateHint(nextId: StepId | null): void {
+  if (busy) {
+    nextHintEl.textContent = 'running…';
+    nextHintEl.className = 'next-hint running';
+    return;
+  }
+  if (nextId) {
+    nextHintEl.textContent = `Next: click ${STEPS[nextId].label}`;
+    nextHintEl.className = 'next-hint action';
+    return;
+  }
+  nextHintEl.textContent = '✓ Scenario complete — try another';
+  nextHintEl.className = 'next-hint done';
+}
+
+function selectScenario(id: string): void {
+  activeScenario = id;
+  renderChips();
+  renderSteps();
+}
+
+async function runStep(id: StepId): Promise<void> {
+  if (busy || !stepEnabled(id)) return;
+  busy = true;
+  renderSteps();
+  try {
+    await STEPS[id].exec();
+    if (!STEPS[id].long) completed.add(id);
+  } catch {
+    // `runProcess` already reported the failure in the terminal.
+  } finally {
+    busy = false;
+    await refreshPorts();
+    syncDerived();
+    renderSteps();
+  }
+}
+
+runBtn.addEventListener('click', () => void runStep('run'));
 
 // --- preview ---------------------------------------------------------------
 
 async function refreshPorts(): Promise<void> {
-  const { ports } = await client.describe();
-  knownPorts = ports.join(',');
+  const described = await client.describe();
+  ports = described.ports;
+  viteDevReady = ports.includes(5173);
   const previous = portSelect.value;
   portSelect.innerHTML = '';
 
@@ -292,14 +587,16 @@ async function refreshPorts(): Promise<void> {
  * resolves and the port list would stay stale until a manual refresh. Poll
  * lightly instead, and reload the preview only when the set actually changes.
  */
-let knownPorts = '';
 function startPortWatch(): void {
   setInterval(() => {
     void client
       .describe()
-      .then(({ ports }) => {
-        if (ports.join(',') === knownPorts) return;
-        void refreshPorts();
+      .then(({ ports: next }) => {
+        if (next.join(',') === ports.join(',')) return;
+        void refreshPorts().then(() => {
+          syncDerived();
+          renderSteps();
+        });
       })
       .catch(() => {});
   }, 1500);
@@ -391,20 +688,9 @@ client.on('ready', (runtimeInfo) => {
   }
   writeTerminal('internalBindings: ' + runtimeInfo.bindings.join(', ') + '\n\n', 'sys');
 });
-runBtn.addEventListener('click', () => void runProject());
-buildBtn.addEventListener('click', () => void buildProject());
-bundleBtn.addEventListener('click', () => void bundleProject());
-viteBtn.addEventListener('click', () => void viteBuildProject());
-viteDevBtn.addEventListener('click', () => void viteDevProject());
-viteReactBtn.addEventListener('click', () => void viteReactBuildProject());
-clusterBtn.addEventListener('click', () => void clusterProject());
-wpDevBtn.addEventListener('click', () => void webpackDevProject());
-tscBtn.addEventListener('click', () => void tscBuildProject());
 
 async function installDeps(): Promise<void> {
   await save();
-  installBtn.disabled = true;
-  runBtn.disabled = true;
   setStatus('installing…', 'running');
   writeTerminal('\n$ npm install\n', 'sys');
   const started = performance.now();
@@ -422,22 +708,58 @@ async function installDeps(): Promise<void> {
     if (result.binLinks?.length) {
       writeTerminal(`[bin] node_modules/.bin: ${result.binLinks.join(', ')}\n`, 'ok');
     }
-    writeTerminal(`[installed ${result.packages} package(s) in ${ms}ms — now press ▶ Run]\n`, 'ok');
+    writeTerminal(`[installed ${result.packages} package(s) in ${ms}ms — now pick a scenario step]\n`, 'ok');
     setStatus(`installed ${result.packages}`, 'ok');
     // A fresh install writes node_modules (and the lockfile) behind the UI's
     // back, so re-read the tree to show them.
     files = (await client.mount({})).filter((f) => !f.endsWith('/'));
     renderTree();
+    depsReady = depsInstalledFromFiles();
   } catch (err) {
     writeTerminal(`[npm install failed] ${(err as Error).message}\n`, 'err');
     setStatus('error', 'err');
-  } finally {
-    installBtn.disabled = false;
-    runBtn.disabled = false;
+    throw err;
   }
 }
 
-installBtn.addEventListener('click', () => void installDeps());
+/**
+ * rspack's dependency tree is heavy (143 packages / ~80s / a 30 MB wasm), so it
+ * is installed *separately* under `/project/rspack` and only when the rspack
+ * scenario asks for it — the default `Install deps` stays fast.
+ */
+async function installRspackDeps(): Promise<void> {
+  await save();
+  setStatus('installing rspack…', 'running');
+  writeTerminal('\n$ npm install  # in /project/rspack\n', 'sys');
+  writeTerminal('[rspack] installing @rspack/core + binding-wasm32-wasi (~143 pkgs)…\n', 'sys');
+  const started = performance.now();
+  try {
+    const result = await client.installDeps({ cwd: '/project/rspack', includeDev: false });
+    const ms = (performance.now() - started).toFixed(0);
+    for (const warning of result.warnings) writeTerminal(`[npm] ${warning}\n`, 'err');
+    if (result.fromLockfile) {
+      writeTerminal(`[lock] reused ${result.fromLockfile} package(s) from package-lock.json\n`, 'sys');
+    }
+    writeTerminal(`[rspack] installed ${result.packages} package(s) in ${ms}ms\n`, 'ok');
+    setStatus(`rspack deps: ${result.packages}`, 'ok');
+    files = (await client.mount({})).filter((f) => !f.endsWith('/'));
+    renderTree();
+    rspackDepsReady = rspackDepsInstalledFromFiles();
+  } catch (err) {
+    writeTerminal(`[rspack install failed] ${(err as Error).message}\n`, 'err');
+    setStatus('error', 'err');
+    throw err;
+  }
+}
+
+function depsInstalledFromFiles(): boolean {
+  return files.some((f) => f.startsWith('/project/node_modules/'));
+}
+
+function rspackDepsInstalledFromFiles(): boolean {
+  return files.some((f) => f.startsWith('/project/rspack/node_modules/'));
+}
+
 clearBtn.addEventListener('click', () => {
   terminalEl.innerHTML = '';
   setStatus('');
@@ -446,14 +768,18 @@ resetBtn.addEventListener('click', async () => {
   files = await client.reset();
   renderTree();
   await openFile('/project/index.js');
+  depsReady = depsInstalledFromFiles();
+  rspackDepsReady = rspackDepsInstalledFromFiles();
   await refreshPorts();
+  syncDerived();
+  renderSteps();
   writeTerminal('\n[project reset to demo files]\n', 'sys');
 });
 
 window.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
     e.preventDefault();
-    void runProject();
+    void runStep('run');
   }
   if ((e.metaKey || e.ctrlKey) && e.key === 's') {
     e.preventDefault();
@@ -462,6 +788,8 @@ window.addEventListener('keydown', (e) => {
 });
 
 async function boot(): Promise<void> {
+  renderChips();
+  renderSteps();
   const bridged = await client.installServiceWorkerBridge();
   installHmrRelay();
   startPortWatch();
@@ -471,6 +799,8 @@ async function boot(): Promise<void> {
   const list = await client.mount({});
   files = list.filter((f) => !f.endsWith('/'));
   renderTree();
+  depsReady = depsInstalledFromFiles();
+  rspackDepsReady = rspackDepsInstalledFromFiles();
   const entry = files.find((f) => f.endsWith('index.js')) ?? files[0];
   if (entry) await openFile(entry);
   writeTerminal(
@@ -479,8 +809,10 @@ async function boot(): Promise<void> {
       : 'service worker unavailable — preview routing disabled.\n',
     bridged ? 'sys' : 'err',
   );
-  writeTerminal('\nPress ▶ Run (or ⌘/Ctrl+Enter).\n\n', 'sys');
+  writeTerminal('\nPick a scenario above, then follow the numbered steps.\n\n', 'sys');
   await refreshPorts();
+  syncDerived();
+  renderSteps();
 }
 
 void boot().catch((err: unknown) => {
@@ -506,13 +838,6 @@ type HmrRelay = { follow: (port: number | null) => void };
 let hmrRelay: HmrRelay = { follow: () => {} };
 
 /**
- * Route Vite HMR frames to a preview that lives on its own subdomain.
- *
- * HMR frames travel on a same-origin `BroadcastChannel` (see `public/sw.js`).
- * A `<port>.localhost` preview is a different origin, so it cannot hear that
- * channel; its WebSocket shim posts frames to this page instead, and this page
- * — which does share the runtime's origin — relays them both ways.
- *
  * There is one channel per preview port (`web-node-hmr:<port>`), so two dev
  * servers on different ports never see each other's clients. The shim tags each
  * frame with its port, and we only push the runtime's replies to the iframe

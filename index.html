@@ -16,22 +16,22 @@
         </div>
       </div>
       <div class="actions">
-        <button id="install">⬇ Install deps</button>
-        <button id="build">▦ Build</button>
-        <button id="bundle">⧉ Bundle</button>
-        <button id="vite">⚡ Vite build</button>
-      <button id="vitedev">🛠 Vite dev</button>
-        <button id="vitereact">⚛ Vite React</button>
-        <button id="wpdev">📦 Webpack dev</button>
-        <button id="tsc">⌨ tsc build</button>
-        <button id="cluster">🖧 Cluster</button>
-        <button id="hmred">✏️ HMR JS</button>
-        <button id="hmrcss">🎨 HMR CSS</button>
-        <button id="run" class="primary">▶ Run</button>
-        <button id="clear">Clear</button>
-        <button id="reset">Reset project</button>
+        <button id="run" class="primary" title="node /project/index.js">▶ Run</button>
+        <button id="clear" title="Clear the output">Clear</button>
+        <button id="reset" title="Restore the demo project">Reset project</button>
       </div>
     </header>
+
+    <nav class="scenariobar" aria-label="Scenarios">
+      <span class="bar-label">Scenario</span>
+      <div id="scenario-chips" class="chips"></div>
+    </nav>
+
+    <div class="stepbar">
+      <span class="bar-label">Steps</span>
+      <div id="steps" class="steps"></div>
+      <span id="next-hint" class="next-hint"></span>
+    </div>
 
     <main class="layout">
       <section class="pane files">
