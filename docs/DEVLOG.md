@@ -182,9 +182,9 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 下一步（从这里继续）
 
-> **固定路线图在 [`docs/ROADMAP.md`](ROADMAP.md)**——正序、带编号、可勾选（当前主线是**阶段 H：native → WASM**——M115/M116/M117/M118 ✅，下一步 **M119**（`crypto` → OpenSSL 子集编 wasm））。下面这份是历史 backlog（多数已 ✅），保留作决策痕迹。
+> **固定路线图在 [`docs/ROADMAP.md`](ROADMAP.md)**——正序、带编号、可勾选。**阶段 A–I 已基本结清**；仅余 G·M113（子域名静态托管，卡在通配 DNS）与 I·M122（沙箱出站网络，需外部代理）两项，暂被搁置。2026-09-29 新开 **M126 启动载荷再降 ✅**（阶段 E）。
 >
-> **近期待办**：M109（webpack loader / plugin 生态）✅ 2026-09-28 · 下一步 **M110（webpack watch / dev-server）**。
+> **近期待办**：**M126（启动载荷再降：vendored 源拆 core/lazy 两层）✅ 2026-09-29**；下一步 **M127（差分语料 / 行为门禁扩面）** → **M128（真实工具链端到端）**。
 
 按优先级：
 
@@ -245,6 +245,20 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-29 · M126 —— 启动载荷再降：vendored 源拆成 core / lazy 两层
+
+**背景**：M107 把大 wasm 移出关键路径后，启动期 awaited 的最大一块变成 **1.8 MB（gzip 344.6 KB）的 vendored 源文本**——整包 `assets/vendored-sources.txt` 预加载，worker 在 `ready` 前 `await` 并**整包** `JSON.parse`。但它是个「一个巨大 JSON 对象」，163 文件全在一次同步 parse 里；而 `new NodeRuntime(...)` 建 realm + 装全局时其实**只读到其中 54 个**。
+
+- **做法（沿用 M107 对 wasm 的双层策略，不引进新格式）**：按「谁在启动时被读到」拆两个资产——
+  - **core 层**（54 文件，`assets/vendored-core.txt`，615 KB / **gzip 121.9 KB**）：primordials、loader 管线、console/process/stream 牵出的内建。`index.html` 预加载，`ready` 前 await。
+  - **lazy 层**（109 文件，`assets/vendored-rest.txt`，1.36 MB / **gzip 233.9 KB**）：只有用户代码才会碰（`fs`/`crypto`/`http`、web streams、`node_modules` 辅助）。worker 在模块求值期 `priority:'low'` 后台预取、**不 await**。
+- **同步竞态不存在**：所有会跑用户代码的请求（`run`/`npmInstall`/`http`/`httpStream`）分发前 `await ensureDeferredVendored()`（与 `ensureDeferredWasm()` 并列）；新回报事件 `vendoredReady` → `__wnBoot.vendoredDeferredMs`。
+- **分层是策展清单，不是静态闭包**：新门禁 `test/vendored-tiers.test.ts` 仪器化 `VENDORED` **重算启动读取集**并断言它是 core 的子集——启动依赖若落进 lazy 层，门禁失败并**点名文件**，而不是把拆分发上线才炸。`init` 另加**一次性兜底**：realm 构建因缺源报错 → 加载 lazy 层再重试一次（宿主差异优雅降级）。
+- **顺带修真差异**：`Realm#materialize` 在建模块**求值抛错**时把记录留在 `loading`——于是**第二次 `require` 同一 id 会静默拿到半成品导出（或 `{}`）而不重跑模块**。Node 的语义是抛错模块**不进缓存**、下次重新求值（v26.9.0 实测 `caught1 boom` → `second {"ok":true,"n":2}`）。已改为失败回滚 `unloaded` 并原样抛错；新增 `test/module-load-failure.test.ts`（2 例，含连续失败每次都重抛）。
+- **验收**：`tsc --noEmit` 净 · `vitest run` **1156 passed / 3 skipped（139 文件）** · build：`vendored-core.txt` **614.66 KB / gzip 121.92 KB**、`vendored-rest.txt` **1,357.81 KB / gzip 233.89 KB**、`runtime.worker-*.js` ~765 KB。**启动期 awaited 的源载荷：gzip 344.6 → 121.9 KB（−222.7 KB）**。
+- **页内 E2E**（`vite preview` + raw CDP）：请求序 core 预加载（+4ms，早于 worker 脚本 +16ms）→ worker → core + lazy + 小 wasm 并行（+59–62ms）；`ready` @115ms；`vendoredDeferredMs`=25、`deferredMs`=26；**demo 全跑通**（`fs.readFileSync` / worker / child_process / streams，`exit 0 · 395ms`）。
+- **线上 E2E**（gh-pages `857f1d6`）：core 预加载 +497ms、worker +945ms、lazy 源 +1394ms；`runtimeReady` 1753ms（冷）/ 341–349ms（暖）；三跑基准 `vendored(core)=19–21ms · wasm=26–27ms · realm=42–48ms · lazy sources @25ms · deferred codecs @28–29ms`；demo 全跑通；所有线上资产 200。
 
 ### 2026-09-28 · M107 —— 启动性能：把大 wasm 移出启动关键路径（阶段 E 结清）
 

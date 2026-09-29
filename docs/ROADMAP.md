@@ -6,8 +6,8 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[⤳]` **已并入其他里程碑**（保留条目作决策痕迹，**不单独计数**） · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。**当前剩余：G·M113（子域名静态托管）· I·M122（沙箱出站网络）**。
-> - **最后更新**：2026-09-28（**阶段 E 结清：M107 ✅**——启动性能：把 brotli/zstd/histogram 三个大 wasm（563 KB gzip）从启动关键路径上移走；Realm 不再等它们，只在**执行用户代码前**保证就位；并给启动加了 `vendored/wasm/realm/deferred` 四段分解计时。**阶段 I：M124 ✅ · M123 ✅**——「加载 OK ≠ 可用」行为门禁（104 观测的差分巡查；当场扑出 3 处真缺口 + 1 个真 bug）；**`cluster` 多进程**（1 进程 = 1 独立 worker，共享端口轮询分发；顺带修真 bug：`runMain` 未更新 `process.argv[1]` 致 fork 跑错入口）。**阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅**——React（`@vitejs/plugin-react`）+ PostCSS/Tailwind 管线页内构建并真渲染成功。**阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅**）
+> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。**当前剩余：G·M113（子域名静态托管）· I·M122（沙箱出站网络）**（二者暂被搁置；新增的 **M126 启动载荷再降 ✅** 见阶段 E）。
+> - **最后更新**：2026-09-29（**M126 ✅ 启动载荷再降**——把 1.8 MB vendored 源拆成「启动 core 层（54 文件 / gzip 121.9 KB，预加载 + `ready` 前 await）」与「lazy 层（109 文件 / gzip 233.9 KB，后台低优先级预取，跑用户代码前 await）」，启动期 awaited 的源载荷 **gzip 344.6 → 121.9 KB**；顺带修一个真差异——`Realm#materialize` 在求值抛错后把记录留在 `loading`，二次 `require` 会静默拿到半成品导出，Node 是丢弃缓存并重跑，已改正）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅。
 
 ---
 
@@ -214,7 +214,20 @@
     - **同步竞态不存在**：所有**会跑用户代码**的请求（`run` / `npmInstall` / `http` / `httpStream`）在分发前 `await ensureDeferredWasm()`——模块未就位就等，绝不半执行。
     - 新增 `wasm-tiers.test.ts`（4 例）：层级不重叠 · 大模块必须在 deferred 层 · 加载器低优先级且幂等 · 坏模块响亮报错 · **无这三个模块也能建 Realm 跑 JS**。
   - **验收**：`tsc --noEmit` 净 · `vitest run` **1148 passed / 3 skipped（137 文件）** · build（`runtime.worker-*.js` **760 KB**）· 页内 + **线上**探针：`brotli rt=true` / `zstd rt=true` / `histogram count=3 max=5 p50=3`。
-  - **下一步**：再降要看 1.97 MB 源文本本身（按需子集/懒加载，`require` 同步 => 需「ready 后再补」策略）或 V8 code cache/快照。
+  - **下一步**：再降要看 1.97 MB 源文本本身（按需子集/懒加载，`require` 同步 => 需「ready 后再补」策略）或 V8 code cache/快照。 → **源文本那条已由 M126 接续并完成**；余下只剩 V8 code cache/快照未做。
+
+- [x] **M126 · 启动载荷再降（vendored 源分层）** ✅ 2026-09-29
+  - **背景**：M107 之后，启动关键路径上最大的一块变成 **1.8 MB（gzip 344.6 KB）的 vendored 源文本**：`assets/vendored-sources.txt` 整包预加载，worker 在 `ready` 前 `await` 它并整包 `JSON.parse`。而它其实是「一个巨大 JSON 对象」——163 个文件全在一次同步 parse 里。
+  - **做法**：不引入新格式，只**按“谁在启动时被读到”分层**，沿用 M107 对 wasm 的双层策略：
+    - **core 层**（54 文件，615 KB / **gzip 121.9 KB**）：`new NodeRuntime(...)` 构建 Realm 与安装全局对象时**真正读到**的那些（primordials、loader 管线、console/process/stream 牵出的内建）。emit 为 `assets/vendored-core.txt`，`index.html` **预加载**，worker `ready` 前 await。
+    - **lazy 层**（109 文件，1.36 MB / **gzip 233.9 KB**）：只有用户代码才会碰的（`fs`/`crypto`/`http`、web streams、`node_modules` 辅助）。emit 为 `assets/vendored-rest.txt`，worker 在模块求值期以 `priority:'low'` **后台预取、不 await**。
+  - **同步竞态不存在**：所有**会跑用户代码**的请求（`run` / `npmInstall` / `http` / `httpStream`）在分发前 `await ensureDeferredVendored()`——源码未就位就等，绝不半执行（与 `ensureDeferredWasm()` 并列）。新回报事件 `vendoredReady` → `__wnBoot.vendoredDeferredMs`。
+  - **分层是“策展清单”而非“静态闭包”**：core 用一张显式清单，新增门禁 `test/vendored-tiers.test.ts` **仪器化 `VENDORED` 重算启动读取集、断言它是 core 的子集**——新加的启动依赖会让门禁失败并点名文件，而不是把拆分发上线就跑坏。`init` 另加**一次性兜底**：若 Realm 构建因缺源报错，就加载 lazy 层再重试一次（宿主差异优雅降级，不硬崩）。
+  - **顺带修真差异（不是本次引入的 bug，是拆层/重试路径把它暴露了）**：`Realm#materialize` 在建模块**求值抛错**时把记录留在 `loading` 状态——于是**第二次 `require` 同一 id 会静默返回半成品导出（或 `{}`）而不重跑模块**。Node 的语义是：抛错的模块**不进缓存**，下次 require 重新求值（已在 v26.9.0 实测：`caught1 boom` → `second {"ok":true,"n":2}`）。已改为失败时回滚 `unloaded` 并原样抛错；新增 `test/module-load-failure.test.ts`（2 例，含连续失败每次都重抛）。
+  - **验收**：`tsc --noEmit` 净 · `vitest run` **1156 passed / 3 skipped（139 文件）** · build：`vendored-core.txt` **614.66 KB / gzip 121.92 KB**、`vendored-rest.txt` **1,357.81 KB / gzip 233.89 KB**、`runtime.worker-*.js` **765 KB**。
+    - **启动期 awaited 的源载荷：gzip 344.6 → 121.9 KB（−222.7 KB）**。启动关键载荷合计（worker JS 230 + vendored-core 121.9 + wn_stub/wn_zlib 59 + index 4 + fs.worker 3）≈ **gzip 418 KB**。
+    - **页内 E2E**（`vite preview` + raw CDP）：请求顺序 `vendored-core` 预加载（+4ms，早于 worker 脚本 +16ms）→ worker → `vendored-core` + `vendored-rest` + 小 wasm 并行（+59–62ms）；`ready` @115ms；`vendoredDeferredMs`=25、`deferredMs`=26；**demo 全跑通**（`fs.readFileSync` / worker / child_process / streams，`exit 0 · 395ms`）。
+    - **线上 E2E**（`https://mcuking.github.io/web-node/`，gh-pages `857f1d6`）：core 预加载 +497ms、worker +945ms、lazy 源 +1394ms；`runtimeReady` 1753ms（冷）/ 341–349ms（暖）；三跑基准 `vendored(core)=19–21ms · wasm=26–27ms · realm=42–48ms · lazy sources @25ms · deferred codecs @28–29ms`；demo 全跑通。所有线上资产 200。
 
 ---
 
