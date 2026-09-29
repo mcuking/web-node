@@ -303,6 +303,20 @@ function writeAll(v: MemoryVfs, files: Record<string, string>): void {
   }
 }
 
+/**
+ * Add demo files that a restored snapshot predates, without touching anything
+ * the user already has (edits, installed `node_modules`, deleted files stay
+ * put). A returning visitor whose OPFS snapshot was written before a release
+ * that added demo files would otherwise never see them.
+ */
+function writeMissing(v: MemoryVfs, files: Record<string, string>): void {
+  for (const [path, contents] of Object.entries(files)) {
+    if (v.exists(path)) continue;
+    ensureDir(v, path);
+    v.writeFile(path, new TextEncoder().encode(contents));
+  }
+}
+
 interface VirtualHttpResult {
   status: number;
   statusMessage: string;
@@ -387,6 +401,7 @@ async function buildRuntime(id: number): Promise<void> {
     : new MemoryVfs({ cwd: '/project' });
 
   if (!hasRestored) writeAll(v, DEMO_FILES);
+  else writeMissing(v, DEMO_FILES);
 
   // Durable `fsync` rides this sink. Without a durable backend there is nothing
   // to wait for, so the sink stays unset and `fsync` degrades to a no-op — the
