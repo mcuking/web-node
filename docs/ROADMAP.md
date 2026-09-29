@@ -7,7 +7,7 @@
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
 > - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 I → 阶段 J。阶段 A/B/C/D 均已结清。**M113 · M122 ✅ 2026-09-29 后，阶段 G 与阶段 I 全部结清**（新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I、**M128 真实工具链端到端（真 tsc）✅** 见阶段 F）；**阶段 J：M129 ✅ 2026-09-29**。
-> - **最后更新**：2026-09-29（**M113 ✅ 预览子域名路由（静态托管跟进）**——dev 侧 `<port>.localhost` 保留 + 新增**通配域** `VITE_WEB_NODE_PREVIEW_DOMAIN`：静态托管（GitHub Pages / 任意静态服务器 / 自定义域）把每个预览挂到 `<port>.<domain>` 真 origin；预览壳改为**静态资产**、SW `?domain=` 归一；三策略纯函数化 + 单测；真浏览器双路（dev 子域 / 静态服务器）均从虚拟 FS 供给真应用。**M122 ✅ 沙箱出站网络（egress）**——新增 `net/egress.ts` 传输层 + `Bindings.egress` 接入缝；`http`/`https` 公网目标经**宿主源 worker 的 `fetch`** 出网（可选自备 proxy 兜底，无第三方托管依赖），`net.connect` 无 TCP 桥则响亮 `ECONNREFUSED`；实测 `https.get('https://registry.npmjs.org/ms')` 200（改前 ECONNREFUSED）。**M128 ✅ 真实工具链端到端**——页内跑真 TypeScript 编译器：解析 tsconfig → 类型检查 → 产出 `.js`/`.d.ts` → 执行编译产物（拿到 `{count:2,total:15.1416}`）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅ · M127 ✅ · M122 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅ · M128 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅ · M126 ✅；阶段 G：M113 ✅。
+> - **最后更新**：2026-09-29（**M113 ✅ 预览子域名路由（静态托管跟进）**——dev 侧 `<port>.localhost` 保留 + 新增**通配域** `VITE_WEB_NODE_PREVIEW_DOMAIN`：静态托管（GitHub Pages / 任意静态服务器 / 自定义域）把每个预览挂到 `<port>.<domain>` 真 origin；预览壳改为**静态资产**、SW `?domain=` 归一；三策略纯函数化 + 单测；真浏览器双路（dev 子域 / 静态服务器）均从虚拟 FS 供给真应用。**M122 ✅ 沙箱出站网络（egress）**——新增 `net/egress.ts` 传输层 + `Bindings.egress` 接入缝；`http`/`https` 公网目标经**宿主源 worker 的 `fetch`** 出网（可选自备 proxy 兜底，无第三方托管依赖），`net.connect` 无 TCP 桥则响亮 `ECONNREFUSED`；实测 `https.get('https://registry.npmjs.org/ms')` 200（改前 ECONNREFUSED）。**M128 ✅ 真实工具链端到端**——页内跑真 TypeScript 编译器：解析 tsconfig → 类型检查 → 产出 `.js`/`.d.ts` → 执行编译产物（拿到 `{count:2,total:15.1416}`）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅ · M127 ✅ · M122 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅ · M128 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅ · M126 ✅；阶段 G：M113 ✅。**阶段 J：M129 ✅ · M130（Demo 顶部导航改版：四独立项目步进器——Vite/Webpack/rspack/Node.js 各自目录+依赖，第一行选项目、第二行操作、HMR 默认化）✅ 2026-09-29**。
 
 ---
 
@@ -652,9 +652,16 @@
 
 ---
 
-## 阶段 J — Demo 体验（情景步进器）
+## 阶段 J — Demo 体验（项目步进器）
 
-> **动机**：能力已齐，但 demo 入口平铺 13 个按钮、无分组/顺序/前置提示，导致「不知道怎么用、乱点必报错」。本阶段把 demo 顶部导航改造成**情景步进器**（选择情景 → 编号步骤 → 渐进门禁 → 下一步高亮），并把已跑通但未上 UI 的 **rspack** 接入场景栏。
+> **动机**：能力已齐，但 demo 入口平铺 13 个按钮、无分组/顺序/前置提示，导致「不知道怎么用、乱点必报错」。本阶段把 demo 顶部导航改造成**项目步进器**（第一行选项目 → 第二行编号操作 → 渐进门禁 → 下一步高亮）。
+
+- [x] **M130 · Demo 顶部导航改版（四独立项目步进器）** ✅ 2026-09-29
+  - **做**：把「工具类型 + 场景混一行」拆开——**第一行**只放项目切换 `⚡ Vite · 📦 Webpack · 🔷 rspack · 🟢 Node.js`，**第二行**只放操作 `⬇ Install deps → ▶ Run dev → ⚙ Run build`（Node.js 是 `▶ Run`）；**HMR / full-reload 变默认行为**，UI 不再暴露 HMR 按钮。四个项目**各自独立目录 / 独立依赖 / 独立文件**（`/project/{vite,webpack,rspack,node}`，端口 5173/5174/5175/3000）；文件树只显示当前项目；编辑器改为**可直接编辑的模板代码**（`index.html` 就是模板，JS 只做 `textContent`/`addEventListener`）。删除 esbuild / rollup / React+Tailwind / tsc / Cluster 五个旧场景。
+  - **数据分模块**：`src/demo/{node,vite,webpack,rspack}-project.ts` + 聚合 `src/demo-project.ts` + UI 元数据 `src/projects.ts`。
+  - **实测**（真浏览器）：Vite install 29 pkgs → `:5173` HMR（`h1` = `HOT-UPDATED vite in the browser`）；Webpack `:5174`（`v5.111.1`）build `done in 2585ms` + full-reload；rspack `:5175` `built bundle.js (2441 bytes)` + full-reload + build；Node.js `:3000` HTTP server。
+  - **验收**：`typecheck` 净 · `vitest run` **1181 passed / 3 skipped** · `build` worker **774.04 kB（774109 bytes）** · `index-*.js` **13.94 kB**。
+  - **设计稿**：`docs/specs/designs/2026-09-29-demo-scenario-projects-design.md`。
 
 - [x] **M129 · Demo 情景步进器（顺序引导 + vite / webpack / rspack 场景）** ✅ 2026-09-29
   - **做**：`index.html` 三层（顶栏全局按钮 / 情景 chips / 步骤栏），`src/ui/main.ts` 新增情景-步骤引擎（`STEPS`/`SCENARIOS` + `needs` 门禁 + `syncDerived` 按观测量派生完成态 + 「Next: click …」提示）；`src/ui/style.css` 加 chip/step/next/done/blocked 样式。步骤状态：blocked / ready / **next（高亮脉冲）** / done（✓）。

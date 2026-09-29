@@ -184,7 +184,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 > **固定路线图在 [`docs/ROADMAP.md`](ROADMAP.md)**——正序、带编号、可勾选。**阶段 A–I 已基本结清**；仅余 G·M113（子域名静态托管，卡在通配 DNS）与 I·M122（沙箱出站网络，需外部代理）两项，暂被搁置。2026-09-29 新开 **M126 启动载荷再降 ✅**（阶段 E）。
 >
-> **近期待办**：**M126 ✅ · M127 ✅ · M128（真实工具链端到端：页内跑真 TypeScript 编译器）✅ 2026-09-29**。阶段 F 至此全部结清；仅余 G·M113 与 I·M122（两者仍被搁置）。
+> **近期待办**：**M126 ✅ · M127 ✅ · M128（真实工具链端到端：页内跑真 TypeScript 编译器）✅ 2026-09-29**。阶段 F 至此全部结清；仅余 G·M113 与 I·M122（两者仍被搁置）。**阶段 J：M129 ✅ · M130（Demo 顶部导航改版：四独立项目步进器）✅ 2026-09-29**。
 
 按优先级：
 
@@ -245,6 +245,31 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-29 · M130 —— Demo 顶部导航改版（项目步进器 · 四独立项目）
+
+**动机**：M129 把 13 个平铺按钮收敛成步进器，方向对了，但**「工具类型」和「场景」仍混在一行**——Project 行里 `Rspack / Vite / Webpack` 和 `Run app / tsc / react` 平铺，看不出哪些是项目、哪些是操作；文件树里混着多个场景的文件；编辑器内容由**函数拼接生成**（`buildDemoFiles()` 拼字符串），新用户既看不懂也改不动。反馈要求：① 第一行只放项目切换；② 第二行只放操作；③ 文件树只显示当前项目；④ 每个项目独立文件；⑤ 编辑器改为**可直接编辑的模板代码**。
+
+**改法（项目步进器 · 四独立项目）**：
+
+- **四场景 = 四个独立项目**：`/project/vite`（dev `:5173`，真 HMR）、`/project/webpack`（watch + 静态伺服 `:5174`，full-reload）、`/project/rspack`（watch + 静态伺服 `:5175`，full-reload）、`/project/node`（`node index.js`，含 `:3000` HTTP server）。各自 `package.json` / 入口 / 配置 / 源码**互不相同**，各自装各自的 `/project/<proj>/node_modules`（`installDeps({ cwd })`）。**删除** esbuild / rollup / React+Tailwind / tsc / Cluster 五个旧场景及其文件。
+- **第一行 = 项目切换**：`⚡ Vite` · `📦 Webpack` · `🔷 rspack` · `🟢 Node.js`（`#project-chips`）。
+- **第二行 = 操作步骤**：`⬇ Install deps` → `▶ Run dev` → `⚙ Run build`（Node.js 项目是 `⬇ Install deps` → `▶ Run`）。**HMR / full-reload 变成默认行为**，UI 不再暴露 HMR 按钮——vite 走真 HMR，webpack/rspack 走 `BroadcastChannel 'web-node-hmr:<port>'` 桥 + `public/sw.js` 把预览的 loopback WebSocket 换掉，改源码即触发 full-reload。
+- **文件树只显示当前项目**，切项目即切目录；**编辑器内容改为可编辑模板代码**——三个 bundler 项目的 `index.html` 就是普通可编辑 HTML，JS 只做交互绑定（`textContent` / `addEventListener`），不再拼 HTML 字符串。
+- **数据分模块**：`src/demo/{node,vite,webpack,rspack}-project.ts` 各管一个项目，`src/demo-project.ts` 只聚合，`src/projects.ts` 单独存 UI 元数据（避免把大源码拖进页面 bundle）。
+- **门禁按观测量派生**（`/project/<proj>/node_modules` 存在 + 端口监听），刷新重算、不持久化。构建脚本加 **keep-alive timer**（build 步骤 await 宿主 promise，pending promise 不保活事件循环）；webpack/rspack 加 `watchOptions.ignored: /[\\/]dist[\\/]/` 防 rebuild 循环（`dist` 写回 VFS 会重新触发 watch）。
+
+**实测（真浏览器 Playwright，四场景全流程）**：
+
+- **Vite**：install 29 pkgs → Run dev `:5173` → 编辑 src 触发 HMR（预览 `h1` = `HOT-UPDATED vite in the browser`）→ Run build（含准确计时）。
+- **Webpack**：install → Run dev `:5174`（webpack `v5.111.1`）→ Run build `done in 2585ms`（`/project/webpack/dist/bundle.js` 229 bytes）→ full-reload 生效（`h1` = `Hello from webpack, RELOADED-EDITED in the browser`），无 rebuild 循环（前后均 9 行）。
+- **rspack**：install 9 pkgs → Run dev `:5175` → `built bundle.js (2441 bytes)` → 编辑 `src/message.mjs` 触发 full-reload → Run build。
+- **Node.js**：install → Run → `:3000` HTTP server 供给正常。
+- **UI 打磨**：next 步骤脉冲高亮 + `Next: click …` 提示改成高对比 chip、done/blocked 对比度、`Reset project` 警示色、状态栏省略号防溢出。
+
+**验收**：`npm run typecheck` 净 · `npx vitest run` **1181 passed / 3 skipped**（140 文件）· `npm run build` worker **774.04 kB（774109 bytes）**、`index-*.js` **13.94 kB**。
+
+**设计稿**：`docs/specs/designs/2026-09-29-demo-scenario-projects-design.md`。
 
 ### 2026-09-29 · M129 —— Demo 情景步进器（顺序引导 + vite / webpack / rspack 场景）
 
