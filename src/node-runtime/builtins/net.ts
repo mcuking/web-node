@@ -1,6 +1,6 @@
 import type { BuiltinSpec, BuiltinInitContext } from './types';
-import type { VirtualSocket } from '../net/network';
-import type { VirtualNetwork } from '../net/network';
+import { VirtualSocket, type VirtualNetwork } from '../net/network';
+import { isLoopbackHost, type Egress } from '../net/egress';
 import { createAddressTypes, type AddressTypes, type NetAddressErrorCodes } from '../net/socket-address';
 import { notImplemented } from '../errors';
 import { ERRNO } from '../vfs/types';
@@ -399,6 +399,46 @@ export const netSpec: BuiltinSpec = {
         // dialing, so on success it runs ahead of listeners added afterwards and
         // on failure it never runs.
         if (typeof cb === 'function') this.once('connect' as never, cb as never);
+        const host = String(options.host ?? options.hostname ?? '127.0.0.1');
+        // A non-loopback target is *outbound* (M122): the local virtual network
+        // has no such port, so it can only go out through an egress TCP bridge.
+        // A browser cannot open a raw TCP socket on its own, so when no bridge is
+        // configured we fail loudly and precisely instead of pretending.
+        if (!isLoopbackHost(host)) {
+          const dialTcp = ctx.binding.egress?.dialTcp;
+          if (!dialTcp) {
+            ctx.binding.nextTick(() => {
+              this.connecting = false;
+              this.destroy(
+                Object.assign(
+                  new Error(
+                    `connect ECONNREFUSED ${host}:${port} (no egress TCP bridge configured; ` +
+                      'set an egress `tcpProxy` to reach public hosts from a tab)',
+                  ),
+                  { code: 'ECONNREFUSED', errno: -111, syscall: 'connect', address: host, port },
+                ),
+              );
+            });
+            return this;
+          }
+          let client: VirtualSocket;
+          try {
+            client = bridgeEgressTcp(dialTcp.bind(ctx.binding.egress), host, port);
+          } catch (err) {
+            ctx.binding.nextTick(() => {
+              this.connecting = false;
+              this.destroy(err as Error);
+            });
+            return this;
+          }
+          this._attach(client, 'client');
+          this.connecting = false;
+          ctx.binding.nextTick(() => {
+            this.emit('connect');
+            this.emit('ready');
+          });
+          return this;
+        }
         let vsock: VirtualSocket;
         try {
           vsock = network.dial(port);
@@ -822,6 +862,72 @@ export const netSpec: BuiltinSpec = {
       if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
       if (data instanceof ArrayBuffer) return new Uint8Array(data);
       throw new TypeError('The "chunk" argument must be of type string or an instance of Buffer, ArrayBuffer, or Array');
+    }
+
+    let bridgeSocketSeq = 0x400000;
+
+    /**
+     * Wrap an egress TCP pipe as a `VirtualSocket` so the ordinary `net.Socket`
+     * wrapper drives it unchanged. Writes go out through the bridge, and bytes
+     * coming back are delivered exactly as if a virtual peer had sent them.
+     */
+    class EgressBridgeSocket extends VirtualSocket {
+      #bridge: EgressTcpSocketLike | null = null;
+
+      constructor(localPort: number, remotePort: number) {
+        super(++bridgeSocketSeq, localPort, remotePort);
+      }
+
+      _bind(bridge: EgressTcpSocketLike): void {
+        this.#bridge = bridge;
+      }
+
+      override write(chunk: Uint8Array | string): boolean {
+        if (this.destroyed) return false;
+        this.#bridge?.write(toBytes(chunk));
+        return true;
+      }
+
+      override end(chunk?: Uint8Array | string): void {
+        if (chunk !== undefined && !this.destroyed) this.#bridge?.write(toBytes(chunk));
+        this.#bridge?.end();
+        // The remote side's EOF arrives through `onEnd`; a half-close of our own
+        // write side must not mark our read side ended, so we do not call it here.
+      }
+
+      override destroy(err?: Error): void {
+        this.#bridge?.destroy(err);
+        this.#bridge = null;
+        super.destroy(err);
+      }
+    }
+
+    interface EgressTcpSocketLike {
+      write(chunk: Uint8Array): void;
+      end(): void;
+      destroy(err?: Error): void;
+    }
+
+    function bridgeEgressTcp(
+      dialTcp: NonNullable<Egress['dialTcp']>,
+      host: string,
+      port: number,
+    ): VirtualSocket {
+      const localPort = 40000 + Math.floor(Math.random() * 20000);
+      const sock = new EgressBridgeSocket(localPort, port);
+      sock._stamp(localPort, port);
+      const bridge = dialTcp(host, port, {
+        onConnect: () => {
+          /* the `net.Socket` wrapper emits `connect` itself after attach */
+        },
+        onData: (chunk) => sock._deliver(chunk),
+        onEnd: () => sock._remoteEnded(),
+        onError: (err) => {
+          if (!sock.destroyed) sock.destroy(err);
+        },
+      });
+      sock._bind(bridge as EgressTcpSocketLike);
+      return sock;
     }
 
     function toBuffer(ctx: BuiltinInitContext, bytes: Uint8Array): unknown {

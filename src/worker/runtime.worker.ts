@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { NodeRuntime, ProcessExit } from '../node-runtime/runtime';
+import { createEgress, type Egress } from '../node-runtime/net/egress';
 import {
   MemoryVfs,
   OpfsPersistence,
@@ -12,6 +13,38 @@ import { loadWasmModules, loadDeferredWasmModules, wasmModuleNames, DEFERRED_WAS
 import { DEMO_FILES } from '../demo-project';
 
 const decoder = new TextDecoder();
+
+/**
+ * The outbound-network transport for this worker (M122).
+ *
+ * A module worker is already same-origin with the page, so its `fetch` carries
+ * the page's origin — that is the "host-sourced fetcher" half of WebContainer's
+ * egress design, minus a separate worker whose only job is to hold the network.
+ * A self-hosted CORS bridge can be supplied by the embedder (public proxy sites
+ * are intentionally **not** hard-coded); `__WEB_NODE_EGRESS_PROXY__` and the
+ * build-time `VITE_WEB_NODE_EGRESS_PROXY` are both honoured, first one wins.
+ * A WebSocket raw-TCP bridge (`VITE_WEB_NODE_TCP_PROXY`) is optional and absent
+ * by default, so `net.connect` to a public host keeps failing loudly.
+ */
+function createWorkerEgress(): Egress {
+  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+  const scope = globalThis as {
+    __WEB_NODE_EGRESS_PROXY__?: string;
+    __WEB_NODE_TCP_PROXY__?: string;
+  };
+  const proxy = scope.__WEB_NODE_EGRESS_PROXY__ || env.VITE_WEB_NODE_EGRESS_PROXY || undefined;
+  const tcpProxy = scope.__WEB_NODE_TCP_PROXY__ || env.VITE_WEB_NODE_TCP_PROXY || undefined;
+  return createEgress({
+    fetch: globalThis.fetch.bind(globalThis) as unknown as Parameters<typeof createEgress>[0]['fetch'],
+    proxy,
+    onFallback: (reason, url) => {
+      // Keep it visible in the worker console: a silent fallback hides a broken
+      // CORS assumption until it bites somewhere far away.
+      console.warn('[web-node] egress direct attempt failed, retrying via proxy:', url, reason);
+    },
+    ...(tcpProxy ? { tcpBridgeUrl: tcpProxy } : {}),
+  } as Parameters<typeof createEgress>[0]);
+}
 
 /**
  * Cold-start breakdown (M107), in ms on the **worker's** clock (its time origin
@@ -371,6 +404,7 @@ async function buildRuntime(id: number): Promise<void> {
     argv: ['/project/index.js'],
     env: { NODE_ENV: 'development', WEB_NODE: '1' },
     installGlobals: true,
+    egress: createWorkerEgress(),
     onStdout: (data) => post({ id: 0, type: 'stdout', data }),
     onStderr: (data) => post({ id: 0, type: 'stderr', data }),
   });

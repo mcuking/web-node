@@ -6,6 +6,7 @@ import { createProcessHost } from './proc/host';
 import { createWorkerHost } from './proc/worker';
 import { triggerUncaughtException } from './bindings/uncaught';
 import { VirtualNetwork } from './net/network';
+import type { Egress } from './net/egress';
 import { Realm } from './realm';
 import { ModuleLoader } from './loader';
 import * as p from './vfs/posix';
@@ -133,6 +134,12 @@ export interface RuntimeOptions {
   onStderr?: (chunk: string) => void;
   /** Fired when a spawned program starts or finishes (diagnostics only). */
   onChildEvent?: (event: { type: 'spawn' | 'exit'; pid: number; command: string; code?: number | null }) => void;
+  /**
+   * Outbound network (M122). When absent, dials to a public host fail loudly
+   * (`ECONNREFUSED` for `net`, a typed egress error for `http`/`https`); the
+   * virtual network still serves loopback ports.
+   */
+  egress?: Egress;
 }
 
 interface TimerHandle {
@@ -213,6 +220,7 @@ export class NodeRuntime {
     const bindingCtx: BindingContext = {
       vfs: opts.vfs,
       network: new VirtualNetwork(),
+      egress: opts.egress,
       spawn,
       workers,
       env,

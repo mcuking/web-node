@@ -1,5 +1,6 @@
 import type { BuiltinSpec, BuiltinInitContext } from './types';
 import type { VirtualSocket } from '../net/network';
+import { isLoopbackHost, type Egress } from '../net/egress';
 import { notImplemented } from '../errors';
 
 /**
@@ -1503,7 +1504,22 @@ export const httpSpec: BuiltinSpec = {
       },
     };
 
-    function acquire(port: number): Connection {
+    function acquire(port: number, host: string, protocol: string): Connection {
+      // Anything not addressed to a loopback name is *outbound*: the virtual
+      // network has no such port, so the host's network stack has to carry it.
+      if (!isLoopbackHost(host)) {
+        const egress = ctx.binding.egress;
+        if (!egress) {
+          throw Object.assign(new Error(`connect ECONNREFUSED ${host}:${port}`), {
+            code: 'ECONNREFUSED',
+            errno: -111,
+            syscall: 'connect',
+            address: host,
+            port,
+          });
+        }
+        return new EgressConnection(egress, host, port, protocol) as unknown as Connection;
+      }
       const list = pool.idle.get(port);
       while (list && list.length > 0) {
         const entry = list.pop()!;
@@ -1513,6 +1529,163 @@ export const httpSpec: BuiltinSpec = {
         return conn;
       }
       return new Connection(ctx.binding.network.dial(port));
+    }
+
+    /**
+     * A client connection whose bytes leave the tab (M122).
+     *
+     * The request is serialized by `ClientRequest` exactly as it is for a
+     * virtual socket and captured through a duck-typed socket; we then hand the
+     * whole exchange to the egress layer and push the reply back through the
+     * same `HttpMessageReader` a local connection uses — so framing, status line
+     * and header handling stay identical in both directions.
+     */
+    class EgressConnection {
+      socket: VirtualSocket;
+      current: ResponseHandlers | null = null;
+      keepAlive = false;
+      destroyed = false;
+      headOnly = false;
+      #egress: Egress;
+      #host: string;
+      #port: number;
+      #protocol: string;
+      #head: Uint8Array | null = null;
+      #body: Uint8Array[] = [];
+
+      constructor(egress: Egress, host: string, port: number, protocol: string) {
+        this.#egress = egress;
+        this.#host = host;
+        this.#port = port;
+        this.#protocol = protocol.startsWith('https') ? 'https:' : 'http:';
+        const self = this;
+        // Only `write`/`destroy`/the few identity fields are ever touched by the
+        // client; a full VirtualSocket would drag in a peer we do not have.
+        this.socket = {
+          remotePort: port,
+          remoteAddress: host,
+          localPort: 0,
+          localAddress: '127.0.0.1',
+          destroyed: false,
+          readableEnded: false,
+          write(chunk: Uint8Array | string): boolean {
+            self.#capture(toBytes(chunk));
+            return true;
+          },
+          destroy(err?: Error): void {
+            self.destroy(err);
+          },
+          end(): void {
+            /* half-close is implicit: the whole request is sent in one exchange */
+          },
+          onData(): void {},
+          onEnd(): void {},
+          onClose(): void {},
+          onError(): void {},
+        } as unknown as VirtualSocket;
+      }
+
+      /** Swap in a fresh reader — n/a here: one exchange per connection. */
+      arm(): void {}
+
+      setHeadOnly(value: boolean): void {
+        this.headOnly = value;
+      }
+
+      send(handlers: ResponseHandlers, write: () => void): void {
+        this.current = handlers;
+        write(); // captures head + body through `socket.write`
+        void this.#perform();
+      }
+
+      destroy(err?: Error): void {
+        if (this.destroyed) return;
+        this.destroyed = true;
+        (this.socket as { destroyed?: boolean }).destroyed = true;
+        void err;
+      }
+
+      #capture(bytes: Uint8Array): void {
+        if (this.#head === null) this.#head = bytes;
+        else this.#body.push(bytes);
+      }
+
+      async #perform(): Promise<void> {
+        const handlers = this.current;
+        if (!handlers) return;
+        let parsed: { method: string; path: string; headers: Record<string, string> };   
+        try {
+          const headText = new TextDecoder('latin1').decode(this.#head ?? new Uint8Array(0));
+          const head = parseHead(headText);
+          if (!head || !head.method) throw new Error('malformed request head');
+          const headers: Record<string, string> = {};
+          for (const [name, value] of Object.entries(head.headers)) {
+            headers[name] = Array.isArray(value) ? value.join(', ') : value;
+          }
+          parsed = { method: head.method, path: head.target ?? '/', headers };
+        } catch (err) {
+          this.destroy();
+          handlers.onError(err as Error);
+          return;
+        }
+        const authority =
+          (this.#protocol === 'https:' && this.#port === 443) || (this.#protocol === 'http:' && this.#port === 80)
+            ? this.#host
+            : `${this.#host}:${this.#port}`;
+        const url = `${this.#protocol}//${authority}${parsed.path}`;
+        try {
+          const res = await this.#egress.request({
+            url,
+            method: parsed.method,
+            headers: parsed.headers,
+            body: this.#body.length ? concatAll(this.#body) : null,
+          });
+          if (this.destroyed) return;
+          const reader = new HttpMessageReader(
+            (head) => this.current?.onHead(head),
+            (chunk) => this.current?.onData(chunk),
+            () => {
+              const h = this.current;
+              this.current = null;
+              this.destroy();
+              h?.onEnd();
+            },
+            (line) => this.current?.onTrailer?.(line),
+          );
+          reader.headOnly = () => this.headOnly;
+          reader.push(serializeEgressResponse(res));
+        } catch (err) {
+          const h = this.current;
+          this.current = null;
+          this.destroy();
+          h?.onError(err as Error);
+        }
+      }
+    }
+
+    /**
+     * Re-frame an egress reply as HTTP/1.1 bytes for the shared reader.
+     *
+     * The host's `fetch` has already removed the transport framing and decoded
+     * any `content-encoding`, so those headers are dropped and a concrete
+     * `Content-Length` is written — otherwise the reader would try to read a
+     * body that is no longer chunked/compressed. (Real Node hands back the raw
+     * wire bytes; that difference is documented in the DEVLOG.)
+     */
+    function serializeEgressResponse(res: {
+      status: number;
+      statusMessage: string;
+      headers: Record<string, string | string[]>;
+      body: Uint8Array;
+    }): Uint8Array {
+      const lines: string[] = [`HTTP/1.1 ${res.status} ${res.statusMessage || ''}`.trimEnd()];
+      for (const [name, value] of Object.entries(res.headers)) {
+        if (name === 'transfer-encoding' || name === 'content-encoding' || name === 'content-length') continue;
+        if (Array.isArray(value)) for (const v of value) lines.push(`${name}: ${v}`);
+        else lines.push(`${name}: ${value}`);
+      }
+      lines.push(`content-length: ${res.body.byteLength}`, '', '');
+      return concatAll([new TextEncoder().encode(lines.join('\r\n')), res.body]);
     }
 
     // -- ClientRequest --------------------------------------------------------
@@ -1680,7 +1853,7 @@ export const httpSpec: BuiltinSpec = {
       #send(): void {
         let conn: Connection;
         try {
-          conn = acquire(this.port);
+          conn = acquire(this.port, this.host, this.protocol);
         } catch (err) {
           this.emit('error', err as Error);
           return;

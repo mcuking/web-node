@@ -1,5 +1,6 @@
 import type { Vfs } from '../vfs';
 import type { VirtualNetwork } from '../net/network';
+import type { Egress } from '../net/egress';
 import type { ProcessHost } from '../proc/host';
 import type { WorkerHost } from '../proc/worker';
 
@@ -16,6 +17,13 @@ export interface BindingContext {
    * bridge dials it from outside the worker.
    */
   network: VirtualNetwork;
+  /**
+   * The outbound half of the network (M122). The virtual network above only
+   * knows ports bound inside this tab; anything addressed to a public host goes
+   * out through the host's own `fetch` (and, when configured, a CORS bridge).
+   * Absent means egress is unavailable: remote dials then fail loudly.
+   */
+  egress?: Egress;
   /**
    * The controlled spawn surface. Node reaches the OS through `uv_spawn`; we
    * reach this instead. It is the *only* way user code can cause another
