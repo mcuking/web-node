@@ -191,3 +191,215 @@ export function untar(input: Uint8Array): TarEntry[] {
 export async function extractTarball(tgz: Uint8Array): Promise<TarEntry[]> {
   return untar(await gunzip(tgz));
 }
+
+// ---------------------------------------------------------------------------
+// Streaming path
+// ---------------------------------------------------------------------------
+//
+// The buffer helpers above are fine for small inputs, but installing a real
+// dependency tree means decompressing hundreds of packages whose *decompressed*
+// bytes dwarf the tarball. Materialising each package as a whole `Uint8Array`
+// (and again as a per-file `slice()`) spikes the worker heap by gigabytes and
+// crashes the tab. So the installer never does that: it streams the gzip stream
+// through an incremental tar parser and writes one file at a time into the VFS.
+//
+// `gunzipStream` / `untarStream` / `extractTarballStream` below are the pieces
+// the installer uses; the buffer functions stay for tests and small in-VFS
+// `file:` tarballs.
+
+/** Wrap a byte buffer as a single-chunk stream without copying it. */
+export function streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
+/** Gunzip a byte *stream* with the platform `DecompressionStream`. */
+export function gunzipStream(source: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  // TS 5.6 + DOM types `DecompressionStream` over `BufferSource`; the stream we
+  // feed it is always `Uint8Array`, so narrow it to keep `pipeThrough` happy.
+  const decompressor = new DecompressionStream('gzip') as unknown as TransformStream<
+    Uint8Array,
+    Uint8Array
+  >;
+  return source.pipeThrough(decompressor);
+}
+
+/**
+ * Incremental byte reader: hands out exactly the bytes the tar parser asks for,
+ * pulling more from the stream only when it must. Peak memory is one requested
+ * block (a tar header, or a single file's bytes) — never the whole archive.
+ */
+class ByteQueue {
+  readonly #reader: ReadableStreamDefaultReader<Uint8Array>;
+  #chunks: Uint8Array[] = [];
+  #head = 0;
+  #length = 0;
+  #ended = false;
+
+  constructor(reader: ReadableStreamDefaultReader<Uint8Array>) {
+    this.#reader = reader;
+  }
+
+  get length(): number {
+    return this.#length;
+  }
+
+  async #pull(): Promise<void> {
+    if (this.#ended) return;
+    const { done, value } = await this.#reader.read();
+    if (done) {
+      this.#ended = true;
+      return;
+    }
+    if (value && value.length > 0) {
+      this.#chunks.push(value);
+      this.#length += value.length;
+    }
+  }
+
+  /** Read until at least `n` bytes are buffered, or the stream ends. */
+  async ensure(n: number): Promise<void> {
+    while (this.#length < n && !this.#ended) await this.#pull();
+  }
+
+  /** Consume `n` bytes positionally, discarding them. */
+  async skip(n: number): Promise<void> {
+    let remaining = Math.min(n, await this.#buffered(n));
+    while (remaining > 0) {
+      const chunk = this.#chunks[0];
+      const available = chunk.length - this.#head;
+      const use = Math.min(available, remaining);
+      this.#head += use;
+      this.#length -= use;
+      remaining -= use;
+      if (this.#head >= chunk.length) {
+        this.#chunks.shift();
+        this.#head = 0;
+      }
+    }
+  }
+
+  /** Take up to `n` bytes as a fresh contiguous buffer (fewer at end-of-stream). */
+  async take(n: number): Promise<Uint8Array> {
+    const count = Math.min(n, await this.#buffered(n));
+    const out = new Uint8Array(count);
+    let offset = 0;
+    while (offset < count) {
+      const chunk = this.#chunks[0];
+      const available = chunk.length - this.#head;
+      const use = Math.min(available, count - offset);
+      out.set(chunk.subarray(this.#head, this.#head + use), offset);
+      offset += use;
+      this.#length -= use;
+      this.#head += use;
+      if (this.#head >= chunk.length) {
+        this.#chunks.shift();
+        this.#head = 0;
+      }
+    }
+    return out;
+  }
+
+  async #buffered(n: number): Promise<number> {
+    await this.ensure(n);
+    return this.#length;
+  }
+
+  release(): void {
+    try {
+      this.#reader.releaseLock();
+    } catch {
+      // reader already released — nothing to do
+    }
+  }
+}
+
+/**
+ * Parse a tar *stream* into entries as they are read.
+ *
+ * Mirrors {@link untar} exactly (same stripping, same pax/GNU long-name
+ * handling, same skipping of links/devices) but yields each entry the moment
+ * its bytes are available, so the caller can write it out and forget it.
+ */
+export async function* untarStream(
+  source: ReadableStream<Uint8Array>,
+): AsyncGenerator<TarEntry, void, undefined> {
+  const queue = new ByteQueue(source.getReader());
+  let pending: PaxRecord = {};
+  let longName: string | null = null;
+
+  const padding = (size: number): number => Math.ceil(size / BLOCK) * BLOCK - size;
+
+  try {
+    for (;;) {
+      await queue.ensure(BLOCK);
+      if (queue.length < BLOCK) break; // truncated archive — stop cleanly
+      const header = await queue.take(BLOCK);
+
+      let zero = true;
+      for (let i = 0; i < BLOCK; i++) {
+        if (header[i] !== 0) {
+          zero = false;
+          break;
+        }
+      }
+      if (zero) break; // end-of-archive marker
+
+      let name = readString(header, 0, 100);
+      const prefix = readString(header, 345, 155);
+      if (prefix.length > 0 && !name.startsWith('/')) name = `${prefix}/${name}`;
+      let size = readField(header, 124, 12);
+      const mode = readField(header, 100, 8) || 0o644;
+      const typeflag = String.fromCharCode(header[156] || 48);
+
+      if (typeflag === 'x' || typeflag === 'g') {
+        const data = await queue.take(size);
+        await queue.skip(padding(size));
+        if (typeflag === 'x') pending = parsePax(data);
+        continue;
+      }
+      if (typeflag === 'L') {
+        const data = await queue.take(size);
+        await queue.skip(padding(size));
+        longName = new TextDecoder().decode(data).replace(/\0[\s\S]*$/, '');
+        continue;
+      }
+
+      const data = await queue.take(size);
+      await queue.skip(padding(size));
+
+      if (longName !== null) {
+        name = longName;
+        longName = null;
+      }
+      if (pending.path) name = pending.path;
+      if (pending.size !== undefined) size = pending.size;
+      pending = {};
+
+      const path = stripRootSegment(name);
+      if (path === '') continue;
+
+      if (typeflag === '5' || path.endsWith('/')) {
+        yield { path: path.replace(/\/+$/, ''), type: 'dir', data: new Uint8Array(0), mode };
+        continue;
+      }
+      if (typeflag === '0' || typeflag === '\0' || typeflag === '') {
+        yield { path, type: 'file', data, mode };
+      }
+      // else: symlink/hardlink/device — skipped
+    }
+  } finally {
+    queue.release();
+  }
+}
+
+/** Streamed `gunzip` + `untar`: yields entries without buffering the package. */
+export async function* extractTarballStream(
+  source: ReadableStream<Uint8Array>,
+): AsyncGenerator<TarEntry, void, undefined> {
+  yield* untarStream(gunzipStream(source));
+}

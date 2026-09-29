@@ -246,6 +246,31 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-29 · M131 —— 依赖安装改流式解包（修内存爆表）
+
+**动机**：点「Run build」会把页签打爆（内存溢出）。实测定位到两个峰值，而 **install** 才是最大那个：
+
+- **install**：runtime worker 的 V8 堆从 ~25MB 直接冲到 **1942MB（1.9GB）**。
+- **build**（冷启）：另有 **~1.3GB** 瞬时峰值（V8 编译 bundler 模块图的垃圾，GC 可回收，但叠加在 install 之后就把页签顶爆）。
+
+**根因（install）**：`npm/install.ts` 的下载阶段把**每个包的完整解压结果**缓存进 `extracted` Map —— `extractTarball(tgz)` 把整包 `gunzip` 成一个大 `Uint8Array`，再 `untar` 逐文件 `slice()` 又复制一份；这些结果**全部驻留到整棵树写完**。一个真实依赖树解压后几十 MB，× 并发 8 且全存 → 上 GB。
+
+**改法（流式解包，WebContainer 同款原则：不缓冲整包）**：
+
+- `npm/tarball.ts` 新增流式路径：`streamOf` / `gunzipStream`（`DecompressionStream('gzip')`）/ `ByteQueue`（按需拉取的增量字节队列）/ `untarStream`（增量 tar 解析，逐 entry yield）/ `extractTarballStream`。缓冲版 `gunzip`/`untar`/`extractTarball` 保留（测试与小 `file:` 包用）。
+- `npm/install.ts`：下载+校验阶段**只缓存压缩包**（`client.tarball` 本就缓存，免二次下载；校验保持「先全下载校验、再写盘」的原子性）；解压阶段改用 `extractTarballStream` **逐文件流式写入 VFS**，不再物化整包。峰值与单文件同阶，与依赖树大小无关。
+
+**实测（真浏览器，冷装 Webpack；CDP `Runtime.getHeapUsage` 采样 worker 堆）**：
+
+- install 峰值：**1942MB → 34MB**（约 56×降低）。
+- 文件落盘正确、install 正常完成（`installed`），`files`/`node_modules` 齐全。
+
+**遗留（下次打磨）**：build（冷启编译 webpack 模块图）仍有 ~1.3GB 瞬时峰值，GC 后可回落到 ~31MB。这次未改；install 修掉后已消除与 build 峰值叠加导致的崩溃。
+
+**测试**：`test/npm.test.ts` 新增 4 条：流式结果与缓冲版逐条等价、7 字节小分块跨 chunk 解析、流式 pax 长路径、包装目录剥离。
+
+**验收**：`npm run typecheck` 净 · `npx vitest run` **1185 passed / 3 skipped**（140 文件）· `npm run build` worker **776.2 kB（776231 bytes）**、`index-*.js` **13.99 kB**。
+
 ### 2026-09-29 · M130 —— Demo 顶部导航改版（项目步进器 · 四独立项目）
 
 **动机**：M129 把 13 个平铺按钮收敛成步进器，方向对了，但**「工具类型」和「场景」仍混在一行**——Project 行里 `Rspack / Vite / Webpack` 和 `Run app / tsc / react` 平铺，看不出哪些是项目、哪些是操作；文件树里混着多个场景的文件；编辑器内容由**函数拼接生成**（`buildDemoFiles()` 拼字符串），新用户既看不懂也改不动。反馈要求：① 第一行只放项目切换；② 第二行只放操作；③ 文件树只显示当前项目；④ 每个项目独立文件；⑤ 编辑器改为**可直接编辑的模板代码**。

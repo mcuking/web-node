@@ -30,7 +30,7 @@ import type { Vfs } from '../vfs';
 import type { ProcessHost } from '../proc/host';
 import * as p from '../vfs/posix';
 import { createRegistry, type FetchLike, type PackageManifest, type RegistryClient } from './registry';
-import { extractTarball } from './tarball';
+import { extractTarball, extractTarballStream, streamOf } from './tarball';
 import { binEntriesFor, writeBinShims, type BinEntry } from './bin';
 import { runDependencyScripts, runRootScripts, DEFAULT_SCRIPT_TIMEOUT_MS, type ScriptOutcome } from './scripts';
 import { maxSatisfying, satisfies } from './semver';
@@ -166,6 +166,22 @@ function copyTree(vfs: Vfs, from: string, to: string): void {
     else {
       ensureDir(vfs, p.dirname(dst));
       vfs.writeFile(dst, vfs.readFile(src));
+    }
+  }
+}
+
+/** Write already-extracted entries (`file:` tarballs) into `dir`. */
+function writeEntries(
+  vfs: Vfs,
+  dir: string,
+  entries: readonly { path: string; type: 'file' | 'dir'; data: Uint8Array }[],
+): void {
+  for (const entry of entries) {
+    const dest = p.join(dir, entry.path);
+    if (entry.type === 'dir') ensureDir(vfs, dest);
+    else {
+      ensureDir(vfs, p.dirname(dest));
+      vfs.writeFile(dest, entry.data);
     }
   }
 }
@@ -479,12 +495,15 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
   }
   if (Object.keys(missingPeers).length > 0) await place(missingPeers, [nmRoot], opts.cwd, 'required', opts.cwd, []);
 
-  // Download + verify + extract each distinct registry tarball once, up to
-  // `concurrency` in flight. Everything is fetched *before* the tree is
-  // written, so a failed download (or an integrity mismatch) leaves
-  // `node_modules` untouched rather than half-populated.
+  // Download + verify every distinct registry tarball once, up to `concurrency`
+  // in flight, *before* the tree is written — so a failed download (or an
+  // integrity mismatch) leaves `node_modules` untouched rather than
+  // half-populated. Extraction is deliberately **not** done here: the tarballs
+  // stay gzipped (a fraction of their unpacked size) and are streamed into the
+  // VFS during the write pass below, one file at a time. Buffering every
+  // decompressed package — the obvious implementation — spikes the worker heap
+  // into the gigabytes and kills the tab.
   const concurrency = Math.max(1, Math.floor(opts.concurrency ?? 8));
-  const extracted = new Map<string, Array<{ path: string; type: 'file' | 'dir'; data: Uint8Array }>>();
   const integrityByKey = new Map<string, string | undefined>();
   const skipped = new Set<string>();
   const downloads: Array<{ key: string; resolved: Resolved }> = [];
@@ -507,7 +526,6 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
     const tgz = await client.tarball(url);
     const verified = await verifyIntegrity(tgz, { tarball: url, integrity: resolved.integrity });
     integrityByKey.set(key, verified ?? resolved.integrity);
-    extracted.set(key, await extractTarball(tgz));
   });
 
   const installed: InstalledPackage[] = [];
@@ -517,23 +535,23 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
 
   for (const { nmDir, resolved } of placements) {
     const key = `${resolved.name}@${resolved.version}`;
-    let entries = resolved.localEntries;
-    if (!entries && !resolved.localDir) {
-      if (skipped.has(key)) continue;
-      entries = extracted.get(key);
-      if (!entries) continue;
-    }
-
     const dir = p.join(nmDir, resolved.name);
-    ensureDir(vfs, dir);
+
     if (resolved.localDir) {
+      ensureDir(vfs, dir);
       copyTree(vfs, resolved.localDir, dir);
+    } else if (resolved.localEntries) {
+      ensureDir(vfs, dir);
+      writeEntries(vfs, dir, resolved.localEntries);
     } else {
-      for (const entry of entries as Array<{ path: string; type: 'file' | 'dir'; data: Uint8Array }>) {
+      if (skipped.has(key) || !resolved.tarball) continue;
+      // Cached from the download pass above — this is a lookup, not a refetch.
+      const tgz = await client.tarball(resolved.tarball);
+      ensureDir(vfs, dir);
+      for await (const entry of extractTarballStream(streamOf(tgz))) {
         const dest = p.join(dir, entry.path);
-        if (entry.type === 'dir') {
-          ensureDir(vfs, dest);
-        } else {
+        if (entry.type === 'dir') ensureDir(vfs, dest);
+        else {
           ensureDir(vfs, p.dirname(dest));
           vfs.writeFile(dest, entry.data);
         }

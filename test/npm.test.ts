@@ -3,7 +3,7 @@ import { MemoryVfs } from '../src/node-runtime/vfs';
 import { encodeBase64 } from '../src/node-runtime/vfs/base64';
 import { NodeRuntime } from '../src/node-runtime/runtime';
 import { compare, maxSatisfying, satisfies } from '../src/node-runtime/npm/semver';
-import { gunzip, untar } from '../src/node-runtime/npm/tarball';
+import { gunzip, untar, extractTarballStream } from '../src/node-runtime/npm/tarball';
 import { nameFromLockPath, parseSri, verifyIntegrity } from '../src/node-runtime/npm';
 import type { FetchLike, FetchResponseLike } from '../src/node-runtime/npm/registry';
 
@@ -262,6 +262,91 @@ describe('tarball', () => {
     const file = entries.find((e) => e.type === 'file')!;
     expect(file.path).toBe('nested/'.repeat(20) + 'file.js');
     expect(new TextDecoder().decode(file.data)).toBe('long');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// streaming extraction — the path the installer actually uses
+// ---------------------------------------------------------------------------
+
+/** Re-chunk a buffer into fixed-size pieces, to exercise cross-chunk parsing. */
+function chunked(bytes: Uint8Array, size: number): ReadableStream<Uint8Array> {
+  let offset = 0;
+  return new ReadableStream({
+    pull(controller) {
+      if (offset >= bytes.length) {
+        controller.close();
+        return;
+      }
+      const end = Math.min(offset + size, bytes.length);
+      controller.enqueue(bytes.subarray(offset, end));
+      offset = end;
+    },
+  });
+}
+
+type StreamEntry = { path: string; type: 'file' | 'dir'; data: Uint8Array };
+
+async function streamEntries(bytes: Uint8Array, chunkSize = bytes.length): Promise<StreamEntry[]> {
+  const out: StreamEntry[] = [];
+  for await (const entry of extractTarballStream(chunked(bytes, chunkSize))) out.push(entry);
+  return out;
+}
+
+const norm = (entries: StreamEntry[]): string[] =>
+  entries
+    .map((e) => `${e.type} ${e.path} ${e.type === 'file' ? new TextDecoder().decode(e.data) : ''}`)
+    .sort();
+
+describe('tarball streaming extraction', () => {
+  it('yields the same entries as the buffer path', async () => {
+    const tar = makeTar([
+      { path: 'package/package.json', data: '{"name":"x"}' },
+      { path: 'package/index.js', data: 'module.exports = 1;' },
+      { path: 'package/lib/deep.js', data: 'deep' },
+    ]);
+    const tgz = await gzip(tar);
+    const buffered = untar(await gunzip(tgz));
+    const streamed = await streamEntries(tgz);
+    expect(norm(streamed)).toEqual(norm(buffered as StreamEntry[]));
+  });
+
+  it('parses correctly when the source trickles in tiny chunks', async () => {
+    const body = `module.exports = ${'a'.repeat(5000)};`;
+    const tgz = await gzip(
+      makeTar([
+        { path: 'package/package.json', data: '{"name":"x"}' },
+        { path: 'package/index.js', data: body },
+      ]),
+    );
+    // 7 bytes at a time: headers, file bodies and padding all straddle chunks.
+    const streamed = await streamEntries(tgz, 7);
+    const index = streamed.find((e) => e.path === 'index.js')!;
+    expect(new TextDecoder().decode(index.data)).toBe(body);
+    expect(streamed.some((e) => e.path === 'package.json')).toBe(true);
+  });
+
+  it('applies pax extended headers over the stream too', async () => {
+    const longPath = `package/${'nested/'.repeat(20)}file.js`;
+    const tgz = await gzip(makeTarWithPax(longPath, 'long'));
+    const streamed = await streamEntries(tgz, 64);
+    const file = streamed.find((e) => e.type === 'file')!;
+    expect(file.path).toBe('nested/'.repeat(20) + 'file.js');
+    expect(new TextDecoder().decode(file.data)).toBe('long');
+  });
+
+  it('strips the wrapper directory named after the package', async () => {
+    const tgz = await gzip(
+      makeTar([
+        { path: 'node/package.json', data: '{"name":"@types/node"}' },
+        { path: 'node/index.d.ts', data: 'declare const x: number;' },
+      ]),
+    );
+    const streamed = await streamEntries(tgz, 33);
+    expect(streamed.filter((e) => e.type === 'file').map((e) => e.path).sort()).toEqual([
+      'index.d.ts',
+      'package.json',
+    ]);
   });
 });
 
