@@ -1,0 +1,1250 @@
+/**
+ * The Node.js playground: the full-capability demo project.
+ * It runs on the in-browser Node.js runtime — fs, streams, http, crypto,
+ * worker_threads, child_process and friends — with no server involved.
+ *
+ * NOTE for maintainers: the embedded sources are TS template literals,
+ * so every backtick / ${ / backslash is escaped on the way in. Keep the
+ * demo code free of all three (use separate console.log('') calls instead of
+ * a newline escape).
+ */
+export const NODE_FILES: Record<string, string> = {
+  '/project/node/package.json': `{
+  "name": "web-node-playground",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "postinstall": "node lib/report.js > postinstall.txt"
+  },
+  "dependencies": {
+    "ms": "^2.1.3",
+    "@demo/greeting": "file:lib/greeting"
+  }
+}`,
+  '/project/node/index.js': `// Runs on Node.js compiled-in-browser. No server. No install.
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const http = require('http');
+const { EventEmitter } = require('events');
+const { Transform, pipeline, Readable, Writable } = require('stream');
+
+const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+
+console.log('=== web-node demo ===');
+console.log('project     :', pkg.name, pkg.version);
+console.log('platform    :', process.platform, '/', process.arch);
+console.log('node        :', process.version);
+console.log('cwd         :', process.cwd());
+console.log('');
+
+// --- real vendored Node path.js ---
+console.log('-- path (vendored from Node source) --');
+console.log('join        :', path.join('/a', 'b', '..', 'c'));
+console.log('normalize   :', path.normalize('/a/./b/../c//'));
+console.log('extname     :', path.extname('archive.tar.gz'));
+console.log('');
+
+// --- Buffer ---
+console.log('-- buffer --');
+const buf = Buffer.from('hello web-node');
+console.log('hex         :', buf.toString('hex'));
+console.log('base64      :', buf.toString('base64'));
+console.log('slice       :', buf.slice(0, 5).toString());
+// slice/subarray alias the backing store, like Node: writing the view writes
+// the original.
+const backing = Buffer.from([1, 2, 3, 4]);
+const view = backing.subarray(1, 3);
+view[0] = 99;
+console.log('view shares :', backing[1] === 99);
+// Small allocations are carved from one 64 KiB slab, as in Node, so the
+// backing store is shared and byteOffset is meaningful (and 8-byte aligned).
+const pooled = Buffer.allocUnsafe(8);
+console.log('pool slab   :', pooled.buffer.byteLength === Buffer.poolSize + 64, 'byteOffset', pooled.byteOffset);
+console.log('');
+
+// --- fs over the virtual file system ---
+console.log('-- fs (virtual, persisted to OPFS) --');
+const dir = '/project/node/output';
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, 'report.txt'), 'generated at ' + new Date().toISOString());
+console.log('written     :', fs.readFileSync(path.join(dir, 'report.txt'), 'utf8'));
+console.log('readdir     :', fs.readdirSync('/project/node').sort().join(', '));
+console.log('stat.size   :', fs.statSync(path.join(dir, 'report.txt')).size, 'bytes');
+console.log('');
+
+// --- local module + ESM ---
+const { fib } = require('./lib/fib.js');
+console.log('-- local require --');
+console.log('fib(10)     :', fib(10));
+console.log('');
+
+// --- events + timers (async) ---
+const emitter = new EventEmitter();
+emitter.on('tick', (n) => console.log('event       : tick #' + n));
+let n = 0;
+const timer = setInterval(() => {
+  emitter.emit('tick', ++n);
+  if (n === 3) {
+    clearInterval(timer);
+    console.log('done. platform:', os.platform(), '| uptime:', process.uptime().toFixed(3) + 's');
+  }
+}, 120);
+
+console.log('scheduled 3 async ticks...');
+console.log('');
+
+// --- streams (milestone 4) ---
+// Readable/Writable/Transform/pipe are real here: chunk sizes are bounded by a
+// high-water mark and pipe() propagates backpressure.
+console.log('-- stream --');
+const { Readable: DefaultsReadable } = require('stream');
+console.log(
+  'hwm default : ' +
+    new DefaultsReadable().readableHighWaterMark +
+    ' bytes / ' +
+    new DefaultsReadable({ objectMode: true }).readableHighWaterMark +
+    ' objects'
+);
+// Readable.from is Node's own source: a string is one chunk, not per char.
+(function () {
+  const readableFrom = require('stream').Readable.from;
+  const chunks = [];
+  const r = readableFrom('abc');
+  r.on('data', function (c) { chunks.push(String(c)); });
+  r.on('end', function () {
+    console.log('from(string): ' + chunks.length + ' chunk(s) -> ' + JSON.stringify(chunks));
+  });
+})();
+// stream.isReadable/isWritable/isDisturbed/isErrored are Node's own predicates
+// (internal/streams/utils.js), reading our _readableState/_writableState.
+(function () {
+  const stream = require('stream');
+  const live = new stream.Readable({ read: function () {} });
+  const done = new stream.Readable({ read: function () {} });
+  done.push('x');
+  done.push(null);
+  done.resume();
+  done.on('end', function () {
+    console.log(
+      'predicates  : live isReadable=' + stream.isReadable(live) +
+        ' / ended isReadable=' + stream.isReadable(done) +
+        ' isDisturbed=' + stream.isDisturbed(done)
+    );
+  });
+})();
+// destroy() / finished() run on Node's own destroy source
+// (internal/streams/destroy.js): a destroy emits 'error' then 'close' on the
+// next tick, and finished() flags a close that beats the writable half as
+// ERR_STREAM_PREMATURE_CLOSE.
+(function () {
+  const stream = require('stream');
+  const order = [];
+  const r = new stream.Readable({ read: function () {} });
+  r.on('error', function (e) { order.push('error:' + e.message); });
+  r.on('close', function () { order.push('close'); });
+  r.destroy(new Error('boom'));
+  console.log(
+    'destroy sync: destroyed=' + r.destroyed + ' closed=' + r.closed +
+      ' errored=' + (r.errored && r.errored.message)
+  );
+  process.nextTick(function () {
+    console.log(
+      'destroy async: ' + order.join(' then ') +
+        ' (isDestroyed=' + stream.isDestroyed(r) + ')'
+    );
+  });
+
+  const w = new stream.Writable({ write: function (_c, _e, cb) { cb(); } });
+  stream.promises.finished(w).then(
+    function () { console.log('premature  : resolved'); },
+    function (e) { console.log('premature  : ' + e.code + ' (' + e.message + ')'); }
+  );
+  w.destroy();
+})();
+// finished() IS Node's end-of-stream (internal/streams/end-of-stream.js): a real
+// AbortSignal rejects it with an AbortError, and it runs its own options object.
+// As in Node, finished takes a callback — the promise form is stream/promises.
+(function () {
+  const stream = require('stream');
+  const r = new stream.Readable({ read: function () {} });
+  const ac = new AbortController();
+  const p = stream.promises.finished(r, { signal: ac.signal });
+  ac.abort();
+  p.then(
+    function () { console.log('end-of-strm: resolved'); },
+    function (e) { console.log('end-of-strm: ' + e.name + ' / ' + e.code); }
+  );
+  const w = new stream.Writable({ write: function (_c, _e, cb) { cb(); } });
+  stream.promises.finished(w, { readable: false }).then(function () {
+    console.log('end-of-strm: readable:false waited for the writable half');
+  });
+  w.end('done');
+})();
+// events is Node's real events.js (not a Map-backed shim): prependListener
+// really pre-empts, and captureRejections routes a rejected listener to error.
+// stream.addAbortSignal is the real internal/streams/add-abort-signal.js.
+(function () {
+  const EventEmitter = require('events');
+  const ee = new EventEmitter();
+  const order = [];
+  ee.on('x', function () { order.push('on'); });
+  ee.prependListener('x', function () { order.push('prepend'); });
+  ee.emit('x');
+  console.log('events     : ' + order.join(' then ') + ' (maxListeners=' + ee.getMaxListeners() + ')');
+
+  const stream = require('stream');
+  const r = new stream.Readable({ read: function () {} });
+  const ac = new AbortController();
+  r.on('error', function (e) { console.log('abortsignal: ' + e.name + ' / ' + e.code); });
+  stream.addAbortSignal(ac.signal, r);
+  ac.abort();
+})();
+// Readable/Writable/Duplex/Transform/PassThrough are Node's own classes now, and
+// so are compose() and the async operators (map/filter): the whole module is the
+// vendored lib/stream.js, not a hand-written stand-in.
+(function () {
+  const stream = require('stream');
+  const upper = new stream.Transform({
+    transform: function (chunk, _enc, cb) { cb(null, String(chunk).toUpperCase()); },
+  });
+  const out = [];
+  upper.on('data', function (chunk) { out.push(String(chunk)); });
+  upper.end('duplex');
+  const composite = stream.compose(
+    new stream.Transform({
+      transform: function (chunk, _enc, cb) { cb(null, String(chunk) + '!'); },
+    })
+  );
+  const composed = [];
+  composite.on('data', function (chunk) { composed.push(String(chunk)); });
+  composite.end('compose');
+  setTimeout(function () {
+    console.log('stream fam : transform=' + out.join('') + ' compose=' + composed.join(''));
+  }, 10);
+})();
+// async_hooks is real Node source too (lib/async_hooks.js + internal/async_hooks.js
+// + internal/async_local_storage/*), on a JS async_wrap binding. Each tick and
+// timer is a real async resource, so a hook fires for them and AsyncLocalStorage
+// carries its store across the async boundary.
+(function () {
+  const ah = require('async_hooks');
+  const seen = [];
+  const hook = ah.createHook({
+    init: function (_id, type) { seen.push('init:' + type); },
+  });
+  hook.enable();
+  const als = new ah.AsyncLocalStorage();
+  als.run({ user: 'tang' }, function () {
+    process.nextTick(function () { seen.push('tick=' + JSON.stringify(als.getStore())); });
+    setTimeout(function () { seen.push('timer=' + JSON.stringify(als.getStore())); }, 5);
+  });
+  // Synchronous, so only the tick + timer scheduled above are reported.
+  hook.disable();
+  setTimeout(function () {
+    console.log('async_hooks: ' + seen.join(' / '));
+    console.log('als outside : ' + als.getStore());
+  }, 15);
+})();
+const factsFile = path.join(dir, 'facts.txt');
+fs.writeFileSync(factsFile, require('./lib/facts.js')().map(function (r) {
+  return r[0] + ' = ' + r[1];
+}).join('; ') + ';');
+
+let streamed = 0;
+let chunkCount = 0;
+fs.createReadStream(factsFile, { highWaterMark: 16 })
+  .on('data', function (chunk) { streamed += chunk.length; chunkCount++; })
+  .on('end', function () {
+    console.log('read stream : ' + streamed + ' bytes in ' + chunkCount + ' chunks of <=16');
+  });
+
+pipeline(
+  fs.createReadStream(factsFile),
+  new Transform({
+    transform: function (chunk, enc, cb) { cb(null, chunk.toString().toUpperCase()); },
+  }),
+  fs.createWriteStream(path.join(dir, 'facts-upper.txt')),
+  function (err) {
+    console.log('pipeline    : ' + (err ? 'error ' + err.message : 'facts-upper.txt written'));
+  }
+);
+
+// The pull API: a paused consumer driven by the 'readable' event, reading an
+// exact byte count at a time (never a whole buffered chunk), and closing itself
+// when the stream ends.
+const pull = new Readable({ read: function () {} });
+pull.push(fs.readFileSync(factsFile));
+pull.push(null);
+let pulled = 0;
+let pulls = 0;
+pull.on('readable', function () {
+  let chunk;
+  while ((chunk = pull.read(32)) !== null) {
+    pulled += chunk.length;
+    pulls++;
+  }
+});
+pull.on('end', function () {
+  console.log('read(32)    : ' + pulled + ' bytes in ' + pulls + ' exact reads');
+});
+pull.on('close', function () {
+  // autoDestroy (on by default) closes the stream once it has ended.
+  console.log('autoDestroy : closed, destroyed=' + pull.destroyed);
+});
+console.log('');
+
+// --- child_process (milestone 7) ---
+// A spawned program is a second module registry on the same event loop, with
+// its own process view (argv/env/cwd/stdout/stderr) and its own pipes. There is
+// no OS process, so what can be spawned is exactly what the VFS can run:
+// JavaScript. Anything else is refused by name.
+console.log('-- child_process --');
+const { execFileSync, spawnSync, exec } = require('child_process');
+
+// Synchronous listener, exactly like the desktop — output is printed here and
+// now because the child finished without ever needing the event loop.
+const report = execFileSync('node', [path.join(__dirname, 'lib', 'report.js')], { encoding: 'utf8' });
+console.log('child out   : ' + report.trim());
+
+// npm's own .bin entries are shell scripts, which a tab cannot execute. They are
+// refused by name instead of half-run — which is exactly why the installer
+// writes JavaScript shims into node_modules/.bin instead.
+const refused = spawnSync('/project/node/tool.sh', []);
+console.log('sh script   : ' + (refused.error ? refused.error.code : 'unexpectedly ran'));
+
+// The shell is a real (small) parser: pipe the output of one virtual program
+// into the next, asynchronously.
+exec('node -e "process.stdout.write(String(6 * 7))" | node ' + path.join(__dirname, 'lib', 'upper.js'), function (err, stdout) {
+  console.log('shell pipe  : ' + (err ? 'error ' + err.code : stdout));
+});
+console.log('');
+
+// --- fork IPC (milestone 40) ---
+// fork() runs a module the way 'node <module>' would and gives both sides a
+// channel: the parent gets child.send / child.on('message') / child.disconnect,
+// the child gets process.send / process.on('message') / process.disconnect.
+// Messages are JSON by default (Node's default), and an open channel keeps the
+// child alive instead of letting it exit the moment its module returns.
+console.log('-- fork IPC (milestone 40) --');
+const { fork } = require('child_process');
+const kid = fork(path.join(__dirname, 'lib', 'ipc-child.js'));
+kid.on('message', function (m) {
+  console.log('child says  : ' + JSON.stringify(m));
+  if (m.step === 2) kid.disconnect();
+});
+kid.on('disconnect', function () {
+  console.log('disconnect  : connected=' + kid.connected);
+});
+kid.on('exit', function (code) {
+  console.log('child exits : ' + code);
+});
+kid.send({ n: 21 });
+console.log('');
+
+// --- worker_threads (milestone 30) ---
+// A MessageChannel is a real entangled port pair: messages are structured
+// clones, a port can be transferred to the other side (and shows up in the
+// event's ports array), and receiveMessageOnPort reads synchronously without
+// starting the port. Only the thread-spawning half of worker_threads (Worker,
+// postMessageToThread) is out of reach in a browser tab, and it says so.
+console.log('-- worker_threads --');
+const { MessageChannel, receiveMessageOnPort } = require('worker_threads');
+
+const syncChannel = new MessageChannel();
+syncChannel.port1.postMessage({ answer: 42 });
+console.log('sync receive : ' + JSON.stringify(receiveMessageOnPort(syncChannel.port2).message));
+
+const channel = new MessageChannel();
+const handoff = new MessageChannel();
+handoff.port2.onmessage = function (e) {
+  console.log('transferred  : ' + e.data);
+};
+channel.port2.onmessage = function (e) {
+  console.log('channel msg  : ' + JSON.stringify(e.data.payload) + ' ports=' + e.ports.length);
+  // The received port is entangled with handoff.port2, so this is the round trip.
+  e.ports[0].postMessage('round trip through the transferred port');
+};
+channel.port1.postMessage({ payload: { hello: 'world' }, port: handoff.port1 }, [handoff.port1]);
+console.log('');
+
+// --- Worker (milestone 57) ---
+// A browser tab cannot start a thread, so a Worker here is a second module
+// registry on the same event loop with its own globals and a real MessageChannel
+// to the parent. workerData, the online/message/error/exit lifecycle and
+// terminate() all behave as in Node; what is missing is parallelism, and that
+// message-passing half is the whole point here.
+console.log('-- worker_threads.Worker (milestone 57) --');
+const { Worker } = require('worker_threads');
+(async function () {
+  const worker = new Worker(path.join(__dirname, 'lib/worker-demo.js'), {
+    workerData: { from: 'main' },
+  });
+  const seen = [];
+  worker.on('online', function () { seen.push('online'); worker.postMessage('ping'); });
+  worker.on('message', function (m) { seen.push('message:' + JSON.stringify(m)); });
+  worker.on('error', function (e) { seen.push('error:' + e.message); });
+  await new Promise(function (resolve) { worker.on('exit', function (code) { seen.push('exit:' + code); resolve(); }); });
+  console.log('events      : ' + seen.join(' '));
+  console.log('');
+})();
+
+// --- worker stdio (milestone 59) ---
+// A worker's stdout/stderr are real streams: their bytes cross a second
+// MessageChannel. By default they are piped to the parent's, so the worker's
+// console.log shows up right here; stdin: true hands the parent a Writable the
+// worker reads as process.stdin.
+console.log('-- worker stdio (milestone 59) --');
+(async function () {
+  const ioWorker = new Worker(path.join(__dirname, 'lib/worker-io.js'), { stdin: true });
+  const ioEvents = [];
+  ioWorker.on('message', function (m) { ioEvents.push(m); });
+  ioWorker.on('online', function () {
+    ioWorker.stdin.write('ping to the worker\\n');
+    ioWorker.stdin.end();
+  });
+  await new Promise(function (resolve) { ioWorker.on('exit', function () { resolve(); }); });
+  console.log('stdio       : ' + ioEvents.join(' '));
+  console.log('');
+})();
+
+// --- internal/errors (milestone 58) ---
+// The internal/errors table now covers every code the vendored modules ask for.
+// Each entry is a real constructor: name is the built-in base it extends and
+// code rides on the instance, exactly as in Node (previously a code that was
+// referenced but not declared came back undefined and new threw).
+console.log('-- internal/errors (milestone 58) --');
+const { codes } = require('internal/errors');
+const useAfterClose = new codes.ERR_USE_AFTER_CLOSE('readline');
+const notIterable = new codes.ERR_ARG_NOT_ITERABLE('value');
+console.log('use-after-close : ' + useAfterClose.name + ' ' + useAfterClose.code + ' - ' + useAfterClose.message);
+console.log('not-iterable    : ' + notIterable.name + ' ' + notIterable.code + ' - ' + notIterable.message);
+console.log('');
+
+// --- internal/errors: SystemError codes (milestone 60) ---
+// Codes Node declares with E(code, msg, SystemError) build their message from a
+// *context object* and call themselves "SystemError" (the suffix is
+// ": syscall returned code (message) path => dest"). The table used to build
+// them like ordinary codes, which dropped both, and two sibling codes had each
+// other's wording.
+console.log('-- internal/errors: SystemError codes (milestone 60) --');
+const cpConflict = new codes.ERR_FS_CP_EINVAL({
+  message: 'src and dest cannot be the same',
+  path: '/a',
+  dest: '/b',
+  syscall: 'cp',
+  code: 'EINVAL',
+});
+console.log('system-error    : ' + cpConflict.name + ' [' + cpConflict.code + '] ' + cpConflict.message);
+console.log('');
+
+// --- binding surface (milestone 61) ---
+// Node's internal code reaches the host only through internalBinding(id), then
+// reads named properties off it. A name the binding doesn't define is
+// undefined, and the call site throws "is not a function" the first time that
+// path runs. The surface is now complete for everything the vendored tree reads:
+// the full libuv errno set, the V8 heap-profiler sampling flags, the
+// extensionless-module format table, and util's markPromiseAsHandled (which
+// stream/iter relies on for promises it deliberately abandons).
+console.log('-- binding surface (milestone 61) --');
+const util = require('util');
+console.log('libuv errnos    : ' + util.getSystemErrorMap().size + ' (e.g. -28 = "' + util.getSystemErrorName(-28) + '")');
+(async function () {
+  const { from } = require('stream/iter');
+  const symbol = Symbol.for('Stream.toAsyncStreamable');
+  const source = {};
+  source[symbol] = function () { return Promise.reject(new Error('abandoned')); };
+  const iterable = from(source);
+  await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  console.log('markPromiseAsHandled: ok (stream/iter tolerated ' + typeof iterable + ' from a rejected protocol)');
+  console.log('');
+})();
+
+// --- readline (milestone 31) ---
+// A "terminal" here is just an { input, output } stream pair - a tab has no TTY,
+// but the line editor, the keypress decoder, the ANSI cursor writers and the
+// history ring are all plain Node code running on streams.
+console.log('-- readline --');
+const readline = require('readline');
+
+let ansi = '';
+const term = new Writable({ write: function (c, e, cb) { ansi += c.toString(); cb(); } });
+readline.cursorTo(term, 3, 2);
+readline.clearLine(term, 0);
+console.log('cursor      : ' + JSON.stringify(ansi));
+
+const keys = [];
+const keyboard = new Readable({ read: function () {} });
+readline.emitKeypressEvents(keyboard);
+keyboard.on('keypress', function (s, k) {
+  keys.push(k.name + (k.ctrl ? '+ctrl' : '') + (k.shift ? '+shift' : ''));
+});
+['a', '[A', ''].forEach(function (seq) { keyboard.push(Buffer.from(seq)); });
+// Key decoding happens when the stream's 'data' event fires, so it lands a tick
+// later - exactly as on the desktop (a synchronous read here still sees []).
+setImmediate(function () { console.log('keypress    : ' + keys.join(', ')); });
+
+const editor = readline.createInterface({ input: Readable.from(['first\\nsecond\\n']), terminal: false });
+const seen = [];
+editor.on('line', function (line) { seen.push(line); });
+editor.on('close', function () { console.log('edit lines  : ' + JSON.stringify(seen)); });
+console.log('');
+
+// --- glob (milestone 33) ---
+// path.matchesGlob and fs.glob* are Node's real glob walker (internal/fs/glob.js)
+// over the bundled minimatch matcher, walking the virtual filesystem. cwd is
+// given explicitly so the walk does not depend on how the host process resolves
+// relative paths.
+console.log('-- glob (milestone 33) --');
+const fsm = require('fs');
+const pathm = require('path');
+const globRoot = '/project/node/globdemo';
+fsm.mkdirSync(globRoot + '/src/deep', { recursive: true });
+fsm.writeFileSync(globRoot + '/index.js', '');
+fsm.writeFileSync(globRoot + '/src/a.js', '');
+fsm.writeFileSync(globRoot + '/src/notes.txt', '');
+fsm.writeFileSync(globRoot + '/src/deep/c.js', '');
+console.log('matchesGlob : ' + pathm.matchesGlob('/a/b/c.txt', '**/*.txt') + ' ' + pathm.matchesGlob('a/b.js', '*.js'));
+console.log('globSync    : ' + JSON.stringify(fsm.globSync('**/*.js', { cwd: globRoot })));
+console.log('exclude     : ' + JSON.stringify(fsm.globSync('**/*.js', { cwd: globRoot, exclude: function (p) { return p.indexOf('deep') !== -1; } })));
+(async function () {
+  const out = [];
+  for await (const match of fsm.promises.glob('src/*.js', { cwd: globRoot })) out.push(match);
+  console.log('async glob  : ' + JSON.stringify(out));
+})();
+console.log('');
+
+// --- crypto (milestone 34) ---
+// The digest/MAC/KDF half of node:crypto has to be synchronous, and WebCrypto
+// is promise-only, so SHA-2, HMAC, PBKDF2, HKDF and scrypt are implemented in
+// plain JS (src/node-runtime/crypto/hash.ts). Randomness still rides on the
+// platform's WebCrypto, exactly like Node rides on OpenSSL's RAND_bytes.
+console.log('-- crypto (milestone 34) --');
+const crypto = require('crypto');
+console.log('sha256(abc) : ' + crypto.createHash('sha256').update('abc').digest('hex'));
+console.log('sha512(abc) : ' + crypto.createHash('sha512').update('abc').digest('hex').slice(0, 40) + '...');
+console.log('md5(abc)    : ' + crypto.createHash('md5').update('abc').digest('hex'));
+console.log('sha3-256    : ' + crypto.createHash('sha3-256').update('abc').digest('hex').slice(0, 40) + '...');
+console.log('shake128    : ' + crypto.createHash('shake128', { outputLength: 16 }).update('abc').digest('hex'));
+console.log('hmac-sha256 : ' + crypto.createHmac('sha256', 'secret-key').update('hello world').digest('hex'));
+console.log('pbkdf2      : ' + crypto.pbkdf2Sync('password', 'salt', 1000, 16, 'sha256').toString('hex'));
+console.log('hkdf        : ' + Buffer.from(crypto.hkdfSync('sha256', 'key', 'salt', 'info', 16)).toString('hex'));
+console.log('scrypt      : ' + crypto.scryptSync('password', 'salt', 16, { N: 1024, r: 8, p: 1 }).toString('hex'));
+console.log('timingSafe  : ' + crypto.timingSafeEqual(Buffer.from('abcd'), Buffer.from('abcd')));
+console.log('randomInt   : ' + (crypto.randomInt(1, 7) >= 1 ? 'in range (1..6)' : 'OUT OF RANGE'));
+console.log('randomUUID  : ' + crypto.randomUUID().length + ' chars, ' + crypto.getHashes().length + ' hashes available');
+console.log('');
+
+// --- perf_hooks (milestone 35 / M117) ---
+// Node's real perf_hooks: the marks/measures/observers half runs on a JS
+// performance binding (the browser clock stands in for uv_hrtime). Since M117
+// the histograms are real too: the native layer is Node's own deps/histogram
+// (HdrHistogram) compiled to WebAssembly, so createHistogram and
+// monitorEventLoopDelay work and export() yields Node-shaped CBOR.
+console.log('-- perf_hooks (milestone 35) --');
+const perfHooks = require('perf_hooks');
+const perf = perfHooks.performance;
+perf.mark('start');
+let spin = 0;
+for (let i = 0; i < 200000; i++) spin += i;
+perf.mark('end');
+const span = perf.measure('spin', 'start', 'end');
+console.log('measure     : ' + span.entryType + ' ' + span.name + ' in ' + span.duration.toFixed(3) + 'ms');
+console.log('marks       : ' + perf.getEntriesByType('mark').length + ' marks, ' + perf.getEntriesByType('measure').length + ' measure');
+console.log('isMark      : ' + (perf.getEntriesByName('start')[0] instanceof perfHooks.PerformanceMark));
+console.log('nodeTiming  : nodeStart=' + perf.nodeTiming.nodeStart + ' loopStart=' + perf.nodeTiming.loopStart);
+const hist = perfHooks.createHistogram();
+for (let i = 1; i <= 1000; i++) hist.record(i);
+console.log('histogram   : count=' + hist.count + ' min=' + hist.min + ' max=' + hist.max + ' mean=' + hist.mean + ' p99=' + hist.percentile(99));
+const histBack = perfHooks.importHistogram(hist.export());
+console.log('hist export : ' + hist.export().length + ' bytes of CBOR, reimport count=' + histBack.count);
+console.log('');
+
+// --- stream/web (milestone 36) ---
+// stream/web is the real WHATWG implementation (lib/stream/web.js + the whole
+// internal/webstreams/* group): ReadableStream / WritableStream /
+// TransformStream, the queuing strategies and the text codecs. The classic <->
+// web bridges work too, so Readable.toWeb(stream) hands back a real web stream.
+console.log('-- stream/web (milestone 36) --');
+const webStreams = require('stream/web');
+const nodeStream = require('stream');
+(async function () {
+  const rs = new webStreams.ReadableStream({
+    start: function (c) { c.enqueue('node '); c.enqueue('in '); c.enqueue('the browser'); c.close(); },
+  });
+  const reader = rs.getReader();
+  const parts = [];
+  for (;;) {
+    const r = await reader.read();
+    if (r.done) break;
+    parts.push(r.value);
+  }
+  console.log('readable    : ' + parts.join(''));
+
+  const ts = new webStreams.TransformStream({
+    transform: function (chunk, c) { c.enqueue(String(chunk).toUpperCase()); },
+  });
+  const w = ts.writable.getWriter();
+  const collected = (async function () {
+    const out = [];
+    const r = ts.readable.getReader();
+    for (;;) { const x = await r.read(); if (x.done) break; out.push(x.value); }
+    return out;
+  })();
+  await w.write('hello');
+  await w.write(' web');
+  await w.close();
+  console.log('transform   : ' + (await collected).join(''));
+
+  const toWeb = nodeStream.Readable.toWeb(nodeStream.Readable.from(['classic ', 'to ', 'web']));
+  const tw = toWeb.getReader();
+  const tparts = [];
+  for (;;) { const x = await tw.read(); if (x.done) break; tparts.push(Buffer.from(x.value).toString()); }
+  console.log('toWeb       : ' + tparts.join(''));
+})();
+console.log('');
+
+// --- zlib (milestone 45 / M116) ---
+// zlib is the real thing now: Node's own C zlib (deps/zlib) compiled to
+// WebAssembly, driven through internalBinding('zlib'). So the sync API and the
+// codec parameters behave exactly like Node's.
+console.log('-- zlib (milestone 45) --');
+const zlib = require('zlib');
+zlib.gzip(Buffer.from('hello hello hello hello'), function (err, gz) {
+  if (err) { console.log('gzip        : ' + err.message); return; }
+  console.log('gzip hex    : ' + gz.toString('hex'));
+  zlib.gunzip(gz, function (e2, back) {
+    console.log('gunzip      : ' + (e2 ? e2.code : back.toString()));
+  });
+});
+console.log('crc32       : ' + zlib.crc32('hello'));
+console.log('gzipSync    : ' + zlib.gzipSync('x').toString('hex'));
+console.log('deflate L9  : ' + zlib.deflateSync(Buffer.from('hello hello hello hello'), { level: 9 }).toString('hex'));
+console.log('zlib version: ' + (zlib.constants.ZLIB_VERNUM === 4897 ? '1.3.2.1' : String(zlib.constants.ZLIB_VERNUM)));
+const webZlib = require('stream/web');
+(async function () {
+  const cs = new webZlib.CompressionStream('deflate');
+  const writer = cs.writable.getWriter();
+  writer.write(Buffer.from('hello hello hello hello'));
+  writer.close();
+  const chunks = [];
+  const reader = cs.readable.getReader();
+  for (;;) { const r = await reader.read(); if (r.done) break; chunks.push(Buffer.from(r.value)); }
+  console.log('CS deflate  : ' + Buffer.concat(chunks).toString('hex'));
+})();
+console.log('');
+
+// --- brotli / zstd (milestone 118) ---
+// Brotli (deps/brotli 1.2.0) and zstd (deps/zstd 1.5.7) are compiled to
+// WebAssembly as well, so the sync/streaming API, the codec parameters and the
+// dictionaries all behave exactly like Node's (byte-identical output).
+console.log('-- brotli / zstd (milestone 118) --');
+const fox = Buffer.from('The quick brown fox jumps over the lazy dog. '.repeat(300));
+const br = zlib.brotliCompressSync(fox);
+console.log('brotli fox  : ' + br.length + ':' + br.subarray(0, 12).toString('hex'));
+console.log('brotli rt   : ' + zlib.brotliDecompressSync(br).equals(fox));
+console.log('brotli q5   : ' + zlib.brotliCompressSync(fox, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } }).length);
+const zs = zlib.zstdCompressSync(fox);
+console.log('zstd fox    : ' + zs.length + ':' + zs.subarray(0, 12).toString('hex'));
+console.log('zstd rt     : ' + zlib.zstdDecompressSync(zs).equals(fox));
+console.log('zstd sum4   : ' + zlib.zstdCompressSync(fox, { params: { [zlib.constants.ZSTD_c_checksumFlag]: 1 } }).length);
+const zdict = Buffer.from('quick brown fox jumps');
+console.log('zstd dict   : ' + zlib.zstdDecompressSync(zlib.zstdCompressSync(fox, { dictionary: zdict }), { dictionary: zdict }).equals(fox));
+console.log('');
+
+// --- AES ciphers (milestone 47) ---
+// The symmetric half of node:crypto is here too: createCipheriv/
+// createDecipheriv over AES in ECB/CBC/CTR/CFB/OFB/GCM. Node's ciphers are
+// synchronous and streaming, so WebCrypto (promise-only) cannot stand in;
+// they are implemented in plain JS (src/node-runtime/crypto/cipher.ts) and
+// match OpenSSL byte for byte.
+console.log('-- AES ciphers (milestone 47) --');
+const cKey = Buffer.from('00112233445566778899aabbccddeeff', 'hex');
+const cIv = Buffer.from('0f0e0d0c0b0a09080706050403020100', 'hex');
+const cbc = crypto.createCipheriv('aes-128-cbc', cKey, cIv);
+const cbcCt = Buffer.concat([cbc.update('The quick brown fox jumps over the lazy dog'), cbc.final()]);
+console.log('cbc ct      : ' + cbcCt.toString('hex').slice(0, 40) + '...');
+const cbcBack = crypto.createDecipheriv('aes-128-cbc', cKey, cIv);
+console.log('cbc pt      : ' + Buffer.concat([cbcBack.update(cbcCt), cbcBack.final()]).toString());
+const gcm = crypto.createCipheriv('aes-128-gcm', cKey, Buffer.from('0f0e0d0c0b0a090807060504', 'hex'));
+gcm.setAAD(Buffer.from('header-v1'));
+const gcmCt = Buffer.concat([gcm.update('hello world'), gcm.final()]);
+console.log('gcm tag     : ' + gcm.getAuthTag().toString('hex'));
+console.log('gcm ciphers : ' + crypto.getCiphers().filter(function (n) { return n.indexOf('aes-') === 0; }).length + ' aes entries');
+console.log('');
+
+// --- ChaCha20, DES/3DES, CCM, Camellia, ARIA, SM4, OCB, wrap, SIV and XTS (milestone 93) ---
+// Beyond AES, the runtime also carries ChaCha20-Poly1305 (RFC 8439), the
+// DES-EDE / DES-EDE3 family, AES-CCM (SP 800-38C), Camellia (RFC 3713),
+// ARIA (RFC 5794), SM4 (GB/T 32907), AES-OCB (RFC 7253), AES key wrap
+// (RFC 3394/5649), AES-SIV (RFC 5297) and AES-XTS (IEEE 1619), all matching
+// OpenSSL byte for byte.
+console.log('-- ChaCha20 / DES / CCM / Camellia / ARIA / SM4 / OCB / wrap / SIV / XTS (milestone 93) --');
+const chaKey = Buffer.alloc(32, 1);
+const chaNonce = Buffer.alloc(12, 2);
+const chacha = crypto.createCipheriv('chacha20-poly1305', chaKey, chaNonce, { authTagLength: 16 });
+chacha.setAAD(Buffer.from('header'));
+const chaCt = Buffer.concat([chacha.update('secret data'), chacha.final()]);
+console.log('chacha ct   : ' + chaCt.toString('hex'));
+console.log('chacha tag  : ' + chacha.getAuthTag().toString('hex'));
+const desKey = Buffer.from('0123456789abcdeffedcba98765432100123456789abcdef', 'hex');
+const desIv = Buffer.alloc(8);
+const des = crypto.createCipheriv('des-ede3-cbc', desKey, desIv);
+const desCt = Buffer.concat([des.update('The quick brown fox'), des.final()]);
+console.log('des3 ct     : ' + desCt.toString('hex'));
+const desBack = crypto.createDecipheriv('des-ede3-cbc', desKey, desIv);
+console.log('des3 pt     : ' + Buffer.concat([desBack.update(desCt), desBack.final()]).toString());
+const ccm = crypto.createCipheriv('aes-128-ccm', cKey, Buffer.from('0f0e0d0c0b0a090807060504', 'hex'), { authTagLength: 16 });
+ccm.setAAD(Buffer.from('header-v1'), { plaintextLength: 11 });
+const ccmCt = Buffer.concat([ccm.update('hello world'), ccm.final()]);
+console.log('ccm ct      : ' + ccmCt.toString('hex'));
+console.log('ccm tag     : ' + ccm.getAuthTag().toString('hex'));
+const camKey = Buffer.from('0123456789abcdeffedcba9876543210', 'hex');
+const camIv = Buffer.from('00112233445566778899aabbccddeeff', 'hex');
+const cam = crypto.createCipheriv('camellia-128-cbc', camKey, camIv);
+const camCt = Buffer.concat([cam.update('The quick brown fox'), cam.final()]);
+console.log('camellia ct : ' + camCt.toString('hex'));
+const camBack = crypto.createDecipheriv('camellia-128-cbc', camKey, camIv);
+console.log('camellia pt : ' + Buffer.concat([camBack.update(camCt), camBack.final()]).toString());
+console.log('camellia mac: ' + crypto.createMac('cmac', camKey, { cipher: 'camellia-128-cbc' }).update('data').final('hex'));
+const aria = crypto.createCipheriv('aria-128-cbc', camKey, camIv);
+console.log('aria ct     : ' + Buffer.concat([aria.update('The quick brown fox'), aria.final()]).toString('hex'));
+const sm4 = crypto.createCipheriv('sm4-cbc', camKey, camIv);
+console.log('sm4 ct      : ' + Buffer.concat([sm4.update('The quick brown fox'), sm4.final()]).toString('hex'));
+const ocb = crypto.createCipheriv('aes-128-ocb', camKey, Buffer.from('000102030405060708090a0b', 'hex'), { authTagLength: 16 });
+ocb.setAAD(Buffer.from('header-v1'));
+console.log('ocb ct      : ' + Buffer.concat([ocb.update('hello world'), ocb.final()]).toString('hex'));
+console.log('ocb tag     : ' + ocb.getAuthTag().toString('hex'));
+const kek = Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex');
+const wrapped = crypto.createCipheriv('aes-128-wrap', kek, Buffer.from('a6a6a6a6a6a6a6a6', 'hex'));
+console.log('wrap ct     : ' + Buffer.concat([wrapped.update(camKey), wrapped.final()]).toString('hex'));
+const sivKey = Buffer.concat([camKey, Buffer.from('00112233445566778899aabbccddeeff', 'hex')]);
+const siv = crypto.createCipheriv('aes-128-siv', sivKey, null, { authTagLength: 16 });
+siv.setAAD(Buffer.from('header-v1'));
+console.log('siv ct      : ' + Buffer.concat([siv.update('hello world'), siv.final()]).toString('hex'));
+console.log('siv tag     : ' + siv.getAuthTag().toString('hex'));
+const xts = crypto.createCipheriv('aes-128-xts', sivKey, Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex'));
+console.log('xts ct      : ' + Buffer.concat([xts.update(Buffer.alloc(20, 7)), xts.final()]).toString('hex'));
+console.log('');
+
+// --- crypto.Certificate (SPKAC, milestone 94) ---
+// The legacy SPKAC helper is real now: verifySpkac checks the embedded
+// signature, exportChallenge returns the challenge string and exportPublicKey
+// PEM-encodes the key. Anything that is not a valid SPKAC comes back falsy.
+console.log('-- crypto.Certificate / SPKAC (milestone 94) --');
+console.log('spkac trio  : ' + ['verifySpkac', 'exportPublicKey', 'exportChallenge'].every((m) => typeof crypto.Certificate[m] === 'function'));
+console.log('bad spkac   : ' + crypto.Certificate.verifySpkac('not-a-spkac'));
+console.log('empty spkac : ' + JSON.stringify(crypto.Certificate.exportChallenge('')));
+console.log('');
+
+// --- ML-KEM encapsulation (milestone 91) ---
+// crypto.encapsulate / crypto.decapsulate are the FIPS 203 (ML-KEM) KEM. The
+// ml-kem-512/768/1024 key types generate here and encapsulate/decapsulate
+// round-trip to the same 32-byte shared secret.
+console.log('-- ML-KEM encapsulation (milestone 91) --');
+const mlkem = crypto.generateKeyPairSync('ml-kem-768');
+console.log('ml-kem type : ' + mlkem.publicKey.asymmetricKeyType);
+const encapsulated = crypto.encapsulate(mlkem.publicKey);
+const decapsulated = crypto.decapsulate(mlkem.privateKey, encapsulated.ciphertext);
+console.log('shared match: ' + decapsulated.equals(encapsulated.sharedKey));
+console.log('key lengths : ' + encapsulated.sharedKey.length + ' / ' + encapsulated.ciphertext.length);
+console.log('');
+
+// --- url (milestone 53) ---
+// url is Node's real lib/url.js now: the legacy Url/parse/format/resolve API
+// next to the WHATWG classes, and pathToFileURL/fileURLToPath. The WHATWG side
+// comes from internal/url, which is bridged to the tab's own URL parser (Node's
+// is native Ada; a browser already ships a spec-compliant one).
+console.log('-- url (milestone 53) --');
+var nodeUrl = require('url');
+var parsedUrl = nodeUrl.parse('http://u:p@h.com:81/p/q?x=1#f');
+console.log('parse       : ' + parsedUrl.hostname + ':' + parsedUrl.port + ' query=' + parsedUrl.query);
+console.log('format      : ' + nodeUrl.format({ protocol: 'https:', host: 'h.com', pathname: '/p', query: { a: '1' } }));
+console.log('resolve     : ' + nodeUrl.resolve('http://h.com/a/b', '../c'));
+console.log('file url    : ' + nodeUrl.pathToFileURL('/project/a b.js').href + ' -> ' + nodeUrl.fileURLToPath('file:///project/a%20b.js'));
+console.log('idna        : ' + nodeUrl.domainToASCII('münchen.de') + ' <- ' + nodeUrl.domainToUnicode('xn--mnchen-3ya.de'));
+console.log('');
+
+// --- v8 (milestone 54) ---
+// v8 is Node's real lib/v8.js. serialize/deserialize are the real V8
+// structured-clone wire format (version 15), reimplemented in JS in the
+// 'serdes' binding because a page cannot reach V8's ValueSerializer. The heap
+// and profiler surface is native-only, so it throws instead of inventing
+// numbers.
+console.log('-- v8 (milestone 54) --');
+function wireVersionOf(v8mod) {
+  var der = new v8mod.Deserializer(v8mod.serialize(1));
+  der.readHeader();
+  return der.getWireFormatVersion();
+}
+var nodeV8 = require('v8');
+var wire = nodeV8.serialize({ a: [1, 2], when: new Date(0), re: /ab+c/gi });
+console.log('serialize   : ' + wire.toString('hex'));
+var backAgain = nodeV8.deserialize(wire);
+console.log('deserialize : a=' + JSON.stringify(backAgain.a) + ' when=' + backAgain.when.toISOString() + ' re=' + backAgain.re.source + '/' + backAgain.re.flags);
+var sharedRef = { v: 1 };
+var twoRefs = nodeV8.deserialize(nodeV8.serialize({ x: sharedRef, y: sharedRef }));
+console.log('references  : same=' + (twoRefs.x === twoRefs.y) + ' value=' + twoRefs.x.v);
+console.log('typed array : ' + nodeV8.serialize(Buffer.from([1, 2, 3])).toString('hex'));
+console.log('wire version: ' + wireVersionOf(nodeV8));
+var oneByte = nodeV8.isStringOneByteRepresentation('abc');
+console.log('one byte    : abc=' + oneByte + ' cjk=' + nodeV8.isStringOneByteRepresentation('中文'));
+try {
+  nodeV8.getHeapStatistics();
+  console.log('heap stats  : unexpectedly available');
+} catch (err) {
+  console.log('heap stats  : throws (' + err.code + ')');
+}
+console.log('');
+
+// --- tty (milestone 55) ---
+// tty is Node's real lib/tty.js. A tab has no file descriptor and no terminal,
+// so isatty answers false and the Read/WriteStream classes throw rather than
+// pretend to be a console; the colour-depth logic (internal/tty) is real.
+console.log('-- tty (milestone 55) --');
+var nodeTty = require('tty');
+function colorDepthOf(mod, env) {
+  return mod.WriteStream.prototype.getColorDepth(env);
+}
+console.log('isatty      : 0=' + nodeTty.isatty(0) + ' 1=' + nodeTty.isatty(1) + ' -1=' + nodeTty.isatty(-1));
+console.log('depth plain : ' + colorDepthOf(nodeTty));
+console.log('depth force3: ' + colorDepthOf(nodeTty, { FORCE_COLOR: '3' }));
+console.log('depth xterm : ' + colorDepthOf(nodeTty, { TERM: 'xterm-256color' }));
+console.log('depth dumb  : ' + colorDepthOf(nodeTty, { TERM: 'dumb' }));
+console.log('hasColors256: ' + nodeTty.WriteStream.prototype.hasColors(256, { FORCE_COLOR: '2' }));
+try {
+  new nodeTty.WriteStream(1);
+  console.log('stream      : unexpectedly built');
+} catch (err) {
+  console.log('stream      : throws (' + err.code + ')');
+}
+console.log('');
+
+// --- vm (milestone 56) ---
+// vm is Node's real lib/vm.js. A page cannot build a second V8 realm, so the
+// 'contextify' binding emulates a context: the sandbox object *is* the context
+// (tagged with Node's contextify symbol), and a script runs inside a with-scope
+// over it. Writes land on the sandbox, this/globalThis are the scope, and the
+// completion value comes back; realm identity is the documented deviation.
+console.log('-- vm (milestone 56) --');
+var nodeVm = require('vm');
+var sandbox = { seed: 41 };
+console.log('expr        : ' + nodeVm.runInNewContext('seed + 1', sandbox));
+nodeVm.runInNewContext('assigned = "yes"', sandbox);
+console.log('sandbox     : seed=' + sandbox.seed + ' assigned=' + JSON.stringify(sandbox.assigned));
+console.log('isolation   : typeof process=' + nodeVm.runInNewContext('typeof process'));
+console.log('this===self : ' + nodeVm.runInNewContext('this===globalThis'));
+console.log('isContext   : plain=' + nodeVm.isContext({}) + ' created=' + nodeVm.isContext(nodeVm.createContext({})));
+console.log('script      : ' + new nodeVm.Script('6*7').runInThisContext());
+var compiled = nodeVm.compileFunction('return a + b', ['a', 'b']);
+console.log('compileFn   : ' + compiled(20, 22));
+var parsing = nodeVm.createContext({ base: 100 });
+console.log('parsingCtx  : ' + nodeVm.compileFunction('return base + 1', [], { parsingContext: parsing })());
+try {
+  nodeVm.runInNewContext('while(true){}', {}, { timeout: 10 });
+  console.log('timeout     : unexpectedly allowed');
+} catch (err) {
+  console.log('timeout     : throws (' + err.code + ')');
+}
+console.log('');
+
+// --- Blob (milestone 37) ---
+// Blob and File are now the real lib/internal/blob.js + lib/internal/file.js
+// running on a JS 'blob' binding. Blob is a global (and require('buffer').Blob
+// agrees on identity); blob.stream() chunks on the original part boundaries.
+console.log('-- Blob (milestone 37) --');
+(async function () {
+  const b = new Blob(['node ', 'in ', 'the browser']);
+  console.log('size        : ' + b.size + ' type=' + JSON.stringify(b.type));
+  console.log('text        : ' + (await b.text()));
+  const chunks = [];
+  const r = b.stream().getReader();
+  for (;;) { const x = await r.read(); if (x.done) break; chunks.push(Buffer.from(x.value).toString()); }
+  console.log('stream      : ' + JSON.stringify(chunks));
+  const f = new File(['data'], 'demo.txt', { type: 'text/plain' });
+  console.log('file        : ' + f.name + ' ' + f.size + ' ' + f.type);
+  const sliced = b.slice(5, 7);
+  console.log('slice       : ' + (await sliced.text()));
+  const ob = await require('fs').openAsBlob('/project/node/index.js').catch(function () { return null; });
+  console.log('openAsBlob  : ' + (ob ? ob.size + ' bytes from /project/node/index.js' : 'n/a'));
+})();
+console.log('');
+
+// --- stream/iter (milestone 38) ---
+// stream/iter is the new experimental iterable-streams API, and stream/consumers
+// is the six-function consumer surface (text/json/buffer/bytes/arrayBuffer/blob).
+// Both are the real Node source now; consumers only became possible once Blob
+// (milestone 37) was real.
+console.log('-- stream/iter (milestone 38) --');
+(async function () {
+  const si = require('stream/iter');
+  const p = si.push();
+  const collected = si.text(p.readable);
+  await p.writer.write('node ');
+  await p.writer.write('iter');
+  await p.writer.end();
+  console.log('iter text   : ' + (await collected));
+  const up = si.pull(si.from(['a', 'b', 'c']), function (chunk) { return chunk; });
+  console.log('iter pull   : ' + (await si.text(up)));
+  console.log('iter merge  : ' + (await si.text(si.merge(si.from(['x']), si.from(['y'])))));
+  const cons = require('stream/consumers');
+  const R = require('stream').Readable;
+  console.log('consumers   : ' + (await cons.text(R.from(['h', 'i']))) + ' / ' + JSON.stringify(await cons.json(R.from(['{"n"', ':1}']))));
+})();
+console.log('');
+
+// --- npm (milestone 4) ---
+// The npm client downloads and unpacks packages into the virtual node_modules.
+// require() already resolves node_modules from the VFS, so once "Install deps"
+// has run this call works exactly like it would on the desktop.
+console.log('-- npm --');
+try {
+  const ms = require('ms');
+  console.log('require(ms) :', ms(60000), '|', ms('2h') + 'ms');
+} catch (err) {
+  console.log('require(ms) : not installed yet - click "Install deps"');
+}
+console.log('');
+
+// --- npm resolution (milestone 39) ---
+// The installer understands two more things a real project uses: a "file:" (or
+// "link:") dependency installed straight from this virtual file system, and a
+// root "overrides"/"resolutions" table that pins a transitive dependency.
+console.log('-- npm resolution (milestone 39) --');
+try {
+  console.log('file: dep   : ' + require('@demo/greeting'));
+} catch (err) {
+  console.log('file: dep   : not installed yet - click "Install deps"');
+}
+console.log('overrides   : ' + JSON.stringify(pkg.overrides || null));
+console.log('');
+
+// --- util.inspect / ICU column width (milestone 42) ---
+// util.inspect is Node's real source; what sits under it is now faithful too.
+// An async function* is both a generator and async in V8, so it is labelled
+// AsyncGeneratorFunction; and the ICU width function measures columns, not
+// code units, so double-width CJK lines up in console.table.
+console.log('-- inspect (milestone 42) --');
+const { inspect } = require('util');
+console.log('async gen fn:', inspect(async function* named() {}));
+// console.table widths come from the same ICU measure: '中文' is four columns,
+// so the box borders line up even for double-width text.
+console.table([{ name: '中文', n: 1 }, { name: 'ab', n: 2 }]);
+console.log('');
+
+// --- X.509 certificate parsing (milestone 87) ---
+// crypto.X509Certificate is a real DER/PEM parser (Node's sits on OpenSSL,
+// which a page does not have). The subject, serial, fingerprints, validity,
+// SANs and signature all match a real Node field for field.
+console.log('-- X509 certificate (milestone 87) --');
+const certPem = [
+  '-----BEGIN CERTIFICATE-----',
+  'MIIEfTCCA2WgAwIBAgITA+BF231Dy7XYHGVb7KOu6ZLDfjANBgkqhkiG9w0BAQsF',
+  'ADBgMQswCQYDVQQGEwJDTjERMA8GA1UECAwIWmhlamlhbmcxEDAOBgNVBAoMB05l',
+  'dGVhc2UxETAPBgNVBAsMCENvZGVXYXZlMRkwFwYDVQQDDBBXZWItTm9kZSBUZXN0',
+  'IENBMB4XDTI2MDkyMjA2MDIzMloXDTI4MTIyNTA2MDIzMlowbjELMAkGA1UEBhMC',
+  'Q04xETAPBgNVBAgMCFpoZWppYW5nMREwDwYDVQQHDAhIYW5nemhvdTEQMA4GA1UE',
+  'CgwHTmV0ZWFzZTERMA8GA1UECwwIQ29kZVdhdmUxFDASBgNVBAMMC2V4YW1wbGUu',
+  'Y29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArjsOg8MVAkA1E+rM',
+  'g+W/rwW+nIhx4TlBw1gG4VHSiUbTDtc3IVej+S7ohdURypGKZE7SjF9ibxLrCJ4C',
+  'T9+UjCzjsQqZ23lkOJqYjv79juxgwvHTX9u6UtwHHKhIjk8dBV4lpNJKCXmr3ULn',
+  'lAx6JeB76Kbos4hU/4Oe/+/LfRbAUDY7lJY7CwkqUXgy+H9O0hdFTB2w1fA47Fl/',
+  'PCyZS7np+FEr5YNIK4FuH9ayBc3dgNbe4GdEx1Jaf9Tx7WhO75dM+zUCOU+FydcM',
+  'LVs6AK9uVVnJSlLbgRY3u5ZK2lPDNpOmqBEshvPlKRRvSV2omP1c4ru69pKFgFZ1',
+  'PvrWewIDAQABo4IBIDCCARwwPgYDVR0RBDcwNYILZXhhbXBsZS5jb22CDSouZXhh',
+  'bXBsZS5jb22HBH8AAAGBEWFkbWluQGV4YW1wbGUuY29tMAwGA1UdEwEB/wQCMAAw',
+  'DgYDVR0PAQH/BAQDAgWgMB0GA1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcDAjBd',
+  'BggrBgEFBQcBAQRRME8wIwYIKwYBBQUHMAGGF2h0dHA6Ly9vY3NwLmV4YW1wbGUu',
+  'Y29tMCgGCCsGAQUFBzAChhxodHRwOi8vY2EuZXhhbXBsZS5jb20vY2EuY3J0MB0G',
+  'A1UdDgQWBBRA8/GtIvkOSDs/w2hkWok31yzwczAfBgNVHSMEGDAWgBQSG/yS6cGd',
+  'LhRBAgG44KVorj6icjANBgkqhkiG9w0BAQsFAAOCAQEAAE6A9A74GLTPipCHroxi',
+  'ARKVr60qebZBoGTvNfa+j+XsC4+Lne+eJJX+8rAhLdz4Wx3xt8ImPMt83W84kF4b',
+  'GeOmnv9jCyvWASzpLWhpplXFKmmgpbAlap8bLaNyZrk4/EqtBY6ptN7Er5LBDlbF',
+  'y+4PScCQZ3DgAr2bXPjivtHj9KbXDXwPzFM0xfdFpx9Da1WYnEQ9z3N8mRNWCWDC',
+  'rfPVAfbM5beH+s9ShE7mBo6AsKIcNPl+QgvvgXL30jFzOYW7b2e14gv21lABXVBF',
+  'D28VLxZR1iZXsoBG1RsVUnaNkRIzIbIowbK5/M2VYco56zXzCWAQ2L5QYmFfu+Ad',
+  'ng==',
+  '-----END CERTIFICATE-----',
+].join('\\n');
+const leafCert = new (require('crypto').X509Certificate)(certPem);
+console.log('subject   :', leafCert.subject.split('\\n').join(' / '));
+console.log('serial    :', leafCert.serialNumber);
+console.log('sha256 fp :', leafCert.fingerprint256);
+console.log('SAN       :', leafCert.subjectAltName);
+console.log('valid     :', leafCert.validFrom, '->', leafCert.validTo);
+console.log('checkHost :', leafCert.checkHost('www.example.com'), '/', leafCert.checkHost('nope.test'));
+console.log('');
+
+// --- prime generation / primality testing (milestone 88) ---
+// generatePrimeSync / checkPrimeSync sit on pure BigInt maths here; in Node
+// OpenSSL is underneath. The primality answers are exact (Miller-Rabin with a
+// deterministic base set) and { safe: true } yields a safe prime whose half is
+// prime too.
+console.log('-- primes (milestone 88) --');
+const primeCrypto = require('crypto');
+console.log('checkPrimeSync 97n  :', primeCrypto.checkPrimeSync(97n));
+console.log('checkPrimeSync 91n  :', primeCrypto.checkPrimeSync(91n));
+const prime128 = primeCrypto.generatePrimeSync(128, { bigint: true });
+console.log('generatePrimeSync128:', prime128.toString(16).slice(0, 20) + '...', '(' + prime128.toString(2).length + ' bits, prime=' + primeCrypto.checkPrimeSync(prime128) + ')');
+const primeSafe = primeCrypto.generatePrimeSync(64, { safe: true, bigint: true });
+console.log('safe prime (64 bit) :', primeSafe.toString());
+console.log('  (p-1)/2 is prime  :', primeCrypto.checkPrimeSync((primeSafe - 1n) / 2n));
+const primeCongruent = primeCrypto.generatePrimeSync(96, { add: 30n, rem: 11n, bigint: true });
+console.log('p congruent 11 mod30:', primeCongruent % 30n === 11n);
+console.log('');
+
+// --- Argon2 password hashing (milestone 89) ---
+// crypto.argon2Sync runs RFC 9106 in pure JS (BLAKE2b + the BlaMka compression
+// function). The first vector below is RFC 9106 section 5.3 and matches Node
+// byte for byte.
+console.log('-- Argon2 (milestone 89) --');
+const rfcTag = primeCrypto.argon2Sync('argon2id', {
+  message: new Uint8Array(32).fill(1),
+  nonce: new Uint8Array(16).fill(2),
+  secret: new Uint8Array(8).fill(3),
+  associatedData: new Uint8Array(12).fill(4),
+  parallelism: 4,
+  tagLength: 32,
+  memory: 32,
+  passes: 3,
+});
+console.log('RFC 9106 argon2id   :', rfcTag.toString('hex'));
+const pwTag = primeCrypto.argon2Sync('argon2id', {
+  message: 'password',
+  nonce: 'somesalt',
+  parallelism: 1,
+  tagLength: 32,
+  memory: 64,
+  passes: 2,
+});
+console.log('argon2id("password"):', pwTag.toString('hex'));
+console.log('tag length         :', pwTag.length);
+console.log('');
+
+// --- MAC (milestone 90.1) ---
+// crypto.createMac is the OpenSSL provider MAC API. Here HMAC and BLAKE2b MAC
+// are computed in JS; getMacs() lists every provider Node exposes.
+console.log('-- MAC (milestone 90.1) --');
+const macCrypto = require('crypto');
+console.log('getMacs count       :', macCrypto.getMacs().length);
+const hmacTag = macCrypto.createMac('hmac', Buffer.from('key'), { digest: 'sha256' }).update('data').final();
+console.log('hmac sha256         :', hmacTag.toString('hex'));
+const b2mac = macCrypto.createMac('blake2bmac', Buffer.alloc(64, 1), { outputLength: 16 });
+b2mac.update('data');
+console.log('blake2bmac (16B)    :', b2mac.final('hex'));
+const kmacTag = macCrypto.createMac('kmac256', Buffer.alloc(32, 7), { customization: Buffer.from('demo'), outputLength: 32 });
+kmacTag.update('data');
+console.log('kmac256 (32B)       :', kmacTag.final('hex'));
+const cmacTag = macCrypto.createMac('cmac', Buffer.alloc(16, 9), { cipher: 'aes-128-cbc' });
+cmacTag.update('data');
+console.log('cmac aes128         :', cmacTag.final('hex'));
+const gmacTag = macCrypto.createMac('gmac', Buffer.alloc(16, 9), { cipher: 'aes-128-gcm', iv: Buffer.alloc(12, 5) });
+gmacTag.update('data');
+console.log('gmac aes128         :', gmacTag.final('hex'));
+const b2sTag = macCrypto.createMac('blake2smac', Buffer.alloc(16, 9));
+b2sTag.update('data');
+console.log('blake2smac          :', b2sTag.final('hex'));
+const polyTag = macCrypto.createMac('poly1305', Buffer.alloc(32, 1));
+polyTag.update('data');
+console.log('poly1305            :', polyTag.final('hex'));
+const sipTag = macCrypto.createMac('siphash', Buffer.alloc(16, 1));
+sipTag.update('data');
+console.log('siphash             :', sipTag.final('hex'));
+console.log('');
+
+// --- DH key agreement (milestone 92) ---
+// crypto.diffieHellman takes two KeyObjects: a DH pair (modp14 here) or an EC
+// pair, and returns the shared secret. The KeyObjects are real DER/PEM
+// carriers (PKCS#8 / SPKI), so a pair can be serialised and re-imported.
+console.log('-- DH key agreement (milestone 92) --');
+const dhCrypto = require('crypto');
+const dhAlice = dhCrypto.generateKeyPairSync('dh', { group: 'modp14' });
+const dhBob = dhCrypto.generateKeyPairSync('dh', { group: 'modp14' });
+const dhSharedA = dhCrypto.diffieHellman({ privateKey: dhAlice.privateKey, publicKey: dhBob.publicKey });
+const dhSharedB = dhCrypto.diffieHellman({ privateKey: dhBob.privateKey, publicKey: dhAlice.publicKey });
+console.log('dh key type         :', dhAlice.publicKey.asymmetricKeyType);
+console.log('dh shared secret    :', dhSharedA.length + ' bytes');
+console.log('dh agreement        :', dhSharedA.equals(dhSharedB));
+const dhReimported = dhCrypto.createPublicKey(dhAlice.publicKey.export({ type: 'spki', format: 'pem' }));
+console.log('dh spki round-trip  :', dhReimported.equals(dhAlice.publicKey));
+const ecdhA = dhCrypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const ecdhB = dhCrypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const ecdhSecret = dhCrypto.diffieHellman({ privateKey: ecdhA.privateKey, publicKey: ecdhB.publicKey });
+console.log('ecdh shared secret  :', ecdhSecret.length + ' bytes');
+console.log('');
+
+// --- http server (milestone 3: virtual TCP) ---
+// listen(3000) binds a port inside this runtime. The ServiceWorker bridge at
+// /preview/3000/ dials it, so this URL is reachable from the browser tab.
+function page() {
+  const rows = require('./lib/facts.js')()
+    .map(function (row) {
+      return '<tr><td>' + row[0] + '</td><td>' + row[1] + '</td></tr>';
+    })
+    .join('');
+  return [
+    '<!doctype html><html><head><meta charset="utf-8"><title>web-node preview</title>',
+    '<style>',
+    'body{margin:0;font:14px/1.6 ui-monospace,Menlo,monospace;background:#0b0e14;color:#d7dee9;padding:32px}',
+    'h1{font-size:18px;color:#5ef1a5;margin:0 0 4px}',
+    '.sub{color:#7b8798;margin-bottom:20px}',
+    'table{border-collapse:collapse;width:100%;max-width:560px}',
+    'td{padding:7px 10px;border-bottom:1px solid #232a3a}',
+    'td:first-child{color:#7b8798;width:40%}',
+    'a{color:#5ef1a5}',
+    '</style></head><body>',
+    '<h1>Hello from your in-browser Node.js server</h1>',
+    '<div class="sub">This HTML was rendered inside the runtime worker and piped through a virtual TCP socket.</div>',
+    '<table>' + rows + '</table>',
+    '<p style="margin-top:24px"><a href="/api/info">GET /api/info</a> &middot; <a href="/api/fib?n=20">GET /api/fib?n=20</a></p>',
+    '<p><a href="/download/facts.txt">GET /download/facts.txt</a> (fs.createReadStream().pipe(res))</p>',
+    '<p><a href="/api/stream">GET /api/stream</a> (5 x res.write() -> Transfer-Encoding: chunked)</p>',
+    '<p><a href="/api/ls?dir=/project/node/output">GET /api/ls?dir=/project/node/output</a> (what the streams wrote)</p>',
+    '</body></html>',
+  ].join('');
+}
+
+const server = http.createServer(function (req, res) {
+  const url = new URL(req.url, 'http://localhost:3000');
+
+  if (url.pathname === '/api/info') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      time: new Date().toISOString(),
+    }, null, 2));
+    return;
+  }
+
+  if (url.pathname === '/api/fib') {
+    const value = Number(url.searchParams.get('n') || 10);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ n: value, fib: fib(value) }));
+    return;
+  }
+
+  // Streamed straight off the virtual file system. No Content-Length is set,
+  // so the response is framed as chunked and backpressure flows from the
+  // socket back into the read stream.
+  if (url.pathname === '/download/facts.txt') {
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+    fs.createReadStream(factsFile).pipe(res);
+    return;
+  }
+
+  // Several writes over time: proves the server can stream a body it cannot
+  // know the length of up front.
+  if (url.pathname === '/api/stream') {
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+    let i = 0;
+    const timer = setInterval(function () {
+      res.write('tick ' + (++i) + ';');
+      if (i === 5) {
+        clearInterval(timer);
+        res.end('done');
+      }
+    }, 30);
+    return;
+  }
+
+  // Reads the virtual file system back out, so the effects of the stream /
+  // upload endpoints are visible from the browser.
+  if (url.pathname === '/api/ls') {
+    const target = url.searchParams.get('dir') || '/project/node';
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(fs.readdirSync(target).sort(), null, 2));
+    return;
+  }
+
+  // Upload: the request body is a Readable, so it pipes straight to a file.
+  if (url.pathname === '/api/upload') {
+    fs.mkdirSync(dir, { recursive: true });
+    const out = fs.createWriteStream(path.join(dir, 'upload.txt'));
+    req.pipe(out);
+    out.on('finish', function () {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ bytes: out.bytesWritten }));
+    });
+    return;
+  }
+
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  res.end(page());
+});
+
+server.listen(3000, function () {
+  console.log('http server  : listening on http://localhost:3000');
+  console.log('preview      : open the Preview tab (or /preview/3000/)');
+});
+`,
+  '/project/node/tool.sh': `#!/bin/sh
+echo "this would run on a real POSIX host"
+`,
+  '/project/node/lib/greeting/package.json': `{
+  "name": "@demo/greeting",
+  "version": "1.2.3",
+  "main": "index.js"
+}`,
+  '/project/node/lib/greeting/index.js': `// Installed with "file:lib/greeting", so this file is copied into
+// node_modules/@demo/greeting by the installer.
+module.exports = 'hello from file:lib/greeting@1.2.3';
+`,
+  '/project/node/lib/fib.js': `// A plain CommonJS module resolved out of the virtual file system.
+function fib(n) {
+  let a = 0;
+  let b = 1;
+  for (let i = 0; i < n; i++) [a, b] = [b, a + b];
+  return a;
+}
+
+exports.fib = fib;
+exports.default = { fib };
+`,
+  '/project/node/lib/report.js': `// Runs as a *child* program (see index.js), and spawns a child of its own.
+const { execFileSync } = require('child_process');
+
+const nested = execFileSync('node', ['-e', 'process.stdout.write(String(6 * 7))'], { encoding: 'utf8' });
+console.log('spawned pid ' + process.pid + ' in ' + process.cwd() + '; its own child said ' + nested);
+`,
+  '/project/node/lib/upper.js': `let buf = '';
+process.stdin.on('data', (chunk) => (buf += chunk.toString()));
+process.stdin.on('end', () => process.stdout.write(buf.toUpperCase().trim() + ' (via pipe)'));
+`,
+  '/project/node/lib/ipc-child.js': `process.on('message', (m) => {
+  process.send({ step: 1, doubled: m.n * 2 });
+  process.send({ step: 2 });
+});
+`,
+  '/project/node/lib/facts.js': `// Feeds the HTML that the virtual HTTP server renders.
+module.exports = function facts() {
+  return [
+    ['process.version', process.version],
+    ['process.platform', process.platform],
+    ['process.arch', process.arch],
+    ['process.cwd()', process.cwd()],
+    ['module resolution', 'CJS from the virtual file system'],
+    ['transport', 'virtual TCP (no real socket)'],
+  ];
+};
+`,
+  '/project/node/lib/worker-demo.js': `const { parentPort, workerData, isMainThread, threadId } = require('worker_threads');
+parentPort.postMessage({
+  workerData: workerData,
+  isMainThread: isMainThread,
+  threadIdPositive: threadId > 0,
+});
+parentPort.on('message', function (m) {
+  parentPort.postMessage('re:' + m);
+  parentPort.close();
+});
+`,
+  '/project/node/lib/worker-io.js': `const { parentPort } = require('worker_threads');
+console.log('worker: hi over stdout');
+process.stdin.on('data', function (d) { parentPort.postMessage('stdin:' + String(d).trim()); });
+process.stdin.on('end', function () { parentPort.postMessage('end'); parentPort.close(); });
+`,
+};

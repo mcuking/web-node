@@ -1,5 +1,6 @@
 import { RuntimeClient } from '../client';
 import type { RuntimeInfo } from '../worker/runtime.worker';
+import { DEMO_PROJECTS, PROJECT_ORDER, type DemoProject, type ProjectId } from '../projects';
 import { previewUrl as buildPreviewUrl, previewPortFromHost, prefixPreviewUrl } from './preview-url';
 
 /**
@@ -46,12 +47,12 @@ const dirtyEl = $<HTMLSpanElement>('dirty');
 const statusEl = $<HTMLSpanElement>('status');
 const bootEl = $<HTMLSpanElement>('boot');
 const factsEl = $<HTMLSpanElement>('facts');
-const runBtn = $<HTMLButtonElement>('run');
 const clearBtn = $<HTMLButtonElement>('clear');
 const resetBtn = $<HTMLButtonElement>('reset');
-const chipsEl = $<HTMLDivElement>('scenario-chips');
+const projectChipsEl = $<HTMLDivElement>('project-chips');
 const stepsEl = $<HTMLDivElement>('steps');
 const nextHintEl = $<HTMLSpanElement>('next-hint');
+const filesRootEl = $<HTMLSpanElement>('files-root');
 const portSelect = $<HTMLSelectElement>('port-select');
 const refreshBtn = $<HTMLButtonElement>('refresh');
 const openTab = $<HTMLAnchorElement>('open-tab');
@@ -62,8 +63,10 @@ const viewPreview = $<HTMLDivElement>('view-preview');
 
 let files: string[] = [];
 let activeFile = '';
-let info: RuntimeInfo | null = null;
 let dirty = false;
+let activeProject: ProjectId = 'vite';
+let busy = false;
+let ports: number[] = [];
 
 function writeTerminal(text: string, cls = ''): void {
   const span = document.createElement('span');
@@ -78,12 +81,28 @@ function setStatus(text: string, cls = ''): void {
   statusEl.className = `status ${cls}`;
 }
 
+/** Re-read the whole VFS file list (the worker's `mount` with no files is a no-op write). */
+async function readTree(): Promise<string[]> {
+  const list = await client.mount({});
+  return list.filter((f) => !f.endsWith('/'));
+}
+
+/**
+ * The file tree shows *only the active project*: a project is a self-contained
+ * directory (`/project/vite`, `/project/webpack`, `/project/rspack`,
+ * `/project/node`), so which files you see tells you which project you are in.
+ * `node_modules` is hidden to keep the list readable.
+ */
 function renderTree(): void {
+  const { root } = DEMO_PROJECTS[activeProject];
+  const prefix = root + '/';
+  filesRootEl.textContent = root;
   treeEl.innerHTML = '';
   for (const f of files) {
-    if (f.includes('/node_modules/')) continue; // keep the tree readable
+    if (!f.startsWith(prefix)) continue;
+    if (f.includes('/node_modules/')) continue;
     const li = document.createElement('li');
-    li.textContent = f.replace('/project/', '');
+    li.textContent = f.slice(prefix.length);
     li.dataset.path = f;
     if (f === activeFile) li.classList.add('active');
     li.addEventListener('click', () => void openFile(f));
@@ -98,7 +117,8 @@ async function openFile(path: string): Promise<void> {
   activeFile = path;
   const contents = await client.readFile(path);
   editorEl.value = contents;
-  activeFileEl.textContent = path.replace('/project/', '');
+  const { root } = DEMO_PROJECTS[activeProject];
+  activeFileEl.textContent = path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
   dirty = false;
   dirtyEl.textContent = '';
   renderTree();
@@ -126,10 +146,9 @@ async function save(): Promise<void> {
  *
  * `awaitExit` distinguishes the two shapes of demo entry: a build that runs to
  * completion (await it, report the elapsed time, mark the step done) vs. a
- * server that binds a port and then stays up (`index.js`, `vite-dev.mjs`,
- * `webpack-dev.mjs`, `vite-react.mjs`). The latter never settles — awaiting it
- * would freeze the button forever — so it is started and the UI moves on; the
- * port watcher picks it up when it comes up.
+ * server that binds a port and then stays up (`dev.mjs`, `index.js`). The
+ * latter never settles — awaiting it would freeze the button forever — so it is
+ * started and the UI moves on; the port watcher picks it up when it comes up.
  */
 async function runProcess(entry: string, label: string, awaitExit: boolean): Promise<void> {
   await save();
@@ -157,318 +176,140 @@ async function runProcess(entry: string, label: string, awaitExit: boolean): Pro
   }
 }
 
-// --- HMR edits -------------------------------------------------------------
-
-// A VFS write is what the dev server watches, so saving a source file makes the
-// running preview hot-update. This button does exactly that write, on the file
-// the demo app accepts, ready for when no dev server is open to react.
-let hmrEdits = 0;
-async function hmrEdit(): Promise<void> {
-  const path = '/project/site/src/message.js';
-  // Continue from the number already in the file so the edit is visibly
-  // monotonic even after a page reload (the in-memory counter would reset).
-  let n = hmrEdits + 1;
-  try {
-    const current = await client.readFile(path);
-    const match = /hot-updated #(\d+)/.exec(current);
-    if (match) n = Number(match[1]) + 1;
-  } catch {
-    // not written yet
-  }
-  hmrEdits = n;
-  const source = [
-    'export function greet(who) {',
-    `  return 'Hello from ' + who + ', hot-updated #${n}';`,
-    '}',
-    '',
-  ].join('\n');
-  await client.writeFile(path, source);
-  writeTerminal(`\n[hmr] wrote site/src/message.js (#${n}) — watch the Preview\n`, 'sys');
-  if (activeFile === path) editorEl.value = source;
-}
-
-// CSS HMR takes the other Vite update path: editing the stylesheet produces a
-// `css-update`, which Vite applies by swapping the injected `<style>` in place
-// (no reload, and JS module state stays put).
-const CSS_COLORS = ['#5ef1a5', '#7cc4ff', '#ffd166', '#ff7b72', '#c792ea'];
-let hmrCssEdits = 0;
-function styleCss(color: string): string {
-  return [
-    '/* Edited by the HMR CSS button: Vite sends a css-update and the preview',
-    '   restyles in place - no reload, no lost page state. */',
-    '#app {',
-    `  color: ${color};`,
-    '  font: 600 22px/1.4 ui-monospace, Menlo, monospace;',
-    '}',
-    '',
-  ].join('\n');
-}
-async function hmrCssEdit(): Promise<void> {
-  const path = '/project/site/src/style.css';
-  // Advance past the colour already in the file, so the change is visible even
-  // after a reload (the in-memory counter would reset).
-  let next = CSS_COLORS[(hmrCssEdits + 1) % CSS_COLORS.length];
-  try {
-    const current = await client.readFile(path);
-    const match = /#([0-9a-f]{6})/i.exec(current);
-    const idx = match ? CSS_COLORS.indexOf(match[0].toLowerCase()) : -1;
-    next = CSS_COLORS[(idx + 1) % CSS_COLORS.length];
-  } catch {
-    // stylesheet not written yet
-  }
-  hmrCssEdits += 1;
-  const source = styleCss(next);
-  await client.writeFile(path, source);
-  writeTerminal(`\n[hmr] wrote site/src/style.css (${next}) — watch the Preview\n`, 'sys');
-  if (activeFile === path) editorEl.value = source;
-}
-
-// --- scenario / step engine ------------------------------------------------
+// --- project / step engine -------------------------------------------------
 
 /**
- * The nav bar used to be a flat row of 13 buttons with no ordering, so it was
- * easy to click a tool before its dependencies existed and get a confusing
- * `MODULE_NOT_FOUND`. The UI is now a *scenario stepper*: pick a scenario, and
- * the bar shows its steps in order, with prerequisites gated and the next
- * action highlighted.
+ * The nav bar used to be a flat row of buttons mixing *tools* (esbuild, rollup,
+ * tsc) with *projects* (Vite, webpack), so it was easy to click a tool before
+ * its dependencies existed and get a confusing `MODULE_NOT_FOUND`.
+ *
+ * It is now a *project stepper*: pick one of the four projects and the bar
+ * shows its steps in order, with prerequisites gated and the next action
+ * highlighted. Every project has the same first step (Install deps) and then a
+ * dev/build (or, for the Node.js playground, a single Run).
  */
-type StepId =
-  | 'install'
-  | 'run'
-  | 'build'
-  | 'bundle'
-  | 'vite'
-  | 'vitedev'
-  | 'hmred'
-  | 'hmrcss'
-  | 'vitereact'
-  | 'wpdev'
-  | 'tsc'
-  | 'cluster'
-  | 'rspackInstall'
-  | 'rspackBuild';
-
-type Requirement = 'none' | 'deps' | 'rspackDeps' | 'viteDev';
+type Requirement = 'none' | 'deps';
 
 interface StepDef {
   label: string;
-  /** What must be true before this step can run. */
+  /** What must be true before this step can run (deps of the active project). */
   needs: Requirement;
   /** A server that binds a port and stays up — never awaited (see `runProcess`). */
   long?: boolean;
   exec: () => Promise<void>;
 }
 
-interface ScenarioDef {
-  id: string;
-  label: string;
-  blurp: string;
-  steps: StepId[];
+const STEPS: Record<string, StepDef> = {};
+for (const id of PROJECT_ORDER) {
+  const project = DEMO_PROJECTS[id];
+  STEPS[`${id}/install`] = { label: '↓ Install deps', needs: 'none', exec: () => installDeps(project) };
+  if (id === 'node') {
+    STEPS[`${id}/run`] = {
+      label: '▶ Run',
+      needs: 'deps',
+      long: true,
+      exec: () => runProcess(`${project.root}/index.js`, `node ${project.root}/index.js`, false),
+    };
+  } else {
+    STEPS[`${id}/dev`] = {
+      label: '▶ Run dev',
+      needs: 'deps',
+      long: true,
+      exec: () => runProcess(`${project.root}/dev.mjs`, `node ${project.root}/dev.mjs`, false),
+    };
+    STEPS[`${id}/build`] = {
+      label: '⚙ Run build',
+      needs: 'deps',
+      exec: () => runProcess(`${project.root}/build.mjs`, `node ${project.root}/build.mjs`, true),
+    };
+  }
 }
 
-const STEPS: Record<StepId, StepDef> = {
-  install: {
-    label: '⬇ Install deps',
-    needs: 'none',
-    exec: () => installDeps(),
-  },
-  run: {
-    label: '▶ Run',
-    needs: 'deps',
-    long: true,
-    exec: () => runProcess('/project/index.js', 'node /project/index.js', false),
-  },
-  build: {
-    label: '▦ Build',
-    needs: 'deps',
-    exec: () => runProcess('/project/build.js', 'node /project/build.js', true),
-  },
-  bundle: {
-    label: '⧉ Bundle',
-    needs: 'deps',
-    exec: () => runProcess('/project/bundle.js', 'node /project/bundle.js', true),
-  },
-  vite: {
-    label: '⚡ Vite build',
-    needs: 'deps',
-    exec: () => runProcess('/project/vite-build.mjs', 'node /project/vite-build.mjs', true),
-  },
-  vitedev: {
-    label: '🛠 Vite dev',
-    needs: 'deps',
-    long: true,
-    exec: () => runProcess('/project/vite-dev.mjs', 'node /project/vite-dev.mjs', false),
-  },
-  hmred: { label: '✏️ HMR JS', needs: 'viteDev', exec: () => hmrEdit() },
-  hmrcss: { label: '🎨 HMR CSS', needs: 'viteDev', exec: () => hmrCssEdit() },
-  vitereact: {
-    label: '⚛ Vite React',
-    needs: 'deps',
-    long: true,
-    exec: () => runProcess('/project/vite-react.mjs', 'node /project/vite-react.mjs', false),
-  },
-  wpdev: {
-    label: '📦 Webpack dev',
-    needs: 'deps',
-    long: true,
-    exec: () => runProcess('/project/webpack-dev.mjs', 'node /project/webpack-dev.mjs', false),
-  },
-  tsc: {
-    label: '⌨ tsc build',
-    needs: 'deps',
-    exec: () => runProcess('/project/tsc-build.js', 'node /project/tsc-build.js', true),
-  },
-  cluster: {
-    label: '🖧 Cluster',
-    needs: 'none',
-    exec: () => runProcess('/project/cluster-demo.mjs', 'node /project/cluster-demo.mjs', true),
-  },
-  rspackInstall: {
-    label: '⬇ Install rspack deps',
-    needs: 'none',
-    exec: () => installRspackDeps(),
-  },
-  rspackBuild: {
-    label: '🔷 rspack build',
-    needs: 'rspackDeps',
-    exec: () => runProcess('/project/rspack/build.cjs', 'node /project/rspack/build.cjs', true),
-  },
+interface ScenarioDef {
+  id: ProjectId;
+  label: string;
+  blurp: string;
+  steps: string[];
+}
+
+const META: Record<ProjectId, { label: string; blurp: string }> = {
+  vite: { label: '⚡ Vite', blurp: 'Vue 3 single-file component — Vite dev server + build, in the tab' },
+  webpack: { label: '📦 Webpack', blurp: 'webpack watches and bundles; the preview full-reloads' },
+  rspack: { label: '🔷 rspack', blurp: 'Rust bundler via wasm32-wasi on a real Worker thread pool' },
+  node: { label: '🟢 Node.js', blurp: 'the full runtime — fs, http, crypto, streams, workers, child processes' },
 };
 
-const SCENARIOS: ScenarioDef[] = [
-  {
-    id: 'run',
-    label: '▶ Run app',
-    blurp: 'start the demo HTTP server on :3000',
-    steps: ['install', 'run'],
-  },
-  {
-    id: 'vite',
-    label: '⚡ Vite',
-    blurp: 'Vite build + dev server + HMR, all in the tab',
-    steps: ['install', 'vite', 'vitedev', 'hmred', 'hmrcss'],
-  },
-  {
-    id: 'webpack',
-    label: '📦 Webpack',
-    blurp: 'webpack dev server (watch + reload)',
-    steps: ['install', 'wpdev'],
-  },
-  {
-    id: 'rspack',
-    label: '🔷 rspack',
-    blurp: 'Rust bundler via wasm32-wasi + a real Worker thread pool',
-    steps: ['rspackInstall', 'rspackBuild'],
-  },
-  {
-    id: 'react',
-    label: '⚛ React',
-    blurp: 'Vite + JSX + Tailwind/PostCSS',
-    steps: ['install', 'vitereact'],
-  },
-  {
-    id: 'esbuild',
-    label: '▦ esbuild',
-    blurp: 'bundle TypeScript with esbuild-wasm',
-    steps: ['install', 'build'],
-  },
-  {
-    id: 'rollup',
-    label: '⧉ rollup',
-    blurp: 'bundle ES modules with rollup-wasm',
-    steps: ['install', 'bundle'],
-  },
-  {
-    id: 'tsc',
-    label: '⌨ tsc',
-    blurp: 'the real TypeScript compiler: parse → typecheck → emit',
-    steps: ['install', 'tsc'],
-  },
-  {
-    id: 'cluster',
-    label: '🖧 Cluster',
-    blurp: 'two processes sharing one port',
-    steps: ['cluster'],
-  },
-];
+const SCENARIOS: ScenarioDef[] = PROJECT_ORDER.map((id) => ({
+  id,
+  ...META[id],
+  steps: id === 'node' ? [`${id}/install`, `${id}/run`] : [`${id}/install`, `${id}/dev`, `${id}/build`],
+}));
 
-let activeScenario = SCENARIOS[0].id;
-let busy = false;
-let ports: number[] = [];
-let depsReady = false;
-let rspackDepsReady = false;
-let viteDevReady = false;
-/** Step ids that have actually run (derived gates are synced in `syncDerived`). */
-const completed = new Set<StepId>();
+/** The port each project's dev server (or the Node playground) listens on. */
+const DEV_PORT: Record<ProjectId, number> = { vite: 5173, webpack: 5174, rspack: 5175, node: 3000 };
 
-function scenarioById(id: string): ScenarioDef {
+/** Step ids that are observably complete (deps on disk / a port listening). */
+const completed = new Set<string>();
+
+function projectDeps(id: ProjectId): boolean {
+  return files.some((f) => f.startsWith(DEMO_PROJECTS[id].root + '/node_modules/'));
+}
+
+function stepEnabled(id: string): boolean {
+  return STEPS[id].needs === 'deps' ? projectDeps(activeProject) : true;
+}
+
+/** Fold observed runtime state into `completed`, so gates survive a reload. */
+function syncDerived(): void {
+  for (const id of PROJECT_ORDER) {
+    const install = `${id}/install`;
+    if (projectDeps(id)) completed.add(install);
+    else completed.delete(install);
+    const runStepId = id === 'node' ? `${id}/run` : `${id}/dev`;
+    if (ports.includes(DEV_PORT[id])) completed.add(runStepId);
+    else completed.delete(runStepId);
+  }
+}
+
+function scenarioById(id: ProjectId): ScenarioDef {
   return SCENARIOS.find((s) => s.id === id) ?? SCENARIOS[0];
 }
 
-/** Fold observed runtime state into `completed` (so gates survive a reload). */
-function syncDerived(): void {
-  const sync = (id: StepId, done: boolean): void => {
-    if (done) completed.add(id);
-    else completed.delete(id);
-  };
-  sync('install', depsReady);
-  sync('rspackInstall', rspackDepsReady);
-  sync('vitedev', viteDevReady);
-}
-
-function stepEnabled(id: StepId): boolean {
-  switch (STEPS[id].needs) {
-    case 'deps':
-      return depsReady;
-    case 'rspackDeps':
-      return rspackDepsReady;
-    case 'viteDev':
-      return viteDevReady;
-    default:
-      return true;
+/** The id of the first runnable, not-yet-done step of the active project. */
+function nextStepId(): string | null {
+  for (const id of scenarioById(activeProject).steps) {
+    if (stepEnabled(id) && !completed.has(id)) return id;
   }
-}
-
-function requirementText(needs: Requirement): string {
-  switch (needs) {
-    case 'deps':
-      return 'needs step 1 — Install deps first';
-    case 'rspackDeps':
-      return 'needs step 1 — Install rspack deps first';
-    case 'viteDev':
-      return 'needs the Vite dev server running';
-    default:
-      return '';
-  }
+  return null;
 }
 
 function renderChips(): void {
-  chipsEl.innerHTML = '';
+  projectChipsEl.innerHTML = '';
   for (const scenario of SCENARIOS) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'chip';
-    btn.dataset.scenario = scenario.id;
+    btn.dataset.project = scenario.id;
     btn.textContent = scenario.label;
     btn.title = scenario.blurp;
-    if (scenario.id === activeScenario) btn.classList.add('active');
-    btn.addEventListener('click', () => selectScenario(scenario.id));
-    chipsEl.appendChild(btn);
+    if (scenario.id === activeProject) btn.classList.add('active');
+    btn.addEventListener('click', () => void selectProject(scenario.id));
+    projectChipsEl.appendChild(btn);
   }
 }
 
 /**
- * Rebuild the step bar for the active scenario and refresh the "next step"
+ * Rebuild the step bar for the active project and refresh the "next step"
  * guidance. A step is:
- *   - *done*    (✓) once its effect is observed (deps installed, dev server up)
+ *   - *done*    (✓) once its effect is observed (deps installed, port listening)
  *                  or it has run to completion this session;
  *   - *blocked* (grey, disabled) while its prerequisite is unmet;
  *   - *next*    (highlighted) when it is the first runnable, not-yet-done step.
  */
 function renderSteps(): void {
-  const scenario = scenarioById(activeScenario);
+  const scenario = scenarioById(activeProject);
   stepsEl.innerHTML = '';
-  let nextId: StepId | null = null;
+  let nextId: string | null = null;
 
   scenario.steps.forEach((id, index) => {
     const def = STEPS[id];
@@ -500,7 +341,7 @@ function renderSteps(): void {
     if (!enabled) {
       btn.classList.add('blocked');
       btn.disabled = true;
-      btn.title = requirementText(def.needs);
+      btn.title = 'needs step 1 — Install deps first';
     } else {
       btn.title = scenario.blurp;
       btn.disabled = busy;
@@ -510,10 +351,9 @@ function renderSteps(): void {
   });
 
   updateHint(nextId);
-  runBtn.disabled = busy || !depsReady;
 }
 
-function updateHint(nextId: StepId | null): void {
+function updateHint(nextId: string | null): void {
   if (busy) {
     nextHintEl.textContent = 'running…';
     nextHintEl.className = 'next-hint running';
@@ -524,17 +364,20 @@ function updateHint(nextId: StepId | null): void {
     nextHintEl.className = 'next-hint action';
     return;
   }
-  nextHintEl.textContent = '✓ Scenario complete — try another';
+  nextHintEl.textContent = '✓ Project complete — try another';
   nextHintEl.className = 'next-hint done';
 }
 
-function selectScenario(id: string): void {
-  activeScenario = id;
+async function selectProject(id: ProjectId): Promise<void> {
+  if (busy) return;
+  activeProject = id;
   renderChips();
+  renderTree();
   renderSteps();
+  await openFile(DEMO_PROJECTS[id].entry);
 }
 
-async function runStep(id: StepId): Promise<void> {
+async function runStep(id: string): Promise<void> {
   if (busy || !stepEnabled(id)) return;
   busy = true;
   renderSteps();
@@ -542,7 +385,7 @@ async function runStep(id: StepId): Promise<void> {
     await STEPS[id].exec();
     if (!STEPS[id].long) completed.add(id);
   } catch {
-    // `runProcess` already reported the failure in the terminal.
+    // `runProcess` / `installDeps` already reported the failure in the terminal.
   } finally {
     busy = false;
     await refreshPorts();
@@ -551,14 +394,11 @@ async function runStep(id: StepId): Promise<void> {
   }
 }
 
-runBtn.addEventListener('click', () => void runStep('run'));
-
 // --- preview ---------------------------------------------------------------
 
 async function refreshPorts(): Promise<void> {
   const described = await client.describe();
   ports = described.ports;
-  viteDevReady = ports.includes(5173);
   const previous = portSelect.value;
   portSelect.innerHTML = '';
 
@@ -664,7 +504,6 @@ client.on('vendoredReady', (ms) => {
 });
 
 client.on('ready', (runtimeInfo) => {
-  info = runtimeInfo;
   bootTiming.runtimeReadyMs = Math.round(performance.now());
   if (runtimeInfo.timing) {
     bootTiming.vendoredMs = runtimeInfo.timing.vendoredMs;
@@ -689,13 +528,13 @@ client.on('ready', (runtimeInfo) => {
   writeTerminal('internalBindings: ' + runtimeInfo.bindings.join(', ') + '\n\n', 'sys');
 });
 
-async function installDeps(): Promise<void> {
+async function installDeps(project: DemoProject): Promise<void> {
   await save();
   setStatus('installing…', 'running');
-  writeTerminal('\n$ npm install\n', 'sys');
+  writeTerminal(`\n$ npm install  # ${project.root}\n`, 'sys');
   const started = performance.now();
   try {
-    const result = await client.installDeps({ includeDev: true });
+    const result = await client.installDeps({ cwd: project.root });
     const ms = (performance.now() - started).toFixed(0);
     for (const warning of result.warnings) writeTerminal(`[npm] ${warning}\n`, 'err');
     for (const pkg of result.installed) writeTerminal(`  ${pkg.name}@${pkg.version}\n`, 'sys');
@@ -708,13 +547,12 @@ async function installDeps(): Promise<void> {
     if (result.binLinks?.length) {
       writeTerminal(`[bin] node_modules/.bin: ${result.binLinks.join(', ')}\n`, 'ok');
     }
-    writeTerminal(`[installed ${result.packages} package(s) in ${ms}ms — now pick a scenario step]\n`, 'ok');
+    writeTerminal(`[installed ${result.packages} package(s) in ${ms}ms — now run a step above]\n`, 'ok');
     setStatus(`installed ${result.packages}`, 'ok');
     // A fresh install writes node_modules (and the lockfile) behind the UI's
     // back, so re-read the tree to show them.
-    files = (await client.mount({})).filter((f) => !f.endsWith('/'));
+    files = await readTree();
     renderTree();
-    depsReady = depsInstalledFromFiles();
   } catch (err) {
     writeTerminal(`[npm install failed] ${(err as Error).message}\n`, 'err');
     setStatus('error', 'err');
@@ -722,64 +560,25 @@ async function installDeps(): Promise<void> {
   }
 }
 
-/**
- * rspack's dependency tree is heavy (143 packages / ~80s / a 30 MB wasm), so it
- * is installed *separately* under `/project/rspack` and only when the rspack
- * scenario asks for it — the default `Install deps` stays fast.
- */
-async function installRspackDeps(): Promise<void> {
-  await save();
-  setStatus('installing rspack…', 'running');
-  writeTerminal('\n$ npm install  # in /project/rspack\n', 'sys');
-  writeTerminal('[rspack] installing @rspack/core + binding-wasm32-wasi (~143 pkgs)…\n', 'sys');
-  const started = performance.now();
-  try {
-    const result = await client.installDeps({ cwd: '/project/rspack', includeDev: false });
-    const ms = (performance.now() - started).toFixed(0);
-    for (const warning of result.warnings) writeTerminal(`[npm] ${warning}\n`, 'err');
-    if (result.fromLockfile) {
-      writeTerminal(`[lock] reused ${result.fromLockfile} package(s) from package-lock.json\n`, 'sys');
-    }
-    writeTerminal(`[rspack] installed ${result.packages} package(s) in ${ms}ms\n`, 'ok');
-    setStatus(`rspack deps: ${result.packages}`, 'ok');
-    files = (await client.mount({})).filter((f) => !f.endsWith('/'));
-    renderTree();
-    rspackDepsReady = rspackDepsInstalledFromFiles();
-  } catch (err) {
-    writeTerminal(`[rspack install failed] ${(err as Error).message}\n`, 'err');
-    setStatus('error', 'err');
-    throw err;
-  }
-}
-
-function depsInstalledFromFiles(): boolean {
-  return files.some((f) => f.startsWith('/project/node_modules/'));
-}
-
-function rspackDepsInstalledFromFiles(): boolean {
-  return files.some((f) => f.startsWith('/project/rspack/node_modules/'));
-}
-
 clearBtn.addEventListener('click', () => {
   terminalEl.innerHTML = '';
   setStatus('');
 });
 resetBtn.addEventListener('click', async () => {
-  files = await client.reset();
+  files = (await client.reset()).filter((f) => !f.endsWith('/'));
   renderTree();
-  await openFile('/project/index.js');
-  depsReady = depsInstalledFromFiles();
-  rspackDepsReady = rspackDepsInstalledFromFiles();
+  await openFile(DEMO_PROJECTS[activeProject].entry);
   await refreshPorts();
   syncDerived();
   renderSteps();
-  writeTerminal('\n[project reset to demo files]\n', 'sys');
+  writeTerminal('\n[projects reset to demo files]\n', 'sys');
 });
 
 window.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
     e.preventDefault();
-    void runStep('run');
+    const id = nextStepId();
+    if (id) void runStep(id);
   }
   if ((e.metaKey || e.ctrlKey) && e.key === 's') {
     e.preventDefault();
@@ -789,27 +588,24 @@ window.addEventListener('keydown', (e) => {
 
 async function boot(): Promise<void> {
   renderChips();
+  renderTree();
   renderSteps();
   const bridged = await client.installServiceWorkerBridge();
   installHmrRelay();
   startPortWatch();
   await client.init();
-  // The ready payload populated `files` via the 'ready' handler; a no-op mount
-  // re-reads the current tree so ordering is deterministic.
-  const list = await client.mount({});
-  files = list.filter((f) => !f.endsWith('/'));
+  // The ready payload populated the VFS; re-read the tree so ordering is
+  // deterministic and the gates see any restored `node_modules`.
+  files = await readTree();
   renderTree();
-  depsReady = depsInstalledFromFiles();
-  rspackDepsReady = rspackDepsInstalledFromFiles();
-  const entry = files.find((f) => f.endsWith('index.js')) ?? files[0];
-  if (entry) await openFile(entry);
+  await openFile(DEMO_PROJECTS[activeProject].entry);
   writeTerminal(
     bridged
       ? 'service worker bridge ready — /preview/<port>/ routes into the virtual network.\n'
       : 'service worker unavailable — preview routing disabled.\n',
     bridged ? 'sys' : 'err',
   );
-  writeTerminal('\nPick a scenario above, then follow the numbered steps.\n\n', 'sys');
+  writeTerminal('\nPick a project above, then follow the numbered steps.\n\n', 'sys');
   await refreshPorts();
   syncDerived();
   renderSteps();
@@ -838,7 +634,7 @@ type HmrRelay = { follow: (port: number | null) => void };
 let hmrRelay: HmrRelay = { follow: () => {} };
 
 /**
- * There is one channel per preview port (`web-node-hmr:<port>`), so two dev
+ * There is one channel per dev-server port (`web-node-hmr:<port>`), so two dev
  * servers on different ports never see each other's clients. The shim tags each
  * frame with its port, and we only push the runtime's replies to the iframe
  * currently showing that port.

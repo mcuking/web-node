@@ -16,15 +16,14 @@
         </div>
       </div>
       <div class="actions">
-        <button id="run" class="primary" title="node /project/index.js">▶ Run</button>
         <button id="clear" title="Clear the output">Clear</button>
-        <button id="reset" title="Restore the demo project">Reset project</button>
+        <button id="reset" title="Restore the demo projects">Reset project</button>
       </div>
     </header>
 
-    <nav class="scenariobar" aria-label="Scenarios">
-      <span class="bar-label">Scenario</span>
-      <div id="scenario-chips" class="chips"></div>
+    <nav class="scenariobar" aria-label="Projects">
+      <span class="bar-label">Project</span>
+      <div id="project-chips" class="chips"></div>
     </nav>
 
     <div class="stepbar">
@@ -35,7 +34,7 @@
 
     <main class="layout">
       <section class="pane files">
-        <div class="pane-head">Files <span class="hint">(VFS → OPFS)</span></div>
+        <div class="pane-head">Files <span class="hint" id="files-root">(VFS → OPFS)</span></div>
         <ul id="file-tree" class="file-tree"></ul>
       </section>
 
@@ -66,7 +65,7 @@
           </div>
           <iframe id="preview-frame" title="preview" src="about:blank"></iframe>
           <div id="preview-empty" class="preview-empty">
-            No port bound yet. <code>http.createServer(…).listen(3000)</code> then hit ▶ Run.
+            No port bound yet. Run a project's dev server, then pick its port here.
           </div>
         </div>
       </section>

@@ -77,54 +77,58 @@ describe('require.resolve', () => {
   });
 });
 
-describe('demo build script', () => {
-  it('explains how to install esbuild-wasm when it is missing', async () => {
-    const { run, out } = boot(DEMO_FILES, '/project/build.js');
-    run();
-    await tick(20);
-    expect(out.join('')).toContain('not installed yet');
-    expect(out.join('')).not.toContain('build failed');
-  });
-
-  it('explains how to install rollup when it is missing', async () => {
-    const { run, out } = boot(DEMO_FILES, '/project/bundle.js');
-    run();
-    await tick(20);
-    expect(out.join('')).toContain('not installed yet');
-    expect(out.join('')).not.toContain('bundle failed');
-  });
-
-  it('explains how to install vite when it is missing', async () => {
-    const { run, out } = boot(DEMO_FILES, '/project/vite-build.mjs');
-    run();
-    await tick(20);
-    expect(out.join('')).toContain('not installed yet');
-    expect(out.join('')).not.toContain('vite failed');
-  });
-
-  it('explains how to install typescript when it is missing (M128)', async () => {
-    const { run, out } = boot(DEMO_FILES, '/project/tsc-build.js');
-    run();
-    await tick(20);
-    expect(out.join('')).toContain('tsc build (milestone 128)');
-    expect(out.join('')).toContain('not installed yet');
-  });
-
-  it('ships the ts-app sources the tsc demo compiles (M128)', () => {
+describe('demo projects', () => {
+  it('ships one self-contained directory per project', () => {
     const { run, out } = boot(
       {
         ...DEMO_FILES,
-        '/project/tsc-list.js': `
+        '/project/list.js': `
           const fs = require('fs');
-          console.log('tsconfig ' + fs.existsSync('/project/ts-app/tsconfig.json'));
-          console.log('src ' + fs.readdirSync('/project/ts-app/src').sort().join(','));
+          const has = (p) => fs.existsSync(p);
+          console.log('vite     ' + has('/project/vite/src/App.vue') + ' ' + has('/project/vite/index.html'));
+          console.log('webpack  ' + has('/project/webpack/src/index.js') + ' ' + has('/project/webpack/webpack.config.mjs'));
+          console.log('rspack   ' + has('/project/rspack/src/main.mjs') + ' ' + has('/project/rspack/webnode-binding.cjs'));
+          console.log('node     ' + has('/project/node/index.js') + ' ' + has('/project/node/lib/report.js'));
         `,
       },
-      '/project/tsc-list.js',
+      '/project/list.js',
     );
     run();
-    expect(out.join('')).toContain('tsconfig true');
-    expect(out.join('')).toContain('src geometry.ts,index.ts');
+    expect(out.join('')).toContain('vite     true true');
+    expect(out.join('')).toContain('webpack  true true');
+    expect(out.join('')).toContain('rspack   true true');
+    expect(out.join('')).toContain('node     true true');
+  });
+
+  it('explains how to install vite when it is missing', async () => {
+    const { run, out } = boot(DEMO_FILES, '/project/vite/build.mjs');
+    run();
+    await tick(20);
+    expect(out.join('')).toContain('not installed yet');
+    expect(out.join('')).not.toContain('failed');
+  });
+
+  it('explains how to install the vite dev server when it is missing', async () => {
+    const { run, out } = boot(DEMO_FILES, '/project/vite/dev.mjs');
+    run();
+    await tick(20);
+    expect(out.join('')).toContain('not installed yet');
+  });
+
+  it('explains how to install webpack when it is missing', async () => {
+    const { run, out } = boot(DEMO_FILES, '/project/webpack/build.mjs');
+    run();
+    await tick(20);
+    expect(out.join('')).toContain('not installed yet');
+    expect(out.join('')).not.toContain('failed');
+  });
+
+  it('explains how to install rspack when it is missing', async () => {
+    const { run, out } = boot(DEMO_FILES, '/project/rspack/build.mjs');
+    run();
+    await tick(20);
+    expect(out.join('')).toContain('not installed yet');
+    expect(out.join('')).not.toContain('failed');
   });
 });
 
