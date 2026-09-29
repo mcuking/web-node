@@ -248,7 +248,322 @@ rep('sqlite:DatabaseSync:new', () => {
 rep('nodePrefix:fsSame', () => require('node:fs') === require('fs'));
 rep('nodePrefix:pathSame', () => require('node:path') === require('path'));
 
+// =========================================================================
+// M127 — depth pass.
+//
+// M124 proved a module can `require()` and still be unusable, and guarded that
+// with one *first call* per builtin. But most of those checks only measured the
+// *shape* of a name (`shape(fn)`), which is itself the WebContainer trap: a
+// present-but-broken function passes `shape()`. This pass adds observations that
+// must produce the same **value** — real round-trips, real parsed output, real
+// error `code`/`name`/`message` — across more modules, so an implementation that
+// resolves names but computes the wrong thing fails the gate too.
+// Values are kept deterministic and host-independent (normalise tmp/abs paths).
+// =========================================================================
+
+// --- constants (tables the other modules read) ----------------------------
+rep('constants:fs:O_RDWR', () => require('constants').fs.O_RDWR);
+rep('constants:fs:O_CREAT', () => require('constants').fs.O_CREAT);
+rep('constants:os:signals:SIGTERM', () => require('constants').os.signals.SIGTERM);
+rep('constants:dns:ADDRCONFIG', () => require('constants').dns.ADDRCONFIG);
+rep('constants:zlib:Z_BEST_COMPRESSION', () => require('constants').zlib.Z_BEST_COMPRESSION);
+rep('constants:zlib:Z_SYNC_FLUSH', () => require('constants').zlib.Z_SYNC_FLUSH);
+
+// --- path deeper ----------------------------------------------------------
+rep('path:normalize', () => require('path').normalize('/a//b/../c/./d'));
+rep('path:resolveRel', () => require('path').resolve('/a/b', '../c'));
+rep('path:parseFormatRoundtrip', () => require('path').format(require('path').parse('/x/y/z.txt')));
+rep('path:win32Join', () => require('path').win32.join('C:\\a', 'b', '..', 'c'));
+rep('path:dirname', () => require('path').dirname('/a/b/c.txt'));
+rep('path:basenameExt', () => require('path').basename('/a/b.c.txt', '.txt'));
+rep('path:sep', () => require('path').sep);
+
+// --- buffer deeper --------------------------------------------------------
+rep('buffer:compare', () => Buffer.compare(Buffer.from('a'), Buffer.from('b')));
+rep('buffer:equals', () => Buffer.from('x').equals(Buffer.from('x')));
+rep('buffer:readInt32BE', () => {
+  const b = Buffer.alloc(4);
+  b.writeInt32BE(-123456, 0);
+  return b.readInt32BE(0);
+});
+rep('buffer:swap16', () => {
+  const b = Buffer.from([1, 2, 3, 4]);
+  b.swap16();
+  return b.toString('hex');
+});
+rep('buffer:latin1', () => Buffer.from([0xe9, 0xff]).toString('latin1'));
+rep('buffer:utf16le', () => Buffer.from('h\u00e9', 'utf16le').toString('hex'));
+rep('buffer:writeUInt16LE', () => {
+  const b = Buffer.alloc(2);
+  b.writeUInt16LE(0x1234, 0);
+  return b.toString('hex');
+});
+rep('buffer:indexOfBuffer', () => Buffer.from('hello world').indexOf(Buffer.from('world')));
+
+// --- url deeper -----------------------------------------------------------
+rep('url:resolve', () => require('url').resolve('https://a/b/c', '../d'));
+rep('url:parseFormatRoundtrip', () => require('url').format(require('url').parse('https://h:8443/p?q=1#f')));
+rep('url:URLSearchParams:toString', () => new URLSearchParams([['a', '1'], ['b', 'x y']]).toString());
+rep('url:URL:pathname', () => new URL('https://h/a%20b/c?x#y').pathname);
+rep('url:domainToASCII', () => require('url').domainToASCII('ma\u00f1ana.com'));
+
+// --- querystring / string_decoder deeper ----------------------------------
+rep('querystring:escape', () => require('querystring').escape('a b&c'));
+rep('string_decoder:splitMultibyte', () => {
+  const { StringDecoder } = require('string_decoder');
+  const d = new StringDecoder('utf8');
+  const full = Buffer.from('h\u00e9llo', 'utf8');
+  return d.write(full.subarray(0, 2)) + d.write(full.subarray(2)) + d.end();
+});
+rep('string_decoder:endFlush', () => {
+  const { StringDecoder } = require('string_decoder');
+  const d = new StringDecoder('utf8');
+  return d.write(Buffer.from([0xe2, 0x82])) + '|' + d.end() + '|';
+});
+
+// --- util deeper ----------------------------------------------------------
+rep('util:format:percentJ', () => require('util').format('%j', { a: 1 }));
+rep('util:inspect:depth', () => require('util').inspect({ a: { b: { c: { d: 1 } } } }, { depth: 2 }));
+rep('util:stripVT', () => require('util').stripVTControlCharacters('\u001b[31mred\u001b[0m'));
+rep('util:types:isTypedArray', () => require('util').types.isTypedArray(new Uint8Array(1)));
+rep('util:types:isPromise', () => require('util').types.isPromise(Promise.resolve()));
+rep('util:types:isArrayBuffer', () => require('util').types.isArrayBuffer(new ArrayBuffer(1)));
+
+// --- assert deeper (error shape, not just success) ------------------------
+rep('assert:AssertionError:name', () => {
+  try {
+    require('assert').strictEqual(1, 2);
+  } catch (e) {
+    return e.name;
+  }
+});
+rep('assert:AssertionError:code', () => {
+  try {
+    require('assert').strictEqual(1, 2);
+  } catch (e) {
+    return e.code;
+  }
+});
+rep('assert:AssertionError:message', () => {
+  try {
+    require('assert').strictEqual('a', 'b');
+  } catch (e) {
+    return e.message;
+  }
+});
+rep('assert:ok:throwsName', () => {
+  try {
+    require('assert').ok(0);
+  } catch (e) {
+    return e.code;
+  }
+});
+
+// --- events deeper --------------------------------------------------------
+rep('events:errorMonitor:shape', () => shape(require('events').errorMonitor));
+rep('events:listenerCount', () => {
+  const { EventEmitter } = require('events');
+  const e = new EventEmitter();
+  e.on('x', () => {});
+  e.on('x', () => {});
+  return e.listenerCount('x');
+});
+rep('events:onceFiresOnce', () => {
+  const { EventEmitter } = require('events');
+  const e = new EventEmitter();
+  let n = 0;
+  e.once('x', () => n++);
+  e.emit('x');
+  e.emit('x');
+  return n;
+});
+rep('events:prependListener:order', () => {
+  const { EventEmitter } = require('events');
+  const e = new EventEmitter();
+  const seen = [];
+  e.on('x', () => seen.push('a'));
+  e.prependListener('x', () => seen.push('b'));
+  e.emit('x');
+  return seen.join(',');
+});
+rep('events:removeListenerCount', () => {
+  const { EventEmitter } = require('events');
+  const e = new EventEmitter();
+  const h = () => {};
+  e.on('x', h);
+  e.off('x', h);
+  return e.listenerCount('x');
+});
+
+// --- perf_hooks deeper ----------------------------------------------------
+rep('perf_hooks:markMeasure', () => {
+  const { performance } = require('perf_hooks');
+  performance.mark('a');
+  performance.measure('m', 'a');
+  const e = performance.getEntriesByName('m')[0];
+  return e.name + ':' + e.entryType;
+});
+rep('perf_hooks:clearMarks', () => {
+  const { performance } = require('perf_hooks');
+  performance.mark('b');
+  performance.clearMarks('b');
+  return performance.getEntriesByName('b').length;
+});
+rep('perf_hooks:timeOrigin:shape', () => shape(require('perf_hooks').performance.timeOrigin));
+
+// --- v8 deeper (structured-clone formats) ---------------------------------
+rep('v8:serializeMap', () => {
+  const v8 = require('v8');
+  return v8.deserialize(v8.serialize(new Map([['a', 1]]))).get('a');
+});
+rep('v8:serializeSet:size', () => {
+  const v8 = require('v8');
+  return v8.deserialize(v8.serialize(new Set([1, 2, 3]))).size;
+});
+rep('v8:serializeDate', () => {
+  const v8 = require('v8');
+  return v8.deserialize(v8.serialize(new Date(0))).getTime();
+});
+rep('v8:serializeRegExp:flags', () => {
+  const v8 = require('v8');
+  return v8.deserialize(v8.serialize(/ab+c/gi)).flags;
+});
+rep('v8:serializeError:name', () => {
+  const v8 = require('v8');
+  return v8.deserialize(v8.serialize(new TypeError('x'))).name;
+});
+rep('v8:serializeUndefined', () => {
+  const v8 = require('v8');
+  return v8.deserialize(v8.serialize(undefined)) === undefined;
+});
+
+// --- zlib deeper ----------------------------------------------------------
+rep('zlib:crc32', () => require('zlib').crc32('hello'));
+rep('zlib:deflateHexRawLen', () => require('zlib').deflateRawSync(Buffer.from('hello world')).length);
+rep('zlib:unzipAuto:gzip', () => require('zlib').unzipSync(require('zlib').gzipSync(Buffer.from('z'))).toString());
+rep('zlib:deflateRawInvalid:code', () => {
+  try {
+    require('zlib').inflateRawSync(Buffer.from([1, 2, 3, 4]));
+    return 'no-throw';
+  } catch (e) {
+    return e.code;
+  }
+});
+
+// --- console / domain / punycode / readline -------------------------------
+rep('console:Console:shape', () => shape(require('console').Console));
+rep('console:log:shape', () => shape(require('console').log));
+rep('domain:create:shape', () => shape(require('domain').create));
+rep('domain:run', () => {
+  const d = require('domain').create();
+  let ran = false;
+  d.run(() => {
+    ran = true;
+  });
+  return ran;
+});
+rep('punycode:toASCII', () => require('punycode').toASCII('ma\u00f1ana.com'));
+rep('punycode:toUnicode', () => require('punycode').toUnicode('xn--maana-pta.com'));
+rep('readline:createInterface:shape', () => shape(require('readline').createInterface));
+rep('stream/web:ReadableStream:shape', () => shape(require('stream/web').ReadableStream));
+rep('stream/web:TransformStream:shape', () => shape(require('stream/web').TransformStream));
+// --- trace_events: real call, not a typeof check --------------------------
+// `shape()` alone would pass even for a throwing stub, so this one *calls* it.
+rep('trace_events:createTracing', () => {
+  return require('trace_events').createTracing({ categories: ['node'] }).categories;
+});
+
+// --- worker_threads: synchronous port round-trip --------------------------
+rep('worker_threads:receiveMessageOnPort', () => {
+  const { MessageChannel, receiveMessageOnPort } = require('worker_threads');
+  const { port1, port2 } = new MessageChannel();
+  port1.unref();
+  port2.unref();
+  port1.postMessage({ hello: 'world', n: 42 });
+  const m = receiveMessageOnPort(port2);
+  return m && m.message ? m.message.hello + ':' + m.message.n : 'none';
+});
+
+// --- fs error shapes (code/name/syscall), not just success ----------------
+rep('fs:readFileSync:missing:code', () => {
+  try {
+    require('fs').readFileSync(fsdir + '/nope-' + Date.now() + '.txt', 'utf8');
+    return 'no-throw';
+  } catch (e) {
+    return e.code;
+  }
+});
+rep('fs:readFileSync:missing:name', () => {
+  try {
+    require('fs').readFileSync(fsdir + '/nope-' + Date.now() + '.txt', 'utf8');
+    return 'no-throw';
+  } catch (e) {
+    return e.name;
+  }
+});
+rep('fs:readdirSync:missing:code', () => {
+  try {
+    require('fs').readdirSync(fsdir + '/nope-' + Date.now());
+    return 'no-throw';
+  } catch (e) {
+    return e.code;
+  }
+});
+rep('fs:rmdirSync:onFile:code', () => {
+  const fs = require('fs');
+  const f = fsdir + '/rmdir-target.txt';
+  fs.writeFileSync(f, 'x');
+  try {
+    fs.rmdirSync(f);
+    return 'no-throw';
+  } catch (e) {
+    return e.code;
+  } finally {
+    fs.rmSync(f, { force: true });
+  }
+});
+rep('fs:mkdirSync:existsNoRecursive:code', () => {
+  try {
+    require('fs').mkdirSync(fsdir);
+    return 'no-throw';
+  } catch (e) {
+    return e.code;
+  }
+});
+
 async function main() {
+  // M127 — async deep round-trips. These await real work (a timer, stream
+  // consumers, fs/promises) and record the resolved value, so a promise-shaped
+  // stub that never settles or resolves wrong is caught too.
+  const arep = async (key, fn) => {
+    try {
+      const v = await fn();
+      out[key] = v === undefined ? 'undefined' : v;
+    } catch (e) {
+      out[key] = 'throw:' + ((e && (e.code || e.name)) || 'Error');
+    }
+  };
+  await arep('async:timers/promises:setTimeout', async () => {
+    await require('timers/promises').setTimeout(1);
+    return 'ok';
+  });
+  await arep('async:stream/consumers:text', () =>
+    require('stream/consumers').text(require('stream').Readable.from(['a', 'b'])),
+  );
+  await arep('async:stream/consumers:json', async () =>
+    JSON.stringify(await require('stream/consumers').json(require('stream').Readable.from(['{"a":', '1}']))),
+  );
+  await arep('async:stream/consumers:buffer', async () =>
+    (await require('stream/consumers').buffer(require('stream').Readable.from([Buffer.from('hi')]))).toString(),
+  );
+  await arep('async:fs/promises:writeRead', async () => {
+    const f = fsdir + '/promise.txt';
+    await require('fs/promises').writeFile(f, 'yo');
+    const v = await require('fs/promises').readFile(f, 'utf8');
+    await require('fs/promises').rm(f);
+    return v;
+  });
+
   console.log('__OBS__ ' + JSON.stringify(out));
 }
 

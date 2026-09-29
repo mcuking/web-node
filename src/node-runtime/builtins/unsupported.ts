@@ -66,8 +66,11 @@ export function unsupported(moduleName: string, provided: Record<string, unknown
  * missing file.
  *
  * `http2` needs a full HTTP/2 (HPACK + frame/stream) stack; `sqlite` needs a
- * bundled native SQLite. Both are deliberately out of scope, so they get the
- * "loads but is not usable" treatment rather than silent stubs.
+ * bundled native SQLite; `trace_events` needs V8's tracing subsystem. All are
+ * deliberately out of scope, so they get the "loads but is not usable"
+ * treatment rather than silent stubs. (Node itself throws
+ * `ERR_TRACE_EVENTS_UNAVAILABLE` when built without tracing, so "no tracing in
+ * the tab" is upstream-legitimate rather than a web-node-only limitation.)
  */
 export const unsupportedSpecs: BuiltinSpec[] = [
   {
@@ -80,5 +83,11 @@ export const unsupportedSpecs: BuiltinSpec[] = [
     aliases: ['node:sqlite'],
     origin: 'web-node',
     init: () => unsupported('sqlite'),
+  },
+  {
+    id: 'trace_events',
+    aliases: ['node:trace_events'],
+    origin: 'web-node',
+    init: () => unsupported('trace_events'),
   },
 ];

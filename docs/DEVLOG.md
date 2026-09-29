@@ -184,7 +184,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 > **固定路线图在 [`docs/ROADMAP.md`](ROADMAP.md)**——正序、带编号、可勾选。**阶段 A–I 已基本结清**；仅余 G·M113（子域名静态托管，卡在通配 DNS）与 I·M122（沙箱出站网络，需外部代理）两项，暂被搁置。2026-09-29 新开 **M126 启动载荷再降 ✅**（阶段 E）。
 >
-> **近期待办**：**M126（启动载荷再降：vendored 源拆 core/lazy 两层）✅ 2026-09-29**；下一步 **M127（差分语料 / 行为门禁扩面）** → **M128（真实工具链端到端）**。
+> **近期待办**：**M126（启动载荷再降：vendored 源拆 core/lazy 两层）✅ 2026-09-29** · **M127（行为门禁扩面：从「能调用」到「算得对」）✅ 2026-09-29**；下一步 **M128（真实工具链端到端）**。
 
 按优先级：
 
@@ -245,6 +245,17 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-29 · M127 —— 行为门禁扩面：从「能调用」到「算得对」
+
+**动机**：M124 的门禁里很多观测是 `shape(fn)`（只 `typeof`）——**这正是 WebContainer 陷阱本身**：一个 present-but-broken 的函数（抛错的桩、算错的实现）照样 `typeof === 'function'`，能骗过 `shape()`。M127 把观测改成**必须产出一致值**的真实往返。
+
+- **落地**：`tools/behavior-smoke-probe.cjs` 观测数 **104 → 187（+83）**，新增全是**值/错误形状**类：常量表真值；`path`/`buffer`/`url`/`querystring`/`string_decoder`/`util` 深调用与 parse↔format 往返；**错误形状**（`assert.AssertionError` 的 name/code/message、`fs` 缺文件/`ENOTDIR`/`EEXIST` 的 code、`zlib` 非法输入 code）；`events`/`perf_hooks`/`v8` 深语义（`once`/`prependListener` 顺序/mark-measure/serialize 往返/`worker_threads.receiveMessageOnPort` 同步往返）；**async 往返**（`timers/promises`、`stream/consumers` text/json/buffer、`fs/promises` 写→读→删）。
+- **门禁当场扑出 1 处真缺口**：`trace_events` —— real Node 能 `createTracing({categories}).categories`，web-node **`MODULE_NOT_FOUND`**（未登记）。
+  - **修复**：把 `trace_events`（别名 `node:trace_events`）登记进 `unsupported.ts` 的 `unsupportedSpecs`——**导入不炸、使用才响亮抛 `ERR_WEB_NODE_NOT_IMPLEMENTED`**。定为「不支持」而非「实现」的理由：它的能力（V8 tracing 子系统）在标签页里**确实不存在**；且 **Node 自身在未编 tracing 的构建上也抛 `ERR_TRACE_EVENTS_UNAVAILABLE`**，所以「标签页无 tracing」是**上游正当**的能力缺口——申报为偏离比伪造 `hasTracing=true` 而实际不发 trace 事件诚实。
+- **负向验证**：临时摘掉 `trace_events` 登记 → 门禁立即失败并指名 `trace_events:createTracing: oracle="node" web-node="throw:MODULE_NOT_FOUND"`；恢复后复绿。
+- **验收**：`tsc --noEmit` 净 · `vitest run` **1156 passed / 3 skipped（139 文件）** · build：`runtime.worker-*.js` 765.39 kB、`vendored-core.txt` 614.66 kB/gzip 121.92 kB、`vendored-rest.txt` 1,357.81 kB/gzip 233.89 kB。
+- **附注**：全套首次跑时 `test/crypto-dh.test.ts` 偶发 1 次失败（DH 观测值不等）；**不可复现**——真 Node oracle 跑 10 次、web-node 探针跑 40 次均稳定一致，隔离跑该文件 8/8 绿；判为一次性环境抖动（与本次改动无关），保留观察。
 
 ### 2026-09-29 · M126 —— 启动载荷再降：vendored 源拆成 core / lazy 两层
 

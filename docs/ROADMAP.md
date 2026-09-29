@@ -6,8 +6,8 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[⤳]` **已并入其他里程碑**（保留条目作决策痕迹，**不单独计数**） · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。**当前剩余：G·M113（子域名静态托管）· I·M122（沙箱出站网络）**（二者暂被搁置；新增的 **M126 启动载荷再降 ✅** 见阶段 E）。
-> - **最后更新**：2026-09-29（**M126 ✅ 启动载荷再降**——把 1.8 MB vendored 源拆成「启动 core 层（54 文件 / gzip 121.9 KB，预加载 + `ready` 前 await）」与「lazy 层（109 文件 / gzip 233.9 KB，后台低优先级预取，跑用户代码前 await）」，启动期 awaited 的源载荷 **gzip 344.6 → 121.9 KB**；顺带修一个真差异——`Realm#materialize` 在求值抛错后把记录留在 `loading`，二次 `require` 会静默拿到半成品导出，Node 是丢弃缓存并重跑，已改正）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅。
+> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 G。阶段 A/B/C/D 均已结清。**当前剩余：G·M113（子域名静态托管）· I·M122（沙箱出站网络）**（二者暂被搁置；新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I）。
+> - **最后更新**：2026-09-29（**M127 ✅ 行为门禁扩面**——把 M124 的门禁从「能调用」加深到「算得对」：观测 **104 → 187**，新增均为值/错误形状/async 往返；当场扑出 `trace_events` 的 `MODULE_NOT_FOUND` 并登记为类型化不支持。**M126 ✅ 启动载荷再降**——把 1.8 MB vendored 源拆成「启动 core 层（54 文件 / gzip 121.9 KB，预加载 + `ready` 前 await）」与「lazy 层（109 文件 / gzip 233.9 KB，后台低优先级预取，跑用户代码前 await）」，启动期 awaited 的源载荷 **gzip 344.6 → 121.9 KB**；顺带修一个真差异——`Realm#materialize` 在求值抛错后把记录留在 `loading`，二次 `require` 会静默拿到半成品导出，Node 是丢弃缓存并重跑，已改正）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅。
 
 ---
 
@@ -326,6 +326,19 @@
   - **修复**：① 把 `http2` / `node:sqlite` 登记进 `builtins/unsupported.ts` 的 `unsupportedSpecs`（**导入不炸、使用才响亮抛错**——正是 `unsupported()` 这个 helper 的设计意图）；② 把 `throwingFn` 由箭头函数改为**普通函数表达式**（可构造，`new` 也走报错分支）。
   - **负向验证**：临时摘掉 `http2` 登记 → 门禁立即失败并指名 `expected throw:ERR_WEB_NODE_NOT_IMPLEMENTED, got "throw:MODULE_NOT_FOUND"`；恢复后复绿。证明它真能揪「require-OK 但运行期崩/消失」。
   - **验收**：现有模块**零未记录告警**（仅 `http2` / `sqlite` 两条已在 DEVIATIONS 写明原因）。门禁：`tsc --noEmit` 净 · `vitest run` **1141 passed / 3 skipped（135 文件）** · build 通过。
+
+- [x] **M127 · 差分语料 / 行为门禁扩面（从「能调用」到「算得对」）** ✅ 2026-09-29 —— 把 M124 的门禁从「有没有」加深到「对不对」
+  - **动机**：M124 的观测大多是 `shape(fn)`（只 `typeof`）——**这正是 WebContainer 的陷阱本身**：一个 present-but-broken 的函数（抛错的桩、算错的实现）照样 `typeof === 'function'`，能骗过 `shape()`。M127 把观测改成**必须产出一致值**的真实往返。
+  - **落地**：`tools/behavior-smoke-probe.cjs` 观测数 **104 → 187**（+83），新增的都是**值/错误形状**类，非 shape：
+    - **常量表**：`constants.fs/os.signals/dns/zlib` 真值。
+    - **深调用**：`path.normalize/resolve/parse↔format` 往返/`win32.join`、`buffer.compare/swap16/latin1/utf16le/readInt32BE`、`url.resolve/parse↔format`/`URL.pathname`/`domainToASCII`、`querystring.escape`、`string_decoder` 多字节拆分与 `end()` flush、`util.format('%j')`/`inspect(depth)`/`stripVT`/`types.*`。
+    - **错误形状**（不只是抛，而是 `name`/`code`/**`message`**）：`assert.AssertionError` 三字段、`fs` 缺文件/`ENOTDIR`/`EEXIST` 的 `code`、`zlib` 非法输入 `code`。
+    - **events/perf_hooks/v8 深语义**：`once` 只触发一次、`prependListener` 顺序、`removeListener`；`perf_hooks` mark/measure/clearMarks；`v8` 序列化 Map/Set/Date/RegExp/Error/undefined 往返；`worker_threads.receiveMessageOnPort` **同步端口往返**。
+    - **async 往返**（新 `arep`，等真结果）：`timers/promises.setTimeout`、`stream/consumers` 的 `text`/`json`/`buffer`、`fs/promises` 写→读→删。
+  - **门禁当场扑出 1 处真缺口**：① `trace_events` —— real Node 能 `createTracing({categories}).categories`，web-node **`MODULE_NOT_FOUND`**（**未登记**，又是「裸 require → MODULE_NOT_FOUND」那类，正是 M124 断言④要拦的）。
+    - **修复**：把 `trace_events`（别名 `node:trace_events`）登记进 `builtins/unsupported.ts` 的 `unsupportedSpecs`——**导入不炸、使用才响亮抛 `ERR_WEB_NODE_NOT_IMPLEMENTED`**。为什么是「不支持」而非「实现」：它的能力（V8 tracing 子系统）在标签页里**确实不存在**；而且 **Node 自己在未编 tracing 的构建上也抛 `ERR_TRACE_EVENTS_UNAVAILABLE`**，所以「标签页无 tracing」是**上游正当**的能力缺口，不是 web-node 独有的限制——申报为偏离比伪造 `hasTracing=true` 而实际不发 trace 事件诚实。
+  - **负向验证**：临时把 `trace_events` 的登记摘掉 → 门禁立即失败并指名 `trace_events:createTracing: oracle="node" web-node="throw:MODULE_NOT_FOUND"`；恢复后复绿。（前一轮 `:shape` 写法也扑出过 `oracle="function" web-node="throw:MODULE_NOT_FOUND"`——证明 `shape()` 骗不过真实调用这一改是对的。）
+  - **验收**：`tsc --noEmit` 净 · `vitest run` **1156 passed / 3 skipped（139 文件）** · 门禁 4 断言全绿、187 观测逐值一致（仅 `http2`/`sqlite`/`trace_events` 三条已在 DEVIATIONS 写明原因）。
 
 ---
 

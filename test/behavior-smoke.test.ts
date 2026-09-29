@@ -31,6 +31,7 @@ const DEVIATIONS: Record<string, string> = {
   'http2:createServer:call': 'node:http2 is not implemented in the tab',
   'http2:getDefaultSettings:call': 'node:http2 is not implemented in the tab',
   'sqlite:DatabaseSync:new': 'node:sqlite needs a bundled native SQLite',
+  'trace_events:createTracing': 'V8 tracing does not exist in the tab (node:trace_events loads, throws typed on use)',
 };
 
 async function observe(): Promise<Record<string, unknown>> {
