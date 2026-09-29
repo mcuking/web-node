@@ -6,7 +6,7 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[⤳]` **已并入其他里程碑**（保留条目作决策痕迹，**不单独计数**） · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 I。阶段 A/B/C/D 均已结清。**M113 · M122 ✅ 2026-09-29 后，阶段 G 与阶段 I 全部结清**（新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I、**M128 真实工具链端到端（真 tsc）✅** 见阶段 F）。
+> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 I → 阶段 J。阶段 A/B/C/D 均已结清。**M113 · M122 ✅ 2026-09-29 后，阶段 G 与阶段 I 全部结清**（新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I、**M128 真实工具链端到端（真 tsc）✅** 见阶段 F）；**阶段 J：M129 ✅ 2026-09-29**。
 > - **最后更新**：2026-09-29（**M113 ✅ 预览子域名路由（静态托管跟进）**——dev 侧 `<port>.localhost` 保留 + 新增**通配域** `VITE_WEB_NODE_PREVIEW_DOMAIN`：静态托管（GitHub Pages / 任意静态服务器 / 自定义域）把每个预览挂到 `<port>.<domain>` 真 origin；预览壳改为**静态资产**、SW `?domain=` 归一；三策略纯函数化 + 单测；真浏览器双路（dev 子域 / 静态服务器）均从虚拟 FS 供给真应用。**M122 ✅ 沙箱出站网络（egress）**——新增 `net/egress.ts` 传输层 + `Bindings.egress` 接入缝；`http`/`https` 公网目标经**宿主源 worker 的 `fetch`** 出网（可选自备 proxy 兜底，无第三方托管依赖），`net.connect` 无 TCP 桥则响亮 `ECONNREFUSED`；实测 `https.get('https://registry.npmjs.org/ms')` 200（改前 ECONNREFUSED）。**M128 ✅ 真实工具链端到端**——页内跑真 TypeScript 编译器：解析 tsconfig → 类型检查 → 产出 `.js`/`.d.ts` → 执行编译产物（拿到 `{count:2,total:15.1416}`）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅ · M127 ✅ · M122 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅ · M128 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅ · M126 ✅；阶段 G：M113 ✅。
 
 ---
@@ -649,6 +649,20 @@
 - **性能/体积**：M32 worker 减重（1259→1028KB） · M41 Buffer slab 池化
 - **语义深度（差分语料）**：M79 http · M80 net · M81 fs
 - **crypto 主线**：M34 同步面 · M47 对称密码 · M83 非对称 · M84 RSA 加密 + ECDH · M85 DH · M86 对称密钥生成 + FIPS · M87 X509Certificate 真解析 · M88 素数生成/素性检验 · M89 Argon2 · M90.1 MAC（HMAC + BLAKE2b MAC） · M90.2 KMAC（Keccak/SHA-3/cSHAKE） · M90.3 CMAC/GMAC（AES） · M90.4 BLAKE2s MAC / Poly1305 / SipHash · M90.5 SHA-3/Keccak/SHAKE/keccak-kmac · M90.6 BLAKE2b-512/BLAKE2s-256 · M90.7 SM3/RIPEMD-160 · M90.8 截断变体与复合摘要 · M90.9 getHashes 全表对齐（81/81） · M92.1 DH KeyObject · M92.2 crypto.diffieHellman · M93.1 ChaCha20-Poly1305 · M93.2 DES/3DES · M93.3 AES-CCM · M93.4a Camellia · M93.4b ARIA/SM4 · M93.4c OCB/wrap · M93.4d SIV/XTS · M94 crypto.Certificate（SPKAC） · M91 ML-KEM（FIPS 203）
+
+---
+
+## 阶段 J — Demo 体验（情景步进器）
+
+> **动机**：能力已齐，但 demo 入口平铺 13 个按钮、无分组/顺序/前置提示，导致「不知道怎么用、乱点必报错」。本阶段把 demo 顶部导航改造成**情景步进器**（选择情景 → 编号步骤 → 渐进门禁 → 下一步高亮），并把已跑通但未上 UI 的 **rspack** 接入场景栏。
+
+- [x] **M129 · Demo 情景步进器（顺序引导 + vite / webpack / rspack 场景）** ✅ 2026-09-29
+  - **做**：`index.html` 三层（顶栏全局按钮 / 情景 chips / 步骤栏），`src/ui/main.ts` 新增情景-步骤引擎（`STEPS`/`SCENARIOS` + `needs` 门禁 + `syncDerived` 按观测量派生完成态 + 「Next: click …」提示）；`src/ui/style.css` 加 chip/step/next/done/blocked 样式。步骤状态：blocked / ready / **next（高亮脉冲）** / done（✓）。
+  - **rspack 场景**：依赖单独按需装（`/project/rspack` 子目录，不进默认 `Install deps`）；步骤 `⬇ Install rspack deps` → `🔷 rspack build`。demo 文件随 `DEMO_FILES` 走（`package.json`/`src/index.mjs`/`build.cjs`/`webnode-binding.cjs`）。
+  - **顺带修真 bug**：OPFS **restore 分支新增 `writeMissing`**——之前 restore 时不写新 demo 文件，回访用户永远看不到新增条目。
+  - **实测**：真浏览器 raw CDP。页内 rspack **`compiled successfully in 182 ms`**（产物 68 字节）；`Vite dev` → `HMR JS` 使预览子帧出现 `hot-updated #N`；`▶ Run app` 起 :3000 供给正常。
+  - **验收**：`typecheck` 净 · `vitest run` **1181 passed / 3 skipped** · `build` worker **784.74 kB**。
+  - **设计稿**：`docs/specs/designs/2026-09-29-demo-ui-scenarios-design.md`。
 
 ---
 

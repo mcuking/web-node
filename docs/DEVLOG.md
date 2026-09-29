@@ -246,6 +246,28 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-29 · M129 —— Demo 情景步进器（顺序引导 + vite / webpack / rspack 场景）
+
+**动机**：demo 顶部原本平铺 13 个按钮，没有分组、没有顺序、没有前置提示——除 `Run` 外多数按钮都要先 `Install deps`（否则 `MODULE_NOT_FOUND`），`HMR JS/CSS` 还要先跑起 `Vite dev`；且**没有 rspack 场景**（M121/M125 已在页内跑通 rspack 生产构建，只是没接进 UI）。反馈是「很杂乱、不知道怎么用、乱点必报错」。
+
+**改法（方案 B：情景步进器）**——把「平铺一行」换成「**情景选择 + 编号步骤 + 渐进门禁 + 下一步提示**」：
+
+- **情景栏**（chips）：`▶ Run app · ⚡ Vite · 📦 Webpack · 🔷 rspack · ⚛ React · ▦ esbuild · ⧉ rollup · ⌨ tsc · 🖧 Cluster`。选中一个只显示该情景相关的步骤。
+- **步骤栏**：按编号列出该情景的步骤按钮，右侧给实时「Next: click …」提示。`needs:'deps'` 的步骤在 `/project/node_modules` 缺失时**置灰禁用**（tooltip 说明前置）；`HMR *` 需 `5173` 在听；rspack 的 build 需 rspack 自己的 `node_modules`。状态：blocked（灰）/ ready / **next（高亮脉冲）** / done（✓）。门禁按**观测量**派生（`node_modules` 路径、端口表），刷新即重算。
+- **顶栏精简**：只留 `▶ Run` / `Clear` / `Reset project`；`Install deps` 变成每个依赖情景的①号步骤（不再两个入口）。
+- **rspack 场景**：依赖单独按需装（`installDeps({ cwd: '/project/rspack' })`，`/project/rspack` 子目录），不进默认 `Install deps`，默认安装保持快。步骤：① `⬇ Install rspack deps` → ② `🔷 rspack build`。demo 文件（`package.json` / `src/index.mjs` / `build.cjs` / `webnode-binding.cjs`，后两者由 `examples/rspack/` 生成）随 `DEMO_FILES` 写进 VFS。
+- `runProcess` 区分**跑完就退**（build/bundle/tsc/cluster，await 并报耗时、标 done）与**起服务器**（`index.js`/`vite-dev`/`webpack-dev`/`vite-react`，起完即返回，端口 watcher 接管）——避免长驻服务器把按钮永久冻结。
+
+**顺带修真 bug：OPFS 快照不含新 demo 文件**。恢复分支之前只 `writeAll` 当全新项目，**restore 时新增的 demo 文件对回访用户永远不可见**（本次 rspack 文件就踩到）。新增 `writeMissing(v, DEMO_FILES)`：恢复分支下**只补缺失的路径**，已有文件（用户改动 / 已装 `node_modules` / 主动删除的）一律不动。
+
+**实测（真浏览器 raw CDP，dev `:5199`）**：默认状态下依赖类步骤全置灰、提示「Next: click ⬇ Install deps」；`Install deps` 后步骤解锁、`Next` 前移；`Vite dev` 起后 `HMR JS/CSS` 解锁，点 `HMR JS` → 预览子帧（`3000.localhost`）出现 `hot-updated #N`；rspack 情景：`Install rspack deps` 9 包 / 10.5s → `rspack build` **compiled successfully in 182 ms**，产物 68 字节 `(()=>{"use strict";console.log("hello rspack from the browser")})();`；`▶ Run app` 起 :3000、预览正常供给。
+
+**验收**：`npm run typecheck` 净 · `npx vitest run` **1181 passed / 3 skipped** · `npm run build` `runtime.worker-C2Y_OTXi.js` **784.74 kB**（UI chunk `index-BOMJAgjf.js` 16.94 kB、CSS 5.90 kB）。
+
+**踩坑（再次）**：demo `demo-project.ts` 的模板串里**注释也绝不能出现反引号**（M59/M61 记过）——本次把注释写成 `` `.mjs` `` 直接截断外层模板串、worker 评测期崩（`"…".mjs is not a function`）。去反引号即修。
+
+**涉及文件**：`index.html`、`src/ui/main.ts`、`src/ui/style.css`、`src/demo-project.ts`、`src/worker/runtime.worker.ts`、`docs/specs/designs/2026-09-29-demo-ui-scenarios-design.md`（新增设计稿）。
+
 ### 2026-09-29 · M113 + M122 —— 预览子域名路由（静态托管跟进） + 沙箱出站网络（egress）
 
 **动机**：两项都是「对标 WebContainer」的收尾。M113：WebContainer 把 `listen(8080)` 编进唯一子域名再注册 DevServer SW 供给内存 FS；web-node dev 侧早有 `<port>.localhost`，但**静态托管仍走路径式** `/preview/<port>/`（站点根相对路径 / cookie / SW scope 都会踩坑）。M122：WebContainer 在**宿主源专用 Fetcher Worker** 里发 `fetch`（不受沙箱页 CORS），web-node 只有入站虚拟 TCP + 回环 DNS，**公网 `https`/`net.connect` 直接 `ECONNREFUSED`**。
