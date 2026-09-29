@@ -58,11 +58,14 @@ for (let run = 1; run <= RUNS; run++) {
     await sleep(500);
   }
   const parsed = JSON.parse(boot);
-  // The deferred codecs (M107) land *after* ready by design; wait for the worker
-  // to report their timestamp so the table can show they were off the critical path.
+  // The deferred codecs (M107) and the lazy vendored-source tier (M126) land
+  // *after* ready by design; wait for the worker to report their timestamps so
+  // the table can show they were off the critical path.
   const tDefer = Date.now();
-  while (!parsed.deferredMs && Date.now() - tDefer < 30000) {
-    const b = await evalIn('globalThis.__wnBoot.deferredMs ? JSON.stringify(globalThis.__wnBoot) : null');
+  while ((!parsed.deferredMs || !parsed.vendoredDeferredMs) && Date.now() - tDefer < 30000) {
+    const b = await evalIn(
+      'globalThis.__wnBoot && globalThis.__wnBoot.deferredMs && globalThis.__wnBoot.vendoredDeferredMs ? JSON.stringify(globalThis.__wnBoot) : null',
+    );
     if (b) Object.assign(parsed, JSON.parse(b));
     else await sleep(300);
   }
@@ -73,8 +76,8 @@ for (let run = 1; run <= RUNS; run++) {
       `runtimeReady=${parsed.runtimeReadyMs}ms  (wall from navigate ≈ ${wallMs}ms)`,
   );
   console.log(
-    `         ↳ worker phases: vendored=${parsed.vendoredMs}ms  wasm=${parsed.wasmMs}ms  ` +
-      `realm=${parsed.realmMs}ms  |  deferred codecs ready @${parsed.deferredMs}ms`,
+    `         ↳ worker phases: vendored(core)=${parsed.vendoredMs}ms  wasm=${parsed.wasmMs}ms  ` +
+      `realm=${parsed.realmMs}ms  |  lazy sources @${parsed.vendoredDeferredMs}ms  deferred codecs @${parsed.deferredMs}ms`,
   );
   await send('Target.closeTarget', { targetId });
 }
@@ -86,8 +89,9 @@ console.log(`runs              : ${rows.length}`);
 console.log(`module eval (ms)  : ${avg('moduleEvalMs')}`);
 console.log(`worker spawn (ms) : ${avg('workerSpawnMs')}`);
 console.log(`runtime ready (ms): ${avg('runtimeReadyMs')}`);
-console.log(`  vendored (ms)   : ${avg('vendoredMs')}`);
+console.log(`  vendored core (ms): ${avg('vendoredMs')}`);
 console.log(`  wasm (ms)       : ${avg('wasmMs')}`);
 console.log(`  realm (ms)      : ${avg('realmMs')}`);
-console.log(`  deferred (ms)   : ${avg('deferredMs')}  (codecs prefetched in parallel, not awaited at boot)`);
+console.log(`  lazy sources (ms): ${avg('vendoredDeferredMs')}  (fetched in background, not awaited at boot)`);
+console.log(`  deferred codecs (ms): ${avg('deferredMs')}  (prefetched in parallel, not awaited at boot)`);
 console.log(`wall (ms)         : ${avg('wallMs')}`);

@@ -136,6 +136,23 @@ export class Realm {
     if (rec.state === 'loading') return rec.moduleObj ? rec.moduleObj.exports : rec.exports;
     rec.state = 'loading';
 
+    // Node does not keep a module whose evaluation threw: the error propagates
+    // out of `require`, the cache entry is dropped, and a later `require` of the
+    // same id re-evaluates it (verified against v26.9.0). So if anything below
+    // throws we must roll the record back to `unloaded` — leaving it `loading`
+    // would strand it forever, and a second `require` would quietly hand back the
+    // half-built exports (or `{}`) instead of re-running the module.
+    try {
+      return this.#evaluate(key, rec);
+    } catch (err) {
+      rec.state = 'unloaded';
+      rec.moduleObj = undefined;
+      rec.exports = {};
+      throw err;
+    }
+  }
+
+  #evaluate(key: string, rec: ModuleRecord): unknown {
     // Ensure declared dependencies exist first (mirrors Node's ordered bootstrap).
     for (const dep of rec.spec.deps ?? []) this.require(dep);
 

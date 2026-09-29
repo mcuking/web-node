@@ -3,9 +3,10 @@ import { resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import { devSubdomains } from './plugins/dev-subdomains';
 import {
-  VENDORED_ASSET_FILE,
+  VENDORED_CORE_FILE,
+  VENDORED_REST_FILE,
+  splitVendoredSources,
   vendoredBundlePlugin,
-  vendoredBundleText,
   vendoredSourcePlugin,
 } from './plugins/vendored-source';
 
@@ -15,11 +16,20 @@ import {
 // bundle) is derived from it automatically.
 const base = process.env.BASE_PATH || '/';
 
-// The vendored Node sources ship as one preloadable asset (M107) rather than
-// being inlined in the worker bundle. The URL carries a content hash so a deploy
-// busts caches even though the file name is fixed.
-const vendoredJson = vendoredBundleText();
-const vendoredUrl = `${base}${VENDORED_ASSET_FILE}?v=${createHash('sha256').update(vendoredJson).digest('hex').slice(0, 12)}`;
+// The vendored Node sources ship as two preloadable assets (M107 / M126) rather
+// than being inlined in the worker bundle. The URLs carry a content hash so a
+// deploy busts caches even though the file names are fixed. Only the **core**
+// tier (what the realm reads while booting) is preloaded; the lazy tier is pulled
+// by the worker in the background so it never competes for the critical path.
+const hash = (s: string): string => createHash('sha256').update(s).digest('hex').slice(0, 12);
+const { core: vendoredCore, rest: vendoredRest } = splitVendoredSources();
+const vendoredCoreJson = JSON.stringify(vendoredCore);
+const vendoredRestJson = JSON.stringify(vendoredRest);
+const vendoredCoreUrl = `${base}${VENDORED_CORE_FILE}?v=${hash(vendoredCoreJson)}`;
+const vendoredRestUrl = `${base}${VENDORED_REST_FILE}?v=${hash(vendoredRestJson)}`;
+// The full file list (names only, no source) so the worker can report it without
+// having to wait for the lazy tier to land.
+const vendoredManifest = Object.keys({ ...vendoredCore, ...vendoredRest }).sort();
 
 // The emnapi **thread-child** bootstrap (M125). A real browser `Worker` can only
 // load a script by URL, so it is served as a plain same-origin asset (build it
@@ -39,11 +49,17 @@ export default defineConfig(({ mode }) => {
   return {
     base,
     define: {
-      __VENDORED_URL__: JSON.stringify(vendoredUrl),
+      __VENDORED_CORE_URL__: JSON.stringify(vendoredCoreUrl),
+      __VENDORED_REST_URL__: JSON.stringify(vendoredRestUrl),
+      __VENDORED_MANIFEST__: JSON.stringify(vendoredManifest),
       __WASI_THREAD_CHILD_URL__: JSON.stringify(wasiThreadChildUrl),
     },
     resolve: { alias: { 'web-node:vendor-sources': vendorSources } },
-    plugins: [vendoredSourcePlugin(), vendoredBundlePlugin(vendoredJson, vendoredUrl), devSubdomains()],
+    plugins: [
+      vendoredSourcePlugin(),
+      vendoredBundlePlugin(vendoredCoreJson, vendoredRestJson, vendoredCoreUrl, vendoredRestUrl),
+      devSubdomains(),
+    ],
     server: {
       // COOP/COEP so SharedArrayBuffer is available (needed later for wasm/Atomics).
       headers: {

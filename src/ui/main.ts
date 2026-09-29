@@ -18,6 +18,8 @@ export interface BootTiming {
   realmMs: number;
   /** Worker-clock ms when the deferred WASM codecs landed (after `ready`). */
   deferredMs: number;
+  /** Worker-clock ms when the lazy vendored-source tier landed (after `ready`, M126). */
+  vendoredDeferredMs: number;
 }
 const bootTiming: BootTiming = {
   moduleEvalMs: performance.now(),
@@ -28,6 +30,7 @@ const bootTiming: BootTiming = {
   wasmMs: 0,
   realmMs: 0,
   deferredMs: 0,
+  vendoredDeferredMs: 0,
 };
 (globalThis as { __wnBoot?: BootTiming }).__wnBoot = bootTiming;
 
@@ -348,6 +351,10 @@ client.on('exit', (code) => {
 
 client.on('deferredReady', (ms) => {
   bootTiming.deferredMs = ms;
+});
+
+client.on('vendoredReady', (ms) => {
+  bootTiming.vendoredDeferredMs = ms;
 });
 
 client.on('ready', (runtimeInfo) => {

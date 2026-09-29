@@ -27,9 +27,12 @@ export function installVendored(payload: string | Record<string, string>): void 
   for (const key of Object.keys(map)) VENDORED[key] = map[key];
 }
 
-/** True once at least one source is present (test builds start populated). */
-export function vendoredLoaded(): boolean {
-  return Object.keys(VENDORED).length > 0;
+/**
+ * How many sources are installed. Used by the worker to tell whether a tier is
+ * still missing: the manifest length is the expected total (M126).
+ */
+export function vendoredCount(): number {
+  return Object.keys(VENDORED).length;
 }
 
 export function vendoredSource(rel: string): string | undefined {

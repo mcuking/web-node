@@ -6,7 +6,7 @@ import {
   OpfsWorkerPersistence,
   type Persistence,
 } from '../node-runtime/vfs';
-import { VENDORED, installVendored, vendoredLoaded } from '../node-runtime/vendored';
+import { installVendored, vendoredCount } from '../node-runtime/vendored';
 import { loadWasmModule } from '../node-runtime/wasm/lazy';
 import { loadWasmModules, loadDeferredWasmModules, wasmModuleNames, DEFERRED_WASM_MODULES } from '../node-runtime/wasm';
 import { DEMO_FILES } from '../demo-project';
@@ -37,21 +37,59 @@ const bootPhases = { evalAt: Math.round(bootAt), vendoredMs: 0, wasmMs: 0, realm
   __WASI_THREAD_CHILD_URL__;
 
 /**
- * Fetch the vendored-sources bundle (M107) and install it.
+ * Fetch the **core** vendored-sources tier (M107 / M126) and install it.
  *
- * The bundle is emitted as a plain-text asset and preloaded from `index.html`, so
- * this request is usually already warm. In tests the sources are populated
- * synchronously, so this resolves immediately. The promise starts at module-eval
- * — as early as fetch can possibly go in the worker.
+ * The core tier is everything `new NodeRuntime(...)` reads while booting (see
+ * `plugins/vendored-source.ts`). It is emitted as a plain-text asset and preloaded
+ * from `index.html`, so this request is usually already warm. In tests the sources
+ * are populated synchronously, so this resolves immediately. The promise starts at
+ * module-eval — as early as fetch can possibly go in the worker.
  */
-const vendoredSourcesReady: Promise<void> = (async (): Promise<void> => {
-  if (vendoredLoaded()) return;
-  const res = await fetch(__VENDORED_URL__);
-  if (!res.ok) throw new Error(`vendored sources: HTTP ${res.status}`);
+const vendoredCoreReady: Promise<void> = (async (): Promise<void> => {
+  if (vendoredComplete()) return;
+  const res = await fetch(__VENDORED_CORE_URL__);
+  if (!res.ok) throw new Error(`vendored core sources: HTTP ${res.status}`);
   installVendored(await res.text());
 })().finally(() => {
   if (!bootPhases.vendoredMs) bootPhases.vendoredMs = Math.round(performance.now() - bootAt);
 });
+
+/**
+ * Fetch the **lazy** vendored-sources tier (M126) in the background.
+ *
+ * These are the sources only user code reaches (`fs`, `crypto`, `http`, the web
+ * streams, `node_modules`). They are **not** awaited at boot — the realm is built
+ * from the core tier alone — but every request that can execute user code awaits
+ * {@link ensureDeferredVendored} first, so a synchronous `require` can never run
+ * against a source that is still in flight. `priority: 'low'` keeps it from
+ * competing with the critical payloads for bandwidth.
+ */
+const vendoredRest: Promise<void> = (async (): Promise<void> => {
+  if (vendoredComplete()) return;
+  const res = await fetch(__VENDORED_REST_URL__, { priority: 'low' } as RequestInit);
+  if (!res.ok) throw new Error(`vendored lazy sources: HTTP ${res.status}`);
+  installVendored(await res.text());
+})();
+
+/** True once every file in the manifest is present (in tests: the eager glob). */
+function vendoredComplete(): boolean {
+  return vendoredCount() >= __VENDORED_MANIFEST__.length;
+}
+
+let vendoredRestReady: Promise<void> | null = null;
+function ensureDeferredVendored(): Promise<void> {
+  if (vendoredRestReady === null) {
+    vendoredRestReady = vendoredRest.then(() => {
+      post({ id: 0, type: 'vendoredReady', ms: Math.round(performance.now() - bootAt) });
+    });
+  }
+  return vendoredRestReady;
+}
+
+// Kick the lazy prefetch off as soon as the module evaluates. The catch keeps a
+// failed fire-and-forget load from being an unhandled rejection; a caller that
+// awaits it (i.e. before running user code) still sees the failure.
+void ensureDeferredVendored().catch(() => {});
 
 /**
  * Fetch + instantiate the native→WASM modules (M115).
@@ -186,7 +224,8 @@ type Response =
   | { id: number; type: 'httpChunk'; data: Uint8Array }
   | { id: number; type: 'httpEnd' }
   | { id: number; type: 'ready'; info: RuntimeInfo }
-  | { id: number; type: 'deferredReady'; ms: number };
+  | { id: number; type: 'deferredReady'; ms: number }
+  | { id: number; type: 'vendoredReady'; ms: number };
 
 /**
  * Storage backend.
@@ -276,9 +315,25 @@ async function serveVirtualRequest(
 }
 
 async function init(id: number): Promise<void> {
-  // Sources and wasm must be in place before the realm is built: `require` is
-  // synchronous, and so is the `internalBinding()` table.
-  await Promise.all([vendoredSourcesReady, wasmReady]);
+  // The core sources and wasm must be in place before the realm is built:
+  // `require` is synchronous, and so is the `internalBinding()` table. The lazy
+  // source tier is *not* awaited here (M126) — if the realm turns out to need a
+  // file from it (a host difference), `buildRuntime` throws and we load it and
+  // retry once.
+  await Promise.all([vendoredCoreReady, wasmReady]);
+  try {
+    await buildRuntime(id);
+  } catch (err) {
+    if (err instanceof Error && /Vendored file .* is missing/.test(err.message)) {
+      await ensureDeferredVendored();
+      await buildRuntime(id);
+      return;
+    }
+    throw err;
+  }
+}
+
+async function buildRuntime(id: number): Promise<void> {
   const loaded = await persistence.load();
   const hasRestored = Boolean(loaded && loaded.entries.length > 0);
 
@@ -335,7 +390,7 @@ async function init(id: number): Promise<void> {
       bindings: runtime.realm.bindingIds,
       wasmModules: wasmModuleNames(),
       deferredWasmModules: Object.keys(DEFERRED_WASM_MODULES).sort(),
-      vendoredFiles: Object.keys(VENDORED).sort(),
+      vendoredFiles: __VENDORED_MANIFEST__,
       timing: { ...bootPhases },
     },
   });
@@ -385,7 +440,7 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
         post({ id: req.id, type: 'ok', result: listTree(vfs) });
         return;
       case 'run':
-        await ensureDeferredWasm();
+        await Promise.all([ensureDeferredVendored(), ensureDeferredWasm()]);
         run(req.id, req.entry);
         return;
       case 'writeFile':
@@ -413,7 +468,7 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
         return;
       case 'npmInstall': {
         if (!runtime) throw new Error('runtime not initialised');
-        await ensureDeferredWasm();
+        await Promise.all([ensureDeferredVendored(), ensureDeferredWasm()]);
         const result = await runtime.installDependencies({
           cwd: req.cwd,
           includeDev: req.includeDev,
@@ -429,14 +484,14 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
       }
       case 'http': {
         if (!runtime) throw new Error('runtime not initialised');
-        await ensureDeferredWasm();
+        await Promise.all([ensureDeferredVendored(), ensureDeferredWasm()]);
         const result = await serveVirtualRequest(runtime, req);
         post({ id: req.id, type: 'ok', result });
         return;
       }
       case 'httpStream': {
         if (!runtime) throw new Error('runtime not initialised');
-        await ensureDeferredWasm();
+        await Promise.all([ensureDeferredVendored(), ensureDeferredWasm()]);
         const http = runtime.realm.require('http') as unknown as HttpStreamModule;
         http._stream(
           req.port,

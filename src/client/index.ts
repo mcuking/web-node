@@ -9,6 +9,8 @@ export interface RuntimeEvents {
   ready: (info: RuntimeInfo) => void;
   /** Worker-clock ms when the deferred WASM codecs finished loading (M107). */
   deferredReady: (ms: number) => void;
+  /** Worker-clock ms when the lazy vendored-source tier finished loading (M126). */
+  vendoredReady: (ms: number) => void;
 }
 
 interface BridgeHttpRequest {
@@ -97,6 +99,9 @@ export class RuntimeClient {
         break; // fall through: settle the pending init() promise
       case 'deferredReady':
         this.#listeners.deferredReady?.(Number(msg.ms));
+        return;
+      case 'vendoredReady':
+        this.#listeners.vendoredReady?.(Number(msg.ms));
         return;
       case 'exit':
         this.#listeners.exit?.(Number(msg.code));
