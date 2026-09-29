@@ -7,10 +7,12 @@
  * real Node and inside web-node):
  *
  *  - The private key size depends on the code path OpenSSL takes. A *named*
- *    group (and an explicit prime that equals a standard group) uses
- *    OpenSSL's recommended exponent size — `BN_priv_rand(bits, TOP_ONE)` for a
- *    named group (fixed byte length), `TOP_ANY` for a matching explicit prime
- *    (variable length). Anything else draws uniformly from `[2, p-2]`.
+ *    group uses OpenSSL's recommended exponent size with `BN_priv_rand(bits,
+ *    TOP_ONE)` (fixed byte length); an explicit prime that *is* a standard group
+ *    uses that group's recommended size but with `TOP_ANY` (variable length);
+ *    everything else (what `(bits, generator)` produces, or a non-standard
+ *    prime) uses `BN_priv_rand(BN_num_bits(p) - 1, TOP_ONE, TOP_ANY)` — also a
+ *    **fixed** byte length, because TOP_ONE pins the high bit.
  *  - `getPrime`/`getGenerator`/`getPublicKey`/`getPrivateKey` return *minimal*
  *    big-endian bytes; the shared secret is padded to the prime length.
  *  - `setPrivateKey` only stores the private key (it does **not** derive the
@@ -158,7 +160,21 @@ function generatePrivate(state: DhState): bigint {
     if (topOne) value |= 1n << BigInt(groupBits - 1);
     if (value > 1n) return value;
   }
-  // Default: uniform in [2, p - 2].
+  // Default (OpenSSL leaves `dh->length` unset): `BN_priv_rand(BN_num_bits(p) -
+  // 1, TOP_ONE, TOP_ANY)`. TOP_ONE pins the top bit, so the byte length is
+  // *fixed* at `ceil((BN_num_bits(p) - 1) / 8)` — verified against v26.9.0,
+  // which gives exactly 64 bytes for a 512-bit prime and 128 for a 1024-bit one
+  // over thousands of draws. (web-node used to draw uniformly in `[2, p-2]`,
+  // which is 64 bytes only ~255/256 of the time and 63 the rest — a real,
+  // rarely-surfaced divergence the differential corpus eventually caught.)
+  const bits = state.prime.toString(2).length - 1;
+  if (bits >= 2) {
+    const bytes = Math.ceil(bits / 8);
+    let value = randomBigInt(bytes) & ((1n << BigInt(bits)) - 1n);
+    value |= 1n << BigInt(bits - 1);
+    if (value > 1n && value < state.prime) return value;
+  }
+  // Only reachable for degenerate tiny primes.
   const limit = state.prime - 3n;
   return randomBelow(limit, state.primeLength) + 2n;
 }

@@ -110,4 +110,30 @@ describe('Diffie-Hellman unit surface', () => {
     expect(() => crypto.createDiffieHellman(511, 2)).toThrowError(/Invalid DH parameters/);
     expect(crypto.createDiffieHellman(512, 2).getPrime().length).toBe(64);
   });
+
+  it('generates a fixed-length private key for the (bits, generator) form', () => {
+    // OpenSSL leaves dh->length unset here and draws BN_priv_rand(bits(p)-1,
+    // TOP_ONE, TOP_ANY); TOP_ONE pins the high bit, so the byte length is
+    // fixed. Real Node gives 64 bytes for a 512-bit prime and 128 for 1024,
+    // every single draw (thousands verified). A uniform [2, p-2] draw is 64
+    // bytes only ~255/256 of the time and 63 the rest — the flake this pins.
+    const crypto = boot();
+    for (const [bits, len] of [[512, 64], [1024, 128]] as const) {
+      for (let i = 0; i < 200; i++) {
+        const dh = crypto.createDiffieHellman(bits, 2);
+        dh.generateKeys();
+        expect(dh.getPrivateKey().length).toBe(len);
+      }
+    }
+  });
+
+  it('generates a fixed-length private key for a non-standard explicit prime', () => {
+    const crypto = boot();
+    const prime = crypto.createDiffieHellman(512, 2).getPrime();
+    for (let i = 0; i < 200; i++) {
+      const dh = crypto.createDiffieHellman(prime, 2);
+      dh.generateKeys();
+      expect(dh.getPrivateKey().length).toBe(64);
+    }
+  });
 });
