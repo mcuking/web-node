@@ -1,4 +1,4 @@
-import { RuntimeClient } from '../client';
+import { RuntimeClient, type TreeEntry } from '../client';
 import type { RuntimeInfo } from '../worker/runtime.worker';
 import { DEMO_PROJECTS, PROJECT_ORDER, type DemoProject, type ProjectId } from '../projects';
 import { previewUrl as buildPreviewUrl, previewPortFromHost, prefixPreviewUrl } from './preview-url';
@@ -60,20 +60,40 @@ const previewFrame = $<HTMLIFrameElement>('preview-frame');
 const previewEmpty = $<HTMLDivElement>('preview-empty');
 const viewOutput = $<HTMLDivElement>('view-output');
 const viewPreview = $<HTMLDivElement>('view-preview');
+const newFileBtn = $<HTMLButtonElement>('new-file');
+const newFolderBtn = $<HTMLButtonElement>('new-folder');
 
-let files: string[] = [];
+let tree: TreeEntry[] = [];
 let activeFile = '';
 let dirty = false;
 let activeProject: ProjectId = 'node';
 let busy = false;
 let ports: number[] = [];
+/** Which project each `run()` belongs to, so its output stays with it. */
+const runOwner = new Map<number, ProjectId>();
 
-function writeTerminal(text: string, cls = ''): void {
+/**
+ * Write one line to the terminal, tagged with the project it came from.
+ *
+ * Output ownership matters because a project's dev server is a *program*: the
+ * runtime can start one but cannot stop it, so a server from a project we have
+ * switched away from keeps running and keeps logging. Tagging each line with
+ * its project (see `runOwner`) lets the terminal hide that late output instead
+ * of letting it appear under whatever project is now on screen.
+ */
+function writeTerminal(text: string, cls = '', pid: ProjectId = activeProject): void {
   const span = document.createElement('span');
   if (cls) span.className = cls;
   span.textContent = text;
+  span.dataset.pid = pid;
+  if (pid !== activeProject) span.style.display = 'none';
   terminalEl.appendChild(span);
   terminalEl.scrollTop = terminalEl.scrollHeight;
+}
+
+/** The project a run belongs to; runtime-level output (id 0) is the active one. */
+function ownerOf(runId: number): ProjectId {
+  return runOwner.get(runId) ?? activeProject;
 }
 
 function setStatus(text: string, cls = ''): void {
@@ -81,31 +101,37 @@ function setStatus(text: string, cls = ''): void {
   statusEl.className = `status ${cls}`;
 }
 
-/** Re-read the whole VFS file list (the worker's `mount` with no files is a no-op write). */
-async function readTree(): Promise<string[]> {
-  const list = await client.mount({});
-  return list.filter((f) => !f.endsWith('/'));
+/** Re-read the whole VFS tree (paths + types), without pulling file bodies. */
+async function readTree(): Promise<TreeEntry[]> {
+  return client.tree();
 }
 
 /**
  * The file tree shows *only the active project*: a project is a self-contained
  * directory (`/project/vite`, `/project/webpack`, `/project/rspack`,
  * `/project/node`), so which files you see tells you which project you are in.
- * `node_modules` is hidden to keep the list readable.
+ * `node_modules` is hidden (it would swamp the list, and every project has one),
+ * and directories are shown so a folder you create is visible before it has a
+ * file inside it.
  */
 function renderTree(): void {
   const { root } = DEMO_PROJECTS[activeProject];
   const prefix = root + '/';
   filesRootEl.textContent = root;
   treeEl.innerHTML = '';
-  for (const f of files) {
-    if (!f.startsWith(prefix)) continue;
-    if (f.includes('/node_modules/')) continue;
+  const rows = tree
+    .filter((e) => e.path.startsWith(prefix))
+    .filter((e) => e.path !== prefix + 'node_modules' && !e.path.startsWith(prefix + 'node_modules/'))
+    .map((e) => ({ ...e, rel: e.path.slice(prefix.length) }))
+    .sort((a, b) => a.rel.localeCompare(b.rel));
+  for (const e of rows) {
     const li = document.createElement('li');
-    li.textContent = f.slice(prefix.length);
-    li.dataset.path = f;
-    if (f === activeFile) li.classList.add('active');
-    li.addEventListener('click', () => void openFile(f));
+    li.textContent = e.rel + (e.type === 'dir' ? '/' : '');
+    li.dataset.path = e.path;
+    li.style.paddingLeft = 8 + e.rel.split('/').length * 12 + 'px';
+    if (e.type === 'dir') li.classList.add('dir');
+    if (e.path === activeFile) li.classList.add('active');
+    if (e.type === 'file') li.addEventListener('click', () => void openFile(e.path));
     treeEl.appendChild(li);
   }
 }
@@ -155,16 +181,17 @@ async function runProcess(entry: string, label: string, awaitExit: boolean): Pro
   setStatus('running…', 'running');
   writeTerminal(`\n$ ${label}\n`, 'sys');
   const started = performance.now();
-  const promise = client.run(entry);
+  const { id: runId, done } = client.run(entry);
+  runOwner.set(runId, activeProject);
   if (!awaitExit) {
-    promise.catch((err: unknown) => {
+    done.catch((err: unknown) => {
       writeTerminal(`[run failed] ${(err as Error).message}\n`, 'err');
       setStatus('error', 'err');
     });
     return;
   }
   try {
-    await promise;
+    await done;
     const ms = (performance.now() - started).toFixed(0);
     if (!bootTiming.firstRunMs) bootTiming.firstRunMs = Math.round(performance.now());
     setStatus(`done in ${ms}ms`, 'ok');
@@ -234,8 +261,8 @@ interface ScenarioDef {
 
 const META: Record<ProjectId, { label: string; blurp: string }> = {
   vite: { label: '⚡ Vite', blurp: 'Vue 3 single-file component — Vite dev server + build, in the tab' },
-  webpack: { label: '📦 Webpack', blurp: 'webpack watches and bundles; the preview full-reloads' },
-  rspack: { label: '🔷 rspack', blurp: 'Rust bundler via wasm32-wasi on a real Worker thread pool' },
+  webpack: { label: '📦 Webpack', blurp: 'React app — webpack watches and bundles; the preview full-reloads' },
+  rspack: { label: '🔷 rspack', blurp: 'React app — Rust bundler via wasm32-wasi on a real Worker thread pool' },
   node: { label: '🟢 Node.js', blurp: 'the full runtime — fs, http, crypto, streams, workers, child processes' },
 };
 
@@ -252,7 +279,8 @@ const DEV_PORT: Record<ProjectId, number> = { vite: 5173, webpack: 5174, rspack:
 const completed = new Set<string>();
 
 function projectDeps(id: ProjectId): boolean {
-  return files.some((f) => f.startsWith(DEMO_PROJECTS[id].root + '/node_modules/'));
+  const modules = DEMO_PROJECTS[id].root + '/node_modules';
+  return tree.some((e) => e.type === 'dir' && e.path === modules);
 }
 
 function stepEnabled(id: string): boolean {
@@ -369,12 +397,39 @@ function updateHint(nextId: string | null): void {
 }
 
 async function selectProject(id: ProjectId): Promise<void> {
-  if (busy) return;
+  if (busy || id === activeProject) return;
+  const previous = activeProject;
   activeProject = id;
+  // A project switch is a context switch: the previous project's output, its
+  // live preview and its file bodies all belong to a container we are leaving.
+  clearOutput();
+  clearPreview();
+  // Free the previous project's memory in the background. Eviction flushes
+  // first (so nothing written but not yet durable is lost), and that flush can
+  // take a moment over a large `node_modules` — the switch must not wait on it.
+  void client.evict(DEMO_PROJECTS[previous].root).catch(() => undefined);
   renderChips();
   renderTree();
   renderSteps();
   await openFile(DEMO_PROJECTS[id].entry);
+}
+
+/** Empty the output pane (a project switch must not carry the old logs over). */
+function clearOutput(): void {
+  terminalEl.innerHTML = '';
+  setStatus('');
+}
+
+/** Detach the preview: no port selected, no old document left framed. */
+function clearPreview(): void {
+  ports = [];
+  portSelect.innerHTML = '';
+  portSelect.disabled = true;
+  previewFrame.src = 'about:blank';
+  previewFrame.classList.add('hidden');
+  previewEmpty.classList.remove('hidden');
+  openTab.href = '#';
+  hmrRelay.follow(null);
 }
 
 async function runStep(id: string): Promise<void> {
@@ -388,6 +443,10 @@ async function runStep(id: string): Promise<void> {
     // `runProcess` / `installDeps` already reported the failure in the terminal.
   } finally {
     busy = false;
+    // A build (or a dev server's first compile) writes new files — dist/, a
+    // bundle, assets — behind the UI's back, so re-read the tree to show them.
+    tree = await readTree();
+    renderTree();
     await refreshPorts();
     syncDerived();
     renderSteps();
@@ -398,7 +457,12 @@ async function runStep(id: string): Promise<void> {
 
 async function refreshPorts(): Promise<void> {
   const described = await client.describe();
-  ports = described.ports;
+  // A project owns exactly one port, and a dev server from a project we have
+  // left keeps listening (the runtime cannot stop a program), so scope the
+  // preview to the active project's port — otherwise a switch would re-attach
+  // the previous project's server and show its preview again.
+  const expected = DEMO_PROJECTS[activeProject].port;
+  ports = described.ports.filter((port) => port === expected);
   const previous = portSelect.value;
   portSelect.innerHTML = '';
 
@@ -432,7 +496,8 @@ function startPortWatch(): void {
     void client
       .describe()
       .then(({ ports: next }) => {
-        if (next.join(',') === ports.join(',')) return;
+        const expected = DEMO_PROJECTS[activeProject].port;
+        if (next.filter((port) => port === expected).join(',') === ports.join(',')) return;
         void refreshPorts().then(() => {
           syncDerived();
           renderSteps();
@@ -489,10 +554,10 @@ for (const tab of document.querySelectorAll<HTMLButtonElement>('.tab')) {
 portSelect.addEventListener('change', () => loadPreview());
 refreshBtn.addEventListener('click', () => loadPreview());
 
-client.on('stdout', (data) => writeTerminal(data));
-client.on('stderr', (data) => writeTerminal(data, 'err'));
-client.on('exit', (code) => {
-  if (code !== 0) writeTerminal(`[exit code ${code}]\n`, 'err');
+client.on('stdout', (data, runId) => writeTerminal(data, '', ownerOf(runId)));
+client.on('stderr', (data, runId) => writeTerminal(data, 'err', ownerOf(runId)));
+client.on('exit', (code, runId) => {
+  if (code !== 0) writeTerminal(`[exit code ${code}]\n`, 'err', ownerOf(runId));
 });
 
 client.on('deferredReady', (ms) => {
@@ -551,7 +616,7 @@ async function installDeps(project: DemoProject): Promise<void> {
     setStatus(`installed ${result.packages}`, 'ok');
     // A fresh install writes node_modules (and the lockfile) behind the UI's
     // back, so re-read the tree to show them.
-    files = await readTree();
+    tree = await readTree();
     renderTree();
   } catch (err) {
     writeTerminal(`[npm install failed] ${(err as Error).message}\n`, 'err');
@@ -565,7 +630,8 @@ clearBtn.addEventListener('click', () => {
   setStatus('');
 });
 resetBtn.addEventListener('click', async () => {
-  files = (await client.reset()).filter((f) => !f.endsWith('/'));
+  await client.reset();
+  tree = await readTree();
   renderTree();
   await openFile(DEMO_PROJECTS[activeProject].entry);
   await refreshPorts();
@@ -573,6 +639,44 @@ resetBtn.addEventListener('click', async () => {
   renderSteps();
   writeTerminal('\n[projects reset to demo files]\n', 'sys');
 });
+
+newFileBtn.addEventListener('click', () => void createEntry('file'));
+newFolderBtn.addEventListener('click', () => void createEntry('dir'));
+
+/**
+ * Create a file or folder inside the active project.
+ *
+ * The path is entered relative to the project root (e.g. `src/util.js`) so the
+ * tree keeps its names short; a leading slash is tolerated. A file starts empty
+ * and opens in the editor; a folder is created recursively so `a/b/c` works in
+ * one go.
+ */
+async function createEntry(kind: 'file' | 'dir'): Promise<void> {
+  const { root } = DEMO_PROJECTS[activeProject];
+  const label =
+    kind === 'file'
+      ? 'New file path (relative to ' + root + '):'
+      : 'New folder path (relative to ' + root + '):';
+  const input = window.prompt(label, kind === 'file' ? 'src/untitled.js' : 'src/components');
+  if (input === null) return;
+  const rel = input.trim().replace(/^\/+/, '');
+  if (!rel) return;
+  const abs = root + '/' + rel;
+  try {
+    if (kind === 'dir') {
+      tree = await client.mkdir(abs);
+      writeTerminal('\n[created folder] ' + abs + '\n', 'sys');
+    } else {
+      tree = await client.writeFile(abs, '');
+      writeTerminal('\n[created file] ' + abs + '\n', 'sys');
+    }
+  } catch (err) {
+    writeTerminal('\n[create failed] ' + (err as Error).message + '\n', 'err');
+    return;
+  }
+  renderTree();
+  if (kind === 'file') await openFile(abs);
+}
 
 window.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -596,7 +700,7 @@ async function boot(): Promise<void> {
   await client.init();
   // The ready payload populated the VFS; re-read the tree so ordering is
   // deterministic and the gates see any restored `node_modules`.
-  files = await readTree();
+  tree = await readTree();
   renderTree();
   await openFile(DEMO_PROJECTS[activeProject].entry);
   writeTerminal(

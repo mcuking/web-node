@@ -10,7 +10,7 @@ import {
 import { installVendored, vendoredCount } from '../node-runtime/vendored';
 import { loadWasmModule } from '../node-runtime/wasm/lazy';
 import { loadWasmModules, loadDeferredWasmModules, wasmModuleNames, DEFERRED_WASM_MODULES } from '../node-runtime/wasm';
-import { DEMO_FILES } from '../demo-project';
+import { DEMO_FILES, DEMO_VERSION } from '../demo-project';
 
 const decoder = new TextDecoder();
 
@@ -201,6 +201,9 @@ type Request =
   | { id: number; type: 'run'; entry?: string }
   | { id: number; type: 'writeFile'; path: string; contents: string }
   | { id: number; type: 'readFile'; path: string }
+  | { id: number; type: 'mkdir'; path: string }
+  | { id: number; type: 'tree' }
+  | { id: number; type: 'evict'; root: string }
   | { id: number; type: 'reset' }
   | { id: number; type: 'describe' }
   | { id: number; type: 'npmInstall'; cwd?: string; includeDev?: boolean }
@@ -278,6 +281,16 @@ const persistenceKind: RuntimeInfo['persistence'] =
 
 let runtime: NodeRuntime | null = null;
 let vfs: MemoryVfs | null = null;
+/**
+ * The run whose program is currently producing console output.
+ *
+ * A single realm has one `process.stdout`, so output cannot be tagged with the
+ * *program* that wrote it — but tagging it with the most recent `run()` is
+ * enough for the UI to keep each project's output apart, and far better than a
+ * flat `id: 0` that made every line look like it belonged to whatever project
+ * was on screen.
+ */
+let activeRunId = 0;
 
 function post(msg: Response): void {
   self.postMessage(msg);
@@ -288,12 +301,30 @@ function ensureDir(v: MemoryVfs, filePath: string): void {
   if (idx > 0) v.mkdir(filePath.slice(0, idx), { recursive: true });
 }
 
-function listTree(v: MemoryVfs): string[] {
+/**
+ * The whole tree as `{ path, type }`, **without pulling cold file bodies into
+ * memory**.
+ *
+ * `snapshot()` by default materialises every cold file — it has to, for a
+ * backend whose only copy is the tree. For a *listing* that is pure waste: the
+ * paths are already implied by the structure index, and reading a whole
+ * `node_modules` back just to print its names is exactly the churn that used to
+ * blow the tab. When a synchronous read path exists, ask for the structure-only
+ * snapshot: it still expands cold directories one level (so the paths are
+ * complete) but leaves file bytes where they are.
+ */
+function listEntries(v: MemoryVfs): Array<{ path: string; type: 'file' | 'dir' }> {
+  const dropColdBodies = persistence.readSource() !== null;
   return v
-    .snapshot()
-    .filter((s) => s.type === 'file')
-    .map((s) => s.path)
-    .sort();
+    .snapshot({ dropColdBodies })
+    .map((s) => ({ path: s.path, type: s.type }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function listTree(v: MemoryVfs): string[] {
+  return listEntries(v)
+    .filter((e) => e.type === 'file')
+    .map((e) => e.path);
 }
 
 function writeAll(v: MemoryVfs, files: Record<string, string>): void {
@@ -382,7 +413,6 @@ async function init(id: number): Promise<void> {
 
 async function buildRuntime(id: number): Promise<void> {
   const loaded = await persistence.load();
-  const hasRestored = Boolean(loaded && loaded.entries.length > 0);
 
   // The read source decides how a restore is decoded. With one, the tree comes
   // back **cold**: the index (v3, or a v2 the FS worker can also read through)
@@ -392,7 +422,8 @@ async function buildRuntime(id: number): Promise<void> {
   // inline in the index and are decoded eagerly, because the tree is the only
   // copy. v1 predates both and kept text bodies inline, so it stays eager.
   const readSource = persistence.readSource();
-  const v = hasRestored
+  let hasRestored = Boolean(loaded && loaded.entries.length > 0);
+  let v = hasRestored
     ? MemoryVfs.fromSnapshot(
         loaded!.entries,
         { cwd: '/project', cold: readSource !== null && loaded!.version >= 2 },
@@ -400,8 +431,38 @@ async function buildRuntime(id: number): Promise<void> {
       )
     : new MemoryVfs({ cwd: '/project' });
 
-  if (!hasRestored) writeAll(v, DEMO_FILES);
-  else writeMissing(v, DEMO_FILES);
+  // The marker records which demo release wrote the tree in the store.
+  //
+  // A restored tree may predate the current demo layout (M130 moved every
+  // project into its own `/project/<id>` directory), and the structure index
+  // then still lists files the byte mirror never received — a reader that finds
+  // one gets a phantom. An *absent* marker is exactly that case: nothing before
+  // this release wrote one. So a missing marker means start clean (one store
+  // wipe beats pruning thousands of stale paths), while a marker that merely
+  // names an older release means the demo sources changed and are rewritten in
+  // place without touching anything the visitor created.
+  const markerPath = '/project/.demo-version';
+  const readMarker = (): string => {
+    try {
+      return v.exists(markerPath) ? new TextDecoder().decode(v.readFile(markerPath)).trim() : '';
+    } catch {
+      return '';
+    }
+  };
+  const marker = hasRestored ? readMarker() : '';
+  if (hasRestored && marker === '') {
+    await persistence.clear();
+    v = new MemoryVfs({ cwd: '/project' });
+    hasRestored = false; // the previous tree is gone; this is a fresh start
+  }
+
+  if (!hasRestored || marker !== String(DEMO_VERSION)) {
+    writeAll(v, DEMO_FILES);
+    ensureDir(v, markerPath);
+    v.writeFile(markerPath, new TextEncoder().encode(String(DEMO_VERSION)));
+  } else {
+    writeMissing(v, DEMO_FILES);
+  }
 
   // Durable `fsync` rides this sink. Without a durable backend there is nothing
   // to wait for, so the sink stays unset and `fsync` degrades to a no-op — the
@@ -420,8 +481,8 @@ async function buildRuntime(id: number): Promise<void> {
     env: { NODE_ENV: 'development', WEB_NODE: '1' },
     installGlobals: true,
     egress: createWorkerEgress(),
-    onStdout: (data) => post({ id: 0, type: 'stdout', data }),
-    onStderr: (data) => post({ id: 0, type: 'stderr', data }),
+    onStdout: (data) => post({ id: activeRunId, type: 'stdout', data }),
+    onStderr: (data) => post({ id: activeRunId, type: 'stderr', data }),
   });
 
   persistence.schedule(v);
@@ -447,6 +508,7 @@ async function buildRuntime(id: number): Promise<void> {
 
 function run(id: number, entry?: string): void {
   if (!runtime || !vfs) throw new Error('runtime not initialised');
+  activeRunId = id;
   const target = entry ?? '/project/index.js';
   try {
     runtime.runMain(target);
@@ -497,16 +559,50 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
         ensureDir(vfs, req.path);
         vfs.writeFile(req.path, new TextEncoder().encode(req.contents));
         persistence.schedule(vfs);
-        post({ id: req.id, type: 'ok', result: listTree(vfs) });
+        post({ id: req.id, type: 'ok', result: listEntries(vfs) });
         return;
       case 'readFile':
         if (!vfs) throw new Error('runtime not initialised');
         post({ id: req.id, type: 'ok', result: new TextDecoder().decode(vfs.readFile(req.path)) });
         return;
+      case 'mkdir':
+        if (!vfs) throw new Error('runtime not initialised');
+        vfs.mkdir(req.path, { recursive: true });
+        persistence.schedule(vfs);
+        post({ id: req.id, type: 'ok', result: listEntries(vfs) });
+        return;
+      case 'tree':
+        if (!vfs) throw new Error('runtime not initialised');
+        post({ id: req.id, type: 'ok', result: listEntries(vfs) });
+        return;
+      case 'evict': {
+        if (!vfs) throw new Error('runtime not initialised');
+        // Free the bytes a project was holding. With a synchronous read path
+        // (the FS-worker backend) the tree keeps its structure and pulls a body
+        // back on demand, so this is non-destructive — the files are still
+        // listed and still readable. Without one the tree is the only copy, so
+        // the heavy dependency tree is dropped outright; step 1 of every project
+        // reinstalls it, and the alternative is keeping gigabytes resident.
+        if (persistence.readSource() === null) {
+          const modules = req.root.replace(/\/+$/, '') + '/node_modules';
+          if (vfs.exists(modules)) vfs.rm(modules, { recursive: true, force: true });
+        } else {
+          // Mirror first. A body may only be dropped once the store holds it,
+          // and the snapshot is debounced — so without this a switch could
+          // discard bytes that were written but never made durable.
+          await persistence.flush(vfs);
+          vfs.evictBodies(req.root);
+        }
+        persistence.schedule(vfs);
+        post({ id: req.id, type: 'ok', result: listEntries(vfs) });
+        return;
+      }
       case 'reset':
         await persistence.clear();
         if (vfs) {
           writeAll(vfs, DEMO_FILES);
+          ensureDir(vfs, '/project/.demo-version');
+          vfs.writeFile('/project/.demo-version', new TextEncoder().encode(String(DEMO_VERSION)));
           persistence.schedule(vfs);
         }
         post({ id: req.id, type: 'ok', result: vfs ? listTree(vfs) : [] });

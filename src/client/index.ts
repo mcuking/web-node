@@ -3,10 +3,17 @@ import { previewPortFromHost } from '../ui/preview-url';
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void };
 
+/** One node of the VFS tree as the UI sees it. */
+export interface TreeEntry {
+  path: string;
+  type: 'file' | 'dir';
+}
+
 export interface RuntimeEvents {
-  stdout: (data: string) => void;
-  stderr: (data: string) => void;
-  exit: (code: number) => void;
+  /** `runId` is the id of the `run()` that produced the output (0 = runtime-level). */
+  stdout: (data: string, runId: number) => void;
+  stderr: (data: string, runId: number) => void;
+  exit: (code: number, runId: number) => void;
   ready: (info: RuntimeInfo) => void;
   /** Worker-clock ms when the deferred WASM codecs finished loading (M107). */
   deferredReady: (ms: number) => void;
@@ -66,10 +73,10 @@ export class RuntimeClient {
     this.#worker = new Worker(new URL('../worker/runtime.worker.ts', import.meta.url), { type: 'module' });
     this.#worker.onmessage = (event: MessageEvent) => this.#onMessage(event.data);
     this.#worker.onerror = (event) => {
-      this.#listeners.stderr?.(`[worker error] ${event.message}\n`);
+      this.#listeners.stderr?.(`[worker error] ${event.message}\n`, 0);
     };
     this.#worker.onmessageerror = (event) => {
-      this.#listeners.stderr?.(`[worker message error] ${String(event.data)}\n`);
+      this.#listeners.stderr?.(`[worker message error] ${String(event.data)}\n`, 0);
     };
   }
 
@@ -90,10 +97,10 @@ export class RuntimeClient {
 
     switch (msg.type) {
       case 'stdout':
-        this.#listeners.stdout?.(String(msg.data));
+        this.#listeners.stdout?.(String(msg.data), msg.id);
         return;
       case 'stderr':
-        this.#listeners.stderr?.(String(msg.data));
+        this.#listeners.stderr?.(String(msg.data), msg.id);
         return;
       case 'ready':
         this.#listeners.ready?.(msg.info as RuntimeInfo);
@@ -105,7 +112,7 @@ export class RuntimeClient {
         this.#listeners.vendoredReady?.(Number(msg.ms));
         return;
       case 'exit':
-        this.#listeners.exit?.(Number(msg.code));
+        this.#listeners.exit?.(Number(msg.code), msg.id);
         break; // fall through: settle the pending run() promise
     }
 
@@ -137,12 +144,41 @@ export class RuntimeClient {
     return this.#request({ type: 'mount', files });
   }
 
-  run(entry?: string): Promise<void> {
-    return this.#request({ type: 'run', entry });
+  /**
+   * Start `entry` as the program. The returned `id` identifies every stdout /
+   * stderr / exit message this run produces, so a caller can attribute output
+   * to the context that started it — even after another run has begun.
+   */
+  run(entry?: string): { id: number; done: Promise<void> } {
+    const id = this.#nextId++;
+    const done = new Promise<void>((resolve, reject) => {
+      this.#pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      this.#worker.postMessage({ id, type: 'run', entry });
+    });
+    return { id, done };
   }
 
-  writeFile(path: string, contents: string): Promise<string[]> {
+  writeFile(path: string, contents: string): Promise<TreeEntry[]> {
     return this.#request({ type: 'writeFile', path, contents });
+  }
+
+  /** Create a directory (and its parents) in the VFS. */
+  mkdir(path: string): Promise<TreeEntry[]> {
+    return this.#request({ type: 'mkdir', path });
+  }
+
+  /** The whole VFS tree as `{ path, type }`. */
+  tree(): Promise<TreeEntry[]> {
+    return this.#request({ type: 'tree' });
+  }
+
+  /**
+   * Release a project's file bytes from memory (the UI calls it when switching
+   * projects). Returns the tree afterwards. Whether the files survive depends on
+   * the storage backend; see the worker's `evict` handler.
+   */
+  evict(root: string): Promise<TreeEntry[]> {
+    return this.#request({ type: 'evict', root });
   }
 
   readFile(path: string): Promise<string> {

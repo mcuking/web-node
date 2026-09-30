@@ -189,7 +189,7 @@ function serve(port) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>webpack app · web-node</title>
+    <title>webpack + React app · web-node</title>
     <style>
       body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 16px/1.6 ui-monospace, Menlo, monospace; background: #0b0e14; color: #d7dee9; }
       .card { text-align: center; }
@@ -199,13 +199,9 @@ function serve(port) {
     </style>
   </head>
   <body>
-    <!-- Plain HTML, bundled by webpack in the tab. Edit src/ and save: the
-         dev server rebuilds the bundle and reloads this page. -->
-    <main class="card">
-      <h1 id="title">building…</h1>
-      <button id="counter" type="button">count is 0</button>
-      <p class="hint">Bundled by webpack in the browser. Edit src/message.js and save.</p>
-    </main>
+    <!-- React mounts here; webpack bundles src/ in the tab. Edit src/ and save:
+         the dev server rebuilds the bundle and reloads this page. -->
+    <div id="root"></div>
     <script src="bundle.js"></script>
   </body>
 </html>
@@ -220,21 +216,33 @@ function serve(port) {
     "build": "node build.mjs"
   },
   "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "webpack": "^5.111.1"
   }
 }
 `,
-  '/project/webpack/src/index.js': `import { greet } from './message.js';
+  '/project/webpack/src/index.js': `import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { greet } from './message.js';
 
-// The markup lives in index.html; the bundle only wires it up. Keeping the two
-// apart is what makes "edit the template" work without touching JavaScript.
-document.getElementById('title').textContent = greet('webpack');
+// React, written without JSX on purpose: a browser tab has no transpiler, so
+// the demo calls React.createElement directly. It is the same React - same
+// hooks, same component model - in plain JavaScript webpack can bundle as-is.
+const h = React.createElement;
 
-let count = 0;
-const counter = document.getElementById('counter');
-counter.addEventListener('click', () => {
-  counter.textContent = 'count is ' + ++count;
-});
+function App() {
+  const [count, setCount] = React.useState(0);
+  return h(
+    'main',
+    { className: 'card' },
+    h('h1', null, greet('webpack')),
+    h('button', { type: 'button', onClick: () => setCount(count + 1) }, 'count is ' + count),
+    h('p', { className: 'hint' }, 'Bundled by webpack in the browser. Edit src/message.js and save.'),
+  );
+}
+
+createRoot(document.getElementById('root')).render(h(App));
 `,
   '/project/webpack/src/message.js': `export function greet(who) {
   return 'Hello from ' + who + ', bundled in the browser';

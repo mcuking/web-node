@@ -210,7 +210,7 @@ function serve(port) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>rspack app · web-node</title>
+    <title>rspack + React app · web-node</title>
     <style>
       body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 16px/1.6 ui-monospace, Menlo, monospace; background: #0b0e14; color: #d7dee9; }
       .card { text-align: center; }
@@ -220,13 +220,9 @@ function serve(port) {
     </style>
   </head>
   <body>
-    <!-- Plain HTML, bundled by rspack in the tab. rspack is a Rust bundler
-         compiled to wasm32-wasi; it runs on a real Worker thread pool. -->
-    <main class="card">
-      <h1 id="title">building…</h1>
-      <button id="counter" type="button">count is 0</button>
-      <p class="hint">Packed by rspack (Rust → wasm) in the browser. Edit src/message.mjs and save.</p>
-    </main>
+    <!-- React mounts here; rspack (a Rust bundler compiled to wasm32-wasi,
+         running on a real Worker thread pool) bundles src/ in the tab. -->
+    <div id="root"></div>
     <script src="bundle.js"></script>
   </body>
 </html>
@@ -241,6 +237,8 @@ function serve(port) {
     "build": "node build.mjs"
   },
   "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "@rspack/core": "2.2.7",
     "@rspack/binding-wasm32-wasi": "2.2.7"
   }
@@ -256,16 +254,27 @@ export default {
   output: { path: ROOT + '/dist', filename: 'bundle.js' },
 };
 `,
-  '/project/rspack/src/main.mjs': `import { greet } from './message.mjs';
+  '/project/rspack/src/main.mjs': `import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { greet } from './message.mjs';
 
-// The markup lives in index.html; the bundle only wires it up.
-document.getElementById('title').textContent = greet('rspack');
+// React, written without JSX on purpose: a browser tab has no transpiler, so
+// the demo calls React.createElement directly. It is the same React - same
+// hooks, same component model - in plain JavaScript rspack can bundle as-is.
+const h = React.createElement;
 
-let count = 0;
-const counter = document.getElementById('counter');
-counter.addEventListener('click', () => {
-  counter.textContent = 'count is ' + ++count;
-});
+function App() {
+  const [count, setCount] = React.useState(0);
+  return h(
+    'main',
+    { className: 'card' },
+    h('h1', null, greet('rspack')),
+    h('button', { type: 'button', onClick: () => setCount(count + 1) }, 'count is ' + count),
+    h('p', { className: 'hint' }, 'Packed by rspack (Rust to wasm) in the browser. Edit src/message.mjs and save.'),
+  );
+}
+
+createRoot(document.getElementById('root')).render(h(App));
 `,
   '/project/rspack/src/message.mjs': `export function greet(who) {
   return 'Hello from ' + who + ', packed by a Rust bundler in the browser';

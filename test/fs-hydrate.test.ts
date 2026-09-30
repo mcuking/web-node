@@ -148,6 +148,25 @@ describe('reaching through to backing storage', () => {
     expect(() => vfs.readFile('/project/other.txt')).toThrow(/store exploded/);
   });
 
+  it('treats a body the store reports absent as a missing file, and prunes it', () => {
+    const { vfs } = storeOnly();
+    vfs.stat('/project/only-in-store.txt'); // the store said it was there
+    // ...but it now cannot produce the body and says so with ENOENT: the index
+    // and the byte mirror have drifted (a file from an older layout rides in the
+    // index while the mirror never received it). That is a missing file, not a
+    // broken store — it must answer ENOENT like any other, and the phantom must
+    // not linger into the next snapshot.
+    vfs.setReadSource({
+      info: () => ({ type: 'file', size: 3 }),
+      read: () => {
+        throw Object.assign(new Error('ENOENT: gone'), { code: 'ENOENT' });
+      },
+      list: () => null,
+    });
+    expect(() => vfs.readFile('/project/only-in-store.txt')).toThrow(/ENOENT/);
+    expect(vfs.snapshot().some((e) => e.path === '/project/only-in-store.txt')).toBe(false);
+  });
+
   it('does not consult the store for paths the tree already holds', () => {
     const { vfs, source } = storeOnly();
     // A directory the tree knows lists only what the tree holds — reaching

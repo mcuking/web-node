@@ -34,7 +34,13 @@
 
     <main class="layout">
       <section class="pane files">
-        <div class="pane-head">Files <span class="hint" id="files-root">(VFS → OPFS)</span></div>
+        <div class="pane-head">
+          <span>Files <span class="hint" id="files-root">(VFS → OPFS)</span></span>
+          <span class="file-actions">
+            <button id="new-file" title="New file in this project">+ File</button>
+            <button id="new-folder" title="New folder in this project">+ Folder</button>
+          </span>
+        </div>
         <ul id="file-tree" class="file-tree"></ul>
       </section>
 

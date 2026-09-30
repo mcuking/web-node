@@ -18,3 +18,16 @@ export const DEMO_FILES: Record<string, string> = {
   ...WEBPACK_PROJECT_FILES,
   ...RSPACK_PROJECT_FILES,
 };
+
+/**
+ * Bumped whenever a demo source file changes *in place* (not merely a new file
+ * added — boot already fills missing paths on its own).
+ *
+ * A returning visitor restores their previous VFS from OPFS, and boot only adds
+ * paths that are absent, so a rewritten demo file would otherwise never reach
+ * them: they would open the tab and still see last release's `src/index.js`. A
+ * change to this value tells boot the demo sources on disk are stale and should
+ * be rewritten once (files the user created are untouched — boot writes the
+ * embedded demo paths only).
+ */
+export const DEMO_VERSION = 2;

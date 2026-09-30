@@ -191,6 +191,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .file-tree li:hover { background: var(--panel-2); color: var(--text); }
 .file-tree li.active { background: #17301f; color: var(--accent); }
+.file-tree li.dir { color: #9fb0c8; cursor: default; }
+.file-tree li.dir:hover { background: transparent; color: #9fb0c8; }
+.file-actions { display: flex; gap: 4px; }
+.file-actions button { padding: 2px 8px; font-size: 11px; text-transform: none; letter-spacing: 0; }
 
 /* --- editor --- */
 #editor {

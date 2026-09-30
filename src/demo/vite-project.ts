@@ -236,7 +236,8 @@ function vfsWatchPlugin() {
     "vue": "^3.5.0",
     "vite": "^5.4.0",
     "@vitejs/plugin-vue": "^5.2.0",
-    "esbuild-wasm": "^0.21.5"
+    "esbuild-wasm": "^0.21.5",
+    "@rollup/wasm-node": "^4.63.3"
   }
 }
 `,

@@ -130,11 +130,36 @@ export class MemoryVfs implements Vfs {
     this.#entries.set(abs, entry);
   }
 
-  /** Fetch a cold file's bytes. Throws if the store cannot produce them. */
+  /**
+   * Fetch a cold file's bytes.
+   *
+   * The store is only ever asked about paths it already confirmed, so a miss
+   * here means the two have drifted: the structure index lists a file the byte
+   * mirror never received. That is real — a file left over from an older layout
+   * rides in a snapshot's index (written from the in-memory tree) while the
+   * mirror skips it (only entries that carry bytes are written). Left alone it
+   * surfaces as a hard failure the moment anything reads the path — Vite's
+   * PostCSS search walks up to a stale `/project/package.json`, for one.
+   *
+   * Treat the drift as what it is: the file is not there. Drop the phantom so
+   * the read answers ENOENT like any other missing file — and so the next
+   * snapshot stops carrying it.
+   */
   #materializeFile(abs: string, entry: Entry): void {
     const source = this.#readSource;
     if (!source) return;
-    entry.data = source.read(abs);
+    let data: Uint8Array;
+    try {
+      data = source.read(abs);
+    } catch (err) {
+      // Only a body the store itself reports *absent* is the drift above; it
+      // raises ENOENT. Any other failure is a real storage error and must stay
+      // loud — swallowing it would turn a broken store into silent data loss.
+      if ((err as { code?: string }).code !== 'ENOENT') throw err;
+      this.#entries.delete(abs);
+      throw new VfsError('ENOENT', 'open', abs);
+    }
+    entry.data = data;
     entry.cold = false;
     entry.coldSize = undefined;
   }
@@ -217,6 +242,38 @@ export class MemoryVfs implements Vfs {
     // it. Reading it back just to write it out again would be pure waste.
     if (entry.cold) return;
     this.#syncSink?.(resolved, entry.data);
+  }
+
+  /**
+   * Release the file *bodies* under `abs` from memory, keeping the tree's
+   * structure (paths, sizes, modes) exactly as it was.
+   *
+   * This is the memory half of a project switch: the bytes stay in the backing
+   * store (a durable `fsync` or the debounced mirror put them there), and the
+   * next read pulls them back through `#readSource` — the same cold path a boot
+   * uses. The structure has to stay, because the persistence backends write a
+   * whole-tree *structure* index: dropping the entries would silently delete
+   * them from the next snapshot.
+   *
+   * Only meaningful when a synchronous read path exists. Without one the bytes
+   * would be unreachable, so the call is a no-op and reports zero — the caller
+   * (the runtime worker) turns that into "this backend cannot evict".
+   */
+  evictBodies(abs: string): number {
+    if (this.#readSource === null) return 0;
+    const root = p.normalize(abs);
+    if (root === '/') return 0;
+    const prefix = root + '/';
+    let freed = 0;
+    for (const [path, e] of this.#entries) {
+      if (path !== root && !path.startsWith(prefix)) continue;
+      if (e.type !== 'file' || e.cold) continue;
+      e.coldSize = e.data.byteLength;
+      e.data = EMPTY;
+      e.cold = true;
+      freed++;
+    }
+    return freed;
   }
 
   subscribe(listener: (change: VfsChange) => void): () => void {

@@ -101,3 +101,69 @@ describe('MemoryVfs.snapshot with cold (un-hydrated) entries', () => {
     expect(snap.find((e) => e.path === '/empty.txt')!.data).toEqual(new Uint8Array(0));
   });
 });
+
+describe('MemoryVfs.evictBodies', () => {
+  it('drops bodies under a prefix, keeps the names, and re-reads from the store', () => {
+    const bytes = new TextEncoder().encode('payload');
+    let reads = 0;
+    const source: ReadSource = {
+      info: (path) =>
+        path === '/project/app/a.txt'
+          ? { type: 'file', size: bytes.length }
+          : path === '/project' || path === '/project/app' || path === '/'
+            ? { type: 'dir', size: 0 }
+            : null,
+      read: (path) => {
+        reads++;
+        if (path === '/project/app/a.txt') return bytes;
+        throw Object.assign(new Error('no such file'), { code: 'ENOENT' });
+      },
+      list: () => null,
+    };
+    const vfs = new MemoryVfs({ cwd: '/' });
+    vfs.setReadSource(source);
+    expect(vfs.readFile('/project/app/a.txt')).toEqual(bytes); // hydrate resident
+    expect(reads).toBe(1);
+
+    expect(vfs.evictBodies('/project/app')).toBe(1);
+    // The structure survives: the name and its size are still known, with no
+    // store round trip — that is the difference between eviction and deletion.
+    expect(vfs.stat('/project/app/a.txt').size).toBe(bytes.length);
+    expect(reads).toBe(1);
+    // The body is gone from memory, so a read pulls it back.
+    expect(new TextDecoder().decode(vfs.readFile('/project/app/a.txt'))).toBe('payload');
+    expect(reads).toBe(2);
+  });
+
+  it('leaves bodies outside the prefix resident', () => {
+    const enc = new TextEncoder();
+    const calls: string[] = [];
+    const source: ReadSource = {
+      info: () => null,
+      read: (path) => {
+        calls.push(path);
+        return enc.encode('?');
+      },
+      list: () => null,
+    };
+    const vfs = new MemoryVfs({ cwd: '/' });
+    vfs.setReadSource(source);
+    vfs.mkdir('/project', { recursive: true });
+    vfs.mkdir('/other', { recursive: true });
+    vfs.writeFile('/project/a.txt', enc.encode('A'));
+    vfs.writeFile('/other/b.txt', enc.encode('B'));
+
+    expect(vfs.evictBodies('/project')).toBe(1);
+    // The outside file never left memory, so reading it asks the store nothing.
+    expect(new TextDecoder().decode(vfs.readFile('/other/b.txt'))).toBe('B');
+    expect(calls).toEqual([]);
+  });
+
+  it('is a no-op without a read source, so bytes never become unreachable', () => {
+    const vfs = new MemoryVfs({ cwd: '/' });
+    vfs.mkdir('/project', { recursive: true });
+    vfs.writeFile('/project/a.txt', new TextEncoder().encode('x'));
+    expect(vfs.evictBodies('/project')).toBe(0);
+    expect(new TextDecoder().decode(vfs.readFile('/project/a.txt'))).toBe('x');
+  });
+});
