@@ -251,10 +251,10 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 **动机**：M131 修掉了 install 阶段 1.9GB 的驻留峰值，但 webpack 冷构建仍会在页内堆顶到 ~690MB（dev），而原生 Node 跑同一个生产构建峰值仅 44MB。
 
 - **定位**：用 CDP `HeapProfiler.startSampling` 在 build 期采样分配，几乎全在一处——`encodeBase64` **160MB** + 快照遍历 `snapshot` **61MB**，而模块编译器（`compileTagged`/`eval`）只有 ~15MB。即**每次 debounce 把整棵 VFS（含全部 `node_modules`）base64 编码**才是元凶：base64 让每个文件体膨胀 4/3，并逼出一棵「整树大小的临时字符串」进 JS 堆（文件字节本身是 external buffer，不进 `heapUsed`；那些字符串进）。于是开销随 `node_modules` 增长，哪怕它没变。
-- **修**：`MemoryVfs.snapshot()` 改产出**原始字节**（`Uint8Array`）——异步快照本就是一次 `postMessage`，结构化克隆直接携带字节。`fromSnapshot()` 同时接受字节与旧的 base64 文本（磁盘索引），旧快照仍可加载。FS-worker 后端写**结构索引**（只有 path/type/mode/size）+ 镜像直接写真字节；直连后端（无同步读路径）在 JSON 索引处才 base64（那里索引是树的唯一副本）。
-- **涉及文件**：`src/node-runtime/vfs/memory.ts`、`vfs/fs-service.ts`、`vfs/opfs.ts`、`vfs/persistence.ts`、`src/sync/fs-protocol.ts`（新增 `SnapshotEntry`，`PersistedEntry` 保留为磁盘形状）；测试 `test/fs-service.test.ts`、`test/vfs-snapshot-cold.test.ts` 更新到字节契约。
+- **修**：`MemoryVfs.snapshot()` 改产出**原始字节**（`Uint8Array`）——异步快照本就是一次 `postMessage`，结构化克隆直接携带字节。`fromSnapshot()` 同时接受字节与旧的 base64 文本（磁盘索引），旧快照仍可加载。**两个后端均改为「结构索引 + 镜像字节」**：FS-worker 后端（跨源隔离）写结构索引 + 镜像直接写真字节；直连后端（gh-pages 线上，无 COOP/COEP 时走它）此前把整树 base64 内联进 JSON 索引（build 主因），现改 v3 结构索引 + 镜像，`load()` 从镜像读回字节（v2/v1 仍可读）。
+- **涉及文件**：`src/node-runtime/vfs/memory.ts`、`vfs/fs-service.ts`、`vfs/opfs.ts`、`vfs/persistence.ts`、`src/sync/fs-protocol.ts`（新增 `SnapshotEntry`，`PersistedEntry` 保留为磁盘形状、`data` 允许字节）；测试 `test/fs-service.test.ts`、`test/vfs-snapshot-cold.test.ts` 更新到字节契约。
 - **实测**（真浏览器、fresh origin 清 OPFS，webpack 冷构建 A/B）：install post-GC **573.1MB → 10.7MB**；build 峰值 **688.9MB → 39.1MB**，**与原生 Node 44MB 持平**（此前 ~15×）。
-- **验收**：`tsc --noEmit` 净 · `vitest run` **1185 passed / 3 skipped（140 文件）** · build `runtime.worker-*.js` **776.4 kB**。
+- **验收**：`tsc --noEmit` 净 · `vitest run` **1185 passed / 3 skipped（140 文件）** · build `runtime.worker-*.js` **776.8 kB**。
 
 ### 2026-09-29 · M131 —— 依赖安装改流式解包（修内存爆表）
 

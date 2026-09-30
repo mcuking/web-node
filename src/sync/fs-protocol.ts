@@ -189,13 +189,14 @@ export interface SnapshotEntry {
 
 /** A snapshot entry as it is **stored on disk**, read back by `load()`.
  *
- * A file body is base64 **text** here (v2/v3 index files), where the in-flight
- * {@link SnapshotEntry} carries bytes. A structure-index entry ships no `data` at
- * all and the runtime restores it cold against the mirror. */
+ * A file body is base64 **text** for a v2 index (self-contained on disk) or raw
+ * **bytes** for a v3 index once the backend has read them back from the mirror
+ * (`OpfsPersistence.load()`). A structure-index entry ships no `data` at all and
+ * the runtime restores it cold against the mirror. */
 export interface PersistedEntry {
   path: string;
   type: 'file' | 'dir';
-  data?: string;
+  data?: string | Uint8Array;
   mode?: number;
   /** Byte length of a file's contents; present in a structure index. */
   size?: number;

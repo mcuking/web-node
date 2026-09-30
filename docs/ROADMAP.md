@@ -680,10 +680,11 @@
 
 - [x] **M132 · 修 build 冷启内存峰值（快照体改传字节，不去 base64）** ✅ 2026-09-30
   - **做**：采样 build 期分配，把放大定位到**持久化快照**——`encodeBase64`(160MB) + `snapshot` 遍历(61MB)，而模块编译（`compileTagged`/eval）仅 ~15MB。即**每次 debounce 把整棵 VFS（含全部 `node_modules`）base64 编码**才是元凶。
-  - **修**：`MemoryVfs.snapshot()` 改产出 **原始字节**（`Uint8Array`），异步快照本就是 `postMessage`，结构化克隆直接携带字节，省掉 4/3 膨胀与「整树大小的临时字符串」。`fromSnapshot()` 兼容字节/旧 base64 文本（磁盘索引）；FS-worker 后端写**结构索引** + 镜像直接写真字节，直连后端（无同步读路径）在 JSON 索引处才 base64。
+  - **修**：`MemoryVfs.snapshot()` 改产出 **原始字节**（`Uint8Array`），异步快照本就是 `postMessage`，结构化克隆直接携带字节，省掉 4/3 膨胀与「整树大小的临时字符串」。`fromSnapshot()` 兼容字节/旧 base64 文本（磁盘索引）。**两个后端**都改为「**结构索引 + 镜像字节**」：FS-worker 后端（跨源隔离）写结构索引 + 镜像直接写真字节；**直连后端（gh-pages 线上，无 COOP/COEP 时走它）**此前把整树 base64 内联进 JSON 索引（build 主因），现改 v3 结构索引 + 镜像，`load()` 从镜像读回字节（v2/v1 旧索引仍可读）。
   - **实测**（真浏览器、fresh origin 清 OPFS，webpack 冷构建 A/B）：install post-GC **573.1MB → 10.7MB**；build 峰值 **688.9MB → 39.1MB**，**与原生 Node 44MB 持平**（此前 ~15×）。
+  - **关键点**：`encodeBase64`/`snapshot` 才是元凶（采样 160MB+61MB），模块编译器（`compileTagged`/eval）仅 ~15MB——之前一直怀疑错了方向。
   - **测试**：`test/fs-service.test.ts`、`test/vfs-snapshot-cold.test.ts` 更新到字节契约。
-  - **验收**：`typecheck` 净 · `vitest run` **1185 passed / 3 skipped（140 文件）** · `build` worker **776.4 kB**。
+  - **验收**：`typecheck` 净 · `vitest run` **1185 passed / 3 skipped（140 文件）** · `build` worker **776.8 kB**。
 
 ---
 
