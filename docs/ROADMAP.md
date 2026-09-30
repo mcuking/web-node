@@ -6,8 +6,8 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[⤳]` **已并入其他里程碑**（保留条目作决策痕迹，**不单独计数**） · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 I → 阶段 J。阶段 A/B/C/D 均已结清。**M113 · M122 ✅ 2026-09-29 后，阶段 G 与阶段 I 全部结清**（新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I、**M128 真实工具链端到端（真 tsc）✅** 见阶段 F）；**阶段 J：M129 ✅ · M130 ✅ · M131（依赖安装改流式解包）✅ 2026-09-29 · M132（修 build 冷启内存峰值：快照体改传字节）✅ 2026-09-30**。
-> - **最后更新**：2026-09-30（**M132 ✅ 修 build 冷启内存峰值**——持久化快照的 base64 改为**传原始字节**（异步 `postMessage` 结构化克隆直接带 `Uint8Array`）；webpack 冷构建 **build 峰值 688.9MB → 39.1MB**、install post-GC **573.1MB → 10.7MB**，与原生 Node 44MB 持平。此前 2026-09-29（**M113 ✅ 预览子域名路由（静态托管跟进）**——dev 侧 `<port>.localhost` 保留 + 新增**通配域** `VITE_WEB_NODE_PREVIEW_DOMAIN`：静态托管（GitHub Pages / 任意静态服务器 / 自定义域）把每个预览挂到 `<port>.<domain>` 真 origin；预览壳改为**静态资产**、SW `?domain=` 归一；三策略纯函数化 + 单测；真浏览器双路（dev 子域 / 静态服务器）均从虚拟 FS 供给真应用。**M122 ✅ 沙箱出站网络（egress）**——新增 `net/egress.ts` 传输层 + `Bindings.egress` 接入缝；`http`/`https` 公网目标经**宿主源 worker 的 `fetch`** 出网（可选自备 proxy 兜底，无第三方托管依赖），`net.connect` 无 TCP 桥则响亮 `ECONNREFUSED`；实测 `https.get('https://registry.npmjs.org/ms')` 200（改前 ECONNREFUSED）。**M128 ✅ 真实工具链端到端**——页内跑真 TypeScript 编译器：解析 tsconfig → 类型检查 → 产出 `.js`/`.d.ts` → 执行编译产物（拿到 `{count:2,total:15.1416}`）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅ · M127 ✅ · M122 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅ · M128 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅ · M126 ✅；阶段 G：M113 ✅。**阶段 J：M129 ✅ · M130（Demo 顶部导航改版：四独立项目步进器——Vite/Webpack/rspack/Node.js 各自目录+依赖，第一行选项目、第二行操作、HMR 默认化）✅ 2026-09-29**。
+> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 I → 阶段 J。阶段 A/B/C/D 均已结清。**M113 · M122 ✅ 2026-09-29 后，阶段 G 与阶段 I 全部结清**（新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I、**M128 真实工具链端到端（真 tsc）✅** 见阶段 F）；**阶段 J：M129 ✅ · M130 ✅ · M131（依赖安装改流式解包）✅ 2026-09-29 · M132（修 build 冷启内存峰值：快照体改传字节）✅ 2026-09-30 · M133（Demo 四项目收尾：切项目清场 / React·Vue 框架 / 产物入树 / 文件树可编辑）✅ 2026-09-30**。
+> - **最后更新**：2026-09-30（**M133 ✅ Demo 四项目收尾**——切项目清场（预览+日志+内存，输出按项目归属、预览按项目端口过滤）；webpack/rspack → **React**、vite → **Vue 3 SFC**；`run build` 产物（`dist/`）**入文件树**；文件树加 **`+ File`/`+ Folder`** 可编辑（列空目录）；顺带修真 bug：**`@rollup/wasm-node` 依赖自 M130 丢失致 `vite build` 一直坏**、**旧快照索引幽灵路径**致读崩（改为 ENOENT 当缺失+剪枝 + `DEMO_VERSION` 一次性清理迁移）。`typecheck` 净 · `vitest run` **1189 passed / 3 skipped** · `build` worker **779.24 kB**。此前 2026-09-30（**M132 ✅ 修 build 冷启内存峰值**——持久化快照的 base64 改为**传原始字节**；webpack 冷构建 build 峰值 **688.9MB → 39.1MB**、install post-GC **573.1MB → 10.7MB**，与原生 Node 44MB 持平）。
 
 ---
 
@@ -685,6 +685,15 @@
   - **关键点**：`encodeBase64`/`snapshot` 才是元凶（采样 160MB+61MB），模块编译器（`compileTagged`/eval）仅 ~15MB——之前一直怀疑错了方向。
   - **测试**：`test/fs-service.test.ts`、`test/vfs-snapshot-cold.test.ts` 更新到字节契约。
   - **验收**：`typecheck` 净 · `vitest run` **1185 passed / 3 skipped（140 文件）** · `build` worker **776.8 kB**。
+
+- [x] **M133 · Demo 四项目收尾：切项目清场、React/Vue 框架、产物入树、文件树可编辑** ✅ 2026-09-30
+  - **做（唐工反馈 4 条）**：① **切项目即清场**——`selectProject` 清日志 + 清预览 + 释放上一个项目的文件体；输出**按项目归属**（`writeTerminal` 打 `data-pid`、`on stdout/stderr/exit` 带 `runId`、worker 用 `activeRunId` 标记）、**预览只认当前项目端口**（`refreshPorts` 按 `DEMO_PROJECTS[id].port` 过滤，否则旧 dev server 的日志/端口会串到新项目）；② **框架归位**——webpack → **React**、rspack → **React**（`React.createElement`，无 JSX）、vite 保持 **Vue 3 SFC**；③ **`run build` 产物入树**——`runProcess` finally 与 install 之后都重刷树，`dist/` 等产物构建后立刻出现；④ **文件树可编辑**——`+ File`/`+ Folder` 按钮 + 相对路径弹窗，`mkdir` 递归、空文件直接开；文件树升级为「路径 + 类型」（`tree` 请求能列**空目录**、隐藏 `node_modules`）。
+  - **新增/改文件**：`src/ui/main.ts`、`src/client/index.ts`、`src/worker/runtime.worker.ts`、`src/projects.ts`（`port`）、`index.html`、`src/ui/style.css`、`src/demo/{webpack,rspack,vite}-project.ts`、`src/node-runtime/vfs/memory.ts`（`evictBodies` + 幽灵路径）。
+  - **顺带修真 bug**：① **`@rollup/wasm-node` 依赖自 M130 起丢失** → `vite build` 一直报 `Cannot find module '@rollup/wasm-node/parseAst'`；② **旧快照索引的幽灵路径**（预 M130 旧布局文件仍在索引、镜像却没字节）→ 读它硬崩（Vite PostCSS 搜索 walk 到 `/project/package.json`）；改为对 store 报 ENOENT 当缺失并剪枝（其它存储错误照旧抛），并加 `DEMO_VERSION` 标记做**一次性清理迁移**（无标记 = 老快照 → 清库重来；标记过期 → 重写 demo 源、不动用户文件）。
+  - **内存释放**：新 `evict(root)` worker 请求——**先 `persistence.flush()` 落镜像**再 `evictBodies` **只释放字节、保留结构**（下次读经冷路径取回）；无同步读路径（直连后端）则删 `node_modules`。切项目**不 await** evict，实测切换 **103–254ms**。
+  - **测试**：`test/fs-hydrate.test.ts` +1（ENOENT 幽灵 → 当缺失+剪枝；非 ENOENT 仍抛）；`test/vfs-snapshot-cold.test.ts` +3（`evictBodies` 释放/前缀外不动/无读源 no-op）。
+  - **验收**：`typecheck` 净 · `vitest run` **1189 passed / 3 skipped（140 文件）** · `build` worker **779.24 kB**、`index-*.js` **15.64 kB**。
+  - **实测**（真浏览器）：webpack→React、rspack→React、vite→Vue **三者在预览里都渲染且计数器可点**；三者 `run build` 后 `dist/bundle.js` 入树；切项目终端**清空且保持**清空、端口清空、预览回 empty。
 
 ---
 

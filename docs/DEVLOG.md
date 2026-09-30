@@ -246,6 +246,30 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-30 · M133 —— Demo 四项目收尾：切项目清场、React/Vue 框架、产物入树、文件树可编辑
+
+**改了什么**（唐工反馈 4 条 + 途中挖出的 2 个真 bug）
+
+1. **切项目即清场**（预览 + 日志 + 内存）——`selectProject` 现在 `clearOutput()` + `clearPreview()` + 释放**上一个项目**的文件体；同时给**每条输出打上它的项目**（`writeTerminal` 带 `data-pid`）、**预览只认当前项目的端口**（`refreshPorts` 按 `DEMO_PROJECTS[id].port` 过滤）。为什么三样都要：一个项目的 dev server 是**程序**，运行时能起不能停，离开后它仍在跑、仍在打日志、端口仍在听——不按项目归属隔离，旧项目的输出/预览就会**串到新项目身上**（实测：切走 webpack 后 6s，旧 server 的 `rebuilt bundle.js` 又冒出来，且端口 watcher 把 `:5174` 又挂回预览）。改动文件：`src/ui/main.ts`、`src/client/index.ts`（`onstdout/stderr/exit` 带 `runId`；`run()` 返回 `{id,done}`）、`src/worker/runtime.worker.ts`（输出以 `activeRunId` 标记）、`src/projects.ts`（加 `port`）。
+2. **框架归位**：**webpack → React**、**rspack → React**（两者之前是无框架纯 HTML），**vite 保持 Vue 3 SFC**。React 版 demo 用 `React.createElement`（不写 JSX——标签页里没有转译器），`package.json` 加 `react`/`react-dom`。实测三者预览均渲染且计数器可点。
+3. **`run build` 产物进文件树**：UI 之前只在 install 后刷一次树、build 后不刷；现在 `runProcess` 的 `finally` 与 install 之后都 `readTree()`+`renderTree()`，于是 `dist/bundle.js`、`dist/bundle.js.LICENSE.txt` 等产物**构建后立刻出现**在左侧树里。
+4. **文件树可编辑**：文件树头加 **`+ File` / `+ Folder`** 两个按钮，弹窗输入**相对项目根**的路径（如 `src/util.js` / `a/b/c`）；`mkdir` 递归建目录、文件建成空文件并直接进编辑器打开。为此**文件树从「只有文件路径」升级为「路径 + 类型」**（`TreeEntry`）——`client.tree()` 走新 worker 请求 `tree`，能列出**空目录**（旧实现只看文件、空目录不可见），并隐藏 `node_modules`。改动文件：`index.html`、`src/ui/style.css`、`src/client/index.ts`、`src/worker/runtime.worker.ts`。
+
+**途中挖出并修掉的真 bug**
+
+- **`vite build` 自 M130 起一直是坏的**：M130 把 Vite 项目拆进 `src/demo/vite-project.ts` 时**漏了 `@rollup/wasm-node` 依赖**（Vite 的 rollup 解析在无 WASM binding 时回退到它）。`run build` 直接报 `Cannot find module '@rollup/wasm-node/parseAst'`。补回依赖后 vite 构建恢复。
+- **旧快照索引里的幽灵文件**：预 M130 的快照索引（`.wvm.json`）仍列着 `/project/package.json` 这类**已不存在的旧布局路径**，而字节镜像只写**有字节的**条目——于是索引说“在”、镜像说“没有”。任何读它的代码都会硬崩（Vite 的 PostCSS 配置搜索会一路向上 walk 到 `/project/package.json`：`no such file in backing storage: /project/package.json`，vite build 卡死）。修：`MemoryVfs.#materializeFile` 对**store 报 ENOENT** 的情况按「文件确实不在」处理（删幽灵条目 + 抛 `ENOENT`），**其它存储错误照旧响亮抛**（不吞真错误）；并加**一次性清理迁移**——快照里记 `DEMO_VERSION` 标记（`/project/.demo-version`），**没有标记**（=首次遇到新机制的老快照）就 `persistence.clear()` 从干净的 demo 起步，标记过期则重写 demo 源文件（用户自己建的文件不动）。实测迁移后索引从 400+ 条降到 46 条、`stale: []`。
+
+**内存释放怎么做**（`evict`）
+
+- 新 worker 请求 `evict(root)`：**先 `persistence.flush()` 把镜像落盘**（快照是 debounce 的，不先刷会丢掉已写未持久的字节），再 `MemoryVfs.evictBodies(root)` **只释放文件体、保留结构**（路径/大小/类型都在，下次读经 `#readSource` 从镜像取回——即 boot 那条冷路径）。**无同步读路径**时（直连后端，镜像即唯一副本）改删 `node_modules`（反正每个项目第一步都会重装）——两者都保证「文件仍列出、仍可读」。切项目**不 await** evict（dev 下 flush 一棵 `node_modules` 要数秒），实测切换 **103–254ms** 完成、不阻塞。
+
+**测试**：新增 `test/fs-hydrate.test.ts` 1 条（store 报 ENOENT 的幽灵 → 当缺失 + 剪枝；且**非 ENOENT 仍响亮抛**）；`test/vfs-snapshot-cold.test.ts` +3（`evictBodies` 释放并可从 store 读回 / 前缀外不动 / 无读源时 no-op）。
+
+**验收**：`typecheck` 净 · `vitest run` **1189 passed / 3 skipped（140 文件）** · `build` worker **779.24 kB**、`index-*.js` **15.64 kB**。
+
+**实测**（真浏览器，`localhost:5173`）：webpack `install 68 pkgs`→`dev` 预览渲染 React（`count is 0`→点一次 `count is 1`，`title=webpack + React app`）→`build` `dist/bundle.js (139623 bytes)` 入树；rspack `install 41`→`build` `dist/bundle.js` 入树→`dev` 渲染 React（计数可点）；vite `build` 成功且 `dist/` 入树、`dev` 渲染 Vue（计数可点）；切项目后终端清空且**保持**清空、端口清空、预览回 empty（切换 254ms）。
+
 ### 2026-09-30 · M132 —— 修 build 冷启内存峰值（快照体改传字节，不去 base64）
 
 **动机**：M131 修掉了 install 阶段 1.9GB 的驻留峰值，但 webpack 冷构建仍会在页内堆顶到 ~690MB（dev），而原生 Node 跑同一个生产构建峰值仅 44MB。
