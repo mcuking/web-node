@@ -184,7 +184,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 > **固定路线图在 [`docs/ROADMAP.md`](ROADMAP.md)**——正序、带编号、可勾选。**阶段 A–I 已基本结清**；仅余 G·M113（子域名静态托管，卡在通配 DNS）与 I·M122（沙箱出站网络，需外部代理）两项，暂被搁置。2026-09-29 新开 **M126 启动载荷再降 ✅**（阶段 E）。
 >
-> **近期待办**：**M126 ✅ · M127 ✅ · M128（真实工具链端到端：页内跑真 TypeScript 编译器）✅ 2026-09-29**。阶段 F 至此全部结清；仅余 G·M113 与 I·M122（两者仍被搁置）。**阶段 J：M129 ✅ · M130（Demo 顶部导航改版：四独立项目步进器）✅ 2026-09-29**。
+> **近期待办**：**M126 ✅ · M127 ✅ · M128（真实工具链端到端）✅ 2026-09-29**。**M132（修 build 冷启内存峰值：快照体改传字节）✅ 2026-09-30**。**阶段 J：M129 ✅ · M130 ✅ · M131 ✅ · M132 ✅**；阶段 G·M113、I·M122 亦已结清——**路线图全部完成**。
 
 按优先级：
 
@@ -245,6 +245,16 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 ---
 
 ## 变更记录
+
+### 2026-09-30 · M132 —— 修 build 冷启内存峰值（快照体改传字节，不去 base64）
+
+**动机**：M131 修掉了 install 阶段 1.9GB 的驻留峰值，但 webpack 冷构建仍会在页内堆顶到 ~690MB（dev），而原生 Node 跑同一个生产构建峰值仅 44MB。
+
+- **定位**：用 CDP `HeapProfiler.startSampling` 在 build 期采样分配，几乎全在一处——`encodeBase64` **160MB** + 快照遍历 `snapshot` **61MB**，而模块编译器（`compileTagged`/`eval`）只有 ~15MB。即**每次 debounce 把整棵 VFS（含全部 `node_modules`）base64 编码**才是元凶：base64 让每个文件体膨胀 4/3，并逼出一棵「整树大小的临时字符串」进 JS 堆（文件字节本身是 external buffer，不进 `heapUsed`；那些字符串进）。于是开销随 `node_modules` 增长，哪怕它没变。
+- **修**：`MemoryVfs.snapshot()` 改产出**原始字节**（`Uint8Array`）——异步快照本就是一次 `postMessage`，结构化克隆直接携带字节。`fromSnapshot()` 同时接受字节与旧的 base64 文本（磁盘索引），旧快照仍可加载。FS-worker 后端写**结构索引**（只有 path/type/mode/size）+ 镜像直接写真字节；直连后端（无同步读路径）在 JSON 索引处才 base64（那里索引是树的唯一副本）。
+- **涉及文件**：`src/node-runtime/vfs/memory.ts`、`vfs/fs-service.ts`、`vfs/opfs.ts`、`vfs/persistence.ts`、`src/sync/fs-protocol.ts`（新增 `SnapshotEntry`，`PersistedEntry` 保留为磁盘形状）；测试 `test/fs-service.test.ts`、`test/vfs-snapshot-cold.test.ts` 更新到字节契约。
+- **实测**（真浏览器、fresh origin 清 OPFS，webpack 冷构建 A/B）：install post-GC **573.1MB → 10.7MB**；build 峰值 **688.9MB → 39.1MB**，**与原生 Node 44MB 持平**（此前 ~15×）。
+- **验收**：`tsc --noEmit` 净 · `vitest run` **1185 passed / 3 skipped（140 文件）** · build `runtime.worker-*.js` **776.4 kB**。
 
 ### 2026-09-29 · M131 —— 依赖安装改流式解包（修内存爆表）
 

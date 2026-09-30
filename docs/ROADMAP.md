@@ -6,8 +6,8 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[⤳]` **已并入其他里程碑**（保留条目作决策痕迹，**不单独计数**） · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 I → 阶段 J。阶段 A/B/C/D 均已结清。**M113 · M122 ✅ 2026-09-29 后，阶段 G 与阶段 I 全部结清**（新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I、**M128 真实工具链端到端（真 tsc）✅** 见阶段 F）；**阶段 J：M129 ✅ · M130 ✅ · M131（依赖安装改流式解包，修内存爆表）✅ 2026-09-29**。
-> - **最后更新**：2026-09-29（**M113 ✅ 预览子域名路由（静态托管跟进）**——dev 侧 `<port>.localhost` 保留 + 新增**通配域** `VITE_WEB_NODE_PREVIEW_DOMAIN`：静态托管（GitHub Pages / 任意静态服务器 / 自定义域）把每个预览挂到 `<port>.<domain>` 真 origin；预览壳改为**静态资产**、SW `?domain=` 归一；三策略纯函数化 + 单测；真浏览器双路（dev 子域 / 静态服务器）均从虚拟 FS 供给真应用。**M122 ✅ 沙箱出站网络（egress）**——新增 `net/egress.ts` 传输层 + `Bindings.egress` 接入缝；`http`/`https` 公网目标经**宿主源 worker 的 `fetch`** 出网（可选自备 proxy 兜底，无第三方托管依赖），`net.connect` 无 TCP 桥则响亮 `ECONNREFUSED`；实测 `https.get('https://registry.npmjs.org/ms')` 200（改前 ECONNREFUSED）。**M128 ✅ 真实工具链端到端**——页内跑真 TypeScript 编译器：解析 tsconfig → 类型检查 → 产出 `.js`/`.d.ts` → 执行编译产物（拿到 `{count:2,total:15.1416}`）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅ · M127 ✅ · M122 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅ · M128 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅ · M126 ✅；阶段 G：M113 ✅。**阶段 J：M129 ✅ · M130（Demo 顶部导航改版：四独立项目步进器——Vite/Webpack/rspack/Node.js 各自目录+依赖，第一行选项目、第二行操作、HMR 默认化）✅ 2026-09-29**。
+> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 I → 阶段 J。阶段 A/B/C/D 均已结清。**M113 · M122 ✅ 2026-09-29 后，阶段 G 与阶段 I 全部结清**（新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I、**M128 真实工具链端到端（真 tsc）✅** 见阶段 F）；**阶段 J：M129 ✅ · M130 ✅ · M131（依赖安装改流式解包）✅ 2026-09-29 · M132（修 build 冷启内存峰值：快照体改传字节）✅ 2026-09-30**。
+> - **最后更新**：2026-09-30（**M132 ✅ 修 build 冷启内存峰值**——持久化快照的 base64 改为**传原始字节**（异步 `postMessage` 结构化克隆直接带 `Uint8Array`）；webpack 冷构建 **build 峰值 688.9MB → 39.1MB**、install post-GC **573.1MB → 10.7MB**，与原生 Node 44MB 持平。此前 2026-09-29（**M113 ✅ 预览子域名路由（静态托管跟进）**——dev 侧 `<port>.localhost` 保留 + 新增**通配域** `VITE_WEB_NODE_PREVIEW_DOMAIN`：静态托管（GitHub Pages / 任意静态服务器 / 自定义域）把每个预览挂到 `<port>.<domain>` 真 origin；预览壳改为**静态资产**、SW `?domain=` 归一；三策略纯函数化 + 单测；真浏览器双路（dev 子域 / 静态服务器）均从虚拟 FS 供给真应用。**M122 ✅ 沙箱出站网络（egress）**——新增 `net/egress.ts` 传输层 + `Bindings.egress` 接入缝；`http`/`https` 公网目标经**宿主源 worker 的 `fetch`** 出网（可选自备 proxy 兜底，无第三方托管依赖），`net.connect` 无 TCP 桥则响亮 `ECONNREFUSED`；实测 `https.get('https://registry.npmjs.org/ms')` 200（改前 ECONNREFUSED）。**M128 ✅ 真实工具链端到端**——页内跑真 TypeScript 编译器：解析 tsconfig → 类型检查 → 产出 `.js`/`.d.ts` → 执行编译产物（拿到 `{count:2,total:15.1416}`）。此前：阶段 E 结清 M107 ✅；阶段 I：M124 ✅ · M123 ✅ · M127 ✅ · M122 ✅；阶段 F 结清：M109 ✅ · M110 ✅ · M112 ✅ · M128 ✅；阶段 H：M119 ✅ · M120 ✅ · M121 ✅ · M125 ✅ · M126 ✅；阶段 G：M113 ✅。**阶段 J：M129 ✅ · M130（Demo 顶部导航改版：四独立项目步进器——Vite/Webpack/rspack/Node.js 各自目录+依赖，第一行选项目、第二行操作、HMR 默认化）✅ 2026-09-29**。
 
 ---
 
@@ -677,6 +677,13 @@
   - **测试**：`test/npm.test.ts` +4（流式与缓冲版逐条等价 / 7 字节分块 / 流式 pax / 包装目录）。
   - **验收**：`typecheck` 净 · `vitest run` **1185 passed / 3 skipped** · `build` worker **776.2 kB**。
   - **遗留**：build 冷启（编译 webpack 模块图）仍有峰值（dev ~479MB / 线上 ~51MB；原生 Node 仅 36MB → 运行时编译有放大）——下次打磨。
+
+- [x] **M132 · 修 build 冷启内存峰值（快照体改传字节，不去 base64）** ✅ 2026-09-30
+  - **做**：采样 build 期分配，把放大定位到**持久化快照**——`encodeBase64`(160MB) + `snapshot` 遍历(61MB)，而模块编译（`compileTagged`/eval）仅 ~15MB。即**每次 debounce 把整棵 VFS（含全部 `node_modules`）base64 编码**才是元凶。
+  - **修**：`MemoryVfs.snapshot()` 改产出 **原始字节**（`Uint8Array`），异步快照本就是 `postMessage`，结构化克隆直接携带字节，省掉 4/3 膨胀与「整树大小的临时字符串」。`fromSnapshot()` 兼容字节/旧 base64 文本（磁盘索引）；FS-worker 后端写**结构索引** + 镜像直接写真字节，直连后端（无同步读路径）在 JSON 索引处才 base64。
+  - **实测**（真浏览器、fresh origin 清 OPFS，webpack 冷构建 A/B）：install post-GC **573.1MB → 10.7MB**；build 峰值 **688.9MB → 39.1MB**，**与原生 Node 44MB 持平**（此前 ~15×）。
+  - **测试**：`test/fs-service.test.ts`、`test/vfs-snapshot-cold.test.ts` 更新到字节契约。
+  - **验收**：`typecheck` 净 · `vitest run` **1185 passed / 3 skipped（140 文件）** · `build` worker **776.4 kB**。
 
 ---
 
