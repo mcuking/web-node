@@ -29,8 +29,10 @@ const NM = path.join(ROOT, 'node_modules');
   // before the build was done.
   const keepAlive = setInterval(function () {}, 1000);
   try {
+    // Imported here rather than at the top: the config pulls in the Vue plugin
+    // from node_modules, which does not exist until deps are installed.
+    const config = (await import('./vite.config.mjs')).default;
     const vite = await import('vite');
-    const { default: vue } = await import('@vitejs/plugin-vue');
     console.log('tool        : vite v' + vite.version + ' (running in the tab)');
 
     const esbuild = await import('esbuild');
@@ -41,11 +43,11 @@ const NM = path.join(ROOT, 'node_modules');
 
     const t1 = Date.now();
     const result = await vite.build({
+      ...config,
       root: ROOT,
-      // Relative asset URLs so the built site also works from a sub-path.
-      base: './',
       logLevel: 'silent',
-      plugins: [vue()],
+      // The config is imported above, not auto-discovered (see vite.config.mjs).
+      configFile: false,
       build: { write: false, minify: false },
     });
     const bundle = Array.isArray(result) ? result[0] : result;
@@ -68,18 +70,18 @@ const NM = path.join(ROOT, 'node_modules');
   '/project/vite/dev.mjs': `// Vite dev server, running entirely inside the tab. Pick "Run dev", then open
 // the Preview tab and choose :5173.
 //
-// Two things are special about running Vite here:
+// The shared Vite options live in vite.config.mjs (imported below). This file
+// adds the two things that are special about running Vite here:
 //   1. Vite reaches for the *native* esbuild addon. A tab cannot load one, so
 //      the runtime aliases 'esbuild' to its WASM build, which must be started
 //      explicitly before Vite runs.
-//   2. Vite's watcher is chokidar, which wants inotify. A tab has no inotify,
-//      so we watch the virtual file system ourselves and forward the events
-//      into Vite's watcher - that is where the HMR pipeline is wired up.
+//   2. Vite's HMR socket is a WebSocket, which a ServiceWorker cannot proxy.
+//      The preview iframe is same-origin with this worker, so we swap the
+//      socket for a BroadcastChannel (createHmrBridge, below).
 import fs from 'fs';
 import path from 'path';
 
 const ROOT = '/project/vite';
-const SRC = path.join(ROOT, 'src');
 const NM = path.join(ROOT, 'node_modules');
 const PORT = 5173;
 
@@ -130,44 +132,16 @@ function createHmrBridge() {
   };
 }
 
-function vfsWatchPlugin() {
-  return {
-    name: 'web-node-vfs-watch',
-    configureServer(server) {
-      // Each watcher reports paths relative to its own base, so keep the base
-      // with the watcher - joining a root-relative name onto SRC would invent a
-      // path like src/src/index.html.
-      const forward = function (base) {
-        return function (eventType, filename) {
-          if (!filename) return;
-          const name = String(filename);
-          if (name.indexOf('node_modules') !== -1 || name.indexOf('dist') !== -1) return;
-          console.log('vfs-change  : ' + eventType + ' ' + name);
-          server.watcher.emit(eventType === 'change' ? 'change' : 'add', path.join(base, name));
-        };
-      };
-      // Sources (recursive) plus index.html at the project root. node_modules
-      // and dist are filtered out so an install never floods the HMR pipeline.
-      const watchers = [
-        fs.watch(SRC, { recursive: true }, forward(SRC)),
-        fs.watch(ROOT, {}, forward(ROOT)),
-      ];
-      if (server.httpServer) {
-        server.httpServer.on('close', function () { watchers.forEach(function (w) { try { w.close(); } catch (e) {} }); });
-      }
-      console.log('watching    : ' + SRC + ' (VFS events -> Vite HMR)');
-    },
-  };
-}
-
 (async function () {
   console.log('-- vite dev --');
   if (!fs.existsSync(path.join(NM, 'vite'))) {
     console.log('vite        : not installed yet - run "Install deps" first');
     return;
   }
+  // Imported here rather than at the top: the config pulls in the Vue plugin
+  // from node_modules, which does not exist until deps are installed.
+  const config = (await import('./vite.config.mjs')).default;
   const vite = await import('vite');
-  const { default: vue } = await import('@vitejs/plugin-vue');
   console.log('tool        : vite v' + vite.version + ' dev server (in the tab)');
 
   const esbuild = await import('esbuild');
@@ -177,20 +151,11 @@ function vfsWatchPlugin() {
   console.log('esbuild     : wasm started in ' + (Date.now() - t0) + 'ms');
 
   const server = await vite.createServer({
+    ...config,
     root: ROOT,
     logLevel: 'error',
-    plugins: [vue(), vfsWatchPlugin()],
-    // Vite pre-bundles bare deps with esbuild, and esbuild-wasm has no file
-    // system (its reads throw "not implemented on js"). Turn pre-bundling off
-    // so Vite serves the dependencies' own ESM sources from node_modules.
-    optimizeDeps: { disabled: true },
-    server: {
-      host: '127.0.0.1',
-      port: PORT,
-      // No chokidar (see vfsWatchPlugin); HMR stays on but rides our bridge.
-      watch: null,
-      hmr: { protocol: 'ws', host: '127.0.0.1', port: PORT },
-    },
+    // The config is imported above, not auto-discovered (see vite.config.mjs).
+    configFile: false,
   });
 
   // Vite reads server.hot on every update, so swapping the reference is enough
@@ -207,6 +172,71 @@ function vfsWatchPlugin() {
 })().catch(function (err) {
   console.log('vite dev failed : ' + (err && err.message ? err.message : err));
 });
+`,
+  '/project/vite/vite.config.mjs': `// The Vite config for the demo project.
+//
+// build.mjs and dev.mjs import this module directly instead of letting Vite
+// auto-discover it: Vite loads a config file by bundling it with esbuild
+// against the *real* file system, which a browser tab does not have. The
+// webpack and rspack demos import their configs the same way, for the same
+// reason. Shared options live here; root and the mode-specific options are
+// passed at the call site.
+import vue from '@vitejs/plugin-vue';
+import fs from 'fs';
+import path from 'path';
+
+const ROOT = '/project/vite';
+const SRC = path.join(ROOT, 'src');
+
+// Vite watches with chokidar, which wants inotify - a tab has none. So we
+// watch the virtual file system ourselves and forward the events into Vite's
+// own watcher, which is where the HMR pipeline is wired up. node_modules and
+// dist are filtered out so an install never floods it.
+function vfsWatch() {
+  return {
+    name: 'web-node-vfs-watch',
+    configureServer(server) {
+      // Each watcher reports paths relative to its own base, so carry the base
+      // with the watcher - joining a root-relative name onto SRC would invent a
+      // path like src/src/index.html.
+      const forward = function (base) {
+        return function (eventType, filename) {
+          if (!filename) return;
+          const name = String(filename);
+          if (name.indexOf('node_modules') !== -1 || name.indexOf('dist') !== -1) return;
+          console.log('vfs-change  : ' + eventType + ' ' + name);
+          server.watcher.emit(eventType === 'change' ? 'change' : 'add', path.join(base, name));
+        };
+      };
+      // Sources (recursive) plus index.html at the project root.
+      const watchers = [
+        fs.watch(SRC, { recursive: true }, forward(SRC)),
+        fs.watch(ROOT, {}, forward(ROOT)),
+      ];
+      if (server.httpServer) {
+        server.httpServer.on('close', function () { watchers.forEach(function (w) { try { w.close(); } catch (e) {} }); });
+      }
+      console.log('watching    : ' + SRC + ' (VFS events -> Vite HMR)');
+    },
+  };
+}
+
+export default {
+  // Relative asset URLs so the built site also works from a sub-path.
+  base: './',
+  plugins: [vue(), vfsWatch()],
+  // Vite pre-bundles bare deps with esbuild, and esbuild-wasm has no file
+  // system (its reads throw "not implemented on js"). Turn pre-bundling off so
+  // Vite serves the dependencies' own ESM sources from node_modules.
+  optimizeDeps: { disabled: true },
+  server: {
+    host: '127.0.0.1',
+    port: 5173,
+    // No chokidar (see vfsWatch); HMR stays on and rides our bridge in dev.mjs.
+    watch: null,
+    hmr: { protocol: 'ws', host: '127.0.0.1', port: 5173 },
+  },
+};
 `,
   '/project/vite/index.html': `<!doctype html>
 <html lang="en">

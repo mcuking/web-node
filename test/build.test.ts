@@ -86,6 +86,7 @@ describe('demo projects', () => {
           const fs = require('fs');
           const has = (p) => fs.existsSync(p);
           console.log('vite     ' + has('/project/vite/src/App.vue') + ' ' + has('/project/vite/index.html'));
+          console.log('vitecfg  ' + has('/project/vite/vite.config.mjs'));
           console.log('webpack  ' + has('/project/webpack/src/index.js') + ' ' + has('/project/webpack/webpack.config.mjs'));
           console.log('rspack   ' + has('/project/rspack/src/main.mjs') + ' ' + has('/project/rspack/webnode-binding.cjs'));
           console.log('node     ' + has('/project/node/index.js') + ' ' + has('/project/node/lib/report.js'));
@@ -95,6 +96,7 @@ describe('demo projects', () => {
     );
     run();
     expect(out.join('')).toContain('vite     true true');
+    expect(out.join('')).toContain('vitecfg  true');
     expect(out.join('')).toContain('webpack  true true');
     expect(out.join('')).toContain('rspack   true true');
     expect(out.join('')).toContain('node     true true');
