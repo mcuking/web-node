@@ -227,11 +227,24 @@ self.addEventListener('fetch', (event) => {
   // which resolves to the origin root. Route it back to the preview that asked
   // for it — by client id first, then by referrer as a fallback.
   //
-  // Navigations are excluded on purpose: the app shell owns its own document,
-  // and a stale client→port entry must never hijack it into a preview.
-  if (event.request.mode === 'navigate') return;
+  // Navigations are excluded from that routing on purpose: the app shell owns
+  // its own document, and a stale client→port entry must never hijack it into a
+  // preview. They are not left alone, though — the app shell document gets the
+  // cross-origin isolation headers a static host cannot send (see below).
+  if (event.request.mode === 'navigate') {
+    event.respondWith(withIsolationHeaders(event.request));
+    return;
+  }
   const port = previewPortByClient.get(event.clientId) ?? portFromReferrer(event.request.referrer);
-  if (port == null) return;
+  if (port == null) {
+    // An app-shell subresource: a script, a module the runtime imports, the
+    // wasm assets, or a worker script. They need the isolation headers too — a
+    // worker's *own response* decides whether its realm is cross-origin
+    // isolated, so an isolated document alone is not enough (see
+    // `withIsolationHeaders`).
+    event.respondWith(withIsolationHeaders(event.request));
+    return;
+  }
   event.respondWith(handle(event, port, url, 'prefix'));
 });
 
@@ -264,6 +277,37 @@ async function withShellHeaders(request) {
   headers.set('cross-origin-opener-policy', 'same-origin');
   headers.set('cross-origin-resource-policy', 'cross-origin');
   headers.set('content-type', 'text/html; charset=utf-8');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
+/**
+ * Cross-origin isolation for the app shell and its subresources.
+ *
+ * The runtime needs a `SharedArrayBuffer` and `crossOriginIsolated` realms: the
+ * rspack wasm build imports a **shared** linear memory (its `ThreadPool` spawns
+ * pthreads through `@emnapi/wasi-threads`), and the FS-worker persistence
+ * backend runs a blocking channel over shared memory. A dev server sets
+ * COOP/COEP, but a static host such as GitHub Pages cannot, and an unisolated
+ * realm fails rspack's build with `DataCloneError`
+ * ("SharedArrayBuffer transfer requires self.crossOriginIsolated") and then
+ * hangs.
+ *
+ * So once this worker controls the origin it stamps the two headers onto the
+ * app-shell document **and every app-shell subresource**. The subresources
+ * matter as much as the document: `self.crossOriginIsolated` inside a worker is
+ * decided by the worker script's own response headers, not inherited from the
+ * page — so the document alone leaves every worker realm unisolated. A host
+ * that already sends the headers is left untouched (the check below), and
+ * preview responses never come through here (they go through `handle`).
+ */
+async function withIsolationHeaders(request) {
+  const res = await fetch(request);
+  if (res.headers.has('cross-origin-opener-policy') || res.headers.has('cross-origin-embedder-policy')) {
+    return res;
+  }
+  const headers = new Headers(res.headers);
+  headers.set('cross-origin-opener-policy', 'same-origin');
+  headers.set('cross-origin-embedder-policy', 'require-corp');
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
