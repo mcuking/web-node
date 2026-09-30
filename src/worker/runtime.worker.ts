@@ -11,6 +11,7 @@ import { installVendored, vendoredCount } from '../node-runtime/vendored';
 import { loadWasmModule } from '../node-runtime/wasm/lazy';
 import { loadWasmModules, loadDeferredWasmModules, wasmModuleNames, DEFERRED_WASM_MODULES } from '../node-runtime/wasm';
 import { DEMO_FILES, DEMO_VERSION } from '../demo-project';
+import { scaffoldFiles } from './scaffold';
 
 const decoder = new TextDecoder();
 
@@ -204,6 +205,7 @@ type Request =
   | { id: number; type: 'mkdir'; path: string }
   | { id: number; type: 'tree' }
   | { id: number; type: 'evict'; root: string }
+  | { id: number; type: 'scaffold'; template: string; target: string; port?: number }
   | { id: number; type: 'reset' }
   | { id: number; type: 'describe' }
   | { id: number; type: 'npmInstall'; cwd?: string; includeDev?: boolean }
@@ -593,6 +595,19 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
           await persistence.flush(vfs);
           vfs.evictBodies(req.root);
         }
+        persistence.schedule(vfs);
+        post({ id: req.id, type: 'ok', result: listEntries(vfs) });
+        return;
+      }
+      case 'scaffold': {
+        // Copy a built-in template's files into a new project directory, so the
+        // user can start from a working Vite/webpack/rspack/Node setup. Only the
+        // embedded demo sources are copied (never `node_modules`); the new
+        // project installs its own deps as step 1.
+        if (!vfs) throw new Error('runtime not initialised');
+        const files = scaffoldFiles(req.template, req.target, req.port);
+        if (!Object.keys(files).length) throw new Error(`unknown template: ${req.template}`);
+        writeAll(vfs, files);
         persistence.schedule(vfs);
         post({ id: req.id, type: 'ok', result: listEntries(vfs) });
         return;

@@ -1,6 +1,19 @@
 import { RuntimeClient, type TreeEntry } from '../client';
 import type { RuntimeInfo } from '../worker/runtime.worker';
-import { DEMO_PROJECTS, PROJECT_ORDER, type DemoProject, type ProjectId } from '../projects';
+import {
+  DEMO_PROJECTS,
+  PROJECT_ORDER,
+  TEMPLATE_META,
+  entryFor,
+  loadStoredProjects,
+  nextProjectPort,
+  projectFromStored,
+  projectIdFromName,
+  saveStoredProjects,
+  type DemoProject,
+  type ProjectId,
+  type TemplateId,
+} from '../projects';
 import { previewUrl as buildPreviewUrl, previewPortFromHost, prefixPreviewUrl } from './preview-url';
 
 /**
@@ -55,6 +68,13 @@ const nextHintEl = $<HTMLSpanElement>('next-hint');
 const filesRootEl = $<HTMLSpanElement>('files-root');
 const portSelect = $<HTMLSelectElement>('port-select');
 const refreshBtn = $<HTMLButtonElement>('refresh');
+
+/**
+ * Session flag guarding the one-time cross-origin-isolation reload (see
+ * `boot`). It lives in `sessionStorage` so it survives the reload itself and
+ * keeps a host that never isolates from reloading forever.
+ */
+const COI_RELOAD_FLAG = 'web-node:coi-reloaded';
 const openTab = $<HTMLAnchorElement>('open-tab');
 const previewFrame = $<HTMLIFrameElement>('preview-frame');
 const previewEmpty = $<HTMLDivElement>('preview-empty');
@@ -71,6 +91,16 @@ let busy = false;
 let ports: number[] = [];
 /** Which project each `run()` belongs to, so its output stays with it. */
 const runOwner = new Map<number, ProjectId>();
+
+/**
+ * Every project the UI can show: the four built-ins plus any the user created.
+ * A registry rather than the static `DEMO_PROJECTS` record, because custom
+ * projects are registered at runtime, once their sources are scaffolded.
+ */
+const PROJECTS = new Map<ProjectId, DemoProject>();
+function projectById(id: ProjectId): DemoProject {
+  return PROJECTS.get(id) ?? DEMO_PROJECTS.node;
+}
 
 /**
  * Write one line to the terminal, tagged with the project it came from.
@@ -115,7 +145,7 @@ async function readTree(): Promise<TreeEntry[]> {
  * file inside it.
  */
 function renderTree(): void {
-  const { root } = DEMO_PROJECTS[activeProject];
+  const { root } = projectById(activeProject);
   const prefix = root + '/';
   filesRootEl.textContent = root;
   treeEl.innerHTML = '';
@@ -143,7 +173,7 @@ async function openFile(path: string): Promise<void> {
   activeFile = path;
   const contents = await client.readFile(path);
   editorEl.value = contents;
-  const { root } = DEMO_PROJECTS[activeProject];
+  const { root } = projectById(activeProject);
   activeFileEl.textContent = path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
   dirty = false;
   dirtyEl.textContent = '';
@@ -227,10 +257,24 @@ interface StepDef {
 }
 
 const STEPS: Record<string, StepDef> = {};
-for (const id of PROJECT_ORDER) {
-  const project = DEMO_PROJECTS[id];
+const SCENARIOS: ScenarioDef[] = [];
+/** The port each project's dev server (or the Node playground) listens on. */
+const DEV_PORT: Record<string, number> = {};
+
+/**
+ * Wire a project into the step bar and the chip row.
+ *
+ * Called once per built-in at load, and once per custom project when the user
+ * creates one (or when a stored one is restored), so a project is defined in a
+ * single place regardless of where it came from. The step set depends on the
+ * *template*, not the id: a `node` project runs its entry directly, a bundler
+ * project gets a dev server and a build.
+ */
+function registerProject(project: DemoProject, label: string, blurp: string): void {
+  const id = project.id;
+  PROJECTS.set(id, project);
   STEPS[`${id}/install`] = { label: '↓ Install deps', needs: 'none', exec: () => installDeps(project) };
-  if (id === 'node') {
+  if (project.template === 'node') {
     STEPS[`${id}/run`] = {
       label: '▶ Run',
       needs: 'deps',
@@ -250,6 +294,18 @@ for (const id of PROJECT_ORDER) {
       exec: () => runProcess(`${project.root}/build.mjs`, `node ${project.root}/build.mjs`, true),
     };
   }
+  DEV_PORT[id] = project.port;
+  SCENARIOS.push({
+    id,
+    label,
+    blurp,
+    steps: project.template === 'node' ? [`${id}/install`, `${id}/run`] : [`${id}/install`, `${id}/dev`, `${id}/build`],
+  });
+}
+
+for (const template of PROJECT_ORDER) {
+  const project = DEMO_PROJECTS[template];
+  registerProject(project, TEMPLATE_META[template].label, TEMPLATE_META[template].blurp);
 }
 
 interface ScenarioDef {
@@ -259,27 +315,11 @@ interface ScenarioDef {
   steps: string[];
 }
 
-const META: Record<ProjectId, { label: string; blurp: string }> = {
-  vite: { label: '⚡ Vite', blurp: 'Vue 3 single-file component — Vite dev server + build, in the tab' },
-  webpack: { label: '📦 Webpack', blurp: 'React app — webpack watches and bundles; the preview full-reloads' },
-  rspack: { label: '🔷 rspack', blurp: 'React app — Rust bundler via wasm32-wasi on a real Worker thread pool' },
-  node: { label: '🟢 Node.js', blurp: 'the full runtime — fs, http, crypto, streams, workers, child processes' },
-};
-
-const SCENARIOS: ScenarioDef[] = PROJECT_ORDER.map((id) => ({
-  id,
-  ...META[id],
-  steps: id === 'node' ? [`${id}/install`, `${id}/run`] : [`${id}/install`, `${id}/dev`, `${id}/build`],
-}));
-
-/** The port each project's dev server (or the Node playground) listens on. */
-const DEV_PORT: Record<ProjectId, number> = { vite: 5173, webpack: 5174, rspack: 5175, node: 3000 };
-
 /** Step ids that are observably complete (deps on disk / a port listening). */
 const completed = new Set<string>();
 
 function projectDeps(id: ProjectId): boolean {
-  const modules = DEMO_PROJECTS[id].root + '/node_modules';
+  const modules = projectById(id).root + '/node_modules';
   return tree.some((e) => e.type === 'dir' && e.path === modules);
 }
 
@@ -289,11 +329,11 @@ function stepEnabled(id: string): boolean {
 
 /** Fold observed runtime state into `completed`, so gates survive a reload. */
 function syncDerived(): void {
-  for (const id of PROJECT_ORDER) {
+  for (const id of PROJECTS.keys()) {
     const install = `${id}/install`;
     if (projectDeps(id)) completed.add(install);
     else completed.delete(install);
-    const runStepId = id === 'node' ? `${id}/run` : `${id}/dev`;
+    const runStepId = projectById(id).template === 'node' ? `${id}/run` : `${id}/dev`;
     if (ports.includes(DEV_PORT[id])) completed.add(runStepId);
     else completed.delete(runStepId);
   }
@@ -314,15 +354,131 @@ function nextStepId(): string | null {
 function renderChips(): void {
   projectChipsEl.innerHTML = '';
   for (const scenario of SCENARIOS) {
+    const project = projectById(scenario.id);
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'chip';
     btn.dataset.project = scenario.id;
-    btn.textContent = scenario.label;
     btn.title = scenario.blurp;
+    const label = document.createElement('span');
+    label.textContent = scenario.label;
+    btn.appendChild(label);
     if (scenario.id === activeProject) btn.classList.add('active');
     btn.addEventListener('click', () => void selectProject(scenario.id));
+    // A project the user created gets a small × to remove it. Removing is a
+    // context switch too, so it is blocked while a step is running.
+    if (project.custom) {
+      const x = document.createElement('span');
+      x.className = 'chip-x';
+      x.textContent = '×';
+      x.title = 'Remove this project';
+      x.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void removeProject(scenario.id);
+      });
+      btn.appendChild(x);
+    }
     projectChipsEl.appendChild(btn);
+  }
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'chip chip-add';
+  add.id = 'new-project';
+  add.textContent = '+ New project';
+  add.title = 'Scaffold a new project from a built-in template';
+  add.addEventListener('click', () => void createProject());
+  projectChipsEl.appendChild(add);
+}
+
+/**
+ * Scaffold a new project from a template and switch to it.
+ *
+ * The dialog is plain prompts (the app has no modal system): a name, then a
+ * template. The name becomes both the id (slugged) and the `/project/<id>`
+ * directory; the template's files are copied there by the runtime, so the new
+ * project is a working Vite/webpack/rspack/Node setup from the first step.
+ */
+async function createProject(): Promise<void> {
+  if (busy) return;
+  const name = window.prompt('New project name:', 'my-app');
+  if (name === null) return;
+  const id = projectIdFromName(name);
+  if (PROJECTS.has(id)) {
+    window.alert(`A project named “${id}” already exists.`);
+    return;
+  }
+  const template = (window.prompt('Template? One of: node | vite | webpack | rspack', 'vite') || '')
+    .trim()
+    .toLowerCase();
+  if (!(template in DEMO_PROJECTS)) {
+    window.alert(`Unknown template “${template}”. Pick node, vite, webpack or rspack.`);
+    return;
+  }
+  const taken = [...PROJECTS.values()].map((p) => p.port);
+  const port = nextProjectPort(taken);
+  const project: DemoProject = {
+    id,
+    template: template as TemplateId,
+    root: `/project/${id}`,
+    entry: entryFor(template as TemplateId, `/project/${id}`),
+    port,
+    custom: true,
+  };
+  busy = true;
+  setStatus('creating project…', 'running');
+  try {
+    tree = await client.scaffold(template, project.root, port);
+  } catch (err) {
+    writeTerminal(`\n[create project failed] ${(err as Error).message}\n`, 'err');
+    setStatus('error', 'err');
+    busy = false;
+    renderSteps();
+    return;
+  }
+  busy = false;
+  registerProject(project, `📁 ${name.trim() || id}`, `${template} project · ${project.root} · port ${port}`);
+  saveStoredProjects([...loadStoredProjects(), { id, template: template as TemplateId, port, label: name.trim() || id }]);
+  renderChips();
+  renderTree();
+  await selectProject(id);
+  writeTerminal(
+    `\n[created project] ${project.root} from “${template}” template — pick a step above\n`,
+    'ok',
+    id,
+  );
+  syncDerived();
+  renderSteps();
+}
+
+/** Remove a project the user created (its files stay on disk until reset). */
+async function removeProject(id: ProjectId): Promise<void> {
+  if (busy) return;
+  const project = projectById(id);
+  if (!project.custom) return;
+  if (!window.confirm(`Remove “${id}” from the list? Its “${project.root}” files stay in the workspace.`)) return;
+  PROJECTS.delete(id);
+  const index = SCENARIOS.findIndex((s) => s.id === id);
+  if (index >= 0) SCENARIOS.splice(index, 1);
+  saveStoredProjects(loadStoredProjects().filter((p) => p.id !== id));
+  if (activeProject === id) {
+    activeProject = 'node';
+    clearOutput();
+    clearPreview();
+    await openFile(DEMO_PROJECTS.node.entry);
+    await refreshPorts();
+  }
+  renderChips();
+  renderTree();
+  syncDerived();
+  renderSteps();
+}
+
+/** Register the projects the user created in a previous session. */
+function restoreStoredProjects(): void {
+  for (const stored of loadStoredProjects()) {
+    if (PROJECTS.has(stored.id)) continue;
+    const project = projectFromStored(stored);
+    registerProject(project, `📁 ${stored.label ?? stored.id}`, `${stored.template} project · ${project.root} · port ${project.port}`);
   }
 }
 
@@ -407,11 +563,11 @@ async function selectProject(id: ProjectId): Promise<void> {
   // Free the previous project's memory in the background. Eviction flushes
   // first (so nothing written but not yet durable is lost), and that flush can
   // take a moment over a large `node_modules` — the switch must not wait on it.
-  void client.evict(DEMO_PROJECTS[previous].root).catch(() => undefined);
+  void client.evict(projectById(previous).root).catch(() => undefined);
   renderChips();
   renderTree();
   renderSteps();
-  await openFile(DEMO_PROJECTS[id].entry);
+  await openFile(projectById(id).entry);
 }
 
 /** Empty the output pane (a project switch must not carry the old logs over). */
@@ -461,7 +617,7 @@ async function refreshPorts(): Promise<void> {
   // left keeps listening (the runtime cannot stop a program), so scope the
   // preview to the active project's port — otherwise a switch would re-attach
   // the previous project's server and show its preview again.
-  const expected = DEMO_PROJECTS[activeProject].port;
+  const expected = projectById(activeProject).port;
   ports = described.ports.filter((port) => port === expected);
   const previous = portSelect.value;
   portSelect.innerHTML = '';
@@ -496,7 +652,7 @@ function startPortWatch(): void {
     void client
       .describe()
       .then(({ ports: next }) => {
-        const expected = DEMO_PROJECTS[activeProject].port;
+        const expected = projectById(activeProject).port;
         if (next.filter((port) => port === expected).join(',') === ports.join(',')) return;
         void refreshPorts().then(() => {
           syncDerived();
@@ -633,7 +789,12 @@ resetBtn.addEventListener('click', async () => {
   await client.reset();
   tree = await readTree();
   renderTree();
-  await openFile(DEMO_PROJECTS[activeProject].entry);
+  // Reset restores the built-in demo sources only, so a custom project's entry
+  // may no longer exist — fall back to the Node playground rather than raise.
+  const entry = projectById(activeProject).entry;
+  await openFile(tree.some((e) => e.path === entry) ? entry : DEMO_PROJECTS.node.entry).catch(
+    () => undefined,
+  );
   await refreshPorts();
   syncDerived();
   renderSteps();
@@ -652,7 +813,7 @@ newFolderBtn.addEventListener('click', () => void createEntry('dir'));
  * one go.
  */
 async function createEntry(kind: 'file' | 'dir'): Promise<void> {
-  const { root } = DEMO_PROJECTS[activeProject];
+  const { root } = projectById(activeProject);
   const label =
     kind === 'file'
       ? 'New file path (relative to ' + root + '):'
@@ -691,10 +852,52 @@ window.addEventListener('keydown', (e) => {
 });
 
 async function boot(): Promise<void> {
+  // Restore the user's custom projects before the first chip render, so they
+  // appear alongside the built-ins from the very first paint.
+  restoreStoredProjects();
   renderChips();
   renderTree();
   renderSteps();
   const bridged = await client.installServiceWorkerBridge();
+
+  // A static host cannot send COOP/COEP, so the service worker adds them to the
+  // app-shell document and its subresources (see `public/sw.js`). A worker
+  // only shapes responses *after* it controls the page, so the first load of a
+  // fresh registration is not isolated: the service worker registers, then
+  // claims this client, but the document it is showing already came from the
+  // network. Without isolation the runtime worker cannot allocate the
+  // SharedArrayBuffer the wasm toolchain needs, and rspack's build wedges on the
+  // failed transfer of that shared memory (page or worker realm alike).
+  //
+  // So reload until the document is actually isolated. A single reload is not
+  // enough: `controller` can become non-null via `clients.claim()` *without* the
+  // current navigation having been served by the worker, so one reload can still
+  // land unisolated. Cap the attempts so a host that can never isolate (e.g. the
+  // worker cannot register) degrades to "no isolation" rather than a reload
+  // loop.
+  if (bridged && !window.crossOriginIsolated) {
+    const tries = Number(sessionStorage.getItem(COI_RELOAD_FLAG) ?? '0');
+    if (tries < 3) {
+      sessionStorage.setItem(COI_RELOAD_FLAG, String(tries + 1));
+      bootEl.textContent = 'enabling cross-origin isolation…';
+      // Wait until this page is controlled by the worker, so the *next*
+      // navigation is served by it (that is what applies COOP/COEP). The claim
+      // can lag activation, and `controllerchange` may fire before we can
+      // listen, so poll rather than race an event, with a bound.
+      if (!navigator.serviceWorker.controller) {
+        const deadline = Date.now() + 5000;
+        while (!navigator.serviceWorker.controller && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      location.reload();
+      return;
+    }
+  } else if (bridged) {
+    // Isolated: clear the counter so a later fresh registration can isolate again.
+    sessionStorage.removeItem(COI_RELOAD_FLAG);
+  }
+
   installHmrRelay();
   startPortWatch();
   await client.init();
@@ -702,7 +905,7 @@ async function boot(): Promise<void> {
   // deterministic and the gates see any restored `node_modules`.
   tree = await readTree();
   renderTree();
-  await openFile(DEMO_PROJECTS[activeProject].entry);
+  await openFile(projectById(activeProject).entry);
   writeTerminal(
     bridged
       ? 'service worker bridge ready — /preview/<port>/ routes into the virtual network.\n'

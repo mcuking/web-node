@@ -167,6 +167,14 @@ export class RuntimeClient {
     return this.#request({ type: 'mkdir', path });
   }
 
+  /**
+   * Copy a built-in template's sources into `target` (a new project root), so
+   * the user can start a project from a known-good setup. Returns the tree.
+   */
+  scaffold(template: string, target: string, port?: number): Promise<TreeEntry[]> {
+    return this.#request({ type: 'scaffold', template, target, port });
+  }
+
   /** The whole VFS tree as `{ path, type }`. */
   tree(): Promise<TreeEntry[]> {
     return this.#request({ type: 'tree' });

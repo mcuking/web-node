@@ -107,6 +107,25 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border-color: var(--accent);
   font-weight: 700;
 }
+/* The × on a user-created project chip, and the “+ New project” chip. */
+.chip { display: inline-flex; align-items: center; gap: 5px; }
+.chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.55;
+}
+.chip-x:hover { opacity: 1; background: rgba(255, 255, 255, 0.14); }
+.chip-add {
+  border-style: dashed;
+  color: var(--muted);
+}
+.chip-add:hover { color: var(--accent); border-color: var(--accent); }
 .steps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .step-arrow { color: #3a4557; font-size: 12px; }
 .step {
