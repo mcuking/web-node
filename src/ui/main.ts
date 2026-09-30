@@ -136,34 +136,187 @@ async function readTree(): Promise<TreeEntry[]> {
   return client.tree();
 }
 
+// --- file explorer state ---------------------------------------------------
+
+/** Folders the user collapsed; everything starts expanded. */
+const collapsedDirs = new Set<string>();
+/** A new file/folder being named in place, keyed by its parent folder. */
+let creating: { parent: string; kind: 'file' | 'dir' } | null = null;
+/** The path whose name is being edited in place, or null. */
+let renaming: string | null = null;
+
+const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
+const parentDir = (path: string): string => path.slice(0, path.lastIndexOf('/'));
+const joinPath = (dir: string, name: string): string => dir.replace(/\/+$/, '') + '/' + name;
+
 /**
- * The file tree shows *only the active project*: a project is a self-contained
- * directory (`/project/vite`, `/project/webpack`, `/project/rspack`,
- * `/project/node`), so which files you see tells you which project you are in.
- * `node_modules` is hidden (it would swamp the list, and every project has one),
- * and directories are shown so a folder you create is visible before it has a
- * file inside it.
+ * The file tree renders *only the active project*, as a nested explorer (the
+ * way a desktop IDE does): folders collapse, `node_modules` is hidden (it would
+ * swamp the list and every project has one), and each row carries the actions
+ * that apply to it — new file / new folder / rename / delete for a folder,
+ * rename / delete for a file. New entries and renames happen in an inline input,
+ * so nothing leaves the tree.
  */
 function renderTree(): void {
   const { root } = projectById(activeProject);
   const prefix = root + '/';
   filesRootEl.textContent = root;
   treeEl.innerHTML = '';
-  const rows = tree
+
+  const entries = tree
     .filter((e) => e.path.startsWith(prefix))
-    .filter((e) => e.path !== prefix + 'node_modules' && !e.path.startsWith(prefix + 'node_modules/'))
-    .map((e) => ({ ...e, rel: e.path.slice(prefix.length) }))
-    .sort((a, b) => a.rel.localeCompare(b.rel));
-  for (const e of rows) {
-    const li = document.createElement('li');
-    li.textContent = e.rel + (e.type === 'dir' ? '/' : '');
-    li.dataset.path = e.path;
-    li.style.paddingLeft = 8 + e.rel.split('/').length * 12 + 'px';
-    if (e.type === 'dir') li.classList.add('dir');
-    if (e.path === activeFile) li.classList.add('active');
-    if (e.type === 'file') li.addEventListener('click', () => void openFile(e.path));
-    treeEl.appendChild(li);
+    .filter((e) => e.path !== prefix + 'node_modules' && !e.path.startsWith(prefix + 'node_modules/'));
+
+  // Group the flat path list by parent directory, then sort each bucket
+  // folders-first and by name — the order a tree view reads in.
+  const childrenOf = new Map<string, TreeEntry[]>();
+  for (const entry of entries) {
+    const parent = parentDir(entry.path);
+    const bucket = childrenOf.get(parent);
+    if (bucket) bucket.push(entry);
+    else childrenOf.set(parent, [entry]);
   }
+  for (const bucket of childrenOf.values()) {
+    bucket.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+      return baseName(a.path).localeCompare(baseName(b.path));
+    });
+  }
+
+  const renderDir = (dir: string, depth: number): void => {
+    if (!collapsedDirs.has(dir)) {
+      for (const entry of childrenOf.get(dir) ?? []) {
+        treeEl.appendChild(makeRow(entry, depth));
+        if (entry.type === 'dir') renderDir(entry.path, depth + 1);
+      }
+    }
+    if (creating && creating.parent === dir) treeEl.appendChild(makeCreateRow(depth));
+  };
+
+  renderDir(root, 0);
+}
+
+/** One explorer row: indent, caret, icon, name, and the row's actions. */
+function makeRow(entry: TreeEntry, depth: number): HTMLLIElement {
+  const li = document.createElement('li');
+  li.className = 'row-item' + (entry.type === 'dir' ? ' dir' : '');
+  li.dataset.path = entry.path;
+  li.dataset.type = entry.type;
+  li.style.paddingLeft = 4 + depth * 14 + 'px';
+  if (entry.path === activeFile) li.classList.add('active');
+
+  const caret = document.createElement('span');
+  caret.className = 'caret';
+  caret.textContent = entry.type === 'dir' ? (collapsedDirs.has(entry.path) ? '▸' : '▾') : '';
+  li.appendChild(caret);
+
+  const icon = document.createElement('span');
+  icon.className = 'ftype';
+  icon.textContent = entry.type === 'dir' ? '📁' : '📄';
+  li.appendChild(icon);
+
+  // Renaming this row: swap the name for an input in place.
+  if (renaming === entry.path) {
+    const input = document.createElement('input');
+    input.className = 'tree-input';
+    input.value = baseName(entry.path);
+    input.spellcheck = false;
+    li.appendChild(input);
+    queueMicrotask(() => {
+      input.focus();
+      input.select();
+    });
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        void commitRename(input.value);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        renaming = null;
+        renderTree();
+      }
+    });
+    input.addEventListener('blur', () => {
+      if (renaming === entry.path) void commitRename(input.value);
+    });
+    return li;
+  }
+
+  const name = document.createElement('span');
+  name.className = 'fname';
+  name.textContent = baseName(entry.path);
+  li.appendChild(name);
+
+  const actions = document.createElement('span');
+  actions.className = 'row-actions';
+  const addAct = (cls: string, title: string, label: string, onClick: () => void): void => {
+    const button = document.createElement('button');
+    button.className = 'act ' + cls;
+    button.title = title;
+    button.textContent = label;
+    button.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onClick();
+    });
+    actions.appendChild(button);
+  };
+  if (entry.type === 'dir') {
+    addAct('new-file', 'New file in this folder', '＋📄', () => startCreate(entry.path, 'file'));
+    addAct('new-dir', 'New folder in this folder', '＋📁', () => startCreate(entry.path, 'dir'));
+  }
+  addAct('rename', 'Rename', '✎', () => {
+    renaming = entry.path;
+    renderTree();
+  });
+  addAct('delete', 'Delete', '🗑', () => void deleteEntry(entry.path, entry.type));
+  li.appendChild(actions);
+
+  // A folder toggles open/closed; a file opens in the editor.
+  li.addEventListener('click', () => {
+    if (entry.type === 'dir') {
+      if (collapsedDirs.has(entry.path)) collapsedDirs.delete(entry.path);
+      else collapsedDirs.add(entry.path);
+      renderTree();
+    } else {
+      void openFile(entry.path);
+    }
+  });
+  return li;
+}
+
+/** The inline "new file/folder" input row shown inside the target folder. */
+function makeCreateRow(depth: number): HTMLLIElement {
+  const li = document.createElement('li');
+  li.className = 'row-item creating';
+  li.style.paddingLeft = 4 + depth * 14 + 'px';
+
+  const icon = document.createElement('span');
+  icon.className = 'ftype';
+  icon.textContent = creating?.kind === 'dir' ? '📁' : '📄';
+  li.appendChild(icon);
+
+  const input = document.createElement('input');
+  input.className = 'tree-input';
+  input.placeholder = creating?.kind === 'dir' ? 'new folder name' : 'new file name';
+  input.spellcheck = false;
+  li.appendChild(input);
+  queueMicrotask(() => input.focus());
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void commitCreate(input.value);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      creating = null;
+      renderTree();
+    }
+  });
+  input.addEventListener('blur', () => {
+    if (creating) void commitCreate(input.value);
+  });
+  return li;
 }
 
 async function openFile(path: string): Promise<void> {
@@ -801,30 +954,34 @@ resetBtn.addEventListener('click', async () => {
   writeTerminal('\n[projects reset to demo files]\n', 'sys');
 });
 
-newFileBtn.addEventListener('click', () => void createEntry('file'));
-newFolderBtn.addEventListener('click', () => void createEntry('dir'));
+newFileBtn.addEventListener('click', () => startCreate(projectById(activeProject).root, 'file'));
+newFolderBtn.addEventListener('click', () => startCreate(projectById(activeProject).root, 'dir'));
+
+/** Begin naming a new file/folder inside `parent` (inline input in the tree). */
+function startCreate(parent: string, kind: 'file' | 'dir'): void {
+  creating = { parent, kind };
+  renaming = null;
+  collapsedDirs.delete(parent);
+  renderTree();
+}
 
 /**
- * Create a file or folder inside the active project.
- *
- * The path is entered relative to the project root (e.g. `src/util.js`) so the
- * tree keeps its names short; a leading slash is tolerated. A file starts empty
- * and opens in the editor; a folder is created recursively so `a/b/c` works in
- * one go.
+ * Commit the inline "new file/folder" input. The name is a single segment (the
+ * folder is the row it was opened from), so paths stay valid by construction;
+ * an empty name simply cancels.
  */
-async function createEntry(kind: 'file' | 'dir'): Promise<void> {
-  const { root } = projectById(activeProject);
-  const label =
-    kind === 'file'
-      ? 'New file path (relative to ' + root + '):'
-      : 'New folder path (relative to ' + root + '):';
-  const input = window.prompt(label, kind === 'file' ? 'src/untitled.js' : 'src/components');
-  if (input === null) return;
-  const rel = input.trim().replace(/^\/+/, '');
-  if (!rel) return;
-  const abs = root + '/' + rel;
+async function commitCreate(raw: string): Promise<void> {
+  const state = creating;
+  creating = null;
+  if (!state) return;
+  const name = raw.trim().replace(/^\/+|\/+$/g, '');
+  if (!name) {
+    renderTree();
+    return;
+  }
+  const abs = joinPath(state.parent, name);
   try {
-    if (kind === 'dir') {
+    if (state.kind === 'dir') {
       tree = await client.mkdir(abs);
       writeTerminal('\n[created folder] ' + abs + '\n', 'sys');
     } else {
@@ -833,10 +990,62 @@ async function createEntry(kind: 'file' | 'dir'): Promise<void> {
     }
   } catch (err) {
     writeTerminal('\n[create failed] ' + (err as Error).message + '\n', 'err');
+    renderTree();
     return;
   }
   renderTree();
-  if (kind === 'file') await openFile(abs);
+  if (state.kind === 'file') await openFile(abs);
+}
+
+/** Rename `renaming` to a single-segment name in the same folder. */
+async function commitRename(raw: string): Promise<void> {
+  const from = renaming;
+  renaming = null;
+  if (!from) return;
+  const name = raw.trim().replace(/^\/+|\/+$/g, '');
+  if (!name || name.includes('/')) {
+    renderTree();
+    return;
+  }
+  const to = joinPath(parentDir(from), name);
+  if (to === from) {
+    renderTree();
+    return;
+  }
+  try {
+    tree = await client.rename(from, to);
+    writeTerminal('\n[renamed] ' + from + ' -> ' + to + '\n', 'sys');
+  } catch (err) {
+    writeTerminal('\n[rename failed] ' + (err as Error).message + '\n', 'err');
+    renderTree();
+    return;
+  }
+  // Keep the editor and the active-row marker pointing at the moved file, and
+  // follow a folder rename through any file that lived under it.
+  if (activeFile === from) activeFile = to;
+  else if (activeFile.startsWith(from + '/')) activeFile = to + activeFile.slice(from.length);
+  renderTree();
+}
+
+/** Delete a file, or a folder and everything under it, after a confirmation. */
+async function deleteEntry(path: string, kind: 'file' | 'dir'): Promise<void> {
+  const what = kind === 'dir' ? 'folder' : 'file';
+  if (!window.confirm('Delete ' + what + ' "' + baseName(path) + '"? This cannot be undone.')) return;
+  try {
+    tree = await client.remove(path);
+    writeTerminal('\n[deleted ' + what + '] ' + path + '\n', 'sys');
+  } catch (err) {
+    writeTerminal('\n[delete failed] ' + (err as Error).message + '\n', 'err');
+    return;
+  }
+  if (activeFile === path || activeFile.startsWith(path + '/')) {
+    activeFile = '';
+    editorEl.value = '';
+    activeFileEl.textContent = '—';
+    dirty = false;
+    dirtyEl.textContent = '';
+  }
+  renderTree();
 }
 
 window.addEventListener('keydown', (e) => {

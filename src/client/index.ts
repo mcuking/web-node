@@ -168,6 +168,22 @@ export class RuntimeClient {
   }
 
   /**
+   * Move/rename a file or directory; the destination's parents are created if
+   * needed. Returns the tree afterwards.
+   */
+  rename(from: string, to: string): Promise<TreeEntry[]> {
+    return this.#request({ type: 'rename', from, to });
+  }
+
+  /**
+   * Delete a file, or a directory and everything under it. Returns the tree
+   * afterwards.
+   */
+  remove(path: string): Promise<TreeEntry[]> {
+    return this.#request({ type: 'remove', path });
+  }
+
+  /**
    * Copy a built-in template's sources into `target` (a new project root), so
    * the user can start a project from a known-good setup. Returns the tree.
    */

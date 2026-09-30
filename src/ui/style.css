@@ -200,18 +200,49 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* --- file tree --- */
 .file-tree { list-style: none; margin: 0; padding: 6px; overflow: auto; flex: 1; }
 .file-tree li {
-  padding: 5px 8px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 6px;
   border-radius: 5px;
   color: var(--muted);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .file-tree li:hover { background: var(--panel-2); color: var(--text); }
 .file-tree li.active { background: #17301f; color: var(--accent); }
-.file-tree li.dir { color: #9fb0c8; cursor: default; }
-.file-tree li.dir:hover { background: transparent; color: #9fb0c8; }
+.file-tree li.dir { color: #9fb0c8; }
+.file-tree .caret { flex: 0 0 12px; width: 12px; font-size: 10px; color: #6b7a90; }
+.file-tree .ftype { flex: 0 0 auto; font-size: 12px; }
+.file-tree .fname { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.file-tree .row-actions { flex: 0 0 auto; display: none; gap: 2px; }
+.file-tree li:hover .row-actions { display: inline-flex; }
+.row-actions .act {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 18px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.row-actions .act:hover { color: var(--accent); border-color: var(--accent-dim); background: rgba(255, 255, 255, 0.06); }
+.row-actions .act.delete:hover { color: var(--err); border-color: var(--err); }
+.file-tree .tree-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--accent-dim);
+  border-radius: 4px;
+  padding: 1px 6px;
+  outline: none;
+}
+.file-tree li.creating .tree-input { border-color: var(--accent); }
 .file-actions { display: flex; gap: 4px; }
 .file-actions button { padding: 2px 8px; font-size: 11px; text-transform: none; letter-spacing: 0; }
 

@@ -203,6 +203,8 @@ type Request =
   | { id: number; type: 'writeFile'; path: string; contents: string }
   | { id: number; type: 'readFile'; path: string }
   | { id: number; type: 'mkdir'; path: string }
+  | { id: number; type: 'rename'; from: string; to: string }
+  | { id: number; type: 'remove'; path: string }
   | { id: number; type: 'tree' }
   | { id: number; type: 'evict'; root: string }
   | { id: number; type: 'scaffold'; template: string; target: string; port?: number }
@@ -570,6 +572,24 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
       case 'mkdir':
         if (!vfs) throw new Error('runtime not initialised');
         vfs.mkdir(req.path, { recursive: true });
+        persistence.schedule(vfs);
+        post({ id: req.id, type: 'ok', result: listEntries(vfs) });
+        return;
+      case 'rename':
+        if (!vfs) throw new Error('runtime not initialised');
+        // Create the destination's parents first: the tree edits a path one
+        // segment at a time, so a rename must not fail because a directory it
+        // moves under does not exist yet.
+        ensureDir(vfs, req.to);
+        vfs.rename(req.from, req.to);
+        persistence.schedule(vfs);
+        post({ id: req.id, type: 'ok', result: listEntries(vfs) });
+        return;
+      case 'remove':
+        if (!vfs) throw new Error('runtime not initialised');
+        // `recursive` so a folder goes with everything under it; `force` so a
+        // concurrent delete (or a path already gone) is not an error.
+        vfs.rm(req.path, { recursive: true, force: true });
         persistence.schedule(vfs);
         post({ id: req.id, type: 'ok', result: listEntries(vfs) });
         return;
