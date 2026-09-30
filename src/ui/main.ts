@@ -150,6 +150,24 @@ const parentDir = (path: string): string => path.slice(0, path.lastIndexOf('/'))
 const joinPath = (dir: string, name: string): string => dir.replace(/\/+$/, '') + '/' + name;
 
 /**
+ * Row-action icons, as inline SVG on a 16px grid.
+ *
+ * Glyph characters (＋ 📄 ✎ 🗑) render at the mercy of the emoji font — they
+ * vary in width and colour, and a coloured emoji cannot inherit the row's
+ * colour on hover. A stroked SVG inherits `currentColor` and stays crisp.
+ */
+const ICON = {
+  newFile:
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M9 1.6H4.6A1.6 1.6 0 0 0 3 3.2v9.6A1.6 1.6 0 0 0 4.6 14.4h6.8A1.6 1.6 0 0 0 13 12.8V5.6z"/><path d="M9 1.6v4h4"/><path d="M8 8.2v3.2M6.4 9.8h3.2"/></svg>',
+  newDir:
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M1.6 4.4A1.6 1.6 0 0 1 3.2 2.8h2.6l1.5 1.6h5.5A1.6 1.6 0 0 1 14.4 6v6a1.6 1.6 0 0 1-1.6 1.6H3.2A1.6 1.6 0 0 1 1.6 11.9z"/><path d="M8 7.4v3.2M6.4 9h3.2"/></svg>',
+  rename:
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M10.6 2.6a1.4 1.4 0 0 1 2 2L5.4 11.8l-2.6.8.8-2.6z"/><path d="M9.6 3.6l2 2"/></svg>',
+  delete:
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M2.6 4h10.8"/><path d="M5.6 4V2.9a1 1 0 0 1 1-1h2.8a1 1 0 0 1 1 1V4"/><path d="M4.1 4l.6 8.9a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9L12 4"/><path d="M6.7 6.9v4.2M9.3 6.9v4.2"/></svg>',
+};
+
+/**
  * The file tree renders *only the active project*, as a nested explorer (the
  * way a desktop IDE does): folders collapse, `node_modules` is hidden (it would
  * swamp the list and every project has one), and each row carries the actions
@@ -250,11 +268,12 @@ function makeRow(entry: TreeEntry, depth: number): HTMLLIElement {
 
   const actions = document.createElement('span');
   actions.className = 'row-actions';
-  const addAct = (cls: string, title: string, label: string, onClick: () => void): void => {
+  const addAct = (cls: string, title: string, icon: string, onClick: () => void): void => {
     const button = document.createElement('button');
     button.className = 'act ' + cls;
     button.title = title;
-    button.textContent = label;
+    button.setAttribute('aria-label', title);
+    button.innerHTML = icon;
     button.addEventListener('click', (e) => {
       e.stopPropagation();
       onClick();
@@ -262,14 +281,14 @@ function makeRow(entry: TreeEntry, depth: number): HTMLLIElement {
     actions.appendChild(button);
   };
   if (entry.type === 'dir') {
-    addAct('new-file', 'New file in this folder', '＋📄', () => startCreate(entry.path, 'file'));
-    addAct('new-dir', 'New folder in this folder', '＋📁', () => startCreate(entry.path, 'dir'));
+    addAct('new-file', 'New file in this folder', ICON.newFile, () => startCreate(entry.path, 'file'));
+    addAct('new-dir', 'New folder in this folder', ICON.newDir, () => startCreate(entry.path, 'dir'));
   }
-  addAct('rename', 'Rename', '✎', () => {
+  addAct('rename', 'Rename', ICON.rename, () => {
     renaming = entry.path;
     renderTree();
   });
-  addAct('delete', 'Delete', '🗑', () => void deleteEntry(entry.path, entry.type));
+  addAct('delete', 'Delete', ICON.delete, () => void deleteEntry(entry.path, entry.type));
   li.appendChild(actions);
 
   // A folder toggles open/closed; a file opens in the editor.
@@ -1027,10 +1046,86 @@ async function commitRename(raw: string): Promise<void> {
   renderTree();
 }
 
+/**
+ * A small in-app confirmation dialog, used in place of `window.confirm`.
+ *
+ * The native dialog is unstyled, blocks the whole tab, and cannot show our
+ * colours or say *which* file is about to go. This one matches the app, traps
+ * Enter/Escape, and resolves to a boolean so the caller reads the same either
+ * way.
+ */
+function confirmDialog(opts: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+
+    const title = document.createElement('div');
+    title.className = 'modal-title';
+    title.textContent = opts.title;
+    const message = document.createElement('div');
+    message.className = 'modal-message';
+    message.textContent = opts.message;
+
+    const row = document.createElement('div');
+    row.className = 'modal-actions';
+    const cancel = document.createElement('button');
+    cancel.className = 'modal-cancel';
+    cancel.textContent = 'Cancel';
+    const confirm = document.createElement('button');
+    confirm.className = 'modal-confirm' + (opts.danger ? ' danger' : '');
+    confirm.textContent = opts.confirmLabel;
+    row.append(cancel, confirm);
+    modal.append(title, message, row);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    queueMicrotask(() => confirm.focus());
+
+    const close = (value: boolean): void => {
+      document.removeEventListener('keydown', onKey, true);
+      backdrop.remove();
+      resolve(value);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close(false);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        close(true);
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    cancel.addEventListener('click', () => close(false));
+    confirm.addEventListener('click', () => close(true));
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) close(false);
+    });
+  });
+}
+
 /** Delete a file, or a folder and everything under it, after a confirmation. */
 async function deleteEntry(path: string, kind: 'file' | 'dir'): Promise<void> {
   const what = kind === 'dir' ? 'folder' : 'file';
-  if (!window.confirm('Delete ' + what + ' "' + baseName(path) + '"? This cannot be undone.')) return;
+  const name = baseName(path);
+  const ok = await confirmDialog({
+    title: 'Delete ' + what,
+    message:
+      kind === 'dir'
+        ? 'Delete "' + name + '" and everything inside it? This cannot be undone.'
+        : 'Delete "' + name + '"? This cannot be undone.',
+    confirmLabel: 'Delete',
+    danger: true,
+  });
+  if (!ok) return;
   try {
     tree = await client.remove(path);
     writeTerminal('\n[deleted ' + what + '] ' + path + '\n', 'sys');

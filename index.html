@@ -37,8 +37,12 @@
         <div class="pane-head">
           <span>Files <span class="hint" id="files-root">(VFS → OPFS)</span></span>
           <span class="file-actions">
-            <button id="new-file" title="New file in this project">+ File</button>
-            <button id="new-folder" title="New folder in this project">+ Folder</button>
+            <button id="new-file" class="act" title="New file in this project" aria-label="New file">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M9 1.6H4.6A1.6 1.6 0 0 0 3 3.2v9.6A1.6 1.6 0 0 0 4.6 14.4h6.8A1.6 1.6 0 0 0 13 12.8V5.6z"/><path d="M9 1.6v4h4"/><path d="M8 8.2v3.2M6.4 9.8h3.2"/></svg>
+            </button>
+            <button id="new-folder" class="act" title="New folder in this project" aria-label="New folder">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M1.6 4.4A1.6 1.6 0 0 1 3.2 2.8h2.6l1.5 1.6h5.5A1.6 1.6 0 0 1 14.4 6v6a1.6 1.6 0 0 1-1.6 1.6H3.2A1.6 1.6 0 0 1 1.6 11.9z"/><path d="M8 7.4v3.2M6.4 9h3.2"/></svg>
+            </button>
           </span>
         </div>
         <ul id="file-tree" class="file-tree"></ul>

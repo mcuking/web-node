@@ -199,11 +199,14 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* --- file tree --- */
 .file-tree { list-style: none; margin: 0; padding: 6px; overflow: auto; flex: 1; }
+/* A fixed row height keeps hover from growing the row: the action buttons
+   appear inside this height instead of adding to it. */
 .file-tree li {
   display: flex;
   align-items: center;
   gap: 3px;
-  padding: 3px 6px;
+  height: 22px;
+  padding: 0 6px;
   border-radius: 5px;
   color: var(--muted);
   cursor: pointer;
@@ -216,20 +219,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .file-tree .caret { flex: 0 0 12px; width: 12px; font-size: 10px; color: #6b7a90; }
 .file-tree .ftype { flex: 0 0 auto; font-size: 12px; }
 .file-tree .fname { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
-.file-tree .row-actions { flex: 0 0 auto; display: none; gap: 2px; }
-.file-tree li:hover .row-actions { display: inline-flex; }
-.row-actions .act {
-  padding: 0 4px;
-  font-size: 11px;
-  line-height: 18px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--muted);
-  cursor: pointer;
-}
-.row-actions .act:hover { color: var(--accent); border-color: var(--accent-dim); background: rgba(255, 255, 255, 0.06); }
-.row-actions .act.delete:hover { color: var(--err); border-color: var(--err); }
+.file-tree .row-actions { flex: 0 0 auto; display: none; gap: 2px; margin-left: auto; padding-left: 6px; }
+.file-tree li:hover .row-actions,
+.file-tree li:focus-within .row-actions { display: inline-flex; }
 .file-tree .tree-input {
   flex: 1 1 auto;
   min-width: 0;
@@ -243,8 +235,29 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   outline: none;
 }
 .file-tree li.creating .tree-input { border-color: var(--accent); }
-.file-actions { display: flex; gap: 4px; }
-.file-actions button { padding: 2px 8px; font-size: 11px; text-transform: none; letter-spacing: 0; }
+
+/* Action buttons: small, square, icon-only, and shown on hover — the shape a
+   WebContainer-style explorer uses. Shared by the tree rows and the pane-head
+   “new file / new folder” pair, so the two read as one control. */
+.act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #93a2b8;
+  line-height: 1;
+  cursor: pointer;
+}
+.act svg { display: block; width: 15px; height: 15px; }
+.act:hover { color: var(--text); background: rgba(255, 255, 255, 0.16); }
+.act.rename:hover { color: var(--accent); }
+.act.delete:hover { color: var(--err); }
+.file-actions { display: flex; gap: 2px; }
 
 /* --- editor --- */
 #editor {
@@ -346,3 +359,30 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 11px;
 }
 #facts { color: #4d5a6e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- confirmation dialog --- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 7, 12, 0.62);
+}
+.modal {
+  width: min(340px, calc(100vw - 32px));
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px -18px #000;
+}
+.modal-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.modal-message { margin-top: 8px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.modal-actions button { padding: 5px 12px; font-size: 12px; }
+.modal-confirm { background: var(--accent); color: #04150c; border-color: var(--accent); font-weight: 700; }
+.modal-confirm:hover { background: #7dffbc; }
+.modal-confirm.danger { background: var(--err); border-color: var(--err); color: #2a0505; }
+.modal-confirm.danger:hover { background: #ff8b8b; color: #2a0505; }
