@@ -730,6 +730,13 @@
   - **不可应用内修复**：worker 无 `gc()`（未开 `--expose-gc`），也无等价 GC API；build 是同步分配密集段，V8 惰于 GC。
   - **结论**：峰值瞬时、可回收，浏览器按标签页内存管理即可；无需也无法在应用内修复。若要强压，只能靠宿主开 `--expose-gc` + opportunistic `gc?.()`，或把 build 放独立 Worker 后 terminate（不降总峰值）。**本轮无代码改动**。
 
+- [x] **M139 · 隔离 build worker + 可选 GC 泵（+ 修好开机清库 bug）** ✅ 2026-09-30
+  - **② 可选 GC 泵**（`gc-pump.ts`）：one-shot 程序运行期间用宿主定时器低频 `gc?.()`；仅宿主 `--expose-gc` 时生效，否则 no-op。`run` 增 `oneShot` 标记。
+  - **③ 隔离 build worker**：build 改在专用 worker（`name:'web-node-build'`）跑、完事 `terminate()`；专建 worker 只读还原（`readOnlyPersistence`）不回写，页面把 `dist` 产物拷回共享 worker（`selectBuildOutputs`）；前置 `flush()`；起不来则回退共享 worker。
+  - **修复 durable 后端“每次开机清库”**：`setReadSource` 被放到标记校验之后 → 冷读 `.demo-version` 恒空 → 误判缺标记 → `clear()` + 重写 demo → **持久化实际从未生效**。提为 `wireVfs()` 在校验前接线后，`restored:true, marker:'4'`。
+  - **真机**：合成 build（空转 3.5s）使共享 worker **8.9→8.9MB（全程平）**，专建 worker 峰值 13.8MB 跑完即终止，产物并入共享树，无回退。
+  - **门禁**：typecheck 净 · vitest **1223 passed / 3 skipped** · worker 784.60 kB / index 26.15 kB / css 8.46 kB。真实 webpack 验证受 registry 间歇不可达影响，以合成 build + 机制取证为准。
+
 ---
 
 ## 怎么用这份文件

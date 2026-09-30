@@ -1,4 +1,5 @@
 import { RuntimeClient, type TreeEntry } from '../client';
+import { selectBuildOutputs } from './build-outputs';
 import type { RuntimeInfo } from '../worker/runtime.worker';
 import {
   DEMO_PROJECTS,
@@ -399,7 +400,7 @@ async function runProcess(entry: string, label: string, awaitExit: boolean): Pro
   setStatus('running…', 'running');
   writeTerminal(`\n$ ${label}\n`, 'sys');
   const started = performance.now();
-  const { id: runId, done } = client.run(entry);
+  const { id: runId, done } = client.run(entry, { oneShot: awaitExit });
   runOwner.set(runId, activeProject);
   if (!awaitExit) {
     done.catch((err: unknown) => {
@@ -418,6 +419,74 @@ async function runProcess(entry: string, label: string, awaitExit: boolean): Pro
     writeTerminal(`[run failed] ${(err as Error).message}\n`, 'err');
     setStatus('error', 'err');
     throw err;
+  }
+}
+
+/**
+ * Run a one-shot build in a dedicated, throwaway runtime worker (M139).
+ *
+ * A build is the single heaviest thing the tab does: it compiles hundreds of
+ * webpack modules, and V8 keeps that compiled module graph live long after the
+ * build exits — ~25 MB that the *shared* worker would then carry for the rest of
+ * the session. Running the build in its own worker and terminating it afterwards
+ * returns that memory to the browser, leaving the shared worker (which hosts the
+ * dev servers and the visible tree) at its ~10 MB baseline.
+ *
+ * The build worker restores the project from the store read-only and never
+ * mirrors back; the page pulls its outputs (the project's `dist`, plus any new
+ * files) and mounts them into the shared worker, which owns the visible tree.
+ * If it cannot start, the build falls back to the shared worker so the step
+ * always works.
+ */
+async function runBuildIsolated(entry: string, label: string, root: string): Promise<void> {
+  await save();
+  setStatus('running…', 'running');
+  const started = performance.now();
+  const owner = activeProject;
+  // The build worker reads the store, so the current (possibly edited) tree has
+  // to be durable before it starts — otherwise it builds a debounced old copy.
+  await client.flush();
+
+  const buildClient = new RuntimeClient({ name: 'web-node-build' });
+  buildClient.on('stdout', (data) => writeTerminal(data, '', owner));
+  buildClient.on('stderr', (data) => writeTerminal(data, 'err', owner));
+
+  try {
+    await buildClient.init();
+  } catch (err) {
+    buildClient.terminate();
+    writeTerminal(`[isolated build unavailable: ${(err as Error).message} — using the shared worker]\n`, 'sys');
+    await runProcess(entry, label, true);
+    return;
+  }
+
+  writeTerminal(`\n$ ${label}\n`, 'sys');
+  try {
+    const { done } = buildClient.run(entry, { oneShot: true });
+    await done;
+
+    // Adopt the build's outputs so the shared worker's tree reflects them.
+    const buildTree = await buildClient.tree();
+    const outputs = selectBuildOutputs(buildTree, tree.map((e) => e.path), `${root}/dist`);
+    if (outputs.length) {
+      const files: Record<string, string> = {};
+      for (const path of outputs) files[path] = await buildClient.readFile(path);
+      await client.mount(files);
+      tree = await readTree();
+      renderTree();
+    }
+
+    const ms = (performance.now() - started).toFixed(0);
+    if (!bootTiming.firstRunMs) bootTiming.firstRunMs = Math.round(performance.now());
+    setStatus(`done in ${ms}ms`, 'ok');
+    writeTerminal(`[exit 0 · ${ms}ms]\n`, 'sys');
+  } catch (err) {
+    writeTerminal(`[run failed] ${(err as Error).message}\n`, 'err');
+    setStatus('error', 'err');
+    throw err;
+  } finally {
+    // The whole point: the compiled module graph dies with the worker.
+    buildClient.terminate();
   }
 }
 
@@ -479,7 +548,7 @@ function registerProject(project: DemoProject, label: string, blurp: string): vo
     STEPS[`${id}/build`] = {
       label: '⚙ Run build',
       needs: 'deps',
-      exec: () => runProcess(`${project.root}/build.mjs`, `node ${project.root}/build.mjs`, true),
+      exec: () => runBuildIsolated(`${project.root}/build.mjs`, `node ${project.root}/build.mjs`, project.root),
     };
   }
   DEV_PORT[id] = project.port;

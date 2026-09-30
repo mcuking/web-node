@@ -5,8 +5,10 @@ import {
   MemoryVfs,
   OpfsPersistence,
   OpfsWorkerPersistence,
+  readOnlyPersistence,
   type Persistence,
 } from '../node-runtime/vfs';
+import { beginGcPump } from '../node-runtime/gc-pump';
 import { installVendored, vendoredCount } from '../node-runtime/vendored';
 import { loadWasmModule } from '../node-runtime/wasm/lazy';
 import { loadWasmModules, loadDeferredWasmModules, wasmModuleNames, DEFERRED_WASM_MODULES } from '../node-runtime/wasm';
@@ -199,13 +201,14 @@ void wasmReady.then(() => loadWasmModule('wn_openssl'));
 type Request =
   | { id: number; type: 'init' }
   | { id: number; type: 'mount'; files: Record<string, string> }
-  | { id: number; type: 'run'; entry?: string }
+  | { id: number; type: 'run'; entry?: string; oneShot?: boolean }
   | { id: number; type: 'writeFile'; path: string; contents: string }
   | { id: number; type: 'readFile'; path: string }
   | { id: number; type: 'mkdir'; path: string }
   | { id: number; type: 'rename'; from: string; to: string }
   | { id: number; type: 'remove'; path: string }
   | { id: number; type: 'tree' }
+  | { id: number; type: 'flush' }
   | { id: number; type: 'evict'; root: string }
   | { id: number; type: 'scaffold'; template: string; target: string; port?: number }
   | { id: number; type: 'reset' }
@@ -276,9 +279,16 @@ type Response =
  * `SharedArrayBuffer`, which GitHub Pages does not send — there the direct
  * backend keeps working, just without a synchronous flush.
  */
-const persistence: Persistence =
-  OpfsWorkerPersistence.create({ rootName: 'web-node-project' }) ??
-  new OpfsPersistence('web-node-project');
+const persistence: Persistence = (() => {
+  const backend =
+    OpfsWorkerPersistence.create({ rootName: 'web-node-project' }) ??
+    new OpfsPersistence('web-node-project');
+  // A dedicated **build** worker (M139) reads the store but never writes it: the
+  // page spawns it to run one build and terminates it, then mounts the outputs
+  // back into the main worker, which owns the store. Mirroring from here would
+  // race the main worker's snapshot.
+  return self.name === 'web-node-build' ? readOnlyPersistence(backend) : backend;
+})();
 
 const persistenceKind: RuntimeInfo['persistence'] =
   persistence.durable ? 'fs-worker' : OpfsPersistence.supported ? 'direct' : 'none';
@@ -295,6 +305,8 @@ let vfs: MemoryVfs | null = null;
  * was on screen.
  */
 let activeRunId = 0;
+/** Release handle for the GC pump of the run in flight, if it is a one-shot one. */
+let runPump: (() => void) | null = null;
 
 function post(msg: Response): void {
   self.postMessage(msg);
@@ -445,6 +457,26 @@ async function buildRuntime(id: number): Promise<void> {
   // wipe beats pruning thousands of stale paths), while a marker that merely
   // names an older release means the demo sources changed and are rewritten in
   // place without touching anything the visitor created.
+  // Wire the backing-store sinks onto the tree *before* the reconciliation
+  // below reads it. On a restore the marker is a **cold** file, so reading it
+  // needs the read source already installed; when the sink was wired only at the
+  // end, the marker read came back empty and every durable boot wiped the store
+  // (M139). A wipe replaces the tree, so re-wire whatever tree survives.
+  const wireVfs = (target: MemoryVfs): MemoryVfs => {
+    // Durable `fsync` rides this sink. Without a durable backend there is
+    // nothing to wait for, so the sink stays unset and `fsync` degrades to a
+    // no-op — the same answer a real filesystem gives when its writes sit in a
+    // page cache.
+    if (persistence.durable) target.setSyncSink((path, data) => persistence.sync(path, data));
+    // The other half of M120: a lookup the memory tree misses can still reach
+    // the store, synchronously. `null` from the direct backend leaves the tree
+    // as the only source of truth, which is how this ran before.
+    target.setReadSource(readSource);
+    target.setDeletedSink((paths) => persistence.deleted(paths));
+    return target;
+  };
+  wireVfs(v);
+
   const markerPath = '/project/.demo-version';
   const readMarker = (): string => {
     try {
@@ -456,7 +488,7 @@ async function buildRuntime(id: number): Promise<void> {
   const marker = hasRestored ? readMarker() : '';
   if (hasRestored && marker === '') {
     await persistence.clear();
-    v = new MemoryVfs({ cwd: '/project' });
+    v = wireVfs(new MemoryVfs({ cwd: '/project' }));
     hasRestored = false; // the previous tree is gone; this is a fresh start
   }
 
@@ -467,16 +499,6 @@ async function buildRuntime(id: number): Promise<void> {
   } else {
     writeMissing(v, DEMO_FILES);
   }
-
-  // Durable `fsync` rides this sink. Without a durable backend there is nothing
-  // to wait for, so the sink stays unset and `fsync` degrades to a no-op — the
-  // same answer a real filesystem gives when its writes sit in a page cache.
-  if (persistence.durable) v.setSyncSink((path, data) => persistence.sync(path, data));
-  // The other half of M120: a lookup the memory tree misses can still reach the
-  // store, synchronously. `null` from the direct backend leaves the tree as the
-  // only source of truth, which is how this ran before.
-  v.setReadSource(readSource);
-  v.setDeletedSink((paths) => persistence.deleted(paths));
 
   vfs = v;
   runtime = new NodeRuntime({
@@ -510,18 +532,24 @@ async function buildRuntime(id: number): Promise<void> {
   });
 }
 
-function run(id: number, entry?: string): void {
+function run(id: number, entry?: string, oneShot = false): void {
   if (!runtime || !vfs) throw new Error('runtime not initialised');
   activeRunId = id;
+  // A one-shot program (a build) compiles hundreds of modules with no idle gap
+  // for V8's own heuristics; pump the collector while it runs to bound the peak
+  // (M139). A server run is left alone — it would otherwise collect forever.
+  if (oneShot) runPump = beginGcPump();
   const target = entry ?? '/project/index.js';
   try {
     runtime.runMain(target);
   } catch (err) {
     if (err instanceof ProcessExit) {
       persistence.schedule(vfs);
+      stopRunPump();
       post({ id, type: 'exit', code: err.code });
       return;
     }
+    stopRunPump();
     post({ id: 0, type: 'stderr', data: `\n${(err as Error).stack ?? String(err)}\n` });
     post({ id, type: 'error', message: (err as Error).message });
     return;
@@ -534,10 +562,19 @@ function run(id: number, entry?: string): void {
   void finishRun(id);
 }
 
+/** Stop the pump a one-shot run started, once and only once. */
+function stopRunPump(): void {
+  if (runPump) {
+    runPump();
+    runPump = null;
+  }
+}
+
 async function finishRun(id: number): Promise<void> {
   if (!runtime || !vfs) return;
   await runtime.drain();
   persistence.schedule(vfs);
+  stopRunPump();
   post({ id, type: 'exit', code: runtime.exitCode ?? 0 });
 }
 
@@ -556,7 +593,7 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
         return;
       case 'run':
         await Promise.all([ensureDeferredVendored(), ensureDeferredWasm()]);
-        run(req.id, req.entry);
+        run(req.id, req.entry, req.oneShot);
         return;
       case 'writeFile':
         if (!vfs) throw new Error('runtime not initialised');
@@ -596,6 +633,14 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
       case 'tree':
         if (!vfs) throw new Error('runtime not initialised');
         post({ id: req.id, type: 'ok', result: listEntries(vfs) });
+        return;
+      case 'flush':
+        // Mirror the in-memory tree to the store and resolve once it has landed.
+        // The page calls this before spawning a build worker so that worker
+        // restores the *current* source, not a debounced older snapshot.
+        if (!vfs) throw new Error('runtime not initialised');
+        await persistence.flush(vfs);
+        post({ id: req.id, type: 'ok' });
         return;
       case 'evict': {
         if (!vfs) throw new Error('runtime not initialised');

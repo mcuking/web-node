@@ -66,11 +66,21 @@ export class RuntimeClient {
   #nextId = 1;
   #listeners: Partial<RuntimeEvents> = {};
 
-  constructor() {
+  constructor(opts: { name?: string } = {}) {
     // Boot timing handshake (M107): read by the page, harmless elsewhere.
     const boot = (globalThis as { __wnBoot?: { workerSpawnMs: number } }).__wnBoot;
     if (boot) boot.workerSpawnMs = Math.round(performance.now());
-    this.#worker = new Worker(new URL('../worker/runtime.worker.ts', import.meta.url), { type: 'module' });
+    // The worker's `name` is how it learns it is the throwaway **build** worker
+    // (it reports as `self.name`), switching it to a read-only store view (M139).
+    // Both options objects are static literals on purpose: Vite only rewrites a
+    // worker it can parse statically.
+    this.#worker =
+      opts.name === 'web-node-build'
+        ? new Worker(new URL('../worker/runtime.worker.ts', import.meta.url), {
+            type: 'module',
+            name: 'web-node-build',
+          })
+        : new Worker(new URL('../worker/runtime.worker.ts', import.meta.url), { type: 'module' });
     this.#worker.onmessage = (event: MessageEvent) => this.#onMessage(event.data);
     this.#worker.onerror = (event) => {
       this.#listeners.stderr?.(`[worker error] ${event.message}\n`, 0);
@@ -149,11 +159,11 @@ export class RuntimeClient {
    * stderr / exit message this run produces, so a caller can attribute output
    * to the context that started it — even after another run has begun.
    */
-  run(entry?: string): { id: number; done: Promise<void> } {
+  run(entry?: string, opts: { oneShot?: boolean } = {}): { id: number; done: Promise<void> } {
     const id = this.#nextId++;
     const done = new Promise<void>((resolve, reject) => {
       this.#pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-      this.#worker.postMessage({ id, type: 'run', entry });
+      this.#worker.postMessage({ id, type: 'run', entry, oneShot: opts.oneShot });
     });
     return { id, done };
   }
@@ -194,6 +204,14 @@ export class RuntimeClient {
   /** The whole VFS tree as `{ path, type }`. */
   tree(): Promise<TreeEntry[]> {
     return this.#request({ type: 'tree' });
+  }
+
+  /**
+   * Mirror the in-memory tree to backing storage and resolve once it has landed.
+   * Called before spawning a build worker so it restores the current source.
+   */
+  flush(): Promise<void> {
+    return this.#request({ type: 'flush' });
   }
 
   /**

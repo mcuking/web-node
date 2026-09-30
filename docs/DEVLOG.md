@@ -246,6 +246,20 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-30 · M139 —— 隔离 build worker（峰值内存回落）+ 修好一个“每次开机都清库”的恢复 bug
+
+唐工选 2 和 3，两个都做：
+
+- **(2) 可选 GC 泵**（`src/node-runtime/gc-pump.ts`）：build 这类 one-shot 程序运行期间，用**宿主定时器**（`installGlobals` 之前的 `setInterval`，不会被 `runMain` 清队列）低频调 `gc?.()`，把峰值压下来。**仅当宿主开 `--js-flags=--expose-gc` 时生效**，否则是一段无副作用的 no-op。`run` 消息新增 `oneShot` 标记：只有 build 开泵，dev server 这种常驻程序不开（否则一直整理）。
+- **(3) 隔离 build worker**（`src/client/index.ts` + `src/ui/main.ts` + `src/node-runtime/vfs/read-only.ts`）：`⚙ Run build` 不再跑在共享 worker，而是**新建一个专用 runtime worker**（`name:'web-node-build'`）跑完即 `terminate()`。共享 worker 因此不再背上 build 编译出的整张模块图。
+  - 专建 worker **只读**还原（`readOnlyPersistence`：`load`/`readSource` 透传，一切写入丢弃，`durable:false`），绝不回写共享 store；页面跑完后把**产物**（`<root>/dist` 下全部 + 新建文件）拷回共享 worker（`selectBuildOutputs`），共享 worker 仍是可见文件树的唯一 owner。
+  - 页面前置 `client.flush()`，保证（可能刚编辑过的）源码先落盘，专建 worker 还原的是当前版本。
+  - 起不来（如无 COOP/COEP）则**回退到共享 worker**，步骤始终可用。
+- **修复：durable 后端下“每次开机都清库”**（`src/worker/runtime.worker.ts`）。`buildRuntime()` 里 `v.setReadSource(readSource)` 被放在**标记文件校验之后**；还原出来的树里 `.demo-version` 是 **cold** 条目，读它需要已装好的 read source —— 结果冷读恒为空串 → 判定“标记缺失” → `persistence.clear()` + 重写 demo。**即每一次带 fs-worker（durable）后端的启动都会把用户数据抹掉、回到全新 demo**（这正是本会话反复看到 app2/app5 “fresh project”、依赖丢失的根因）。修法：把 sync/read/deleted 三个 sink 的接线提为 `wireVfs()`，在标记校验**之前**给树接上，wipe 重建的新树也重新接。改后 worker 回执 `restored:true, marker:'4'`，跨 reload 持久化恢复正常。
+- **真机验证**（dev, raw CDP）：合成 build（写 `dist/out.txt` + 空转 3.5s）——**共享 worker 8.9MB → 8.9MB（全程平）**，专建 worker 峰值 13.8MB 且跑完即终止，`dist/out.txt` 已并入共享树，无回退。
+- **门禁**：typecheck 净 · vitest **1223 passed / 3 skipped**（新增 13 条：`gc-pump` 4、`read-only-persistence` 3、`build-outputs` 3、`vfs-restore` 3）· build worker 784.60 kB、index 26.15 kB、css 8.46 kB。
+- **注**：真实 webpack build 的“共享 worker 不再涨 ~25MB”验证依赖 npm registry，采样期间 registry 间歇不可达（`Failed to fetch`），以合成 build + 机制取证为准；机制与 webpack 无关（区别只在 build 脚本内容）。
+
 ### 2026-09-30 · M138 —— build 峰值内存取证：约一半峰值是未回收垃圾（并说明为何应用内无法修）
 
 - **背景**：M137 结清了“保留堆”，但把“build 峰值 ~79MB”列为“瞬时 V8 parse/JIT churn”未深入。本里程碑专做峰值。
