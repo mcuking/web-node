@@ -254,7 +254,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 **修法（复用 `public/sw.js` 注入 COOP/COEP，coi-serviceworker 模式）**：
 - **子资源也要带隔离头**：`addEventListener('fetch')` 里 `port == null` 分支（app-shell **全部子资源**，含 worker 脚本、wasm、模块）改为 `event.respondWith(withIsolationHeaders(event.request))`——worker realm 的 `crossOriginIsolated` 由 **worker 自己脚本响应的 header** 决定，**不继承文档**。只改文档不够。
-- **一次性 reload 改 bounded retry（≤3 次，`sessionStorage` 计数）**：静态宿主只能在 SW 接管页面**之后**才改写响应，故首次导航未隔离、需 reload；但单次 reload 可能仍落在未隔离的导航上，于是轮询 `navigator.serviceWorker.controller`（最多 5s）后再 `location.reload()`，计数器防 reload loop，无法隔离的宿主**降级为不隔离**而非死循环。
+- **一次性 reload 改 bounded retry（≤6 次，`sessionStorage` 计数 `web-node:coi-reloaded`）**：静态宿主只能在 SW 接管页面**之后**才改写响应，故首次导航未隔离、需 reload。**关键（在 live 上暴露）：reload 之前不能只看 `navigator.serviceWorker.controller` 是否非空** —— 新部署的 `sw.js` 还在安装时，`navigator.serviceWorker.ready` 已对**旧的**活跃 worker 兑现、`controller` 也指向旧 worker，此时 reload 就由**旧 worker**（没有隔离头）服务，会白白烧完重试次数；且 `register()` 的更新检查可能吃到 HTTP 缓存，新 worker 根本不会安装。于是改为：① 先 **`registration.update()` 强制刷新**（绕过 HTTP 缓存）；② 等 **`registration` 的 `installing`/`waiting` 都清空且已有活跃 worker 且已有 `controller`**（即最新 worker 已接管）；③ 再 settle 300ms 后 `location.reload()`。计数器防 reload loop，无法隔离的宿主**降级为不隔离**而非死循环。**本机还原验证**：全新 origin（无 SW）与「先注册旧 stub SW 再替换 `sw.js`」两种场景**都恰好 1 次 reload 即隔离**（后者旧代码会烧到重试上限仍失败）。
 - **验证**：全部改用 **gh-pages-like 宿主** `http://localhost:8099/`（`python3 -m http.server 8099` serve `dist/`，无 COOP/COEP）——浏览器 boot 成功、**两个 worker 均隔离**；`node`/`vite`/`webpack`/`rspack` 四项目 install+dev+build 全通。**rspack build `done in 605ms`、`dist/bundle.js` 139540 bytes、exit 0；dev preview React 计数可点、port `:5175`**。
 
 **新建项目（feature 3）**：

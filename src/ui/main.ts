@@ -875,21 +875,49 @@ async function boot(): Promise<void> {
   // land unisolated. Cap the attempts so a host that can never isolate (e.g. the
   // worker cannot register) degrades to "no isolation" rather than a reload
   // loop.
+  //
+  // The wait before reloading must be on the *latest* worker being active and
+  // controlling — not merely on `controller` becoming non-null. On a CDN a new
+  // build ships a new `sw.js`; when it is still installing, `ready` already
+  // resolves against the *previous* active worker and `controller` is non-null
+  // (pointing at that stale worker). Reloading then is served by the stale
+  // worker, which predates the isolation headers, so the page stays unisolated
+  // and several instant retries can burn out before the new worker takes over.
+  // So require `registration.installing`/`waiting` to be cleared as well, and
+  // give the browser a tick to commit the new controller.
   if (bridged && !window.crossOriginIsolated) {
     const tries = Number(sessionStorage.getItem(COI_RELOAD_FLAG) ?? '0');
-    if (tries < 3) {
+    if (tries < 6) {
       sessionStorage.setItem(COI_RELOAD_FLAG, String(tries + 1));
       bootEl.textContent = 'enabling cross-origin isolation…';
-      // Wait until this page is controlled by the worker, so the *next*
-      // navigation is served by it (that is what applies COOP/COEP). The claim
-      // can lag activation, and `controllerchange` may fire before we can
-      // listen, so poll rather than race an event, with a bound.
-      if (!navigator.serviceWorker.controller) {
-        const deadline = Date.now() + 5000;
-        while (!navigator.serviceWorker.controller && Date.now() < deadline) {
+      const deadline = Date.now() + 8000;
+      try {
+        const reg = await navigator.serviceWorker.getRegistration();
+        // Force a fresh update check. The `register()` above can be served from
+        // the HTTP cache (browsers throttle SW update checks), so a newly
+        // deployed `sw.js` might not install on its own — and then we would keep
+        // reloading into the stale worker that never had the isolation headers.
+        // `update()` bypasses the HTTP cache.
+        if (reg?.active) {
+          try {
+            await reg.update();
+          } catch {
+            // Network hiccup; the wait below still gives any pending install a
+            // chance to finish before we reload.
+          }
+        }
+        while (Date.now() < deadline) {
+          const settled =
+            !!reg && !reg.installing && !reg.waiting && !!reg.active && !!navigator.serviceWorker.controller;
+          if (settled) break;
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
+      } catch {
+        // No registration to inspect; fall through and reload anyway (bounded).
       }
+      // A brief settle so the browser commits the new controller before the
+      // navigation, otherwise the reload can still be served by the old one.
+      await new Promise((resolve) => setTimeout(resolve, 300));
       location.reload();
       return;
     }
