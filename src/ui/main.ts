@@ -150,6 +150,19 @@ const parentDir = (path: string): string => path.slice(0, path.lastIndexOf('/'))
 const joinPath = (dir: string, name: string): string => dir.replace(/\/+$/, '') + '/' + name;
 
 /**
+ * How much of a file name to preselect when renaming: everything up to the last
+ * dot (the stem), so the extension is left out of the selection.
+ *
+ * A name with no dot, or a dotfile like `.gitignore`, has no extension to
+ * preserve, so the whole name is selected. `archive.tar.gz` keeps only `.gz`
+ * out of the selection, matching common editor behaviour.
+ */
+function renameSelectionEnd(name: string): number {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? dot : name.length;
+}
+
+/**
  * Row-action icons, as inline SVG on a 16px grid.
  *
  * Glyph characters (＋ 📄 ✎ 🗑) render at the mercy of the emoji font — they
@@ -242,7 +255,10 @@ function makeRow(entry: TreeEntry, depth: number): HTMLLIElement {
     li.appendChild(input);
     queueMicrotask(() => {
       input.focus();
-      input.select();
+      // Select the stem only, so typing replaces "App" in "App.vue" while the
+      // extension stays put - matching a WebContainer-style explorer. A leading
+      // dot is part of the name (dotfiles), not an extension.
+      input.setSelectionRange(0, renameSelectionEnd(input.value));
     });
     input.addEventListener('keydown', (e) => {
       e.stopPropagation();
