@@ -246,6 +246,23 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-30 · M136 —— 界面反馈四则（Rspack 拼写 / vite.config / 文件树按钮）+ 删除确认弹窗
+
+- **改（唐工 4 条反馈）**：
+  1. **顶部项目栏 `rspack` → `Rspack`**（首字母大写，`src/projects.ts` 的 label）。
+  2. **Vite 项目补上配置文件**：新增 `/project/vite/vite.config.mjs`（导出 `base`/`plugins`[`@vitejs/plugin-vue` + VFS 监听插件]/`optimizeDeps.disabled`/`server`），`build.mjs`/`dev.mjs` 改为 **`import config from './vite.config.mjs'`** 再展开进 `vite.build({...config})` / `createServer({...config})`（`configFile:false`）。**不能用 Vite 自动发现**：Vite 读配置文件时会用 esbuild 按真实文件系统打包它，而浏览器 tab 没有真 FS——与 webpack/rspack demo 的显式 import 同理。原 `dev.mjs` 里内联的 `vfsWatchPlugin` 上提到 config 文件（`vfsWatch`）。关键修正：`import` 改**动态**（`await import('./vite.config.mjs')`）放在**依赖安装检查之后**，否则 config 顶层拉 `@vitejs/plugin-vue` → 未安装时提前 `ERR_MODULE_NOT_FOUND`，破坏「未安装就生成脚本退出」的早退路径（单测抓出）。
+  3. **顶部「Files」行的新建按钮改成与树内一致**：`index.html` 的 `#new-file`/`#new-folder` 由 `+ File`/`+ Folder` 文本按钮改为 **图标按钮**（`class="act"` + 内联 SVG），与行内操作共用 `.act` 样式。
+  4. **文件树操作按钮重做（对齐 WebContainer）+ 去掉悬浮跳高 + 删除确认**：
+     - 行内操作按钮由 emoji 文本（`＋📄`/`✎`/`🗑`）改为**内联描边 SVG 图标**（`ICON` 常量），继承 `currentColor`、可随 hover 变色（emoji 不可继承色且宽度不一）。
+     - `.file-tree li` 改**固定行高 22px**：操作按钮出现/隐藏不再改变行高（此前 padding 惹的祸）。
+     - `.act` 统一为 **20×20 圆角图标按钮**（15px 图标、hover 浅色圆角背景、rename 变 accent、delete 变红），顶栏与行内共用。
+     - **删除确认由 `window.confirm` 改为应用内弹窗**（`confirmDialog`，`src/ui/main.ts` + `.modal-*` 样式）：深色主题、显示文件名、Enter 确认 / Esc 取消 / 点遮罩取消、危险动作红色确认键。
+- **测试**：`test/build.test.ts` 断言补充 `/project/vite/vite.config.mjs` 已生成（`vitecfg  true`）。
+- **验收**：`typecheck` 净 · `vitest run` **1210 passed / 3 skipped（140 文件）** · `build` worker **783.77 kB**、`index-*.js` **24.84 kB**、`style.css` **8.46 kB**。
+- **实测**（真浏览器，dev 站点）：① 项目栏显示 `🔷 Rspack`；② Vite 树出现 `vite.config.mjs`，**install(30 包)→build(`vite v5.4.21`、`built in 1221ms`、写 `dist/`)→dev(`listening :5173`、HMR 桥) 全通**，预览渲染 Vue 应用（`count is 0`）；③ 顶栏新建按钮已是图标样式；④ 行高 hover 前后 **22px→22px**（不跳高）、hover 按钮背景 `rgba(255,255,255,0.16)`、rename 变绿；删除弹窗出现且可取消。
+- **既有非回归**：控制台一条 `Unsupported platform: linux wasm32 LE` 来自 `esbuild` 的 postinstall（`install.js` 找原生平台二进制），为**既有行为**，与本次改动无关，build 用 esbuild-wasm 正常。
+- **涉及文件**：`src/projects.ts`、`src/demo/vite-project.ts`、`index.html`、`src/ui/main.ts`、`src/ui/style.css`、`src/demo-project.ts`（`DEMO_VERSION` 3→4）、`test/build.test.ts`。
+
 ### 2026-09-30 · M135 —— demo 改模板写法（JSX/SFC）+ 文件树增删改名 + OPFS 句柄修复
 
 - **做（唐工三项需求）**：

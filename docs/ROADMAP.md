@@ -711,6 +711,13 @@
   - **顺带修真 bug · OPFS 陈旧句柄**：`vfs/opfs-store.ts` 的 `remove()` 删目录后未清理 `#dirs` 句柄缓存 → 缓存句柄指向已删条目 → 后续经它写入抛 `NotFoundError`。修：按 key 及 `<key>/` 前缀清理。新增 `test/opfs-store.test.ts`（4 例，删掉失效逻辑即复现）。
   - **验收**：`typecheck` 净 · `vitest run` **1210 passed / 3 skipped（140 文件）** · `build` worker **782.39 kB**、`index-*.js` **22.33 kB**。
 
+- [x] **M136 · 界面反馈四则 + 删除确认弹窗** ✅ 2026-09-30
+  - **① 顶部项目栏 `rspack` → `Rspack`**（首字母大写）。
+  - **② Vite 项目补 `vite.config.mjs`**：`build.mjs`/`dev.mjs` 改为 `import config from './vite.config.mjs'` 再展开进 `vite.build`/`createServer`（`configFile:false`）；**不用自动发现**（Vite 读 config 要用 esbuild 按真 FS 打包，tab 无真 FS）。**关键：import 改动态、放在依赖安装检查之后**，否则 config 顶层拉 `@vitejs/plugin-vue` → 未安装时提前报错、破坏早退路径（单测抓出）。
+  - **③ 顶部「Files」行新建按钮改图标按钮**（与树内共用 `.act`）。
+  - **④ 文件树操作按钮重做（对齐 WebContainer）**：emoji → 内联描边 SVG（可继承 `currentColor`）；`.file-tree li` 固定行高 22px（**去掉悬浮跳高**）；`.act` 统一 20×20 圆角图标按钮（hover 浅色背景、rename 变绿、delete 变红）；**删除确认由 `window.confirm` 改为应用内弹窗**（显示文件名 / Enter 确认 / Esc 取消 / 点遮罩取消）。
+  - **验收**：`typecheck` 净 · `vitest run` **1210 passed / 3 skipped** · `build` worker **783.77 kB**、`index-*.js` **24.84 kB**、`style.css` **8.46 kB**。真机：Vite install→build→dev 全通、预览渲染 Vue 应用；行高 hover 22px↔22px、删除弹窗可取消。
+
 ---
 
 ## 怎么用这份文件
