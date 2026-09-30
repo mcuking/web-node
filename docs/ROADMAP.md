@@ -718,6 +718,12 @@
   - **④ 文件树操作按钮重做（对齐 WebContainer）**：emoji → 内联描边 SVG（可继承 `currentColor`）；`.file-tree li` 固定行高 22px（**去掉悬浮跳高**）；`.act` 统一 20×20 圆角图标按钮（hover 浅色背景、rename 变绿、delete 变红）；**删除确认由 `window.confirm` 改为应用内弹窗**（显示文件名 / Enter 确认 / Esc 取消 / 点遮罩取消）；**重命名默认只选中主文件名、不选后缀**（`App.vue`→`App`，无扩展名/点文件整名选中）。
   - **验收**：`typecheck` 净 · `vitest run` **1210 passed / 3 skipped** · `build` worker **783.77 kB**、`index-*.js` **24.84 kB**、`style.css` **8.46 kB**。真机：Vite install→build→dev 全通、预览渲染 Vue 应用；行高 hover 22px↔22px、删除弹窗可取消。
 
+- [x] **M137 · 内存复取证：build 保留堆的确定归属** ✅ 2026-09-30
+  - **受控基线**（单页单 worker、全新 origin、`getHeapUsage` after `collectGarbage`×2）：boot **8.8MB** → +install(80 包) **10.3MB** → +build **35.0MB**；**第二次 build 仍 34.9MB（不累加）**、切项目（`evict`）仍 34.6MB（不降）——**build 一步独占 ~24.7MB，稳态非泄漏**。
+  - **构成**（反向引用路径 BFS）：V8 堆内 Script 对象 4.4MB、`wn_openssl.wasm` 2.9MB、Terser 源串 2.1MB、webpack `cssMinify` 1.4MB——即 **webpack 编译出的模块图**的编译代码 + 源码串。
+  - **证伪 M135 的「疑似」**：`registry.ts` 的 `tarballs` **不是**持有者（每次 install 新建、装完即释放；install 仅 +1.5MB，包体落 OPFS 不占 JS 堆）；**不是**可驱逐 VFS body（ArrayBuffer 类仅 1.5MB，evict 不降）；子进程独立 ModuleLoader 退出即移除 → 保留在 **V8 层**，JS 侧无可清缓存。
+  - **结论**：~25MB 是**在 tab 内编译 webpack 的固有代价、稳态、与原生 Node 持平**，**非泄漏、无需修复**。无代码改动（仅 DEVLOG/ROADMAP/memory）。
+
 ---
 
 ## 怎么用这份文件

@@ -246,6 +246,17 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-30 · M137 —— 内存复取证：build 保留堆的确定归属（证伪 tarballs 假设）
+
+- **背景**：M135 只能说「模块图编译保留量与原生 Node 持平」，并把「`registry.ts` 的 `tarballs` Map」列为「疑似」驻留大头，未定论。本次做受控基线实验把它钉死。
+- **方法**：单页单 worker（关掉其它页，避免多个 worker 混淆），**全新 origin**（干净 OPFS）；用 `Runtime.getHeapUsage` 在 `HeapProfiler.collectGarbage`×2 后读数（多轮验证稳定）；用**自制反向引用路径分析器**（`/tmp/wnk/retainers.mjs`，从每个大节点 BFS 向上到 GC root）查「谁持有」。
+- **归属（决定性）**：boot **8.8MB** → +install(80 包) **10.3MB** → +build **35.0MB**。**build 一步独占 ~24.7MB**。
+- **稳态，非泄漏**：**再跑一次 build 仍 34.9MB（不累加）**；切项目（触发 `evictBodies`）仍 34.6MB（不下降）。
+- **构成**（V8 堆内）：Script 对象 4.4MB（`Strong root list > WeakArrayList > Script`）、`wn_openssl.wasm` 2.9MB（`Global handles > wasm Script`）、Terser 源串 2.1MB（ExternalStringData）、webpack `cssMinify.js` 1.4MB……即 **webpack 编译出的模块图**（Terser/内部模块/原生 wasm）的编译代码 + 源码串。
+- **证伪**：① `registry.ts` 的 `tarballs` **不是**持有者——它是每次 `installProject` 新建、装完即失去引用（install 仅 +1.5MB；包体落在 OPFS/FS-worker，不占 JS 堆）；② **不是**可驱逐 VFS body——ArrayBuffer 类总计仅 1.5MB，且 `evict` 不降；③ 子进程用**独立 ModuleLoader**、退出即从 `children` 移除，故保留在 **V8 层**（编译缓存/脚本源码/wasm 全局句柄），JS 侧无可清缓存。
+- **结论**：模块图编译的 ~25MB 是**在 tab 内编译 webpack 的固有代价、稳态**（与原生 Node 持平），**非泄漏、无需修复**。M135 留下的 tarballs 尾巴就此结清。
+- **工具**：`/tmp/wnk/{retainers,bigstr,snap2,settle2}.mjs`（反向引用路径 BFS / 大对象按祖先路径分组 / 按 host 取 worker 快照 / 多轮 GC 读数）。
+
 ### 2026-09-30 · M136 —— 界面反馈四则（Rspack 拼写 / vite.config / 文件树按钮）+ 删除确认弹窗
 
 - **改（唐工 4 条反馈）**：
