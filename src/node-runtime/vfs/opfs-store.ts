@@ -227,6 +227,14 @@ export class OpfsFileStore {
   async remove(path: string): Promise<void> {
     const { dir, name } = await this.#parentOf(path, false);
     await dir.removeEntry(name);
+    // Drop this path and everything under it from the handle cache: the handles
+    // now point at a directory that no longer exists, and a later write that
+    // walked through them would throw NotFoundError.
+    const key = '/' + path.replace(/^\/+/, '');
+    const prefix = key + '/';
+    for (const cached of [...this.#dirs.keys()]) {
+      if (cached === key || cached.startsWith(prefix)) this.#dirs.delete(cached);
+    }
   }
 
   /** Drop the whole tree. Used by the UI's reset; the store rebuilds lazily. */
