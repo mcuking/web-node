@@ -246,6 +246,28 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-30 · M134 —— 新建项目 + 跨域隔离补齐（live 静态宿主也能跑 rspack）
+
+**背景**：唐工反馈「rspack 的 `run dev` / `run build` 之前在 live（GitHub Pages）上没成功」，并要求「测全所有构建工具（冷启动下 install+dev+build）」与「支持新建自定义项目」。二者其实是同一个根因。
+
+**根因（rspack 卡死）**：`@rspack/binding-wasm32-wasi` 的 wasm 线性内存 import 是 **shared（`flags:3`）**，且带 `wasi_thread_spawn`（`@emnapi/wasi-threads`），所以 **必须有 `SharedArrayBuffer` + `crossOriginIsolated`**。dev server 能下发 COOP/COEP，但 **live 是纯静态宿主（GitHub Pages），不能自定义响应头** → adapter 把 shared memory `postMessage` 给 worker 时抛 `DataCloneError` → build 挂起。
+
+**修法（复用 `public/sw.js` 注入 COOP/COEP，coi-serviceworker 模式）**：
+- **子资源也要带隔离头**：`addEventListener('fetch')` 里 `port == null` 分支（app-shell **全部子资源**，含 worker 脚本、wasm、模块）改为 `event.respondWith(withIsolationHeaders(event.request))`——worker realm 的 `crossOriginIsolated` 由 **worker 自己脚本响应的 header** 决定，**不继承文档**。只改文档不够。
+- **一次性 reload 改 bounded retry（≤3 次，`sessionStorage` 计数）**：静态宿主只能在 SW 接管页面**之后**才改写响应，故首次导航未隔离、需 reload；但单次 reload 可能仍落在未隔离的导航上，于是轮询 `navigator.serviceWorker.controller`（最多 5s）后再 `location.reload()`，计数器防 reload loop，无法隔离的宿主**降级为不隔离**而非死循环。
+- **验证**：全部改用 **gh-pages-like 宿主** `http://localhost:8099/`（`python3 -m http.server 8099` serve `dist/`，无 COOP/COEP）——浏览器 boot 成功、**两个 worker 均隔离**；`node`/`vite`/`webpack`/`rspack` 四项目 install+dev+build 全通。**rspack build `done in 605ms`、`dist/bundle.js` 139540 bytes、exit 0；dev preview React 计数可点、port `:5175`**。
+
+**新建项目（feature 3）**：
+- `src/projects.ts` 重写：`TemplateId='vite'|'webpack'|'rspack'|'node'`、`ProjectId=string`、`DemoProject{id,template,root,entry,port,custom?}`、`DEMO_PROJECTS`、`PROJECT_ORDER`、`TEMPLATE_META`、`entryFor()`；自定义项目列表存 **localStorage**（key `web-node:projects`）——它是 UI 状态（有哪些项目/标签/端口），必须在 OPFS 文件恢复前就能显示 chip；`projectIdFromName()`（slug）、`nextProjectPort()`（从 5180 起避占用）。
+- `src/worker/scaffold.ts` **新建**：`scaffoldFiles(template, target, port?, files=DEMO_FILES)` 把 `/project/<template>/` 的**内嵌 demo 源**拷到 `target`（不拷 `node_modules`），并做**两处绝对量改写**：① 模板根字面量（每个脚本自报 `const ROOT='/project/vite'`，因为运行时脚本没有可靠的 `import.meta.url`/`__dirname`）；② **dev 端口字面量**（`const PORT = 5173`）——运行时能起 server 不能停，同模板的第二个项目**不能绑同一个端口**，故每个项目分到自己的端口。匹配都做了边界（`/project/node_modules` 不会被 `node` 模板误伤）。
+- `src/worker/runtime.worker.ts` 加 `{type:'scaffold', template, target, port?}`；`src/client/index.ts` 加 `scaffold()`；`src/ui/main.ts` 加 `PROJECTS` Map + `projectById()`、`registerProject()`、`createProject()`（`window.prompt` 取名+模板）、`removeProject()`（custom 才有 `×`，删后回落 node）、`restoreStoredProjects()`（boot 首渲染前恢复）；`renderChips()` 加 `+ New project` chip（id `new-project`）。
+- `src/ui/style.css`：`.chip`/`.chip-x`/`.chip-add` 样式。
+- `test/scaffold.test.ts` **新建**：覆盖前缀改写 / 根字面量重定位（含「像但不是」的路径不误伤）/ 端口改写 / 只拷本模板 / 尾斜杠 / 未知模板 → `{}` / project helpers（slug、`nextProjectPort`、`entryFor`、localStorage round-trip）。
+
+**冷启动全链路实测（全新 origin：清 SW 注册 + 清 OPFS + 清 localStorage）**：首次导航 bounded-retry 后 `window.crossOriginIsolated === true`；新建 `vite-demo`（模板 vite，端口 5180）→ install 30 包 → dev 预览 Vue **计数 0→1** → build 产物入树；新建 `lab`（模板 node，端口 5181）→ run 输出完整（worker/stdio/child/shell pipe/preview）、exit 0；`×` 删除 `vite-demo` → chip 消失且 localStorage 同步。
+
+**验收**：`typecheck` 净 · `vitest run` **1199 passed / 3 skipped（141 文件）** · `build` worker **780.32 kB**、`index-*.js` **19.10 kB**。
+
 ### 2026-09-30 · M133 —— Demo 四项目收尾：切项目清场、React/Vue 框架、产物入树、文件树可编辑
 
 **改了什么**（唐工反馈 4 条 + 途中挖出的 2 个真 bug）

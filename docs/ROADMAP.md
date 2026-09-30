@@ -6,8 +6,8 @@
 > - **状态图例**：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 已完成 · `[⤳]` **已并入其他里程碑**（保留条目作决策痕迹，**不单独计数**） · `[-]` 不做（有意不做 / 死路，附理由）
 > - **编号**：沿用里程碑号 `M88` 起。已完成的 `M1–M87` 见文末「已完成总览」。
 > - **验收标准（每项都适用）**：① 差分语料对真 Node v26.9.0 **0 diff**；② `npm run typecheck` 干净；③ `npx vitest run` 全绿；④ `npm run build` 记录 worker 体积；⑤ 部署 gh-pages 且线上资产 200；⑥ 更新 DEVLOG + memory；⑦ 不能对真的东西响亮抛 `NotImplementedError`，绝不静默伪造。
-> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 I → 阶段 J。阶段 A/B/C/D 均已结清。**M113 · M122 ✅ 2026-09-29 后，阶段 G 与阶段 I 全部结清**（新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I、**M128 真实工具链端到端（真 tsc）✅** 见阶段 F）；**阶段 J：M129 ✅ · M130 ✅ · M131（依赖安装改流式解包）✅ 2026-09-29 · M132（修 build 冷启内存峰值：快照体改传字节）✅ 2026-09-30 · M133（Demo 四项目收尾：切项目清场 / React·Vue 框架 / 产物入树 / 文件树可编辑）✅ 2026-09-30**。
-> - **最后更新**：2026-09-30（**M133 ✅ Demo 四项目收尾**——切项目清场（预览+日志+内存，输出按项目归属、预览按项目端口过滤）；webpack/rspack → **React**、vite → **Vue 3 SFC**；`run build` 产物（`dist/`）**入文件树**；文件树加 **`+ File`/`+ Folder`** 可编辑（列空目录）；顺带修真 bug：**`@rollup/wasm-node` 依赖自 M130 丢失致 `vite build` 一直坏**、**旧快照索引幽灵路径**致读崩（改为 ENOENT 当缺失+剪枝 + `DEMO_VERSION` 一次性清理迁移）。`typecheck` 净 · `vitest run` **1189 passed / 3 skipped** · `build` worker **779.24 kB**。此前 2026-09-30（**M132 ✅ 修 build 冷启内存峰值**——持久化快照的 base64 改为**传原始字节**；webpack 冷构建 build 峰值 **688.9MB → 39.1MB**、install post-GC **573.1MB → 10.7MB**，与原生 Node 44MB 持平）。
+> - **执行顺序**：**阶段 H（native → WASM，主线）** → 阶段 E（M107 ✅ 2026-09-28）→ 阶段 F → 阶段 I → 阶段 J。阶段 A/B/C/D 均已结清。**M113 · M122 ✅ 2026-09-29 后，阶段 G 与阶段 I 全部结清**（新增的 **M126 启动载荷再降 ✅** 见阶段 E、**M127 行为门禁扩面 ✅** 见阶段 I、**M128 真实工具链端到端（真 tsc）✅** 见阶段 F）；**阶段 J：M129 ✅ · M130 ✅ · M131（依赖安装改流式解包）✅ 2026-09-29 · M132（修 build 冷启内存峰值：快照体改传字节）✅ 2026-09-30 · M133（Demo 四项目收尾）✅ 2026-09-30 · M134（新建项目 + 跨域隔离补齐，live 静态宿主也能跑 rspack）✅ 2026-09-30**。
+> - **最后更新**：2026-09-30（**M134 ✅ 新建项目 + 跨域隔离补齐**——① **根因**：rspack 的 wasm 线性内存 import 是 shared（`flags:3`）、带 `wasi_thread_spawn`，**必须有 `crossOriginIsolated`**，而 live（GitHub Pages）是纯静态宿主、不能下发 COOP/COEP → `DataCloneError` → build 挂起；② **修**：复用 `public/sw.js` 注入 COOP/COEP，**全部子资源**也带隔离头（worker 隔离由 worker 自己脚本响应决定，不继承文档），一次性 reload 改为 **bounded retry（≤3 次）**；③ **验证宿主改为 gh-pages-like 静态服务**（`python3 -m http.server`，无 COOP/COEP），`node/vite/webpack/rspack` 四项目 install+dev+build 全通，**rspack build `done in 605ms`、exit 0**；④ **新建项目**：`+ New project` chip → prompt 取名+模板 → `scaffoldFiles` 拷模板源（改写根字面量 + **端口字面量**，每项目分到自己的端口）→ 注册 + 存 localStorage + 切过去，`×` 可删自定义项目。`typecheck` 净 · `vitest run` **1199 passed / 3 skipped（141 文件）** · `build` worker **780.32 kB**。此前 2026-09-30（**M133 ✅ Demo 四项目收尾**——切项目清场 / webpack·rspack → React、vite → Vue 3 SFC / `run build` 产物入树 / 文件树可编辑；顺带修真 bug：**`@rollup/wasm-node` 依赖丢失致 `vite build` 一直坏**、**旧快照索引幽灵路径**致读崩）。
 
 ---
 
@@ -694,6 +694,15 @@
   - **测试**：`test/fs-hydrate.test.ts` +1（ENOENT 幽灵 → 当缺失+剪枝；非 ENOENT 仍抛）；`test/vfs-snapshot-cold.test.ts` +3（`evictBodies` 释放/前缀外不动/无读源 no-op）。
   - **验收**：`typecheck` 净 · `vitest run` **1189 passed / 3 skipped（140 文件）** · `build` worker **779.24 kB**、`index-*.js` **15.64 kB**。
   - **实测**（真浏览器）：webpack→React、rspack→React、vite→Vue **三者在预览里都渲染且计数器可点**；三者 `run build` 后 `dist/bundle.js` 入树；切项目终端**清空且保持**清空、端口清空、预览回 empty。
+
+- [x] **M134 · 新建项目 + 跨域隔离补齐（live 静态宿主也能跑 rspack）** ✅ 2026-09-30
+  - **背景**：唐工反馈「rspack 的 `run dev` / `run build` 之前在 live 上没成功」+「冷启动测全所有构建工具」+「支持新建自定义项目」。
+  - **根因**：`@rspack/binding-wasm32-wasi` 的 wasm 线性内存 import 是 **shared（`flags:3`）**、带 `wasi_thread_spawn`（`@emnapi/wasi-threads`），**必须 `SharedArrayBuffer` + `crossOriginIsolated`**；dev server 能下发 COOP/COEP，**live 纯静态宿主不能** → adapter `postMessage` shared memory 时 `DataCloneError` → build 挂起。
+  - **修（coi-serviceworker 模式）**：① `public/sw.js` 的 `withIsolationHeaders` 应用到 **app-shell 全部子资源**（不只文档）——worker realm 的 `crossOriginIsolated` 由 **worker 自身脚本响应头**决定、**不继承文档**；② 一次性 reload 改 **bounded retry（≤3 次，`sessionStorage` 计数 + 轮询 `navigator.serviceWorker.controller` 最多 5s）**，无法隔离的宿主降级为不隔离而非死循环。
+  - **新建项目**：`src/projects.ts` 重写（`TemplateId`/`ProjectId`/`DemoProject`/`loadStoredProjects`/`saveStoredProjects`（localStorage `web-node:projects`）/`projectIdFromName`/`nextProjectPort`（从 5180 起））；`src/worker/scaffold.ts` 新建（`scaffoldFiles` 拷模板源 + 改写**根字面量**与**端口字面量**，边界匹配不误伤 `/project/node_modules`）；`runtime.worker.ts` 加 `scaffold` 请求（带 `port`）；`client/index.ts` 加 `scaffold()`；`ui/main.ts` 加 `createProject`/`removeProject`/`restoreStoredProjects`/`renderChips` 的 `+ New project` chip（id `new-project`）；`ui/style.css` 加 chip 样式。
+  - **测试**：`test/scaffold.test.ts` 新建（前缀改写 / 根字面量重定位 / 端口改写 / 只拷本模板 / 尾斜杠 / 未知模板 → `{}` / project helpers）。
+  - **验证**：全新 origin（清 SW + OPFS + localStorage）下 bounded-retry 后隔离生效；gh-pages-like 宿主（`python3 -m http.server` serve `dist/`）四项目 install+dev+build 全通（**rspack build `done in 605ms`、`dist/bundle.js` 139540 bytes、exit 0**；dev preview React 计数可点、port `:5175`）。
+  - **验收**：`typecheck` 净 · `vitest run` **1199 passed / 3 skipped（141 文件）** · `build` worker **780.32 kB**、`index-*.js` **19.10 kB**。
 
 ---
 
