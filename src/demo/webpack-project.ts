@@ -218,6 +218,7 @@ function serve(port) {
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "sucrase": "^3.35.0",
     "webpack": "^5.111.1"
   }
 }
@@ -226,27 +227,43 @@ function serve(port) {
 import { createRoot } from 'react-dom/client';
 import { greet } from './message.js';
 
-// React, written without JSX on purpose: a browser tab has no transpiler, so
-// the demo calls React.createElement directly. It is the same React - same
-// hooks, same component model - in plain JavaScript webpack can bundle as-is.
-const h = React.createElement;
-
+// Written as JSX and compiled by the in-tree loader (jsx-loader.cjs, which runs
+// sucrase in the tab). JSX is only syntax: it becomes the same
+// React.createElement calls, but it reads like the markup it produces.
 function App() {
   const [count, setCount] = React.useState(0);
-  return h(
-    'main',
-    { className: 'card' },
-    h('h1', null, greet('webpack')),
-    h('button', { type: 'button', onClick: () => setCount(count + 1) }, 'count is ' + count),
-    h('p', { className: 'hint' }, 'Bundled by webpack in the browser. Edit src/message.js and save.'),
+  return (
+    <main className="card">
+      <h1>{greet('webpack')}</h1>
+      <button type="button" onClick={() => setCount(count + 1)}>
+        count is {count}
+      </button>
+      <p className="hint">Bundled by webpack in the browser. Edit src/message.js and save.</p>
+    </main>
   );
 }
 
-createRoot(document.getElementById('root')).render(h(App));
+createRoot(document.getElementById('root')).render(<App />);
 `,
   '/project/webpack/src/message.js': `export function greet(who) {
   return 'Hello from ' + who + ', bundled in the browser';
 }
+`,
+  '/project/webpack/jsx-loader.cjs': `// A tiny webpack loader: JSX in, React.createElement out, via sucrase (pure
+// JavaScript, so it runs in the tab - there is no native toolchain here). The
+// demo bundles with webpack and lets this loader do the one job webpack will
+// not: turn JSX syntax into ordinary function calls.
+const { transform } = require('sucrase');
+
+module.exports = function jsxLoader(source) {
+  const result = transform(source, {
+    transforms: ['jsx'],
+    jsxRuntime: 'classic',
+    production: true,
+    filePath: this.resourcePath,
+  });
+  return result.code;
+};
 `,
   '/project/webpack/webpack.config.mjs': `// The project lives at a fixed path in the demo, so the root is a constant
 // rather than __dirname (this file is ESM).
@@ -257,10 +274,18 @@ export default {
   context: ROOT,
   entry: './src/index.js',
   output: { path: ROOT + '/dist', filename: 'bundle.js' },
-  // The project's package.json is type: commonjs, so webpack would parse every
-  // .js as CommonJS and reject the demo's import/export. Force the flexible
-  // type (accepts both), which is what Node itself does for the preview shim.
-  module: { rules: [{ test: /[.]m?js$/, type: 'javascript/auto' }] },
+  // .js/.jsx in src/ carry JSX, so they go through the in-tree loader first
+  // (sucrase rewrites JSX to React.createElement). node_modules is skipped: its
+  // .js is plain. The project's package.json is type: commonjs, so webpack would
+  // otherwise parse every .js as CommonJS and reject the demo's import/export;
+  // force the flexible type (accepts both), which is what Node itself does.
+  module: {
+    rules: [
+      { test: /[.]jsx?$/, exclude: /node_modules/, use: ROOT + '/jsx-loader.cjs', type: 'javascript/auto' },
+      { test: /[.]m?js$/, type: 'javascript/auto' },
+    ],
+  },
+  resolve: { extensions: ['.js', '.jsx'] },
   // No eval: the bundle runs in the preview page, so emit plain source.
   devtool: false,
   infrastructureLogging: { level: 'error' },

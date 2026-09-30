@@ -252,29 +252,51 @@ export default {
   context: ROOT,
   entry: { main: './src/main.mjs' },
   output: { path: ROOT + '/dist', filename: 'bundle.js' },
+  // JSX in src/ is compiled by rspack's own swc loader (builtin:swc-loader): the
+  // Rust bundler already ships the compiler, so no extra package is needed.
+  module: {
+    rules: [
+      {
+        test: /[.]m?js$/,
+        exclude: /node_modules/,
+        use: {
+          loader: 'builtin:swc-loader',
+          options: {
+            jsc: {
+              parser: { syntax: 'ecmascript', jsx: true },
+              transform: { react: { runtime: 'classic' } },
+              target: 'es2022',
+            },
+            module: { type: 'es6' },
+          },
+        },
+        type: 'javascript/auto',
+      },
+    ],
+  },
 };
 `,
   '/project/rspack/src/main.mjs': `import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { greet } from './message.mjs';
 
-// React, written without JSX on purpose: a browser tab has no transpiler, so
-// the demo calls React.createElement directly. It is the same React - same
-// hooks, same component model - in plain JavaScript rspack can bundle as-is.
-const h = React.createElement;
-
+// JSX, compiled by rspack's built-in swc loader (builtin:swc-loader). No extra
+// package: the Rust bundler already ships the compiler, so JSX goes straight
+// through and reads like the markup it produces.
 function App() {
   const [count, setCount] = React.useState(0);
-  return h(
-    'main',
-    { className: 'card' },
-    h('h1', null, greet('rspack')),
-    h('button', { type: 'button', onClick: () => setCount(count + 1) }, 'count is ' + count),
-    h('p', { className: 'hint' }, 'Packed by rspack (Rust to wasm) in the browser. Edit src/message.mjs and save.'),
+  return (
+    <main className="card">
+      <h1>{greet('rspack')}</h1>
+      <button type="button" onClick={() => setCount(count + 1)}>
+        count is {count}
+      </button>
+      <p className="hint">Packed by rspack (Rust to wasm) in the browser. Edit src/message.mjs and save.</p>
+    </main>
   );
 }
 
-createRoot(document.getElementById('root')).render(h(App));
+createRoot(document.getElementById('root')).render(<App />);
 `,
   '/project/rspack/src/message.mjs': `export function greet(who) {
   return 'Hello from ' + who + ', packed by a Rust bundler in the browser';
