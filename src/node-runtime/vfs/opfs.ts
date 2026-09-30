@@ -67,36 +67,55 @@ export class OpfsPersistence implements Persistence {
     const dir = await this.#ensureDir();
     const snapshot = vfs.snapshot();
 
-    // Structure index + per-file mirror. Bodies are NOT inlined: the index is
-    // JSON, so inlining means base64 — which inflates every body by 4/3 and
-    // builds a string the size of the whole tree (plus one more in
-    // `JSON.stringify`) on every debounce. That was the dominant cost of a
-    // webpack build on this backend. The mirror holds the bytes; `load()` reads
-    // them back. `v: 3` marks the layout.
-    const entries = snapshot.map((item) =>
-      item.type === 'dir'
-        ? { path: item.path, type: item.type, mode: item.mode }
-        : {
-            path: item.path,
-            type: item.type,
-            mode: item.mode,
-            size: item.data?.byteLength ?? 0,
-          },
-    );
-
-    // Mirror actual file contents so OPFS stays browsable/inspectable.
+    // Structure index + one `bodies.bin` pack. Bodies are NOT inlined in the
+    // index: it is JSON, so inlining means base64 — which inflates every body by
+    // 4/3 and builds a string the size of the whole tree (plus one more in
+    // `JSON.stringify`) on every debounce, the dominant cost of a webpack build
+    // here. Nor are they mirrored one file per entry: a whole `node_modules` is
+    // thousands of files, and opening a sync access handle per file costs
+    // seconds. Instead every body is written into a single file at the offset
+    // the index records, through one handle. `v: 3` marks the layout.
+    const entries: Array<{
+      path: string;
+      type: 'file' | 'dir';
+      mode?: number;
+      size?: number;
+      offset?: number;
+    }> = [];
+    const offsets = new Map<string, number>();
+    let total = 0;
     for (const item of snapshot) {
-      if (item.type !== 'file') continue;
-      const rel = item.path.replace(/^\//, '');
-      const parts = rel.split('/');
-      let cur = dir;
-      for (let i = 0; i < parts.length - 1; i++) {
-        cur = await cur.getDirectoryHandle(parts[i], { create: true });
+      if (item.type === 'dir') {
+        entries.push({ path: item.path, type: item.type, mode: item.mode });
+        continue;
       }
-      await this.#writeBytes(cur, parts[parts.length - 1], item.data ?? new Uint8Array(0));
+      const size = item.data?.byteLength ?? 0;
+      offsets.set(item.path, total);
+      entries.push({ path: item.path, type: item.type, mode: item.mode, size, offset: total });
+      total += size;
     }
 
-    await this.#writeText(dir, '.wvm.json', JSON.stringify({ v: 3, entries }, null, 0));
+    // One buffer, one write. Assembling the pack in memory costs a single
+    // transient copy (~the tree's bytes, external, not JS heap); writing it as
+    // thousands of tiny `access.write` calls costs ~seconds, because each sync
+    // access write is a syscall. The copy is far cheaper than either the old
+    // base64 string or the per-body writes.
+    const pack = new Uint8Array(total);
+    for (const item of snapshot) {
+      if (item.type !== 'file' || !item.data || item.data.byteLength === 0) continue;
+      pack.set(item.data, offsets.get(item.path) ?? 0);
+    }
+    const packFh = await (dir as any).getFileHandle('bodies.bin', { create: true });
+    const access = await packFh.createSyncAccessHandle();
+    try {
+      access.truncate(total);
+      access.write(pack, { at: 0 });
+      access.flush();
+    } finally {
+      access.close();
+    }
+
+    await this.#writeText(dir, '.wvm.json', JSON.stringify({ v: 3, pack: 'bodies.bin', entries }, null, 0));
   }
 
   async #writeText(dir: FileSystemDirectoryHandle, name: string, text: string): Promise<void> {
@@ -143,14 +162,31 @@ export class OpfsPersistence implements Persistence {
         data?: string | Uint8Array;
         mode?: number;
         size?: number;
+        offset?: number;
       }>;
-      // v3 keeps a file's bytes in the mirror, not the index (see `flush`). This
-      // backend has no lazy read path, so read them back now and hand the tree a
-      // ready-to-materialise `Uint8Array` per file.
+      // v3 keeps a file's bytes off the index. This backend has no lazy read
+      // path, so read them back now and hand the tree a ready-to-materialise
+      // `Uint8Array` per file. Newer snapshots pack every body into one
+      // `bodies.bin` (read once, sliced by offset); an earlier v3 build mirrored
+      // a real file per entry, so fall back to that when there is no pack.
       if (version >= 3) {
+        let pack: Uint8Array | null = null;
+        const packName = typeof parsed.pack === 'string' ? parsed.pack : null;
+        if (packName !== null) {
+          try {
+            const pfh = await (dir as any).getFileHandle(packName);
+            pack = new Uint8Array(await (await pfh.getFile()).arrayBuffer());
+          } catch {
+            pack = null;
+          }
+        }
         for (const entry of entries) {
           if (entry.type !== 'file' || entry.data !== undefined) continue;
-          entry.data = await this.#readMirror(dir, entry.path);
+          if (pack !== null && typeof entry.offset === 'number') {
+            entry.data = pack.subarray(entry.offset, entry.offset + (entry.size ?? 0));
+          } else {
+            entry.data = await this.#readMirror(dir, entry.path);
+          }
         }
       }
       return { version, entries };
