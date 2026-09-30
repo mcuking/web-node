@@ -48,7 +48,7 @@ export const PROJECT_ORDER: TemplateId[] = ['node', 'vite', 'webpack', 'rspack']
 export const TEMPLATE_META: Record<TemplateId, { label: string; blurp: string }> = {
   vite: { label: '⚡ Vite', blurp: 'Vue 3 single-file component — Vite dev server + build, in the tab' },
   webpack: { label: '📦 Webpack', blurp: 'React app — webpack watches and bundles; the preview full-reloads' },
-  rspack: { label: '🔷 rspack', blurp: 'React app — Rust bundler via wasm32-wasi on a real Worker thread pool' },
+  rspack: { label: '🔷 Rspack', blurp: 'React app — Rust bundler via wasm32-wasi on a real Worker thread pool' },
   node: { label: '🟢 Node.js', blurp: 'the full runtime — fs, http, crypto, streams, workers, child processes' },
 };
 
