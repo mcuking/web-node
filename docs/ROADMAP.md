@@ -724,6 +724,12 @@
   - **证伪 M135 的「疑似」**：`registry.ts` 的 `tarballs` **不是**持有者（每次 install 新建、装完即释放；install 仅 +1.5MB，包体落 OPFS 不占 JS 堆）；**不是**可驱逐 VFS body（ArrayBuffer 类仅 1.5MB，evict 不降）；子进程独立 ModuleLoader 退出即移除 → 保留在 **V8 层**，JS 侧无可清缓存。
   - **结论**：~25MB 是**在 tab 内编译 webpack 的固有代价、稳态、与原生 Node 持平**，**非泄漏、无需修复**。无代码改动（仅 DEVLOG/ROADMAP/memory）。
 
+- [x] **M138 · build 峰值内存取证：约一半峰值是未回收垃圾** ✅ 2026-09-30
+  - **受控基线**：boot **10.1MB** → install 峰值 **34.6MB** → build 峰值 **89.2MB**（重跑 83–90MB，稳定）。一次 build 编译 **763 模块 / 10.42MB 源码**，无重复编译。
+  - **决定性实验**：build 期间从 CDP 强制 `collectGarbage` → 峰值 **83.0 → 42.9MB（−48%）**。→ 约一半峰值是**未回收垃圾**；活数据 ~43MB（含父级保留模块图 ~35MB）。分配画像热点全在 `compileTagged`（V8 编译开销）。
+  - **不可应用内修复**：worker 无 `gc()`（未开 `--expose-gc`），也无等价 GC API；build 是同步分配密集段，V8 惰于 GC。
+  - **结论**：峰值瞬时、可回收，浏览器按标签页内存管理即可；无需也无法在应用内修复。若要强压，只能靠宿主开 `--expose-gc` + opportunistic `gc?.()`，或把 build 放独立 Worker 后 terminate（不降总峰值）。**本轮无代码改动**。
+
 ---
 
 ## 怎么用这份文件

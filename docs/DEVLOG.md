@@ -246,6 +246,17 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-30 · M138 —— build 峰值内存取证：约一半峰值是未回收垃圾（并说明为何应用内无法修）
+
+- **背景**：M137 结清了“保留堆”，但把“build 峰值 ~79MB”列为“瞬时 V8 parse/JIT churn”未深入。本里程碑专做峰值。
+- **受控基线**（新 origin、单页单 worker、`getHeapUsage` 采样）：boot **10.1MB** → install 峰值 **34.6MB** → build 峰值 **89.2MB**；重跑 build 峰值 83–90MB（稳定）。
+- **编译量**：一次 webpack build 共编译 **763 个模块 / 10.42MB 源码**（avg 14KB/模块）；**无重复编译**（临时探针：`compileTagged` 计数）。
+- **决定性实验（强制 GC）**：在 build 期间从 CDP 反复 `HeapProfiler.collectGarbage`，峰值 **83.0MB → 42.9MB（≈ −48%）**。→ **峰值中约一半是未被回收的垃圾**；build 期间活数据约 **43MB**（含父级保留的模块图 ~35MB）。
+- **分配画像**（`HeapProfiler.startSampling`）：热点集中于 `compileTagged`（757 次模块编译的 V8 编译开销），其余为 V8 内部通用分配；我们自己的代码（`esm-transform`、decode、concat）占比极小 → **垃圾源自 V8 编译 webpack 本身**。
+- **为何应用内无法修**：worker 里 `typeof gc === 'undefined'`（未用 `--expose-gc`），`performance.measureUserAgentSpecificMemory` 也不可用；build 是一段分配密集的**同步**执行，V8 惰于 GC 才让堆涨到 ~90MB。既不能调 `gc()`，也不能向 webpack 的同步循环里插入 yield。
+- **结论/建议**：峰值是**瞬时、可回收**的（约一半是垃圾），由浏览器按标签页内存管理回收；**无需也无法在应用内“修复”**。若真要压：唯一有效手段是在 build 期间让 V8 GC——需宿主开 `--js-flags=--expose-gc` 并在运行时 opportunistic 调 `gc?.()`（**依赖宿主配置，非应用可保证**），或把 build 放进**独立 Worker**执行后 terminate（不降标签页总峰值，仅隔离）。均需唐工拍板，本轮**无代码改动**。
+- **工具**：`/tmp/wnk/{runpeak,runbuild,prof2,gcforce,count,weval}.mjs`（分阶段峰值采样 / 分配采样画像 / build 期间强制 GC 对比 / 编译计数 / worker 内求值）。
+
 ### 2026-09-30 · M137 —— 内存复取证：build 保留堆的确定归属（证伪 tarballs 假设）
 
 - **背景**：M135 只能说「模块图编译保留量与原生 Node 持平」，并把「`registry.ts` 的 `tarballs` Map」列为「疑似」驻留大头，未定论。本次做受控基线实验把它钉死。
