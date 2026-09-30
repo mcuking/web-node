@@ -257,6 +257,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
      - `.file-tree li` 改**固定行高 22px**：操作按钮出现/隐藏不再改变行高（此前 padding 惹的祸）。
      - `.act` 统一为 **20×20 圆角图标按钮**（15px 图标、hover 浅色圆角背景、rename 变 accent、delete 变红），顶栏与行内共用。
      - **删除确认由 `window.confirm` 改为应用内弹窗**（`confirmDialog`，`src/ui/main.ts` + `.modal-*` 样式）：深色主题、显示文件名、Enter 确认 / Esc 取消 / 点遮罩取消、危险动作红色确认键。
+     - **重命名默认只选中主文件名、不选后缀**（`renameSelectionEnd`）：选中范围 = 最后一个 `.` 之前（`App.vue`→`App`、`vite.config.mjs`→`vite.config`）；无扩展名或点文件（`src`/`.gitignore`）整名选中。
 - **测试**：`test/build.test.ts` 断言补充 `/project/vite/vite.config.mjs` 已生成（`vitecfg  true`）。
 - **验收**：`typecheck` 净 · `vitest run` **1210 passed / 3 skipped（140 文件）** · `build` worker **783.77 kB**、`index-*.js` **24.84 kB**、`style.css` **8.46 kB**。
 - **实测**（真浏览器，dev 站点）：① 项目栏显示 `🔷 Rspack`；② Vite 树出现 `vite.config.mjs`，**install(30 包)→build(`vite v5.4.21`、`built in 1221ms`、写 `dist/`)→dev(`listening :5173`、HMR 桥) 全通**，预览渲染 Vue 应用（`count is 0`）；③ 顶栏新建按钮已是图标样式；④ 行高 hover 前后 **22px→22px**（不跳高）、hover 按钮背景 `rgba(255,255,255,0.16)`、rename 变绿；删除弹窗出现且可取消。
