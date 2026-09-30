@@ -246,6 +246,24 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-09-30 · M135 —— demo 改模板写法（JSX/SFC）+ 文件树增删改名 + OPFS 句柄修复
+
+- **做（唐工三项需求）**：
+  1. **demo 弃用渲染函数、改模板写法**——`webpack` 项目加 `sucrase: ^3.35.0` 与 `jsx-loader.cjs`（`transforms:['jsx']`、`jsxRuntime:'classic'`）+ `resolve.extensions:['.js','.jsx']`，`src/index.js` 由「手写 `e()` 调用」改为 **JSX**；`rspack` 项目改用内置 **`builtin:swc-loader`**（`jsc.parser.jsx:true`、`react.runtime:'classic'`）。`DEMO_VERSION` `2`→`3`（触发一次性重写 demo 源、不动用户文件）。
+  2. **文件/文件夹增删改名 + 文件夹内新建**（交互对齐 WebContainer IDE）——`runtime.worker.ts` 加 `{type:'rename';from;to}`（先 `ensureDir(req.to)` 再 `vfs.rename`）与 `{type:'remove';path}`（`vfs.rm(path,{recursive:true,force:true})`）；`client/index.ts` 加 `mkdir`/`rename`/`remove`；`ui/main.ts` 的 `renderTree` 重写为**嵌套 explorer** + 状态 `collapsedDirs`/`creating`/`renaming`（`makeRow`/`makeCreateRow`/`startCreate`/`commitCreate`/`commitRename`/`deleteEntry`，**行内 input**，Enter 提交 / Esc 取消 / blur 提交）；`ui/style.css` 重写 `.file-tree` 样式。
+  3. **内存优化（模块图编译）**——见下「结论」。
+- **内存剖析结论（重要、已用受控实验证伪一条假设）**：
+  - 基线 webpack build 峰值 **79MB**、`compileTagged` 独占 **20.3MB（63%）**；GC 后保留 **35.6MB**（其中 `source-registry` 11MB）。
+  - 把 `source-registry` 改**按字节上限 LRU**（`SOURCE_REGISTRY_MAX_BYTES = 4MiB`）：registry 由 785 条/11MB 降到 224 条/4.1MB，**但保留堆仅降 0.7MB**。
+  - **受控实验**（eval / `new Function` / 无 `sourceURL` 三条路径）证明三者都保留 ~11.7MB——**V8 在模块函数存活时固有保留脚本源码（ConsString），与 `sourceURL`/`eval` 无关**；registry 里那份字符串只是 V8 保留串的一部分 → **该 cap 对堆无效**（保留改动仅为「限定一个进程级全局缓存不无限增长」，属防御性，已在注释里如实说明）。
+  - 快照内最大字符串全是我们自己的模块 eval 包装（V8 保留），**无独立 3.9MB 项**；堆内 `JSArrayBufferData` 31MB 来自 **`npm/registry.ts` 的 `tarballs` Map 永久缓存每次安装的压缩包字节**（安装后为死重）。
+  - **跨项目不累积**：同 origin 先 webpack 再 rspack 都构建后，worker 保留堆 **17.4MB**（低于单跑 webpack 的 35.7MB）——**无跨构建/跨项目泄漏**，编译峰值是**瞬时** V8 parse/JIT churn；保留量已与原生 Node 持平。结论：**模块图编译本身无可再榨的驻留大头**，真优化应落在「安装期 tarball 缓存」与「快照持久化」两条（后者 M132 已解决）。
+- **顺带修复真 bug · OPFS 陈旧句柄**（`vfs/opfs-store.ts`）：`remove()` 删目录后未清理 `#dirs` 句柄缓存——缓存里的目录句柄已指向不存在的条目，**后续经它写入会抛 `NotFoundError`**（真机「新建文件夹→内建文件」偶发即此）。修：删目录时按 key 及 `<key>/` 前缀清理缓存。
+- **测试**：新增 `test/opfs-store.test.ts`（4 例，内存假 OPFS，**删掉失效逻辑即复现 `NotFoundError`**，恢复即绿）；`test/source-registry.test.ts`（7 例，按字节预算 LRU）。
+- **验收**：`typecheck` 净 · `vitest run` **1210 passed / 3 skipped（140 文件）** · `build` worker **782.39 kB**、`index-*.js` **22.33 kB**。
+- **实测**（真浏览器）：webpack build bundle、dev 预览计数 0→1；文件树完整流程（新建文件夹 → 内建 `notes.txt` → 改名 `readme.md` → 删除文件 → 递归删除文件夹）全通过。
+- **涉及文件**：`src/demo/{webpack,rspack}-project.ts`、`src/demo-project.ts`（`DEMO_VERSION`）、`src/ui/{main.ts,style.css}`、`src/client/index.ts`、`src/worker/runtime.worker.ts`、`src/node-runtime/source-registry.ts`、`src/node-runtime/vfs/opfs-store.ts`、`test/{opfs-store,source-registry}.test.ts`。
+
 ### 2026-09-30 · M134 —— 新建项目 + 跨域隔离补齐（live 静态宿主也能跑 rspack）
 
 **背景**：唐工反馈「rspack 的 `run dev` / `run build` 之前在 live（GitHub Pages）上没成功」，并要求「测全所有构建工具（冷启动下 install+dev+build）」与「支持新建自定义项目」。二者其实是同一个根因。

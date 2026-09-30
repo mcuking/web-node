@@ -704,6 +704,13 @@
   - **验证**：全新 origin（清 SW + OPFS + localStorage）下 bounded-retry 后隔离生效；gh-pages-like 宿主（`python3 -m http.server` serve `dist/`）四项目 install+dev+build 全通（**rspack build `done in 605ms`、`dist/bundle.js` 139540 bytes、exit 0**；dev preview React 计数可点、port `:5175`）。
   - **验收**：`typecheck` 净 · `vitest run` **1199 passed / 3 skipped（141 文件）** · `build` worker **780.32 kB**、`index-*.js` **19.10 kB**。
 
+- [x] **M135 · demo 改模板写法（JSX/SFC）+ 文件树增删改名 + OPFS 陈旧句柄修复** ✅ 2026-09-30
+  - **需求 1（demo 弃渲染函数、改模板写法）**：webpack 项目加 `sucrase ^3.35.0` + `jsx-loader.cjs`（`transforms:['jsx']`、`jsxRuntime:'classic'`）+ `resolve.extensions:['.js','.jsx']`，`src/index.js` 改 **JSX**；rspack 项目改用内置 **`builtin:swc-loader`**（`jsc.parser.jsx:true`、`react.runtime:'classic'`）。`DEMO_VERSION` `2`→`3`。build bundle 139682/139585 bytes，dev 预览计数 0→1。
+  - **需求 2（文件/文件夹增删改名 + 文件夹内新建，对齐 WebContainer IDE）**：`runtime.worker.ts` 加 `rename`（先 `ensureDir(to)` 再 `vfs.rename`）与 `remove`（`vfs.rm(recursive,force)`）；`client/index.ts` 加 `mkdir`/`rename`/`remove`；`ui/main.ts` 的 `renderTree` 重写为嵌套 explorer + 状态（`collapsedDirs`/`creating`/`renaming`）+ **行内 input**（Enter 提交 / Esc 取消 / blur 提交）；`ui/style.css` 重写文件树样式。真机完整流程通过。
+  - **需求 3（内存优化 · 模块图编译）**：剖析+受控实验得出——**模块图编译的保留量已与原生 Node 持平、无跨项目累积/泄漏**（同 origin 先 webpack 再 rspack 都构建后 worker 保留堆 **17.4MB**，低于单跑 webpack 的 35.7MB；峰值是瞬时 V8 parse/JIT churn）。`source-registry` 的永久驻留（785 条/11MB）改为**按字节上限 LRU**（`SOURCE_REGISTRY_MAX_BYTES = 4MiB`，降为 224 条/4.1MB）；受控实验证伪「降 registry 即可降堆」——**V8 在模块函数存活时固有保留脚本源码（ConsString），与 `sourceURL`/`eval` 无关**（三种路径都保留 ~11.7MB），故该改动仅作「限定进程级全局缓存」的防御性约束。
+  - **顺带修真 bug · OPFS 陈旧句柄**：`vfs/opfs-store.ts` 的 `remove()` 删目录后未清理 `#dirs` 句柄缓存 → 缓存句柄指向已删条目 → 后续经它写入抛 `NotFoundError`。修：按 key 及 `<key>/` 前缀清理。新增 `test/opfs-store.test.ts`（4 例，删掉失效逻辑即复现）。
+  - **验收**：`typecheck` 净 · `vitest run` **1210 passed / 3 skipped（140 文件）** · `build` worker **782.39 kB**、`index-*.js` **22.33 kB**。
+
 ---
 
 ## 怎么用这份文件
