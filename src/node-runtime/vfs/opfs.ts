@@ -1,5 +1,5 @@
 import type { Persistence, ReadSource, SnapshotSource } from './persistence';
-import { encodeBase64, decodeBase64 } from './base64';
+import { encodeBase64 } from './base64';
 
 /**
  * The debounce must ride the **host** timer queue: `installGlobals` replaces the
@@ -69,9 +69,21 @@ export class OpfsPersistence implements Persistence {
     const snapshot = vfs.snapshot();
 
     // Directory index file: cheap way to restore structure without walking OPFS.
-    // Contents are base64 so binary files (wasm, images) survive intact. `v`
+    // This backend has no synchronous read path, so the index is the tree's only
+    // copy and must carry every body; it is JSON, so the bytes are base64. `v`
     // marks the encoding so pre-base64 snapshots can still be read back.
-    await this.#writeText(dir, '.wvm.json', JSON.stringify({ v: 2, entries: snapshot }, null, 0));
+    const entries = snapshot.map((item) =>
+      item.type === 'dir'
+        ? { path: item.path, type: item.type, mode: item.mode }
+        : {
+            path: item.path,
+            type: item.type,
+            mode: item.mode,
+            data: encodeBase64(item.data ?? new Uint8Array(0)),
+            size: item.data?.byteLength ?? 0,
+          },
+    );
+    await this.#writeText(dir, '.wvm.json', JSON.stringify({ v: 2, entries }, null, 0));
 
     // Mirror actual file contents so OPFS stays browsable/inspectable.
     for (const item of snapshot) {
@@ -82,7 +94,7 @@ export class OpfsPersistence implements Persistence {
       for (let i = 0; i < parts.length - 1; i++) {
         cur = await cur.getDirectoryHandle(parts[i], { create: true });
       }
-      await this.#writeBytes(cur, parts[parts.length - 1], decodeBase64(item.data ?? ''));
+      await this.#writeBytes(cur, parts[parts.length - 1], item.data ?? new Uint8Array(0));
     }
   }
 

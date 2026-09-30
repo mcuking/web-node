@@ -168,12 +168,30 @@ export function decodePut(payload: Uint8Array): { path: string; data: Uint8Array
   return { path, data: payload.slice(4 + pathLen) };
 }
 
-/** A snapshot entry, as `MemoryVfs.snapshot()` produces them (file data is base64).
+/** A snapshot entry as the **runtime worker** produces it (see `MemoryVfs.snapshot()`).
  *
- * `data` may be absent on a file: a **structure index** (version 3, written by the
- * FS-worker backend) names every file but leaves its bytes in the mirror, so only
- * `size` travels. `load()` hands those entries back unchanged and the runtime
- * restores them as cold (`MemoryVfs.fromSnapshot(..., { cold: true })`). */
+ * A file body rides as raw bytes, not base64: the async snapshot is an ordinary
+ * `postMessage`, whose structured clone carries a `Uint8Array` as-is. Base64 would
+ * inflate every body by 4/3 and build a string the size of the whole tree in the
+ * JS heap on every debounce — the snapshot's cost would scale with `node_modules`
+ * even when nothing in it changed.
+ *
+ * `data` may be absent on a file: a **structure index** leaves the bytes in the
+ * mirror (only `size` travels), and the runtime restores such an entry as cold. */
+export interface SnapshotEntry {
+  path: string;
+  type: 'file' | 'dir';
+  data?: Uint8Array;
+  mode?: number;
+  /** Byte length of a file's contents; present in a structure index. */
+  size?: number;
+}
+
+/** A snapshot entry as it is **stored on disk**, read back by `load()`.
+ *
+ * A file body is base64 **text** here (v2/v3 index files), where the in-flight
+ * {@link SnapshotEntry} carries bytes. A structure-index entry ships no `data` at
+ * all and the runtime restores it cold against the mirror. */
 export interface PersistedEntry {
   path: string;
   type: 'file' | 'dir';
@@ -199,7 +217,7 @@ export interface FsInitMessage {
 export type FsAsyncCall =
   | { kind: 'load' }
   /** Mirror the whole tree: rewrite `.wvm.json` and every file next to it. */
-  | { kind: 'snapshot'; snapshot: PersistedEntry[] }
+  | { kind: 'snapshot'; snapshot: SnapshotEntry[] }
   /**
    * Drop these paths from the store.
    *

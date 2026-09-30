@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryVfs } from '../src/node-runtime/vfs';
-import { decodeBase64, encodeBase64 } from '../src/node-runtime/vfs/base64';
 import type { ReadSource } from '../src/node-runtime/vfs/persistence';
 
 /**
@@ -44,9 +43,10 @@ describe('MemoryVfs.snapshot with cold (un-hydrated) entries', () => {
     const snap = vfs.snapshot();
     const entry = snap.find((e) => e.path === '/big.txt');
     expect(entry, 'the file must still be in the snapshot').toBeDefined();
-    expect(entry!.data).toBe(encodeBase64(bytes));
-    expect(decodeBase64(entry!.data!)).toEqual(bytes);
-    expect(entry!.data).not.toBe('');
+    // Bodies travel as raw bytes now (no base64 in-flight), and a cold entry is
+    // still materialised rather than emitted empty.
+    expect(entry!.data).toEqual(bytes);
+    expect(entry!.data!.byteLength).toBeGreaterThan(0);
   });
 
   it('materialises a cold directory and its cold children', () => {
@@ -76,8 +76,8 @@ describe('MemoryVfs.snapshot with cold (un-hydrated) entries', () => {
 
     const snap = vfs.snapshot();
     const found = Object.fromEntries(snap.filter((e) => e.type === 'file').map((e) => [e.path, e.data]));
-    expect(found['/d/a.txt']).toBe(encodeBase64(a));
-    expect(found['/d/b.txt']).toBe(encodeBase64(b));
+    expect(found['/d/a.txt']).toEqual(a);
+    expect(found['/d/b.txt']).toEqual(b);
   });
 
   it('drops a cold entry whose bytes are gone, rather than writing an empty file', () => {
@@ -98,6 +98,6 @@ describe('MemoryVfs.snapshot with cold (un-hydrated) entries', () => {
     const vfs = new MemoryVfs({ cwd: '/' });
     vfs.writeFile('/empty.txt', new Uint8Array(0));
     const snap = vfs.snapshot();
-    expect(snap.find((e) => e.path === '/empty.txt')!.data).toBe('');
+    expect(snap.find((e) => e.path === '/empty.txt')!.data).toEqual(new Uint8Array(0));
   });
 });

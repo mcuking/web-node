@@ -11,7 +11,7 @@ import {
 } from './types';
 import type { ReadSource } from './persistence';
 import * as p from './posix';
-import { encodeBase64, decodeBase64 } from './base64';
+import { decodeBase64 } from './base64';
 
 interface Entry {
   type: 'file' | 'dir';
@@ -634,14 +634,14 @@ export class MemoryVfs implements Vfs {
   snapshot(opts: { dropColdBodies?: boolean } = {}): Array<{
     path: string;
     type: 'file' | 'dir';
-    data?: string;
+    data?: Uint8Array;
     mode: number;
     size?: number;
   }> {
     const out: Array<{
       path: string;
       type: 'file' | 'dir';
-      data?: string;
+      data?: Uint8Array;
       mode: number;
       size?: number;
     }> = [];
@@ -676,9 +676,12 @@ export class MemoryVfs implements Vfs {
           path,
           type: 'file',
           mode: e.mode,
-          // base64, not text: contents are arbitrary bytes (wasm, images) and a
-          // UTF-8 round-trip would corrupt and inflate them.
-          data: encodeBase64(e.data),
+          // Raw bytes, not base64. The FS-worker backend hands this straight to
+          // `postMessage`, whose structured clone carries a `Uint8Array` without
+          // the 4/3 blow-up (and the giant temporary strings) of base64 — the
+          // whole tree's bodies no longer touch the JS heap on every snapshot.
+          // A backend that stores the index as JSON base64-encodes it itself.
+          data: e.data,
           size: e.data.byteLength,
         });
       } else {
@@ -702,7 +705,7 @@ export class MemoryVfs implements Vfs {
    * zero stands in for a file the writer could not size.
    */
   static fromSnapshot(
-    snapshot: Array<{ path: string; type: 'file' | 'dir'; data?: string; mode?: number; size?: number }>,
+    snapshot: Array<{ path: string; type: 'file' | 'dir'; data?: string | Uint8Array; mode?: number; size?: number }>,
     opts: { cwd?: string; onChange?: (path: string | null) => void; cold?: boolean } = {},
     encoding: 'base64' | 'text' = 'base64',
   ): MemoryVfs {
@@ -717,7 +720,15 @@ export class MemoryVfs implements Vfs {
         vfs.#entries.set(f.path, entry);
         continue;
       }
-      const bytes = encoding === 'base64' ? decodeBase64(f.data ?? '') : new TextEncoder().encode(f.data ?? '');
+      // A body may arrive as raw bytes (a `snapshot()` round-trip) or as text
+      // from the index file on disk (base64 since v2, plain UTF-8 for v1).
+      const raw = f.data;
+      const bytes =
+        raw instanceof Uint8Array
+          ? raw
+          : encoding === 'base64'
+            ? decodeBase64(raw ?? '')
+            : new TextEncoder().encode(raw ?? '');
       vfs.writeFile(f.path, bytes, { mode: f.mode });
     }
     return vfs;

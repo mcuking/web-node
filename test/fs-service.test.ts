@@ -292,17 +292,20 @@ describe('fs service snapshots', () => {
     expect(store.files.has('project/src')).toBe(false);
   });
 
-  it('keeps bodies inline for a backend with no synchronous read path', async () => {
+  it('writes a structure index and reads bodies back from the mirror', async () => {
     const store = new FakeStore();
     await new FsService(store).writeSnapshot(makeVfs().snapshot());
     const index = JSON.parse(decoder.decode(store.files.get(SNAPSHOT_FILE)!));
     expect(index.v).toBe(3);
     const ajs = index.entries.find((e: { path: string }) => e.path === '/project/src/a.js');
-    expect(typeof ajs.data).toBe('string');
+    // Bodies never ride in the index (raw bytes would not fit, base64 would
+    // inflate every body by 4/3 on every debounce); the mirror is the copy.
+    expect(ajs.data).toBeUndefined();
     expect(ajs.size).toBe(20);
-    // Self-contained: `load()` alone reproduces the tree, no mirror reads.
+    // The index plus the mirror reproduce the tree.
     const loaded = await new FsService(store).load();
-    const vfs = MemoryVfs.fromSnapshot(loaded!.entries, { cwd: '/project', cold: false }, 'base64');
+    const vfs = MemoryVfs.fromSnapshot(loaded!.entries, { cwd: '/project', cold: true }, 'base64');
+    vfs.setReadSource(readSourceFor(store));
     expect(decoder.decode(vfs.readFile('/project/src/a.js'))).toBe('export const a = 1;\n');
   });
 

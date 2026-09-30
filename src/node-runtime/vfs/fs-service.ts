@@ -20,11 +20,10 @@ import {
   encodeInfoBody,
   encodeReadResult,
   type FsAsyncCall,
-  type PersistedEntry,
+  type SnapshotEntry,
   type PersistedSnapshot,
   type StoreEntry,
 } from '../../sync/fs-protocol';
-import { decodeBase64 } from './base64';
 
 /** The index file: a cheap way to rebuild the tree without walking OPFS. */
 export const SNAPSHOT_FILE = '.wvm.json';
@@ -68,20 +67,6 @@ export interface FileStore {
 /** VFS paths are absolute; store paths are relative to the root directory. */
 export function relativePath(path: string): string {
   return path.replace(/^\/+/, '');
-}
-
-/**
- * Byte length a base64 payload decodes to.
- *
- * Used only to backfill `size` for an entry that carries `data` but no explicit
- * size — a legacy v2 entry, which kept everything inline. A structure-index entry
- * has no `data` and always ships its own `size`.
- */
-function decodedLength(base64: string | undefined): number {
-  if (!base64) return 0;
-  const len = base64.length;
-  const padding = len > 0 && base64[len - 1] === '=' ? (base64[len - 2] === '=' ? 2 : 1) : 0;
-  return (len * 3) / 4 - padding;
 }
 
 export class FsService {
@@ -220,8 +205,13 @@ export class FsService {
    * The snapshot is tracked as in-flight and the files it writes are marked, so a
    * synchronous read that races one waits it out (see `#joinWrite`).
    */
-  writeSnapshot(entries: PersistedEntry[]): Promise<void> {
+  writeSnapshot(entries: SnapshotEntry[]): Promise<void> {
     const run = (async (): Promise<void> => {
+      // Structure index: `path`, `type`, `mode`, and a file's `size`. The bodies
+      // live in the mirror next to it, written just below and read back
+      // synchronously (the FS worker is the only writer), so there is nothing to
+      // inline. That keeps the index tiny for a whole `node_modules` and means a
+      // debounce rewrites only the files a session actually touched.
       const index = entries.map((item) =>
         item.type === 'dir'
           ? { path: item.path, type: item.type, mode: item.mode }
@@ -229,13 +219,7 @@ export class FsService {
               path: item.path,
               type: item.type,
               mode: item.mode,
-              size: item.size ?? decodedLength(item.data),
-              // Inline the body only when the snapshot carries one. A backend with
-              // no synchronous read path (`OpfsPersistence`) is the only copy its
-              // tree has, so `snapshot()` hands over bodies and they must travel
-              // here. The FS-worker backend drops cold bodies — the mirror is the
-              // copy — and this branch stays empty, so its index stays structure.
-              ...(item.data !== undefined ? { data: item.data } : {}),
+              size: item.size ?? item.data?.byteLength ?? 0,
             },
       );
       for (const item of entries) {
@@ -243,7 +227,7 @@ export class FsService {
         const rel = relativePath(item.path);
         this.#writing.add(rel);
         try {
-          await this.#store.put(rel, decodeBase64(item.data));
+          await this.#store.put(rel, item.data);
         } finally {
           this.#writing.delete(rel);
         }

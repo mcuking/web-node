@@ -7,7 +7,7 @@
  * be forced durable **synchronously** — requires cross-origin isolation).
  */
 
-import type { PersistedEntry, PersistedSnapshot, StoreEntry } from '../../sync/fs-protocol';
+import type { PersistedSnapshot, SnapshotEntry, StoreEntry } from '../../sync/fs-protocol';
 
 /** Just enough of `MemoryVfs` for the backend; keeps this file import-free of it. */
 export interface SnapshotSource {
@@ -17,7 +17,7 @@ export interface SnapshotSource {
    * backend can read them back (see `ReadSource`). A backend without a read path
    * must omit it, or it would persist such a file as empty.
    */
-  snapshot(opts?: { dropColdBodies?: boolean }): PersistedEntry[];
+  snapshot(opts?: { dropColdBodies?: boolean }): SnapshotEntry[];
 }
 
 /**
