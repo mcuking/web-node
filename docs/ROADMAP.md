@@ -735,7 +735,7 @@
   - **③ 隔离 build worker**：build 改在专用 worker（`name:'web-node-build'`）跑、完事 `terminate()`；专建 worker 只读还原（`readOnlyPersistence`）不回写，页面把 `dist` 产物拷回共享 worker（`selectBuildOutputs`）；前置 `flush()`；起不来则回退共享 worker。
   - **修复 durable 后端“每次开机清库”**：`setReadSource` 被放到标记校验之后 → 冷读 `.demo-version` 恒空 → 误判缺标记 → `clear()` + 重写 demo → **持久化实际从未生效**。提为 `wireVfs()` 在校验前接线后，`restored:true, marker:'4'`。
   - **真机**：合成 build（空转 3.5s）使共享 worker **8.9→8.9MB（全程平）**，专建 worker 峰值 13.8MB 跑完即终止，产物并入共享树，无回退。
-  - **门禁**：typecheck 净 · vitest **1223 passed / 3 skipped** · worker 784.60 kB / index 26.15 kB / css 8.46 kB。真实 webpack 验证受 registry 间歇不可达影响，以合成 build + 机制取证为准。
+  - **门禁**：typecheck 净 · vitest **1223 passed / 3 skipped** · worker 784.60 kB / index 26.15 kB / css 8.46 kB。真实 webpack build 亦已验证：共享 worker **10.3MB→10.3MB（全程平）**，专建 worker 峰值 70.9MB 跑完即终止，`dist/bundle.js` 已并入共享树。
 
 ---
 
