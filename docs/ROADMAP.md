@@ -737,6 +737,13 @@
   - **真机**：合成 build（空转 3.5s）使共享 worker **8.9→8.9MB（全程平）**，专建 worker 峰值 13.8MB 跑完即终止，产物并入共享树，无回退。
   - **门禁**：typecheck 净 · vitest **1223 passed / 3 skipped** · worker 784.60 kB / index 26.15 kB / css 8.46 kB。真实 webpack build 亦已验证：共享 worker **10.3MB→10.3MB（全程平）**，专建 worker 峰值 70.9MB 跑完即终止，`dist/bundle.js` 已并入共享树。
 
+- [x] **M140 · `--expose-gc` 下 GC 泵实测：机制成立、边界明确** ✅ 2026-10-02
+  - 唐工同意宿主加 `--js-flags=--expose-gc`；**无代码改动**。另起独立 Chrome（38801 带 flag，`--headless=new`）与不带 flag 的实例（38800）对照。
+  - **能力**：`--expose-gc` 确在 runtime worker（含隔离 build worker）里暴露 `gc` ✓。
+  - **让出事件循环时有效**：合成 build（大对象短命垃圾 + 每轮 `await setTimeout(0)`）——带 gc **40.7MB** vs 不带 **61.4MB → −34%**。
+  - **纯同步时无效**：纯同步循环——两轮均 **146.0MB**（JS 定时器在同步段里不会触发；只有 CDP 强制 GC 能插进去）。
+  - **结论**：泵只在 build 让出宏任务边界时生效；真实 webpack（M138 证为同步密集段）预计增益有限。本次因 registry 上午不可达未重跑真实 webpack 对照，脚本已备。
+
 ---
 
 ## 怎么用这份文件
