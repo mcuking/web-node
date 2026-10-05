@@ -254,7 +254,8 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 - **结果 1（能力）**：`--expose-gc` 确实在 **runtime worker（含隔离 build worker）** 里暴露全局 `gc`（`typeof gc === 'function'`）——泵的前提成立。
 - **结果 2（让出事件循环时有效）**：合成 build「大对象短命垃圾 + 每轮 `await setTimeout(0)` 让出」——**带 gc 峰值 40.7MB vs 不带 61.4MB → −34%**（585 ticks）。
 - **结果 3（纯同步时无效）**：纯同步 build 循环（不让出）——**带/不带 gc 均为 146.0MB**。原因：泵就是 JS `setInterval`，**单线程下同步段内回调没机会跑**；只有 debugger/CDP 的强制 GC 能“插进去”（M138 用的那招）。
-- **结论**：GC 泵**只在 build 让出宏任务边界时**才可能运行；对**纯同步**编译段无能为力（无害、自动 no-op）。真实 webpack build（M138 已证为分配密集的同步段）预计增益有限；本次因 `registry.npmjs.org` 整个上午不可达（`Failed to fetch`，host 与 browser 皆然）未能重跑真实 webpack 对照，脚本已备（`/tmp/wnk/{gc-effect,verify-m139}.mjs`）。
+- **结论**：GC 泵**只在 build 让出宏任务边界时**才可能运行；对**纯同步**编译段无能为力（无害、自动 no-op）。真实 webpack build（M138 已证为分配密集的同步段）预计增益有限。
+- **补充（10-05，registry 恢复后补测真实 webpack）**：干净对照（两轮 install 完整、`dist/bundle.js` 139682 B 正常产出）——带 gc **81.8MB** vs 不带 gc **79.1MB** → **无可测收益**（差在噪声内），坐实「同步 build 里泵不触发」。两轮主 worker 均 10.3→10.3MB 平稳（M139 隔离仍生效）。脚本：`/tmp/wnk/verify-m139.mjs`。
 - **附**：曾尝试「启动前 `waitForDebuggerOnStart` 暂停 + 注入 host 定时器计数器」来直接判定 build 是否让出，但该时机下执行上下文尚未建立，`Runtime.evaluate` 返回 `undefined`——**该法不可靠，已作废**（其 `ticks=0` 不作为证据）。
 
 ### 2026-09-30 · M139 —— 隔离 build worker（峰值内存回落）+ 修好一个“每次开机都清库”的恢复 bug

@@ -742,7 +742,8 @@
   - **能力**：`--expose-gc` 确在 runtime worker（含隔离 build worker）里暴露 `gc` ✓。
   - **让出事件循环时有效**：合成 build（大对象短命垃圾 + 每轮 `await setTimeout(0)`）——带 gc **40.7MB** vs 不带 **61.4MB → −34%**。
   - **纯同步时无效**：纯同步循环——两轮均 **146.0MB**（JS 定时器在同步段里不会触发；只有 CDP 强制 GC 能插进去）。
-  - **结论**：泵只在 build 让出宏任务边界时生效；真实 webpack（M138 证为同步密集段）预计增益有限。本次因 registry 上午不可达未重跑真实 webpack 对照，脚本已备。
+  - **结论**：泵只在 build 让出宏任务边界时生效；真实 webpack（M138 证为同步密集段）预计增益有限。
+  - **真实 webpack 补测（10-05 registry 恢复后）**：带 gc **81.8MB** vs 不带 gc **79.1MB**（install 完整、产物正常）→ **无可测收益**，坐实同步 build 里泵不触发；两轮主 worker 均 10.3→10.3MB（M139 隔离仍生效）。
 
 ---
 
