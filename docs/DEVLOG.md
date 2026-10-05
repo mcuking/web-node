@@ -246,6 +246,33 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-05 · M141 —— spike（独立分支）：用「同步 gc() 注入 loader」压 build 峰值 —— 验证结论：无效，不落地
+
+唐工同意先在 `spike/m140-chunked-build` 分支验证（**不碰 main**）。**结论：无论定时器泵还是同步 `gc()` 注入，都压不动真实 webpack build 峰值；不实现。** 分支已删（无提交），main 无代码改动。
+
+**动机**：M140 发现定时器泵只在「让出事件循环」时触发，而真实 build 是同步段。`gc()` 本身是**同步函数**——只要在 loader 编译循环里直接调 `gc()`，就能在同步代码的缝里回收（不需要让出）。这看起来能补上 M140 的缺口。
+
+**实验（均用 38801 带 `--js-flags=--expose-gc`）**：
+
+1. **合成负载 A：垃圾密集**（模块求值时分配大量短命数组，峰值≈垃圾）。loader 每 64 个模块同步 `gc()`：**ON 16.0MB vs OFF 20.8MB → −23%**。✅ 机制成立（同步 gc 确能压垃圾主导的同步加载）。
+2. **合成负载 B：活数据**（800 个编译产物被 `#cache` 保留）。ON 51.0MB vs OFF 51.2MB → **0%**（活数据回收不了，符合预期）。
+3. **真实 webpack**（npmjs 不可达，临时把 registry 指到可达的 `registry.npmmirror.com` 完成安装）。钩子 ON **87.8MB** vs OFF **89.2MB** → **无可测收益**（run-to-run 噪声本身达 70.9–89.2MB）。
+
+**为什么真实 build 无效（相位取证）**：在 build worker 打阶段标记并采样堆 +
+
+```
+import-start→import-end : ~10ms,  heap 13.3MB
+compile-start→compile-end: ~5.6s
+峰值 87.9MB 出现在 compile 阶段末
+```
+
+即**峰值不在模块加载期（13MB），而在 webpack 自己的编译期（87.9MB）**。loader 的钩子只在加载模块时触发，**够不到编译期**——所以真实 build 无差别。
+
+**结论与建议**：
+- 分片/让出、同步 gc() 注入 **都不值得做**：峰值在 webpack 编译内部，web-node 无法在不为 webpack 写专属插件的条件下插入回收点；而为 webpack 写插件既脆弱又与「通用运行时」目标相悖。
+- 好在 **M139 的隔离已经把一次性峰值关进「跑完即 terminate 的专用 worker」**：峰值不再驻留共享 worker、不影响会话其余部分。瞬时可回收垃圾交给浏览器按标签页回收即可。
+- 验证脚本（一次性）：`/tmp/wnk/{spike-run,phase2,gc-effect,verify-m139}.mjs`。
+
 ### 2026-10-02 · M140 —— `--expose-gc` 下 GC 泵实测：机制成立，边界明确（宿主侧，可选）
 
 唐工同意在宿主加 `--js-flags=--expose-gc`，实测泵是否真的生效。**无代码改动**（泵已随 M139 上线；flag 是宿主侧可选开关）。
