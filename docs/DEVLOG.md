@@ -246,6 +246,25 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-09 · M142 —— 动态安装：从 UI 跑 `npm install <spec>`（按需加依赖）
+
+唐工确认在独立分支上实现（`feat/m142-add-packages`，**未合入 main**）。旧能力只能「照 `package.json` 整包安装」，现在可以像 `npm install <pkg>` 一样**往已有工程里加包**，并把解析结果写回 `package.json` + `package-lock.json`。
+
+**为什么不做「解析失败自动装」**：`require` 是同步的，没法在 miss 时 `await` 网络（只对 `import()` 有意义，且隐式联网=供应链风险）。所以走**显式加包 API** 这条路。
+
+**改动**（全部复用现有安装器的五步，不新建管线）：
+- `src/node-runtime/npm/install.ts`：`InstallOptions` 增 `add?: string[]` / `save?: boolean`；新增并导出 `parseAddSpec(spec)`（拆 `name`/`range`，支持 `name`、`name@range`、`name@tag`、scoped `@scope/pkg`）；`saveRangeFor()` 决定写回的范围（裸名/tag/精确版本 → `^<resolved>`，显式范围如 `~1.2`/`>=3 <4` 原样保留）。`add` 的 spec 合入 `rootDeps` 参与整树解析/hoisting，装完后把解析出的版本写回 `rootPkg.dependencies`（**在构建 lockfile 之前**，保证两份文件一致），结果放进 `InstallResult.added`。
+- `runtime.ts` / `worker/runtime.worker.ts` / `client/index.ts`：把 `add`/`save` 从 `installDependencies()` 一路透传到 `installProject()`（worker 的 `npmInstall` 请求体 + client 的 `installDeps()` 入参）。
+- `src/ui/main.ts` + `index.html` + `src/ui/style.css`：文件面板头部加「Add dependency」按钮（内联描边 SVG、复用 `.act` 类）；新增 `promptDialog()`（应用内输入弹窗，与 `confirmDialog` 同风格，带 `.modal-input` 样式）；`addDependency()` 支持空格/逗号分隔多个 spec，装完刷新文件树、打印每条 `+ name@version (saved …)`。
+
+**验证**：
+- 单测新增 6 条（`test/npm.test.ts`）：裸名 → 装 + 写回 `^1.3.0` + lockfile 对齐；显式范围 `~1.0.0` 原样保留；`save:false` 只装不写；叠加在既有 manifest+树之上；`parseAddSpec`（含 scoped）。
+- 同步：新用例单跑 `test/npm.test.ts` 40 passed。
+- 门禁：typecheck 净 · vitest **1228 passed / 3 skipped** · build 成功（worker **785.68 kB** / index **28.65 kB** / css **8.72 kB**）。
+- **真机验证**（dev server + CDP，`app60.localhost`）：新 origin reload 后 `coi:true` → 选 Node.js 工程 → 点「Add dependency」→ 输入 `left-pad` → 终端输出 `+ left-pad@1.3.0` / `saved dependencies.left-pad = "^1.3.0"` / `[added 1 spec(s), 3 package(s) present in 940ms]` → 根 `package.json` 出现 `"left-pad": "^1.3.0"`（与既有 `ms`、`@demo/greeting` 并列）→ **reload 后仍在**（已 flush 到 OPFS），`package-lock.json` 已写入。
+
+**未做/边界**：git 类 spec、`npm run` 不在范围（与现有安装器一致）；动态安装同样可能触发 `postinstall`、同样无 OS 沙箱（信任模型不变，见 `scripts.ts`）；只在主 worker 生效——一次性 build worker 是只读持久化，在里面装包不落盘。
+
 ### 2026-10-05 · M141 —— spike（独立分支）：用「同步 gc() 注入 loader」压 build 峰值 —— 验证结论：无效，不落地
 
 唐工同意先在 `spike/m140-chunked-build` 分支验证（**不碰 main**）。**结论：无论定时器泵还是同步 `gc()` 注入，都压不动真实 webpack build 峰值；不实现。** 分支已删（无提交），main 无代码改动。
