@@ -248,7 +248,7 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ### 2026-10-09 · M142 —— 动态安装：从 UI 跑 `npm install <spec>`（按需加依赖）
 
-唐工确认在独立分支上实现（`feat/m142-add-packages`，**未合入 main**）。旧能力只能「照 `package.json` 整包安装」，现在可以像 `npm install <pkg>` 一样**往已有工程里加包**，并把解析结果写回 `package.json` + `package-lock.json`。
+唐工确认后实现（`feat/m142-add-packages`，**已 FF 合入 main** `31af790`，分支已删）。旧能力只能「照 `package.json` 整包安装」，现在可以像 `npm install <pkg>` 一样**往已有工程里加包**，并把解析结果写回 `package.json` + `package-lock.json`。
 
 **为什么不做「解析失败自动装」**：`require` 是同步的，没法在 miss 时 `await` 网络（只对 `import()` 有意义，且隐式联网=供应链风险）。所以走**显式加包 API** 这条路。
 

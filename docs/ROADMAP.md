@@ -753,7 +753,7 @@
   - **相位取证**：`import-start→end` ~10ms、heap **13.3MB**；`compile-start→end` ~5.6s；峰值 **87.9MB 在 compile 阶段末**。→ **峰值在 webpack 编译期，不在模块加载期**，loader 钩子够不到。
   - **结论**：分片/让出、同步 gc 注入都**不值得做**（需为 webpack 写专属插件，与通用运行时目标相悖）。M139 隔离已把一次性峰值关进专用 worker（跑完即弃），无需再优化。分支已删、main 无改动。
 
-- [~] **M142 · 动态安装：从 UI 跑 `npm install <spec>`（按需加依赖）** 🚧 2026-10-09（分支 `feat/m142-add-packages`，未合入 main）
+- [x] **M142 · 动态安装：从 UI 跑 `npm install <spec>`（按需加依赖）** ✅ 2026-10-09（分支 `feat/m142-add-packages` 已合入 main）
   - 目标：在「照 package.json 整包装」之外，支持像 `npm install lodash` 一样**往已有工程加包**并写回 `package.json` + lockfile。
   - 取舍：**不做「require miss 自动装」**——`require` 同步、无法在 miss 时 await 网络；走**显式加包 API**。
   - 实现：`install.ts` 增 `InstallOptions.add/save` + `parseAddSpec()` + `saveRangeFor()`（裸名/tag/精确版本 → `^<resolved>`，显式范围原样保留），装完在构建 lockfile 前写回 `rootPkg.dependencies`，结果入 `InstallResult.added`；`add`/`save` 经 runtime→worker→client 透传；UI 加「Add dependency」按钮 + `promptDialog` + 样式。
