@@ -56,6 +56,11 @@ export interface InstallResult {
   binLinks?: string[];
   /** Lifecycle events that actually ran, as `package@version event`. */
   lifecycle?: string[];
+  /**
+   * Specs passed via `InstallOptions.add`, with the version each resolved to
+   * and what (if anything) was written into `package.json`.
+   */
+  added?: Array<{ name: string; version: string; savedAs: string }>;
 }
 
 export interface InstallOptions {
@@ -94,6 +99,17 @@ export interface InstallOptions {
    * part of an install, so they overlap up to this many at a time.
    */
   concurrency?: number;
+  /**
+   * Extra specs to install on top of what `package.json` declares, exactly as
+   * `npm install <spec> …` would accept them: `name`, `name@range`, or
+   * `name@tag`. Their resolved versions are written back into `dependencies`.
+   */
+  add?: string[];
+  /**
+   * Write resolved `add` specs into `package.json` (default true). `false` is
+   * `npm install --no-save`: the tree gets the packages, the manifest does not.
+   */
+  save?: boolean;
 }
 
 /** A dependency resolved to a concrete version, however we got there. */
@@ -186,6 +202,35 @@ function writeEntries(
   }
 }
 
+/**
+ * Split an `npm install` spec into name + range. Scoped names (`@scope/pkg`)
+ * survive; a missing range means "latest". Returns null for an empty spec.
+ */
+export function parseAddSpec(spec: string): { name: string; range?: string } | null {
+  const s = spec.trim();
+  if (!s) return null;
+  const at = s.startsWith('@') ? s.indexOf('@', 1) : s.indexOf('@');
+  const name = at === -1 ? s : s.slice(0, at);
+  const range = at === -1 ? undefined : s.slice(at + 1);
+  if (!name) return null;
+  return { name, range: range === '' ? undefined : range };
+}
+
+/**
+ * What to write into `dependencies` for an `add` spec. npm's default
+ * `save-prefix` is `^`, so a bare name, a dist-tag, or an exact version is
+ * saved as `^<resolved>`; an explicit range (`^4`, `~1.2`, `>=3 <4`) is kept
+ * verbatim.
+ */
+function saveRangeFor(requested: string | undefined, version: string): string {
+  if (requested === undefined) return `^${version}`;
+  const r = requested.trim();
+  const plainVersion = /^[vV]?\d+(\.\d+){0,2}(-[0-9A-Za-z.-]+)?$/;
+  const hasRangeSyntax = /[~^*]|>=|<=|>|<|\|\||\s/.test(r) || /(^|\D)x(\D|$)/i.test(r);
+  if (plainVersion.test(r) || !hasRangeSyntax) return `^${version}`;
+  return r;
+}
+
 /** `file:`/`link:` specifier, split into its kind and (raw) target path. */
 function localSpec(spec: string): { kind: 'file' | 'link'; target: string } | null {
   const match = /^(file|link):(.*)$/i.exec(spec);
@@ -242,6 +287,19 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
   const rootDeps: Record<string, string> = { ...(rootPkg.dependencies ?? {}) };
   const devDeps = opts.includeDev ? { ...(rootPkg.devDependencies ?? {}) } : {};
   Object.assign(rootDeps, devDeps);
+
+  // `opts.add` behaves like `npm install <spec>…`: the named packages join (or
+  // refresh) `dependencies` and are resolved on top of the existing tree.
+  const requestedAdd = (opts.add ?? [])
+    .map(parseAddSpec)
+    .filter((x): x is { name: string; range?: string } => x !== null);
+  /** added package name -> the range the user asked for (undefined = latest). */
+  const addedByName = new Map<string, string | undefined>();
+  for (const { name, range } of requestedAdd) {
+    addedByName.set(name, range);
+    rootDeps[name] = range ?? 'latest';
+  }
+  const added: NonNullable<InstallResult['added']> = [];
 
   // `overrides`/`resolutions` steer the whole tree from the root, and they
   // apply even on a lockfile-reusing install (that is the point of pinning).
@@ -603,6 +661,35 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
       }),
     });
   }
+  // ---- `npm install <spec>` write-back ----------------------------------
+  // Resolve each added name to the version now present in the tree (freshly
+  // written, or already satisfied at the root) and save it, mutating `rootPkg`
+  // *before* the lockfile is built so both files agree.
+  if (addedByName.size > 0) {
+    const versionOf = (name: string): string | undefined =>
+      installed.find((pkg) => pkg.name === name)?.version ?? placed.get(nmRoot)?.get(name);
+    const deps = { ...(rootPkg.dependencies ?? {}) };
+    let changed = false;
+    for (const [name, requested] of addedByName) {
+      const version = versionOf(name);
+      if (!version) {
+        warnings.push(`${name}: added, but no version was resolved`);
+        continue;
+      }
+      const savedAs = opts.save === false ? '' : saveRangeFor(requested, version);
+      if (savedAs) {
+        deps[name] = savedAs;
+        changed = true;
+        log(`saved dependencies.${name} = "${savedAs}"`);
+      }
+      added.push({ name, version, savedAs });
+    }
+    if (changed) {
+      rootPkg.dependencies = deps;
+      vfs.writeFile(pkgPath, new TextEncoder().encode(`${JSON.stringify(rootPkg, null, 2)}\n`));
+    }
+  }
+
   if (opts.lockfile !== false) {
     writeLockfile(vfs, opts.cwd, buildLockfile(rootPkg, lockPackages));
   }
@@ -654,5 +741,6 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
     fromLockfile,
     binLinks: [...bins.written.keys()].sort(),
     lifecycle,
+    added,
   };
 }

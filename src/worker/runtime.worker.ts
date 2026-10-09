@@ -213,7 +213,7 @@ type Request =
   | { id: number; type: 'scaffold'; template: string; target: string; port?: number }
   | { id: number; type: 'reset' }
   | { id: number; type: 'describe' }
-  | { id: number; type: 'npmInstall'; cwd?: string; includeDev?: boolean }
+  | { id: number; type: 'npmInstall'; cwd?: string; includeDev?: boolean; add?: string[]; save?: boolean }
   | {
       id: number;
       type: 'http';
@@ -697,6 +697,8 @@ self.onmessage = async (event: MessageEvent<Request>): Promise<void> => {
         const result = await runtime.installDependencies({
           cwd: req.cwd,
           includeDev: req.includeDev,
+          add: req.add,
+          save: req.save,
           onLog: (message) => post({ id: 0, type: 'stdout', data: message + '\n' }),
           // Lifecycle scripts run inside the install, and their output belongs in
           // the same terminal the install writes to.

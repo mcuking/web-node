@@ -4,7 +4,7 @@ import { encodeBase64 } from '../src/node-runtime/vfs/base64';
 import { NodeRuntime } from '../src/node-runtime/runtime';
 import { compare, maxSatisfying, satisfies } from '../src/node-runtime/npm/semver';
 import { gunzip, untar, extractTarballStream } from '../src/node-runtime/npm/tarball';
-import { nameFromLockPath, parseSri, verifyIntegrity } from '../src/node-runtime/npm';
+import { nameFromLockPath, parseAddSpec, parseSri, verifyIntegrity } from '../src/node-runtime/npm';
 import type { FetchLike, FetchResponseLike } from '../src/node-runtime/npm/registry';
 
 // ---------------------------------------------------------------------------
@@ -497,6 +497,91 @@ describe('npm installer', () => {
     expect(second.fromLockfile).toBe(2); // alpha + beta, both reused
     expect(second.packages).toBe(first.packages);
     expect(packumentFetches).toBe(afterFirst); // no resolution attempts
+  });
+
+  // -------------------------------------------------------------------------
+  // npm install <spec>  (on-demand additions)
+  // -------------------------------------------------------------------------
+
+  const addRegistry = async () =>
+    fakeRegistry(
+      {
+        beta: { name: 'beta', 'dist-tags': { latest: '1.0.1' }, versions: { '1.0.0': betaManifest('1.0.0'), '1.0.1': betaManifest('1.0.1') } },
+      },
+      {
+        'https://registry.npmjs.org/beta/-/beta-1.0.0.tgz': await betaTarball('1.0.0', 'beta-old'),
+        'https://registry.npmjs.org/beta/-/beta-1.0.1.tgz': await betaTarball('1.0.1', 'beta-new'),
+      },
+    );
+
+  it('adds a bare spec, hoists it and writes it back with a caret range', async () => {
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', version: '1.0.0' }),
+      '/project/index.js': `console.log(require('beta')());`,
+    });
+    const { runtime, out } = bootRuntime(vfs);
+
+    const result = await runtime.installDependencies({ fetch: await addRegistry(), add: ['beta'] });
+
+    expect(result.added).toEqual([{ name: 'beta', version: '1.0.1', savedAs: '^1.0.1' }]);
+    expect(vfs.exists('/project/node_modules/beta/index.js')).toBe(true);
+
+    const pkg = JSON.parse(new TextDecoder().decode(vfs.readFile('/project/package.json'))) as { dependencies: Record<string, string> };
+    expect(pkg.dependencies.beta).toBe('^1.0.1');
+    const lock = JSON.parse(new TextDecoder().decode(vfs.readFile('/project/package-lock.json'))) as { packages: Record<string, { version: string; dependencies?: Record<string, string> }> };
+    expect(lock.packages[''].dependencies?.beta).toBe('^1.0.1');
+    expect(lock.packages['node_modules/beta'].version).toBe('1.0.1');
+
+    runtime.runMain('/project/index.js');
+    expect(out.join('')).toBe('beta-new\n');
+  });
+
+  it('keeps an explicit range verbatim and resolves within it', async () => {
+    const vfs = makeProject({ '/project/package.json': JSON.stringify({ name: 'demo' }) });
+    const { runtime } = bootRuntime(vfs);
+    const result = await runtime.installDependencies({ fetch: await addRegistry(), add: ['beta@~1.0.0'] });
+    expect(result.added).toEqual([{ name: 'beta', version: '1.0.1', savedAs: '~1.0.0' }]);
+    const pkg = JSON.parse(new TextDecoder().decode(vfs.readFile('/project/package.json'))) as { dependencies: Record<string, string> };
+    expect(pkg.dependencies.beta).toBe('~1.0.0');
+  });
+
+  it('installs without saving when save is false (npm install --no-save)', async () => {
+    const vfs = makeProject({ '/project/package.json': JSON.stringify({ name: 'demo' }) });
+    const { runtime } = bootRuntime(vfs);
+    const before = new TextDecoder().decode(vfs.readFile('/project/package.json'));
+    const result = await runtime.installDependencies({ fetch: await addRegistry(), add: ['beta'], save: false });
+    expect(result.added).toEqual([{ name: 'beta', version: '1.0.1', savedAs: '' }]);
+    expect(vfs.exists('/project/node_modules/beta/index.js')).toBe(true);
+    expect(new TextDecoder().decode(vfs.readFile('/project/package.json'))).toBe(before);
+  });
+
+  it('layers an added spec on top of the manifest and existing tree', async () => {
+    const tarballs: Record<string, Uint8Array> = {
+      'https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz': await alphaTarball(),
+      'https://registry.npmjs.org/beta/-/beta-1.0.1.tgz': await betaTarball('1.0.1', 'beta'),
+    };
+    const packuments = {
+      alpha: { name: 'alpha', 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': alphaManifest() } },
+      beta: { name: 'beta', 'dist-tags': { latest: '1.0.1' }, versions: { '1.0.0': betaManifest('1.0.0'), '1.0.1': betaManifest('1.0.1') } },
+    };
+    const vfs = makeProject({
+      '/project/package.json': JSON.stringify({ name: 'demo', dependencies: { alpha: '^1.0.0' } }),
+      '/project/index.js': `console.log(require('alpha')(), '/', require('beta')());`,
+    });
+    const { runtime, out } = bootRuntime(vfs);
+    await runtime.installDependencies({ fetch: fakeRegistry(packuments, tarballs), add: ['beta'] });
+    const pkg = JSON.parse(new TextDecoder().decode(vfs.readFile('/project/package.json'))) as { dependencies: Record<string, string> };
+    expect(pkg.dependencies).toEqual({ alpha: '^1.0.0', beta: '^1.0.1' });
+    runtime.runMain('/project/index.js');
+    expect(out.join('')).toBe('alpha+beta / beta\n');
+  });
+
+  it('parses npm install specs, scoped names included', () => {
+    expect(parseAddSpec('lodash')).toEqual({ name: 'lodash', range: undefined });
+    expect(parseAddSpec('lodash@4')).toEqual({ name: 'lodash', range: '4' });
+    expect(parseAddSpec('@scope/pkg@^2.0.0')).toEqual({ name: '@scope/pkg', range: '^2.0.0' });
+    expect(parseAddSpec('@scope/pkg')).toEqual({ name: '@scope/pkg', range: undefined });
+    expect(parseAddSpec('   ')).toBeNull();
   });
 
   it('verifies tarball integrity and rejects a mismatch', async () => {

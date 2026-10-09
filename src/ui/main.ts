@@ -83,6 +83,7 @@ const viewOutput = $<HTMLDivElement>('view-output');
 const viewPreview = $<HTMLDivElement>('view-preview');
 const newFileBtn = $<HTMLButtonElement>('new-file');
 const newFolderBtn = $<HTMLButtonElement>('new-folder');
+const addDepBtn = $<HTMLButtonElement>('add-dep');
 
 let tree: TreeEntry[] = [];
 let activeFile = '';
@@ -1060,6 +1061,7 @@ resetBtn.addEventListener('click', async () => {
 
 newFileBtn.addEventListener('click', () => startCreate(projectById(activeProject).root, 'file'));
 newFolderBtn.addEventListener('click', () => startCreate(projectById(activeProject).root, 'dir'));
+addDepBtn.addEventListener('click', () => void addDependency());
 
 /** Begin naming a new file/folder inside `parent` (inline input in the tree). */
 function startCreate(parent: string, kind: 'file' | 'dir'): void {
@@ -1195,6 +1197,119 @@ function confirmDialog(opts: {
       if (e.target === backdrop) close(false);
     });
   });
+}
+
+/** A single-line text prompt (the app has no modal system; mirrors confirmDialog). */
+function promptDialog(opts: {
+  title: string;
+  message: string;
+  placeholder?: string;
+  confirmLabel: string;
+}): Promise<string | null> {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    const title = document.createElement('div');
+    title.className = 'modal-title';
+    title.textContent = opts.title;
+    const message = document.createElement('div');
+    message.className = 'modal-message';
+    message.textContent = opts.message;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'modal-input';
+    if (opts.placeholder) input.placeholder = opts.placeholder;
+    const row = document.createElement('div');
+    row.className = 'modal-actions';
+    const cancel = document.createElement('button');
+    cancel.className = 'modal-cancel';
+    cancel.textContent = 'Cancel';
+    const confirm = document.createElement('button');
+    confirm.className = 'modal-confirm';
+    confirm.textContent = opts.confirmLabel;
+    row.append(cancel, confirm);
+    modal.append(title, message, input, row);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    queueMicrotask(() => input.focus());
+    const close = (value: string | null): void => {
+      document.removeEventListener('keydown', onKey, true);
+      backdrop.remove();
+      resolve(value);
+    };
+    const submit = (): void => close(input.value.trim() === '' ? null : input.value.trim());
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close(null);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        submit();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    cancel.addEventListener('click', () => close(null));
+    confirm.addEventListener('click', submit);
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) close(null);
+    });
+  });
+}
+
+/**
+ * `npm install <spec>` for the active project: prompt for one or more specs
+ * (space- or comma-separated), install them on top of the current tree and
+ * write the resolved versions back into package.json.
+ */
+async function addDependency(): Promise<void> {
+  const project = projectById(activeProject);
+  const raw = await promptDialog({
+    title: 'Add dependency',
+    message: `Install into ${project.root} and save to package.json (e.g. lodash, left-pad@1.3.0, vue@^3)`,
+    placeholder: 'lodash',
+    confirmLabel: 'Install',
+  });
+  if (!raw) return;
+  const specs = raw.split(/[\s,]+/).filter(Boolean);
+  if (specs.length === 0) return;
+
+  await save();
+  setStatus('installing…', 'running');
+  writeTerminal(`\n$ npm install ${specs.join(' ')}\n`, 'sys');
+  const started = performance.now();
+  try {
+    const result = await client.installDeps({ cwd: project.root, add: specs });
+    const ms = (performance.now() - started).toFixed(0);
+    for (const warning of result.warnings) writeTerminal(`[npm] ${warning}\n`, 'err');
+    const addedNames = new Set((result.added ?? []).map((a) => a.name));
+    for (const pkg of result.installed) {
+      if (addedNames.has(pkg.name)) continue;
+      writeTerminal(`  ${pkg.name}@${pkg.version}\n`, 'sys');
+    }
+    for (const a of result.added ?? []) {
+      writeTerminal(
+        a.savedAs
+          ? `+ ${a.name}@${a.version}  (saved to package.json: "${a.savedAs}")\n`
+          : `+ ${a.name}@${a.version}\n`,
+        'ok',
+      );
+    }
+    if (result.lifecycle?.length) {
+      writeTerminal(`[lifecycle] ran ${result.lifecycle.join(', ')}\n`, 'ok');
+    }
+    writeTerminal(`[added ${specs.length} spec(s), ${result.packages} package(s) present in ${ms}ms]\n`, 'ok');
+    setStatus(`added ${specs.length}`, 'ok');
+    tree = await readTree();
+    renderTree();
+    if (tree.some((e) => e.path === project.entry)) await openFile(project.entry).catch(() => undefined);
+  } catch (err) {
+    writeTerminal(`[npm install failed] ${(err as Error).message}\n`, 'err');
+    setStatus('error', 'err');
+  }
 }
 
 /** Delete a file, or a folder and everything under it, after a confirmation. */

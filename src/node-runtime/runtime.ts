@@ -744,6 +744,10 @@ export class NodeRuntime {
       runScripts?: boolean;
       fetch?: FetchLike;
       concurrency?: number;
+      /** Extra specs to install, as `npm install <spec>` (written back to package.json). */
+      add?: string[];
+      /** Persist resolved `add` specs into package.json (default true). */
+      save?: boolean;
     } = {},
   ): Promise<InstallResult> {
     const fetchImpl = opts.fetch ?? (typeof fetch === 'function' ? (fetch.bind(globalThis) as unknown as FetchLike) : undefined);
@@ -752,6 +756,8 @@ export class NodeRuntime {
       cwd: opts.cwd ?? this.vfs.cwd,
       fetch: fetchImpl,
       includeDev: opts.includeDev ?? false,
+      add: opts.add,
+      save: opts.save,
       log: opts.onLog,
       // Lifecycle scripts run on the same controlled spawn surface user code
       // gets, so `npm install` never needs a capability `child_process` lacks.

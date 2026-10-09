@@ -51,6 +51,8 @@ export interface InstallResult {
   binLinks?: string[];
   /** Lifecycle events that ran, as `package@version event`. */
   lifecycle?: string[];
+  /** Specs requested via `installDeps({ add })`, with what was saved back. */
+  added?: Array<{ name: string; version: string; savedAs: string }>;
 }
 
 /**
@@ -232,8 +234,14 @@ export class RuntimeClient {
   }
 
   /** Install the project's dependencies from the npm registry (milestone 4). */
-  installDeps(opts: { cwd?: string; includeDev?: boolean } = {}): Promise<InstallResult> {
-    return this.#request({ type: 'npmInstall', cwd: opts.cwd, includeDev: opts.includeDev });
+  installDeps(opts: { cwd?: string; includeDev?: boolean; add?: string[]; save?: boolean } = {}): Promise<InstallResult> {
+    return this.#request({
+      type: 'npmInstall',
+      cwd: opts.cwd,
+      includeDev: opts.includeDev,
+      add: opts.add,
+      save: opts.save,
+    });
   }
 
   describe(): Promise<{

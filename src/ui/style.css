@@ -380,6 +380,20 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .modal-title { font-size: 13px; font-weight: 700; color: var(--text); }
 .modal-message { margin-top: 8px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.modal-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 12px;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.modal-input:focus { outline: none; border-color: var(--accent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .modal-actions button { padding: 5px 12px; font-size: 12px; }
 .modal-confirm { background: var(--accent); color: #04150c; border-color: var(--accent); font-weight: 700; }

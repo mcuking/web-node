@@ -4,7 +4,7 @@ export { gunzip, untar, extractTarball } from './tarball';
 export type { TarEntry } from './tarball';
 export { createRegistry } from './registry';
 export type { RegistryClient, PackageManifest, Packument, FetchLike, FetchResponseLike, Dist } from './registry';
-export { installProject } from './install';
+export { installProject, parseAddSpec } from './install';
 export type { InstallOptions, InstallResult, InstalledPackage } from './install';
 export { buildOverrideTable, parseOverrideKey } from './overrides';
 export type { OverrideTable, OverrideRule } from './overrides';
