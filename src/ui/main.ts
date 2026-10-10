@@ -16,6 +16,13 @@ import {
   type TemplateId,
 } from '../projects';
 import { previewUrl as buildPreviewUrl, previewPortFromHost, prefixPreviewUrl } from './preview-url';
+import {
+  defaultFractions,
+  fractionsFromPixels,
+  isPaneFractions,
+  resolveWidths,
+  type PaneFractions,
+} from './pane-layout';
 
 /**
  * Cold-start timing (M107), in milliseconds since navigation start. Exposed
@@ -881,6 +888,121 @@ async function runStep(id: string): Promise<void> {
   }
 }
 
+// --- resizable panes -------------------------------------------------------
+
+/** Where the chosen pane split is remembered (`localStorage`). */
+const PANE_STORE = 'web-node:pane-widths';
+
+function loadPaneFractions(): PaneFractions | null {
+  try {
+    const raw = localStorage.getItem(PANE_STORE);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isPaneFractions(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Make the file tree / editor / output dividers draggable.
+ *
+ * The three columns are a CSS grid sized by two custom properties, so a drag is
+ * just a `setProperty` on the layout element. The chosen split is stored as
+ * fractions (not pixels) so it survives a resize and a reload; see
+ * `pane-layout.ts` for the math and the minimum widths.
+ */
+function initPanes(): void {
+  const layout = document.querySelector<HTMLElement>('.layout');
+  const filesResizer = document.querySelector<HTMLElement>('.resizer[data-resizer="files"]');
+  const editorResizer = document.querySelector<HTMLElement>('.resizer[data-resizer="editor"]');
+  if (!layout || !filesResizer || !editorResizer) return;
+
+  const available = (): number => layout.clientWidth;
+  let fractions: PaneFractions = loadPaneFractions() ?? defaultFractions(available());
+
+  /** Reapply the split to the DOM, normalising `fractions` to the clamped result. */
+  const commit = (): void => {
+    const width = resolveWidths(fractions, available());
+    fractions = fractionsFromPixels(width.files, width.editor, available());
+    layout.style.setProperty('--wn-files', `${Math.round(width.files)}px`);
+    layout.style.setProperty('--wn-editor', `${Math.round(width.editor)}px`);
+  };
+
+  const persist = (): void => {
+    try {
+      localStorage.setItem(PANE_STORE, JSON.stringify(fractions));
+    } catch {
+      // Private mode / quota — a non-persisted split is still usable.
+    }
+  };
+
+  commit();
+
+  const drag = { active: false, kind: 'files' as 'files' | 'editor', startX: 0, startFiles: 0, startEditor: 0 };
+
+  const onMove = (event: PointerEvent): void => {
+    if (!drag.active) return;
+    event.preventDefault();
+    const dx = event.clientX - drag.startX;
+    const files = drag.kind === 'files' ? drag.startFiles + dx : drag.startFiles;
+    const editor = drag.kind === 'editor' ? drag.startEditor + dx : drag.startEditor;
+    fractions = fractionsFromPixels(files, editor, available());
+    commit();
+  };
+
+  const onUp = (): void => {
+    if (!drag.active) return;
+    drag.active = false;
+    document.body.classList.remove('resizing');
+    persist();
+  };
+
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+  window.addEventListener('resize', commit);
+
+  const wire = (el: HTMLElement, kind: 'files' | 'editor'): void => {
+    el.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const width = resolveWidths(fractions, available());
+      drag.active = true;
+      drag.kind = kind;
+      drag.startX = event.clientX;
+      drag.startFiles = width.files;
+      drag.startEditor = width.editor;
+      document.body.classList.add('resizing');
+    });
+
+    el.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      const step = event.shiftKey ? 48 : 12;
+      const delta = event.key === 'ArrowLeft' ? -step : step;
+      const width = resolveWidths(fractions, available());
+      fractions = fractionsFromPixels(
+        kind === 'files' ? width.files + delta : width.files,
+        kind === 'editor' ? width.editor + delta : width.editor,
+        available(),
+      );
+      commit();
+      persist();
+    });
+
+    // Double-click restores the default split.
+    el.addEventListener('dblclick', () => {
+      fractions = defaultFractions(available());
+      commit();
+      persist();
+    });
+  };
+
+  wire(filesResizer, 'files');
+  wire(editorResizer, 'editor');
+}
+
 // --- preview ---------------------------------------------------------------
 
 async function refreshPorts(): Promise<void> {
@@ -1464,6 +1586,7 @@ async function boot(): Promise<void> {
   renderSteps();
 }
 
+initPanes();
 void boot().catch((err: unknown) => {
   const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
   bootEl.textContent = `boot failed — ${message}`;

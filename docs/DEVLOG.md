@@ -246,6 +246,24 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-10 · M145 —— 预览界面三栏可拖拽（文件树 / 编辑器 / 预览区）
+
+唐工要求「demo 里文件树、代码编辑区、右侧预览区，三个地方支持拖拽」。
+
+**做法：** 原来三栏是写死的 `grid-template-columns: 240px 1fr 1.1fr`，无法调。改成**两个 CSS 变量驱动的三列网格** + **两条可分栏线**：
+- `.layout` 用 `--wn-files` / `--wn-editor` 两个自定义属性，`grid-template-columns: var(--wn-files) var(--wn-editor) 1fr`；第③列恒取余量，故三列**恒等于**容器宽度、无取整缝。CSS 默认值写成 `calc((100% - 240px) / 2.1)`，即复刻原 `240px 1fr 1.1fr` 的初始分割——**JS 跑之前的首帧就已经是同一布局**，无闪跳。
+- 分栏线是 `position: absolute` 的 7px 拖拽热区（`role=separator`、`col-resize`、`tabindex=0`），居中压在两栏边界上、**不占网格轨道**，也不会盖住栏头按钮。
+
+**关键点：**
+- 分割比例按**可用宽度的分数**存，不存像素——换窗口尺寸/刷新后仍是同一比例，不会在某个屏宽上跑偏。
+- 三栏各有**最小宽度**（文件树 150 / 编辑器 220 / 预览 260px），拖拽与窗口收缩都在 `resolveWidths` 里按序钳制，余量交给第③列，永远不为负。
+- 布局算法抽成**纯模块** `src/ui/pane-layout.ts`（`defaultFractions` / `resolveWidths` / `fractionsFromPixels` / `isPaneFractions`），DOM 接线只在 `main.ts` 的 `initPanes()` 里，便于单测。
+- 交互：鼠标/触控指针拖拽（`pointerdown/move/up`，拖拽期 `body.resizing` 全局 `col-resize` 光标并 `pointer-events:none` 掉 iframe，防止光标进预览区丢失）；键盘 `←/→`（`Shift` 粗调）可调、`dblclick` 复位默认；比例写 `localStorage`（`web-node:pane-widths`）持久化。
+
+**验证：** 单测 `test/pane-layout.test.ts`（默认分割复刻 1:1.1、和恒等于宽度、最小值钳制、分数↔像素往返、存储校验）；本地 `npm run build` + 静态服务（`localhost:8111`）实机：拖文件树 → 列宽随动、`body.resizing` 类名正确、`localStorage` 落盘、刷新后恢复；拖到极右/极左被钳在最小值；分栏线命中不遮挡 `#new-file`/`#new-folder`/tab 等按钮。全量 `npx vitest run` **148 files / 1255 tests 全绿**。
+
+**改动**：新增 `src/ui/pane-layout.ts`、`test/pane-layout.test.ts`；`index.html` 增两条 `.resizer`；`src/ui/style.css` 的 `.layout` 改为变量驱动 + `.resizer`/`body.resizing` 样式；`src/ui/main.ts` 增 `initPanes()` 与调用。
+
 ### 2026-10-10 · M144 —— uni-app H5 **dev server** 在页内跑起来（Run dev + HMR）
 
 唐工确认给 uni demo 再加一个页内 dev server（H5 预览 + 热更）。目标是 `▶ Run dev` 起 Vite dev server、`🚢 Build H5` 一次性构建，且 HMR 走预览桥。
