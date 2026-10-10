@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <link rel="preload" as="fetch" crossorigin="" href="/web-node/assets/vendored-core.txt?v=6b98e9618fbd">
+
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>web-node — Node.js in the browser</title>
+    <script type="module" crossorigin src="/web-node/assets/index-Dbj2QD1u.js"></script>
+    <link rel="stylesheet" crossorigin href="/web-node/assets/index-D0n9dQrb.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">▣</span>
+        <div>
+          <strong>web-node</strong>
+          <span class="sub">Node.js core running in your browser tab</span>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="clear" title="Clear the output">Clear</button>
+        <button id="reset" title="Restore the demo projects">Reset project</button>
+      </div>
+    </header>
+
+    <nav class="scenariobar" aria-label="Projects">
+      <span class="bar-label">Project</span>
+      <div id="project-chips" class="chips"></div>
+    </nav>
+
+    <div class="stepbar">
+      <span class="bar-label">Steps</span>
+      <div id="steps" class="steps"></div>
+      <span id="next-hint" class="next-hint"></span>
+    </div>
+
+    <main class="layout">
+      <section class="pane files">
+        <div class="pane-head">
+          <span>Files <span class="hint" id="files-root">(VFS → OPFS)</span></span>
+          <span class="file-actions">
+            <button id="new-file" class="act" title="New file in this project" aria-label="New file">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M9 1.6H4.6A1.6 1.6 0 0 0 3 3.2v9.6A1.6 1.6 0 0 0 4.6 14.4h6.8A1.6 1.6 0 0 0 13 12.8V5.6z"/><path d="M9 1.6v4h4"/><path d="M8 8.2v3.2M6.4 9.8h3.2"/></svg>
+            </button>
+            <button id="new-folder" class="act" title="New folder in this project" aria-label="New folder">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M1.6 4.4A1.6 1.6 0 0 1 3.2 2.8h2.6l1.5 1.6h5.5A1.6 1.6 0 0 1 14.4 6v6a1.6 1.6 0 0 1-1.6 1.6H3.2A1.6 1.6 0 0 1 1.6 11.9z"/><path d="M8 7.4v3.2M6.4 9h3.2"/></svg>
+            </button>
+            <button id="add-dep" class="act" title="Add a dependency (npm install &lt;pkg&gt;)" aria-label="Add dependency">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M8 2.2 14 5.5v5L8 13.8 2 10.5v-5z"/><path d="M2.2 5.6 8 8.8l5.8-3.2M8 8.8v4.9"/></svg>
+            </button>
+          </span>
+        </div>
+        <ul id="file-tree" class="file-tree"></ul>
+      </section>
+
+      <div class="resizer" data-resizer="files" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the file tree"></div>
+
+      <section class="pane editor">
+        <div class="pane-head"><span id="active-file">—</span><span id="dirty" class="dirty"></span></div>
+        <textarea id="editor" spellcheck="false"></textarea>
+      </section>
+
+      <div class="resizer" data-resizer="editor" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the editor"></div>
+
+      <section class="pane output">
+        <div class="pane-head">
+          <div class="tabs">
+            <button class="tab active" data-tab="output">Output</button>
+            <button class="tab" data-tab="preview">Preview</button>
+          </div>
+          <span id="status" class="status"></span>
+        </div>
+
+        <div class="view" id="view-output">
+          <pre id="terminal"></pre>
+        </div>
+
+        <div class="view hidden" id="view-preview">
+          <div class="preview-bar">
+            <label for="port-select">:&nbsp;</label>
+            <select id="port-select"></select>
+            <button id="refresh" title="Reload the preview">⟳</button>
+            <a id="open-tab" href="#" target="_blank" rel="noopener">open ↗</a>
+          </div>
+          <iframe id="preview-frame" title="preview" src="about:blank"></iframe>
+          <div id="preview-empty" class="preview-empty">
+            No port bound yet. Run a project's dev server, then pick its port here.
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="statusbar">
+      <span id="boot">booting runtime…</span>
+      <span id="facts"></span>
+    </footer>
+
+  </body>
+</html>
