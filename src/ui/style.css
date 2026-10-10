@@ -176,13 +176,67 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .next-hint.done { color: var(--accent); background: #17301f; }
 
 /* --- layout --- */
+/*
+ * Three columns, two draggable dividers. The widths are driven by two custom
+ * properties so a drag is a single `style.setProperty` (see `pane-layout.ts` +
+ * `initPanes` in `main.ts`).
+ *
+ * The `calc()` defaults reproduce the original `240px 1fr 1.1fr` split — the
+ * same expression the resizer positions use — so the very first paint (before
+ * JS runs) already matches, with no flash of a differently-split layout.
+ */
 .layout {
+  --wn-files: 240px;
+  --wn-editor: calc((100% - 240px) / 2.1);
   display: grid;
-  grid-template-columns: 240px 1fr 1.1fr;
+  grid-template-columns: var(--wn-files) var(--wn-editor) 1fr;
   min-height: 0;
+  position: relative;
 }
 .pane { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
 .pane:last-child { border-right: none; }
+
+/*
+ * A divider handle. It is absolutely positioned (so it never adds a grid track)
+ * and centred on the pane border it moves, with a hit area a few pixels wider
+ * than the 1px line — enough to grab comfortably without covering the pane
+ * heads' controls.
+ */
+.resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  margin-left: -3px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+.resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+.resizer:hover::after,
+.resizer:focus-visible::after,
+body.resizing .resizer::after {
+  background: var(--accent);
+  box-shadow: 0 0 6px -1px var(--accent);
+}
+.resizer:focus-visible { outline: none; }
+.resizer[data-resizer='files'] { left: var(--wn-files); }
+.resizer[data-resizer='editor'] { left: calc(var(--wn-files) + var(--wn-editor)); }
+
+/* While dragging: keep the col-resize cursor everywhere (including over the
+   preview iframe) and stop the drag from selecting text or scrolling. */
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing iframe { pointer-events: none; }
 .pane-head {
   display: flex;
   align-items: center;
