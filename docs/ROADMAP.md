@@ -100,7 +100,7 @@
 >
 > **⑥ 阻塞式系统调用（M120，已结清）**：浏览器没有阻塞式系统调用，而 OPFS 句柄只能 `await` 拿——**这与「运行时 worker 必须能阻塞」直接矛盾**。于是开一个 **FS-worker**：它在自己的线程里跑 `await`、干同步句柄的活；运行时 worker 把请求写进 `SharedArrayBuffer` 后 `Atomics.wait` 停车，答案也从同一块内存回传（**`postMessage` 送不到一个停着的线程**）。**上行**（`FS_OP_PUT`）让 `fs.fsyncSync`/`fdatasyncSync` 真同步；**下行**（`FS_OP_GET`/`FS_OP_STAT`/`FS_OP_LIST`）让内存树成为 OPFS 的缓存——不命中就在同步通道上回源，不必改 `readFileSync` 的签名。删除经异步 `{kind:'delete'}` 传到存储，否则被删文件会从 OPFS「复活」。非跨源隔离时如实降级（无 SAB → `sync fs: async`、无回源能力）。详见 DEVLOG 的 M120 条目。
 >
-> **附：registered binding 的三个来源**（共 41 个，含 `wn_stub`）——**wasm 支撑** 3（`wn_stub`/`zlib`/`performance`）、**TS 手写 shim** 38（`fs`/`buffer`/`timers`/`errors`/`serdes`/`contextify`/`v8`/`url`/…，多为小表面或宿主能力桥接）、**刻意不提供** 32（见 `UNSUPPORTED_BINDINGS`，由 `test/bindings-surface.test.ts` + `test/fixtures/node-bindings.json` 锁死）。JS 模块层的真源码 vendored（119+ 文件：stream/events/util/assert/perf_hooks/…）不算 native，但正是「JS 层用 Node 自己的 `lib/`」这一半目标。
+> **附：registered binding 的三个来源**（共 41 个，含 `wn_stub`）——**wasm 支撑** 3（`wn_stub`/`zlib`/`performance`）、**TS 手写 shim** 38（`fs`/`buffer`/`timers`/`errors`/`serdes`/`contextify`/`v8`/`url`/…，多为小表面或宿主能力桥接）、**刻意不提供** 32（见 `UNSUPPORTED_BINDINGS`，由 `test/bindings-surface.test.ts` + `test/fixtures/node-bindings.json` 锁死）。JS 模块层的真源码 vendored（163 文件：stream/events/util/assert/perf_hooks/…）不算 native，但正是「JS 层用 Node 自己的 `lib/`」这一半目标。
 >
 > **附：全部 72 个 `internalBinding` 名单**（夹具 `test/fixtures/node-bindings.json`，`node tools/binding-names-oracle.mjs` 从 `$NODE_SRC/lib` 重新生成）：
 >

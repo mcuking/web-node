@@ -10,7 +10,7 @@ Run Node.js source code in the browser — a WebContainer-style runtime.
   demo project, hit **⚡ Vite build** — all inside the tab)
 - **Roadmap / task list**: [`docs/ROADMAP.md`](docs/ROADMAP.md) ← **fixed, numbered, checkbox list of what is left**
 - **Dev log / progress / next steps**: [`docs/DEVLOG.md`](docs/DEVLOG.md) ← **append an entry after every change**
-- Design doc: [`docs/superpowers/specs/2026-09-17-web-node-design.md`](docs/superpowers/specs/2026-09-17-web-node-design.md)
+- Design docs: [`docs/superpowers/specs/2026-09-17-web-node-design.md`](docs/superpowers/specs/2026-09-17-web-node-design.md) and [`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`](docs/superpowers/specs/2026-09-23-native-to-wasm-design.md)
 - Upstream sources: local checkout of Node.js (v26.9.1-dev, `v26.9.0-1-g7a3437d`), vendored via `tools/`
 
 ## How it works
@@ -76,6 +76,48 @@ top of it sit three virtual subsystems:
   routes the browser's absolute-path assets back to the virtual port, so the dev
   app renders in the Preview tab. **HMR** rides a `BroadcastChannel` (a
   ServiceWorker cannot proxy the WebSocket), so edits hot-update in place.
+- **Native layer → WASM** — a tab has no native addons and no `dlopen`, so where
+  a core module's real implementation sits on a C/C++ library, that **upstream
+  library is compiled to WASM** (see below) instead of being reimplemented.
+  Those modules are *real*, not stubs: `zlib` (+ brotli/zstd), `perf_hooks`
+  histograms, and the whole `crypto` surface (OpenSSL).
+
+## Native layer → WASM
+
+A browser tab has no native addons and no `dlopen`, and the previous milestones
+proved that hand-written JS stand-ins for compression / crypto eventually hit a
+correctness wall. So the rule for the native layer changed: **compile the real
+upstream C/C++ to WASM** with `wasi-sdk`, don't rewrite it. The artefacts are
+committed under `src/node-runtime/wasm/artifacts/` and registered in
+`src/node-runtime/wasm/index.ts` (imported with `?url`, so Vite emits them as
+content-hashed `assets/`). Loading is layered, per M107: the small codec modules
+(`wn_stub`, `wn_zlib`) are awaited at startup before the Realm is built (the
+binding table is synchronous, so anything a binding needs at build time must be
+ready), the heavier codecs (`wn_histogram`, `wn_brotli`, `wn_zstd`) are fetched
+in the background at boot but awaited before any user code runs, and the ~2.4 MB
+OpenSSL subset is loaded lazily on first use (`wasm/lazy.ts`, gated by
+`opensslReady()`), falling back to the JS path if it never arrives.
+
+`native/build.mjs` drives the build (`npm run build:native`): each module lists
+its sources, the toolchain targets **`wasm32-wasip1`** with the **reactor** model
+(`-mexec-model=reactor -Wl,--no-entry`, calling `_initialize` once after
+instantiation), and exports exactly the symbols declared with
+`__attribute__((export_name(…), used))` — never `--export-all` (it leaks libc
+symbols). A minimal WASI host (`src/node-runtime/wasm/wasi.ts`) backs the
+`wasi_snapshot_preview1` imports (clock → `performance.now()`, random →
+`crypto.getRandomValues`, writes to fd default to a sink).
+
+| module | upstream | serves | size | milestone |
+| --- | --- | --- | --- | --- |
+| `wn_stub` | hand-written C stub (smoke test) | the toolchain→binding seam | 46.5 KB | M115 |
+| `wn_zlib` | `deps/zlib` 1.3.2.1-motley (11 `.c`) | `zlib` binding | 108.8 KB | M116 |
+| `wn_histogram` | `deps/histogram` (hdr_histogram) + ported `src/histogram.cc` | `performance` binding | 257.7 KB | M117 |
+| `wn_brotli` | `deps/brotli` 1.2.0 (36 `.c`) | `zlib` binding (brotli half) | 847.4 KB | M118 |
+| `wn_zstd` | `deps/zstd` 1.5.7 (27 `.c`, single-threaded) | `zlib` binding (zstd half) | 484.0 KB | M118 |
+| `wn_openssl` | `deps/openssl` 3.5.8 subset (self-contained WASI target) | `crypto` module (TS drives it directly, not a binding) | 2483.2 KB | M119 |
+
+> The design note for this phase (native → WASM) lives at
+> [`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`](docs/superpowers/specs/2026-09-23-native-to-wasm-design.md).
 
 ## Development
 
@@ -113,13 +155,16 @@ src/
   node-runtime/   Runtime core: realm (binding dispatch) / loader / runtime
     bindings/     TS implementations of internalBinding
     builtins/     node:* module implementations (real sources + TS shims)
+    crypto/       Crypto engine, driven from TS on the wn_openssl WASM build
     loader/       CJS resolver + ESM→CJS transform
     net/          Virtual TCP (VirtualNetwork / VirtualSocket)
     vfs/          Virtual file system (in-memory tree + OPFS persistence)
     npm/          npm client (semver / registry / tarball / installer)
+    wasm/         WASM artefacts + registry + minimal WASI host
   worker/         Dedicated Worker entry
   client/         Main-thread Runtime Client API (incl. ServiceWorker bridge)
   ui/             Demo UI (file tree / editor / terminal / preview)
+native/           C/C++ sources + build.mjs (wasi-sdk → src/node-runtime/wasm/artifacts)
 public/sw.js      ServiceWorker: /preview/<port>/ → virtual network
 vendor/node-lib/  Real files copied from the Node.js sources (with MANIFEST.json)
 tools/            Dependency scan / vendoring tools
@@ -416,7 +461,7 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
 
 **Current coverage** (revision `7a3437d`, v26.9.1-dev):
 
-- **119 files vendored** — the whole `stream` layer, `events`,
+- **163 files vendored** — the whole `stream` layer, `events`,
   `internal/event_target` (+ `internal/webidl`, `internal/perf/utils`),
   `internal/abort_controller`, `console` (+ `internal/console/*`,
   `internal/cli_table`, `internal/util/debuglog`, `internal/trace_events`,
@@ -440,13 +485,14 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
   `perf_hooks` (+ the whole `internal/perf/*` group) — a real `Performance`,
   `PerformanceMark`/`PerformanceMeasure`, `PerformanceObserver`,
   `PerformanceNodeTiming` and `timerify`, on a JS `performance` binding;
-  histograms (`createHistogram`, `monitorEventLoopDelay`) need the native
-  hdr_histogram and throw,
+  histograms (`createHistogram`, `monitorEventLoopDelay`) are real, on the
+  `wn_histogram` WASM build of `deps/histogram` (the `performance` binding),
   `stream/web` (+ the whole `internal/webstreams/*` group) — the real WHATWG
   `ReadableStream` / `WritableStream` / `TransformStream`, the queuing
   strategies and the text codecs, plus the classic↔web adapters so
   `Readable.toWeb` / `Writable.toWeb` / `Duplex.toWeb` work;
-  `CompressionStream`/`DecompressionStream` need the native zlib and throw,
+  `CompressionStream`/`DecompressionStream` are real, on the `wn_zlib` WASM
+  build of `deps/zlib` (plus `wn_brotli`/`wn_zstd` for the brotli/zstd codecs),
   `stream/iter` (+ the whole `internal/streams/iter/*` group) — the new
   experimental iterable-streams API (`push`/`pull`/`from`/`merge`/`broadcast`/
   `share`/`tap`, sync and async consumers, and classic↔iter interop), plus
@@ -470,34 +516,49 @@ and keeps each file's MIT header; the worker bundle drops from 1259 KB to
   `internal/perf/*` group), `stream/web` (the whole `internal/webstreams/*`
   group), the `Blob`/`File` globals behind `internal/blob` + `internal/file`, and
   `stream/iter` (+ `internal/streams/iter/*`) with `stream/consumers`.
-  `crypto` is the newest hand-written one: the
-  WebCrypto API is promise-only, but Node's `createHash` / `createHmac` /
-  `pbkdf2Sync` / `scryptSync` are synchronous, so MD5, SHA-1, SHA-2
-  (224/256/384/512), HMAC, PBKDF2, HKDF and scrypt are implemented in plain JS
-  in `src/node-runtime/crypto/hash.ts` and checked against Node's OpenSSL
-  output. Ciphers, signatures and key objects stay explicitly unsupported.
+  `crypto` is the deepest one: the WebCrypto API is promise-only, but Node's
+  `createHash` / `createHmac` / `pbkdf2Sync` / `scryptSync` / cipher and key
+  APIs are synchronous, so a whole crypto engine was needed. It runs on the
+  `wn_openssl` WASM build of an OpenSSL 3.5.8 subset, driven from TS in
+  `src/node-runtime/crypto/` — digests (MD5, SHA-1, SHA-2, SHA-3/Keccak, BLAKE2,
+  RIPEMD-160, SM3), MACs (HMAC, Poly1305, SipHash), KDFs (PBKDF2, HKDF, scrypt,
+  Argon2), symmetric ciphers (AES incl. GCM/CCM/OCB/SIV/XTS/CBC-CTS/CFB,
+  ChaCha20-Poly1305, DES/3DES, Camellia, ARIA, SM4), asymmetric
+  (RSA/DSA/DH/ECDH/Ed25519/Ed448/X25519/X448/ML-KEM), plus X.509/SPKAC
+  certificates and DER. Output is checked against Node's own OpenSSL byte for
+  byte.
 
 ### What can and cannot be moved over
 
 Node's `lib/` has ~420 `.js` files. Moving "all of them" is not a copy job: the
 large majority sit directly on native bindings (V8 C++ APIs, libuv handles, raw
 sockets, native addons, the module loader) that have no browser equivalent. So
-the rule is: **vendor the pure-JS layers verbatim, and reimplement only the
-native layer underneath them in JS** — exactly what `async_wrap` does for
-`async_hooks` and what the JS `string_decoder` binding does for the real
-decoder (`src/string_decoder.cc` ported to `bindings/string_decoder.ts`). A file
-is vendorable when its only dependencies are shims we already provide;
-everything else is a binding away.
+the rule is: **vendor the pure-JS layers verbatim, and cover the native layer
+underneath them** — either with a JS reimplementation built on the browser's own
+APIs (exactly what `async_wrap` does for `async_hooks` and what the JS
+`string_decoder` binding does for the real decoder, `src/string_decoder.cc`
+ported to `bindings/string_decoder.ts`) or, where the real implementation sits
+on a C/C++ library, by **compiling that library to WASM** (see *Native layer →
+WASM*). A file is vendorable when its only dependencies are shims we already
+provide; everything else is a binding away.
+
+Where the real implementation sits on a C/C++ library, the library is now
+**compiled to WASM** rather than reimplemented (see *Native layer → WASM*):
+`zlib` (+ brotli/zstd), `perf_hooks` histograms and the whole `crypto` engine.
+`wasi` and `cluster` are real too — a full `wasi_snapshot_preview1` host on the
+VFS (which is what lets rspack's WASM binding run), and one worker per forked
+child with shared ports on the virtual network.
 
 The remaining large gaps are the ones with no browser story at all (`http2`,
-`dgram`, `tls`/`_tls_*`, `cluster`, `inspector`, `repl`, `wasi`, `sqlite`,
-`sea`, and the *real threads* behind `worker_threads`), plus native-layer
-reimplementations worth doing (`internal/util/inspect.js`, the native
-`string_decoder`, `internal/fs/*`). `vm` is the real `lib/vm.js` on a JS
-stand-in for V8 contexts, and `worker_threads.Worker` runs as a cooperative
-worker (real messages, lifecycle and stdio, no parallelism). `internal/errors`
-defines every code the vendored modules actually reach for (and every word of their
-messages), with regression tests keeping it that way. Of Node's core modules, only `tls` remains a pure throwing stub.
+`dgram`, `tls`/`_tls_*`, `inspector`, `repl`, `sqlite`, `sea`, and the *real
+threads* behind `worker_threads`), plus native-layer reimplementations worth
+doing (`internal/util/inspect.js`, the native `string_decoder`, `internal/fs/*`).
+`vm` is the real `lib/vm.js` on a JS stand-in for V8 contexts, and
+`worker_threads.Worker` runs as a cooperative worker (real messages, lifecycle
+and stdio, no parallelism). `internal/errors` defines every code the vendored
+modules actually reach for (and every word of their messages), with regression
+tests keeping it that way. Of Node's core modules, only `tls` remains a pure
+throwing stub.
 
 ## Contributing
 

@@ -8,8 +8,25 @@
 
 - **在线 demo**：<https://mcuking.github.io/web-node/>（装依赖、跑 demo 项目、点 **⚡ Vite build**，全在标签页里）
 - **开发日志 / 进度 / 下一步**：`docs/DEVLOG.md` ← **每次改动都往这里追加**
-- 设计文档：`docs/superpowers/specs/2026-09-17-web-node-design.md`
+- 设计文档：`docs/superpowers/specs/2026-09-17-web-node-design.md`、`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`
 - 上游源码：`/Users/tangjianghong/Downloads/node`（Node.js **v26.9.1-dev**，`v26.9.0-1-g7a3437d`）
+
+## 原生层 → WASM（阶段 H）
+
+标签页里没有 native addon、也没有 `dlopen`，而此前的手写 JS 替身在压缩 / 加密这类场景里终究会撞到正确性天花板。所以 native 层的规则改成了：**用 `wasi-sdk` 把真上游 C/C++ 编成 WASM**，而不是自己重写。产物提交在 `src/node-runtime/wasm/artifacts/`，在 `src/node-runtime/wasm/index.ts` 里登记（用 `?url` 导入，Vite 会按内容哈希发到 `assets/`）；runtime worker 启动时与 vendored 源一起 await 它们（绑定表是同步构建的，不能懒加载）。
+
+`native/build.mjs` 驱动构建（`npm run build:native`）：每个模块声明自己的源文件，工具链目标 **`wasm32-wasip1`**、**reactor 模型**（`-mexec-model=reactor -Wl,--no-entry`，实例化后调一次 `_initialize`），导出严格用 `__attribute__((export_name(…), used))` 声明——**不用 `--export-all`**（会泄 libc 符号）。一个最小 WASI 宿主（`src/node-runtime/wasm/wasi.ts`）接住 `wasi_snapshot_preview1` 导入（时钟 → `performance.now()`、随机 → `crypto.getRandomValues`、默认写 fd 丢弃）。
+
+| 模块 | 上游 | 服务对象 | 体积 | 里程碑 |
+| --- | --- | --- | --- | --- |
+| `wn_stub` | 手写 C 桩（冒烟） | 工具链→binding 接缝 | 46.5 KB | M115 |
+| `wn_zlib` | `deps/zlib` 1.3.2.1-motley（11 个 `.c`） | `zlib` binding | 108.8 KB | M116 |
+| `wn_histogram` | `deps/histogram`（hdr_histogram）+ 逐行移植 `src/histogram.cc` | `performance` binding | 257.7 KB | M117 |
+| `wn_brotli` | `deps/brotli` 1.2.0（36 个 `.c`） | `zlib` binding（brotli 半边） | 847.4 KB | M118 |
+| `wn_zstd` | `deps/zstd` 1.5.7（27 个 `.c`，不开多线程） | `zlib` binding（zstd 半边） | 484.0 KB | M118 |
+| `wn_openssl` | `deps/openssl` 3.5.8 子集（自包含 WASI target） | `crypto` 模块（TS 层直驱，非 binding） | 2483.2 KB | M119 |
+
+> 这一阶段的设计文档在 [`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`](docs/superpowers/specs/2026-09-23-native-to-wasm-design.md)。
 
 ## 开发
 
@@ -49,9 +66,12 @@ src/
     net/          虚拟 TCP（VirtualNetwork / VirtualSocket）
     vfs/          虚拟文件系统（内存树 + OPFS 持久化）
     npm/          npm client（semver / registry / tarball / installer）
+    crypto/       加密引擎，TS 直驱 `wn_openssl` WASM 构建
+    wasm/         WASM 产物 + 注册表 + 最小 WASI 宿主
   worker/         Dedicated Worker 入口
   client/         主线程 Runtime Client API（含 ServiceWorker 桥）
   ui/             Demo UI（文件树 / 编辑器 / 终端 / 预览）
+native/           C/C++ 源码 + build.mjs（wasi-sdk → src/node-runtime/wasm/artifacts）
 public/sw.js      ServiceWorker：/preview/<port>/ → 虚拟网络
 vendor/node-lib/  从 Node.js 源码复制的真实文件（含来源记录 MANIFEST.json）
 tools/            依赖扫描 / vendoring 工具
@@ -286,10 +306,12 @@ Node 的 `lib/` 里可原样复用的文件直接取真源码（内容哈希 + �
 
 **当前覆盖**（revision `7a3437d`，v26.9.1-dev）：
 
-- **119 个文件**已 vendor：整套 `stream` 层、`events`、`internal/event_target`（+ `internal/webidl`、`internal/perf/utils`）、`internal/abort_controller`、`console`（+ `internal/console/*`、`internal/cli_table`、`internal/util/debuglog`、`internal/trace_events`、`internal/readline/*`）、`os`、`timers`（+ `internal/timers`、`timers/promises`、`internal/linkedlist`、`internal/priority_queue`）、`internal/worker/io`（+ `internal/per_context/messageport`、`internal/worker/js_transferable`，真 `MessageChannel`/`MessagePort`/`BroadcastChannel`）、`readline`（+ `readline/promises`、`internal/readline/{interface,emitKeypressEvents,promises}`、`internal/repl/history`，真行编辑器/按键解码/ANSI 光标/历史环）、`internal/fs/glob`（+ 随包的 `internal/deps/minimatch/index`，真 glob 遍历器与匹配器，`path.matchesGlob`/`fs.glob`/`fs.globSync`/`fs.promises.glob` 可用）、`perf_hooks`（+ 整个 `internal/perf/*` 组，真 `Performance`/`PerformanceMark`/`PerformanceMeasure`/`PerformanceObserver`/`PerformanceNodeTiming`/`timerify`，跑在 JS `performance` binding 上；直方图 `createHistogram`/`monitorEventLoopDelay` 需 native hdr_histogram，抛错）、`stream/web`（+ 整个 `internal/webstreams/*` 组，真 WHATWG `ReadableStream`/`WritableStream`/`TransformStream`、queuing strategies、`TextEncoderStream`/`TextDecoderStream`，以及经典流↔web 流双向适配，`Readable.toWeb`/`Writable.toWeb`/`Duplex.toWeb` 可用；`CompressionStream`/`DecompressionStream` 需 native zlib，抛错）、`stream/iter`（+ 整个 `internal/streams/iter/*` 组，新的实验性 iterable-streams API：`push`/`pull`/`from`/`merge`/`broadcast`/`share`/`tap`、同步与异步两套消费者、经典流↔iter 双向互操作）与 `stream/consumers`（`text`/`json`/`buffer`/`bytes`/`arrayBuffer`/`blob`）、`internal/blob`（+ `internal/file`，真 `Blob`/`File`，跑在 JS `blob` binding 上并保留 `DataQueue` 契约：reader 每次 `pull` 只交出一片，所以 `blob.stream()` 按原始 source 边界切块；`Blob`/`File` 是全局且与 `require('buffer').Blob` 同身份，`fs.openAsBlob` 与 `URL.createObjectURL` 对象存储一并就位）、`async_hooks`（+ `internal/async_local_storage/*`、`internal/promise_hooks`）、`path`、`querystring`、`punycode`、`domain`、`diagnostics_channel`、`string_decoder`、`assert`（+ `internal/assert/*`）、`internal/validators`、`internal/util/types`、`internal/util/inspect`（真 `util.inspect`）、`internal/util/comparisons`（真 `isDeepStrictEqual`）、`internal/util/colors`、`util`（+ `internal/util.js`、`internal/util/diff`、`internal/util/parse_args/*`）、`internal/mime`，以及它们依赖的 `internal/*`（`primordials`、`fixed_queue`、`constants`、`encoding/util`、`streams/state`、`streams/destroy`、`per_context/*` 等）。
-- **58 个顶层 `lib/*.js` 里已有 32 个可用**——其中 28 个是真实现（vendored 真源码，或因为真文件依赖浏览器里不存在的 native 层而由我们自研），另 4 个（`tty`/`v8`/`tls`/`zlib`）是只保证 `import` 不出错的占位桩，调用时抛带类型的 `NotImplementedError`。最新的真实现是 `perf_hooks`（整个 `internal/perf/*` 组）、`stream/web`（整个 `internal/webstreams/*` 组）、`internal/blob`/`internal/file` 背后的 `Blob`/`File` 全局，以及 `stream/iter`（+ `internal/streams/iter/*`）与 `stream/consumers`。手写实现里最新的是 `crypto`：WebCrypto 只有异步 API，而 Node 的 `createHash`/`createHmac`/`pbkdf2Sync`/`scryptSync` 都是同步的，所以 MD5、SHA-1、SHA-2（224/256/384/512）、HMAC、PBKDF2、HKDF、scrypt 都在 `src/node-runtime/crypto/hash.ts` 里用纯 JS 实现，并逐一对照 Node 的 OpenSSL 输出；密文、签名、密钥对象仍显式不支持。
+- **163 个文件**已 vendor：整套 `stream` 层、`events`、`internal/event_target`（+ `internal/webidl`、`internal/perf/utils`）、`internal/abort_controller`、`console`（+ `internal/console/*`、`internal/cli_table`、`internal/util/debuglog`、`internal/trace_events`、`internal/readline/*`）、`os`、`timers`（+ `internal/timers`、`timers/promises`、`internal/linkedlist`、`internal/priority_queue`）、`internal/worker/io`（+ `internal/per_context/messageport`、`internal/worker/js_transferable`，真 `MessageChannel`/`MessagePort`/`BroadcastChannel`）、`readline`（+ `readline/promises`、`internal/readline/{interface,emitKeypressEvents,promises}`、`internal/repl/history`，真行编辑器/按键解码/ANSI 光标/历史环）、`internal/fs/glob`（+ 随包的 `internal/deps/minimatch/index`，真 glob 遍历器与匹配器，`path.matchesGlob`/`fs.glob`/`fs.globSync`/`fs.promises.glob` 可用）、`perf_hooks`（+ 整个 `internal/perf/*` 组，真 `Performance`/`PerformanceMark`/`PerformanceMeasure`/`PerformanceObserver`/`PerformanceNodeTiming`/`timerify`，跑在 JS `performance` binding 上；直方图 `createHistogram`/`monitorEventLoopDelay` 是真的，跑在 `deps/histogram` 的 `wn_histogram` WASM 构建上）、`stream/web`（+ 整个 `internal/webstreams/*` 组，真 WHATWG `ReadableStream`/`WritableStream`/`TransformStream`、queuing strategies、`TextEncoderStream`/`TextDecoderStream`，以及经典流↔web 流双向适配，`Readable.toWeb`/`Writable.toWeb`/`Duplex.toWeb` 可用；`CompressionStream`/`DecompressionStream` 是真的，跑在 `deps/zlib` 的 `wn_zlib` WASM 构建上（brotli/zstd 编解码另有 `wn_brotli`/`wn_zstd`））、`stream/iter`（+ 整个 `internal/streams/iter/*` 组，新的实验性 iterable-streams API：`push`/`pull`/`from`/`merge`/`broadcast`/`share`/`tap`、同步与异步两套消费者、经典流↔iter 双向互操作）与 `stream/consumers`（`text`/`json`/`buffer`/`bytes`/`arrayBuffer`/`blob`）、`internal/blob`（+ `internal/file`，真 `Blob`/`File`，跑在 JS `blob` binding 上并保留 `DataQueue` 契约：reader 每次 `pull` 只交出一片，所以 `blob.stream()` 按原始 source 边界切块；`Blob`/`File` 是全局且与 `require('buffer').Blob` 同身份，`fs.openAsBlob` 与 `URL.createObjectURL` 对象存储一并就位）、`async_hooks`（+ `internal/async_local_storage/*`、`internal/promise_hooks`）、`path`、`querystring`、`punycode`、`domain`、`diagnostics_channel`、`string_decoder`、`assert`（+ `internal/assert/*`）、`internal/validators`、`internal/util/types`、`internal/util/inspect`（真 `util.inspect`）、`internal/util/comparisons`（真 `isDeepStrictEqual`）、`internal/util/colors`、`util`（+ `internal/util.js`、`internal/util/diff`、`internal/util/parse_args/*`）、`internal/mime`，以及它们依赖的 `internal/*`（`primordials`、`fixed_queue`、`constants`、`encoding/util`、`streams/state`、`streams/destroy`、`per_context/*` 等）。
+- **58 个顶层 `lib/*.js` 里已有 32 个可用**——其中 31 个是真实现（vendored 真源码，或因为真文件依赖浏览器里不存在的 native 层而由我们自研，或直接跑在 WASM 构建上），只剩 **`tls`** 一个是只保证 `import` 不出错的占位桩，调用时抛带类型的 `NotImplementedError`（`tty`/`v8`/`zlib` 都已是真实现）。最新的真实现就包括跑在 wasm 上的 `zlib`（`wn_zlib`/`wn_brotli`/`wn_zstd`）与 `perf_hooks` 直方图（`wn_histogram`），以及 `stream/web`（整个 `internal/webstreams/*` 组）、`internal/blob`/`internal/file` 背后的 `Blob`/`File` 全局、`stream/iter`（+ `internal/streams/iter/*`）与 `stream/consumers`。`crypto` 是覆盖最深的那个：WebCrypto 只有异步 API，而 Node 的 `createHash`/`createHmac`/`pbkdf2Sync`/`scryptSync` 以及密码、密钥 API 都是同步的，所以需要一个完整加密引擎——它跑在 OpenSSL 3.5.8 子集的 `wn_openssl` WASM 构建上，由 `src/node-runtime/crypto/` 的 TS 直接驱动：摘要（MD5、SHA-1、SHA-2、SHA-3/Keccak、BLAKE2、RIPEMD-160、SM3）、MAC（HMAC、Poly1305、SipHash）、KDF（PBKDF2、HKDF、scrypt、Argon2）、对称密码（AES 含 GCM/CCM/OCB/SIV/XTS/CBC-CTS/CFB、ChaCha20-Poly1305、DES/3DES、Camellia、ARIA、SM4）、非对称（RSA/DSA/DH/ECDH/Ed25519/Ed448/X25519/X448/ML-KEM），以及 X.509/SPKAC 证书与 DER；输出逐一对照 Node 自己的 OpenSSL 输出。
 
-**能搬与不能搬**：Node `lib/` 约 420 个 `.js`。"全搬"不是复制活：绝大多数直接坐在 native binding（V8 C++ API、libuv handle、raw socket、native addon、模组 loader）上，浏览器没有对应物。所以规则是——**纯 JS 层原样 vendor，下面的 native 层用 JS 重写**（`async_hooks` 的 `async_wrap`、`string_decoder` 的 JS decoder binding 都是这个套路）。剩下的大缺口是根本无浏览器故事的那些（`http2`、`dgram`、`tls`/`_tls_*`、`cluster`、`worker_threads` 背后的**真线程**、`inspector`、`repl`、`wasi`、`sqlite`、`sea`），以及值得做的 native 层重写（`internal/util/inspect.js`、`internal/util/types.js`、`internal/fs/*`）。`vm` 已经是真的 `lib/vm.js`（下面垫一层 JS 复刻的 V8 context），`worker_threads.Worker` 则是同 loop 的协作式工作器（真消息、真生命周期与真 stdio，无并行）；`internal/errors` 已覆盖 vendored 模块实际取用的每一个码，并有回归测试兵护。Node 核心模块里只剩 `tls` 是纯报错桩。
+**能搬与不能搬**：Node `lib/` 约 420 个 `.js`。"全搬"不是复制活：绝大多数直接坐在 native binding（V8 C++ API、libuv handle、raw socket、native addon、模组 loader）上，浏览器没有对应物。所以规则是——**纯 JS 层原样 vendor，下面的 native 层要么用 JS 在本页自带 API 上重写**（`async_hooks` 的 `async_wrap`、`string_decoder` 的 JS decoder binding 都是这个套路），**要么——当真实现坐在 C/C++ 库上时——把那库直接编成 WASM**（见《原生层 → WASM（阶段 H）》）。当某个文件的依赖只有我们已提供的 shim 时，它就可 vendor。真实现坐在 C/C++ 库上的现在都走 WASM：`zlib`（+ brotli/zstd）、`perf_hooks` 直方图、整个 `crypto` 引擎。`wasi` 和 `cluster` 也都是真的——前者是 VFS 上的完整 `wasi_snapshot_preview1` 宿主（正是它让 rspack 的 WASM binding 能跑），后者是「一 fork 一个 worker」并在虚拟网络上共享端口。
+
+剩下的大缺口是根本无浏览器故事的那些（`http2`、`dgram`、`tls`/`_tls_*`、`inspector`、`repl`、`sqlite`、`sea`，以及 `worker_threads` 背后的**真线程**），以及值得做的 native 层重写（`internal/util/inspect.js`、`internal/util/types.js`、`internal/fs/*`）。`vm` 已经是真的 `lib/vm.js`（下面垫一层 JS 复刻的 V8 context），`worker_threads.Worker` 则是同 loop 的协作式工作器（真消息、真生命周期与真 stdio，无并行）；`internal/errors` 已覆盖 vendored 模块实际取用的每一个码，并有回归测试兵护。Node 核心模块里只剩 `tls` 是纯报错桩。
 
 ## 改动约定
 

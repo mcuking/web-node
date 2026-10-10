@@ -1,6 +1,6 @@
 # web-node — native → WASM 迁移设计（对齐 WebContainer 架构）
 
-> 状态：**待评审**（2026-09-23）
+> 状态：**已实现（阶段 H 完成）** — 2026-09-24（M115–M121、M125 全部结清；路线实测可行且已落地）
 > 目标编号：**B2 目标 + B1 验收**（见 §1）；技术路线：**甲（真上游 C/C++ → wasi-sdk → wasm）**
 > 关联：`docs/ROADMAP.md` 阶段 C / E / F / G / **H**、`docs/webcontainer-research.md`、`docs/superpowers/specs/2026-09-17-web-node-design.md`
 
@@ -54,7 +54,7 @@ B2 下把它们**移回 `REGISTRY` 并指向 wasm**。
 ### 3.2 产物交付与加载
 
 - wasm 作为**独立静态资产**（仿 `vendored-sources.txt`），**文件名带内容哈希**；
-- worker 里 `fetch` + `WebAssembly.instantiate`，**按 binding 惰性实例化**（不在启动期全量加载）；
+- worker 里 `fetch` + `WebAssembly.instantiate`。**实现落地为三层加载**（M107 的教训：大载荷不能全卡在启动关键路径上）：① 小 codec（`wn_stub` / `wn_zlib`）**启动期**取回并实例化，建 Realm 之前 await 完（绑定表同步构建）；② 大 codec（`wn_histogram` / `wn_brotli` / `wn_zstd`）**启动后后台取回**（低优先级、不抢关键带宽），但**执行任何用户代码前**必须 await 完（见 `wasm/index.ts` 的 `DEFERRED_WASM_MODULES`）；③ 最重的 `wn_openssl`（~2.3 MB）**懒加载**（`wasm/lazy.ts` 的 `LAZY_WASM_MODULES`），调用方用 `opensslReady()` 判断，缺席时退回 JS crypto（性能退化、非正确性问题）。
 - 与 vendored 源的策略一致（M107 已验证"拆分 + 预加载"路线）。
 
 ### 3.3 ABI
@@ -76,9 +76,9 @@ B2 下把它们**移回 `REGISTRY` 并指向 wasm**。
 | **P1+** | **`stream/iter` 的 `transform`**：vendor 真 `lib/internal/streams/iter/transform.js`（顶层 `internalBinding('zlib')`，M116 后就绪） | P1 | 差分 **0 diff** |
 | **P2** | **`histogram`**：真 `deps/histogram`（HdrHistogram）+ `wn_histogram.cc`（移植 `src/histogram.cc`）✅ 2026-09-23（M117） | P0 | 差分 0 diff |
 | **P3** | `brotli` / `zstd`（纯计算） | P0 | 差分 0 diff ✅ 2026-09-23（M118） |
-| **P4** | **crypto → OpenSSL 子集**（hash/hmac/cipher/kdf）——🚧 2026-09-23（M119）可行性已退险，**摘要/HMAC 已切**；cipher/KDF/非对称待迁 | P0 | 现有 crypto 差分 **保持 0 diff** ✅（摘要） |
-| **P5** | **同步 syscall**：SAB + `Atomics.wait` + FS-worker | P0 | 同步 `fs` 真逐字节 |
-| **P6** | 页内跑通 **webpack / rspack** | P1–P5 | **B1 北极星** |
+| **P4** | **crypto → OpenSSL 子集**（hash/hmac/cipher/kdf/非对称/PQC）——✅ 2026-09-24（M119 **结清**：摘要/HMAC + 对称密码与 KDF + Argon2 + 非对称 + ECDH/DH + ML-KEM + X509/SPKAC 全部迁完） | P0 | 现有 crypto 差分 **保持 0 diff** ✅ |
+| **P5** | **同步 syscall**：SAB + `Atomics.wait` + FS-worker ✅ 2026-09-24（M120） | P0 | 同步 `fs` 真逐字节 ✅ |
+| **P6** | 页内跑通 **webpack / rspack** ✅ 2026-09-28（M121；rspack 一侧含 M125 `node:wasi`） | P1–P5 | **B1 北极星** ✅ |
 
 ---
 
@@ -95,17 +95,17 @@ B2 下把它们**移回 `REGISTRY` 并指向 wasm**。
 
 ---
 
-## 6. 风险与退路
+## 6. 风险与退路（⟶ 实测结论）
 
-1. **OpenSSL → wasm 最重**（5063 文件 / 246M）：需 `--no-asm` + 裁 provider。**2026-09-23 实测：能编**（3.5.8 → `libcrypto.a` 5.75 MB，薄模块 2.29 MB，逐字节对齐），见 `native/openssl/99-wasi.conf` 与 DEVLOG 的 M119 条目。若某个增量真的编不动/链不上，该增量退为「JS crypto 保留 + wasm 只补缺」并**显式报告**，而非硬上。
-2. **体积**：OpenSSL wasm 确为 **2.29 MB**（实测）→ **独立资产 + 惰性加载**（§3.2），不进 worker 启动路径（M119 已按此实现）。
-3. **0 diff 边界**：同一份 C 代码数值应一致，但 wasi 的整数/浮点边角行为要逐项验。
-4. **SAB / COEP**：P5 需跨源隔离；dev 已配，线上 gh-pages 需确认 COOP/COEP 头。
+1. **OpenSSL → wasm 最重**（5063 文件 / 246M）：需 `--no-asm` + 裁 provider。**实测：能编**（3.5.8 → `libcrypto.a` 5.75 MB，薄模块 2.29 MB，逐字节对齐），见 `native/openssl/99-wasi.conf` 与 DEVLOG 的 M119 条目。**已落地并结清**（M119）。
+2. **体积**：OpenSSL wasm 确为 **2.29 MB** → **独立资产 + 懒加载**（§3.2、`wasm/lazy.ts`），不进 worker 启动路径（M119 已按此实现）。
+3. **0 diff 边界**：同一份 C 代码数值应一致；实测发现含浮点递推 / 超越函数的场景，宿主（arm64）会把 `v + α*d*d` 融成 FMA、而 wasm 无 FMA 指令 → 按**有效位数归一**后比对（M117）。
+4. **SAB / COEP**：P5 需跨源隔离；dev 已配，线上 gh-pages 由 `public/sw.js` 注入 COOP/COEP 头（M134），静态宿主也能跑 rspack。
 
 ---
 
-## 7. 开放问题
+## 7. 开放问题（⟶ 已定）
 
-- P5 的 FS-worker 与现有 **同 realm VFS** 如何共处（双栈并存 or 替换）？
-- wasm crypto 与现有 JS crypto 的**切换开关**（灰度 / 回退）？
-- `getCiphers()` 等**表面常量**由 wasm 导出还是 TS 常量表维护？
+- P5 的 FS-worker 与现有 **同 realm VFS** 如何共处 → **双栈并存**：内存树是 OPFS 的缓存（下行回源）、上行让 `fsyncSync` 真同步（M120）。
+- wasm crypto 与现有 JS crypto 的**切换开关** → `wasmLoaded('wn_openssl')` / `opensslReady()`；懒加载失败**退回 JS**（性能退化、非正确性问题）。
+- `getCiphers()` 等**表面常量**由 wasm 导出还是 TS 常量表维护 → **TS 常量表**（wasm 只提供计算）。

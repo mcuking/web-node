@@ -5,6 +5,8 @@
 - **上游源码**：`/Users/tangjianghong/Downloads/node`（Node.js v26.9.1，`v26.x`，`7a3437d9986`）
 - **项目位置**：`/Users/tangjianghong/Downloads/web-node`
 
+> 本文是 2026-09-17 的初版设计。native 层原来打算「先用 TypeScript 实现、将来按热点替换为 wasm」，该方案已在**阶段 H** 被 [`2026-09-23-native-to-wasm-design.md`](./2026-09-23-native-to-wasm-design.md) 取代并落地（**真上游 C/C++ → wasi-sdk → wasm**）。下文相关处已就地更新为最终口径。
+
 ---
 
 ## 1. 目标与范围
@@ -20,7 +22,7 @@ WebContainer **不是**"把 Node 编译成 WASM"。它的真实做法是：
 3. 虚拟文件系统 + ServiceWorker 虚拟 TCP；
 4. 自研 npm client。
 
-我们的 γ 路线与它同构，只是把 wasm 原生层**先用 TypeScript 实现**，将来按热点替换为 wasm。
+我们的 γ 路线与它同构；native 层自**阶段 H（M115）**起已按此落地——**把真上游 C/C++（zlib / histogram / OpenSSL…）编成 wasm**（早期曾用 TypeScript 顶替，现已替换）。
 
 ### MVP 范围（本次交付）
 - ✅ 纯 JS 运行层：bootstrap、realm、模块 loader（CJS + ESM 子集）
@@ -45,7 +47,7 @@ Runtime Worker (Dedicated Web Worker)
   │ ModuleLoader (CJS + ESM 子集)                              │
   ├───────────────────────────────────────────────────────────┤
   │ Realm：internalBinding 分发表 + builtin 注册表              │
-  │   ├── 真 Node 源码（vendored，8 个文件）                    │
+  │   ├── 真 Node 源码（vendored，163 个文件）                  │
   │   └── TS 实现（buffer/fs/events/util/...）                  │
   ├───────────────────────────────────────────────────────────┤
   │ bindings (TS)：fs/timers/buffer/util/config/constants/...   │
@@ -109,15 +111,23 @@ primordials.js（真源码）→ domexception.js / messageport.js（真源码）
 | `stream_wrap` | TS（仅形状，供真 `internal/webstreams/*` 加载） | `WriteWrap`/`ShutdownWrap`/`kReadBytesOrError`/`kArrayBufferOffset`/`kBytesWritten`/`kLastWriteWasAsync`/`streamBaseState`（`Int32Array(4)`）；网络是自研的，永不产出 `stream_base` |
 | `blob` | TS（真 `internal/blob.js` + `internal/file.js` 跑在其上） | `createBlob`/`concat`/`createBlobFromFilePath`/`storeDataObject`/`getDataObject`/`revokeObjectURL`；C++ 的 `DataQueue` 收敛成扁平 `Uint8Array` 分片，reader 每次 `pull` 只交出一片然后 EOS（对齐 `src/node_blob.cc` 的 `InMemoryReader`），所以 `blob.stream()` 按原始 source 边界分块 |
 
-**明确不支持**（抛错）：原生 `crypto`/OpenSSL 绑定、`zlib`、`tcp_wrap`、`udp_wrap`、`worker`、`inspector`、`sea`、`ffi`、`quic`、`cares_wrap`、`http_parser` 等。
+**明确不支持**（抛错）：`tcp_wrap`、`udp_wrap`、`inspector`、`sea`、`ffi`、`quic`、`cares_wrap`、`http_parser` 等——即**浏览器里根本没有对应物**的那些。
 
-> 注：上表说的是 **native 绑定**。`crypto` 这个 **builtin 模块本身是支持的**（`origin: web-node`）：随机数走平台 WebCrypto，同步的摘要/HMAC/PBKDF2/HKDF/scrypt 在 JS 里实现（`src/node-runtime/crypto/hash.ts`）并对齐 Node 的 OpenSSL 输出，对称密码（AES 的 ECB/CBC/CTR/CFB/OFB/GCM，`createCipheriv`/`createDecipheriv`）在 `src/node-runtime/crypto/cipher.ts` 里按 FIPS-197 + NIST SP 800-38A/D 纯 JS 实现、同样逐字节对齐 OpenSSL（未实现的已知 cipher 抛类型化 `NotImplementedError`，未知 cipher 抛 `ERR_CRYPTO_UNKNOWN_CIPHER`）；签名/非对称密钥仍显式抛错。`perf_hooks` 也是真源码（`lib/perf_hooks.js` + `internal/perf/*`），只坐在上面那个 JS `performance` binding 上；直方图那一组（`createHistogram`/`importHistogram`/`monitorEventLoopDelay`）需要 native hdr_histogram，由 `internal/histogram` shim 显式抛错。`stream/web` 同样是真源码（`lib/stream/web.js` + 整个 `internal/webstreams/*`），坐在 `messaging`/`buffer`/`util`/`stream_wrap`（仅形状）四个 binding 上；`CompressionStream`/`DecompressionStream` 现在可用（它们拉的是新实现的 `zlib`），只有 `brotli` 格式抛错。`Blob`/`File` 同样是真源码（`lib/internal/blob.js` + `lib/internal/file.js`），坐在上面那个 JS `blob` binding 上；它们同时也是**全局**，且与 `require('buffer').Blob` 同身份（真 `internal/streams/duplexify` 的 `isBlob` 门依赖这一点）。`zlib` 这个 **builtin 模块本身也是支持的**（`origin: web-node`）：deflate/gzip（含流式与一次性异步形式）跑在平台的 `CompressionStream`/`DecompressionStream` 上，默认选项下输出与 Node 逐字节一致；同步形式与 `level`/`windowBits`/`memLevel`/`strategy`/`dictionary` 参数因平台无对应面而显式抛错，brotli/zstd/zip 同理。
+> 注：上表说的是 **native 绑定**。自**阶段 H（M115 起）**起，native 层的做法改为**把真上游 C/C++ 编成 wasm**（而非 JS 重写，见 [`2026-09-23-native-to-wasm-design.md`](./2026-09-23-native-to-wasm-design.md)）。凡是坐在 C/C++ 库上的都已是 **wasm**：
+> - **`crypto`**（`origin: web-node`）：随机数走平台 WebCrypto，其余（摘要、MAC、KDF、对称密码、非对称、X.509/DER）由 `src/node-runtime/crypto/` 的 TS **直接驱动 `wn_openssl.wasm`**（OpenSSL 3.5.8 子集），字节输出与 Node 的 OpenSSL 逐字节一致；`wn_openssl`（~2.3 MB）**懒加载**（`bindings/openssl.ts` 的 `opensslReady()`），缺席时退回 JS 实现（性能退化，非正确性问题）。
+> - **`zlib`**（`origin: web-node`）：deflate/gzip（含**同步** `gzipSync` 等与 `level`/`windowBits`/`memLevel`/`strategy`/`dictionary` 参数面）跑在 `wn_zlib.wasm`（真 `deps/zlib` 1.3.2.1-motley）上，brotli/zstd 分别是 `wn_brotli.wasm`（`deps/brotli` 1.2.0）/`wn_zstd.wasm`（`deps/zstd` 1.5.7）；输出与 Node 逐字节一致。
+> - **`perf_hooks` 直方图**（`origin: web-node`）：`createHistogram`/`importHistogram`/`monitorEventLoopDelay` 跑在 `wn_histogram.wasm`（真 `deps/histogram` + 逐行移植的 `native/src/wn_histogram.cc`）上（`bindings/histogram.ts`，M117）。
+> - **`perf_hooks`**：真源码（`lib/perf_hooks.js` + `internal/perf/*`），坐在上面那个 JS `performance` binding 上。
+> - **`stream/web`**：真源码（`lib/stream/web.js` + `internal/webstreams/*`），坐在 `messaging`/`buffer`/`util`/`stream_wrap`（仅形状）四个 binding 上；`CompressionStream`/`DecompressionStream` 现全格式可用（含 brotli，走 `wn_zlib`/`wn_brotli`）。
+> - **`Blob`/`File`**：真源码（`lib/internal/blob.js` + `lib/internal/file.js`），坐在上面那个 JS `blob` binding 上；即**全局**，且与 `require('buffer').Blob` 同身份（真 `internal/streams/duplexify` 的 `isBlob` 门依赖这一点）。
 
 ---
 
 ## 5. Vendored 真 Node 源码
 
 由 `tools/vendor.mjs` 复制，`vendor/node-lib/MANIFEST.json` 记录 **上游 commit + 上游 sha256 + 产物 sha256 + 补丁说明**。
+
+> 下表是 **MVP 期最初的 8 个文件**；当前 vendored 真源码已增至 **163 个**（完整清单见 §9）。
 
 | 文件 | 说明 |
 |---|---|
@@ -166,17 +176,24 @@ web-node/
 │  │  ├─ vm.ts               # CJS 编译
 │  │  ├─ errors.ts           # NotImplementedError
 │  │  ├─ vendored.ts         # 以 raw 文本加载 vendor/ 源码
-│  │  ├─ bindings/           # 16 个 TS binding
+│  │  ├─ bindings/           # 23 个 TS binding（含 zlib/histogram/openssl 的 wasm 胶水）
 │  │  ├─ builtins/           # node:* 模块（真源码 + TS 实现）
+│  │  ├─ crypto/             # 加密引擎，TS 直驱 wn_openssl.wasm
+│  │  ├─ wasm/               # wasm 产物 + 注册表 + 最小 WASI 宿主
 │  │  ├─ loader/             # CJS resolver + ESM transformer
+│  │  ├─ net/                # 虚拟 TCP（入站）+ egress（出站）
+│  │  ├─ npm/                # npm client（semver / registry / tarball / installer）
+│  │  ├─ proc/               # fork/cluster 的子进程宿主
 │  │  └─ vfs/                # 内存树 + OPFS + posix
+│  ├─ sync/                  # SAB + Atomics 同步 RPC
 │  ├─ worker/runtime.worker.ts
 │  ├─ client/index.ts
 │  ├─ ui/                    # main.ts + style.css
 │  └─ demo-project.ts
+├─ native/                   # C/C++ 源码 + build.mjs（wasi-sdk → wasm）
 ├─ vendor/node-lib/          # 真 Node 源码 + MANIFEST.json
 ├─ tools/                    # vendor.mjs + 依赖扫描
-└─ test/                     # vfs.test.ts + runtime.test.ts
+└─ test/                     # vitest 单测 / 集成 / 差分门禁
 ```
 
 ---
@@ -186,15 +203,15 @@ web-node/
 - **单元（Vitest）**：VFS 行为（9 条）、resolver/ESM 转换、binding 契约。
 - **集成（Vitest）**：同一段脚本，断言 stdout —— 覆盖真源码 path/querystring、Buffer、fs、CJS、ESM、错误路径。
 - **E2E（浏览器）**：Vite dev server + CDP 验证 boot → Run → 输出 → 刷新后 OPFS 仍在。
-- 当前：**20/20 通过**，`tsc --noEmit` 干净，`vite build` 通过（worker 产物 182KB）。
+- 当前：`tsc --noEmit` 干净 · `vitest run` **1228 passed / 3 skipped**（144 个文件过 / 3 skip）· `npm run build` 通过（worker 产物 **785.68 kB**，另发独立 wasm 资产 `wn_*.wasm`，不内联进 bundle）。
 
 ---
 
 ## 9. 已知限制
 
-> 本表按里程碑进展刷新（当前至 **M47**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
+> 本表按里程碑进展刷新（当前至 **M142**）。早期版本里「无 streams / 无网络 / 无 npm」等条目均已解决，不再列出。
 >
-> **vendoring 进展**：`lib/stream.js` + `internal/streams/*`（整套流）、`lib/events.js`、`lib/internal/event_target.js` + `internal/webidl.js` + `internal/perf/utils.js`、`lib/internal/abort_controller.js`、`lib/console.js` + `internal/console/*` + `internal/cli_table.js` + `internal/trace_events.js` + `internal/util/debuglog.js`、`lib/os.js`、`lib/timers.js` + `internal/timers.js` + `timers/promises.js` + `internal/{linkedlist,priority_queue}.js`、`lib/internal/worker/io.js` + `internal/per_context/messageport.js` + `internal/worker/js_transferable.js`、`lib/readline.js` + `lib/readline/promises.js` + `internal/readline/{interface,emitKeypressEvents,promises}.js` + `internal/repl/history.js`、`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` + `internal/promise_hooks.js`、`lib/path.js`、`lib/querystring.js`、`lib/punycode.js`、`lib/domain.js`、`lib/diagnostics_channel.js`、`lib/string_decoder.js`、`internal/fs/glob.js` + `internal/deps/minimatch/index.js`、`internal/blob.js` + `internal/file.js`、`stream/iter.js` + `internal/streams/iter/{types,utils,webidl,ringbuffer,from,consumers,pull,push,duplex,broadcast,share,classic}.js`、`stream/consumers.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util.js`、`internal/util/diff.js`、`internal/util/parse_args/*`、`internal/validators.js`、`internal/mime.js`、`assert.js`、`internal/assert/{utils,assertion_error,myers_diff}.js`、`internal/streams/{state,from,utils}.js`、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`internal/per_context/*` 以及 `util.js` 已用 Node 真源码（MANIFEST 119 个文件）。
+> **vendoring 进展**：`lib/stream.js` + `internal/streams/*`（整套流）、`lib/events.js`、`lib/internal/event_target.js` + `internal/webidl.js` + `internal/perf/utils.js`、`lib/internal/abort_controller.js`、`lib/console.js` + `internal/console/*` + `internal/cli_table.js` + `internal/trace_events.js` + `internal/util/debuglog.js`、`lib/os.js`、`lib/timers.js` + `internal/timers.js` + `timers/promises.js` + `internal/{linkedlist,priority_queue}.js`、`lib/internal/worker/io.js` + `internal/per_context/messageport.js` + `internal/worker/js_transferable.js`、`lib/readline.js` + `lib/readline/promises.js` + `internal/readline/{interface,emitKeypressEvents,promises}.js` + `internal/repl/history.js`、`lib/async_hooks.js` + `internal/async_hooks.js` + `internal/async_local_storage/*` + `internal/promise_hooks.js`、`lib/path.js`、`lib/querystring.js`、`lib/punycode.js`、`lib/domain.js`、`lib/diagnostics_channel.js`、`lib/string_decoder.js`、`internal/fs/glob.js` + `internal/deps/minimatch/index.js`、`internal/blob.js` + `internal/file.js`、`stream/iter.js` + `internal/streams/iter/{types,utils,webidl,ringbuffer,from,consumers,pull,push,duplex,broadcast,share,classic}.js`、`stream/consumers.js`、`internal/util/types.js`、`internal/util/inspect.js`、`internal/util/comparisons.js`、`internal/util/colors.js`、`internal/util.js`、`internal/util/diff.js`、`internal/util/parse_args/*`、`internal/validators.js`、`internal/mime.js`、`assert.js`、`internal/assert/{utils,assertion_error,myers_diff}.js`、`internal/streams/{state,from,utils}.js`、`internal/constants.js`、`internal/encoding/util.js`、`internal/querystring.js`、`internal/per_context/*` 以及 `util.js` 已用 Node 真源码（MANIFEST **163** 个文件）。
 
 | 限制 | 说明 |
 |---|---|
@@ -204,7 +221,8 @@ web-node/
 | child 剩余工作是 host promise 时 | **已修正**（M44）：runtime 把在飞的宿主请求（`fetch`）计入 `activeCount()`，子进程会在其 settle 后才判定退出；纯微任务 promise（`crypto.subtle`/`Blob.arrayBuffer`/裸 `new Promise`）与真 Node 一致地**不**计数 |
 | child 剩余工作是开着的 WebSocket 时 | **已修正**（M46）：抓宿主 `WebSocket`，开着的 socket 计入 `activeCount()`（`close`/`error` 释放，按 run 隔离），子进程在 socket 关闭/失败后才判定退出（真 Node v26.9.0 实测：开着的 socket 会吊住事件循环） |
 | 沙箱全局注入与模块顶层词法声明冲突 | **已修正**（M46）：沙箱全局以 wrapper 参数注入，模块顶层又 `const`/`let`/`class` 同名声明（如 Vite chunk 里的 `const WebSocket = websocket`）会 `Identifier 'X' has already been declared`；现用**长度保持的 `codeMask` 分词器**扫出顶层词法绑定名，按模块从注入参数里剔除（只影响该模块） |
-| `crypto` 对称密码 | **已支持**（M47）：AES-128/192/256 的 ECB/CBC/CTR/CFB/OFB/GCM（`createCipheriv`/`createDecipheriv`，`src/node-runtime/crypto/cipher.ts`，FIPS-197 + NIST SP 800-38A/D），输出与 OpenSSL 逐字节一致；`getCiphers`/`getCipherInfo` 齐备。未实现（抛类型化 `NotImplementedError`）：Camellia/ARIA/SM4/DES/3DES/ChaCha20-Poly1305/CCM/OCB/SIV/XTS/wrap 等；签名/非对称密钥同样抛错 |
+| `crypto` 引擎 | **已切真 OpenSSL（M119）**：`wn_openssl.wasm`（3.5.8 子集）由 `src/node-runtime/crypto/` 的 TS 直驱——摘要（MD5、SHA-1、SHA-2、SHA-3/Keccak、BLAKE2、RIPEMD-160、SM3）、MAC（HMAC、Poly1305、SipHash）、KDF（PBKDF2、HKDF、scrypt、Argon2）、对称密码（AES 含 GCM/CCM/OCB/SIV/XTS/CBC-CTS/CFB、ChaCha20-Poly1305、DES/3DES、Camellia/ARIA/SM4）、非对称（RSA/DSA/DH/ECDH/Ed25519/Ed448/X25519/X448/ML-KEM）、X.509/SPKAC/DER；输出与 Node 的 OpenSSL 逐字节一致 |
+| `perf_hooks` 直方图 | **已支持**（M117）：`createHistogram`/`importHistogram`/`monitorEventLoopDelay` 跑在 `wn_histogram.wasm`（真 `deps/histogram` + 逐行移植的 `src/histogram.cc`）上，可观测等价 |
 | `os` 返回静态假数据 | 浏览器无可信宿主信息（但已换真 `lib/os.js`，形状/强制转换/`constants` 与 Node 一致） |
 | `credentials` binding | 只提供 `getTempDir`（`/tmp`） |
 | `internal/fs/utils.js` 为 shim | 只导出 `DirentFromStats`（`fs` 是自研 VFS，真 util 是 fs 基座） |
@@ -215,7 +233,7 @@ web-node/
 | 回调里抛出的异常 | **已修正**（M43）：timer / nextTick 回调里的抛出之前绕过 `process._fatalException`（捕获回调与 `uncaughtException` 监听器都不响）；现在统一经共享 dispatcher 路由 |
 | vendored 注释不进 bundle | 构建期剥离注释（行号/列号/ MIT 声明均保留）；`Function.prototype.toString()` 看不到注释，缩进未动 |
 | promise hooks 不触发 | 浏览器不向 JS 暴露 V8 的 promise hooks（`v8::SetPromiseHooks` 只给 embedder），无法拦截 `await`/async 函数创建的 promise，所以 `createHook({ promiseResolve })` 不会响（tick/timer/AsyncResource 会）。V8 判据只能靠 `Object.prototype.toString`，会漏掉 await-创建的 promise，故不做半吊子实现 |
-| `zlib` | **deflate/gzip 已支持**（M45）：流式与一次性异步形式（`createGzip`/`gzip`/`gunzip`/`unzip` 等）跑在平台 `CompressionStream`/`DecompressionStream` 上，默认选项下输出与 Node v26.9.0 **逐字节一致**；`crc32`/`constants`/`codes` 齐备。不支持（抛错）：同步形式（`gzipSync` 等，平台 codec 只有异步面）、`level`/`windowBits`/`memLevel`/`strategy`/`dictionary` 等**编码参数**（平台无参数面，传非默认值即抛，不静默忽略）、`flush()`/`params()`、brotli/zstd/zip |
+| `zlib` | **全格式已切真 zlib/zstd/brotli（M116/M118）**：deflate/gzip（含**同步** `gzipSync` 等与 `level`/`windowBits`/`memLevel`/`strategy`/`dictionary` 参数面）跑在 `wn_zlib.wasm`（真 `deps/zlib` 1.3.2.1-motley）上，brotli/zstd 分别是 `wn_brotli.wasm`（`deps/brotli` 1.2.0）/`wn_zstd.wasm`（`deps/zstd` 1.5.7）；输出与 Node v26.9.0 **逐字节一致**；`crc32`/`constants`/`codes` 齐备 |
 
 ---
 
@@ -239,5 +257,5 @@ web-node/
 
 1. **promise hooks（M17 遗留，可选）**：要让 `createHook` 的 `promiseResolve` 真响，需要 V8 promise 级插桩，代价大，暂缓。
 2. ~~**npm 再进一步**~~ ✅ **已统一处理（M39）**：`overrides`/`resolutions`、`file:`/`link:`、有界并发下载（见上）。剩：`git+`/`git:` 不支持（标签页无 git）。
-3. **性能**：把热点 binding（buffer/fs）替换为 wasm；引入 SharedArrayBuffer + Atomics 做同步 syscall。
+3. ~~**性能**：把热点 binding（buffer/fs）替换为 wasm；引入 SharedArrayBuffer + Atomics 做同步 syscall。~~ ✅ **已落地（M115–M126）**：热点的 native 层（zlib / histogram / crypto·OpenSSL）已换成**真上游编出的 wasm**（阶段 H），同步 syscall 用**第二 worker + `SharedArrayBuffer` + `Atomics.wait/notify`** 实现（`src/sync/`），并已使页面内跑通 **webpack / rspack**（M121 / M125）；出网（M122 egress）、多进程（M123 cluster）、按需装包（M142）等亦已补齐。详见 [`2026-09-23-native-to-wasm-design.md`](./2026-09-23-native-to-wasm-design.md)。
 4. **更多框架 / 工具链**：React（SWC / Babel）、Svelte、TypeScript 项目、Tailwind / PostCSS 管线。
