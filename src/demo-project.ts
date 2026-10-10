@@ -33,4 +33,4 @@ export const DEMO_FILES: Record<string, string> = {
  * be rewritten once (files the user created are untouched — boot writes the
  * embedded demo paths only).
  */
-export const DEMO_VERSION = 5;
+export const DEMO_VERSION = 6;

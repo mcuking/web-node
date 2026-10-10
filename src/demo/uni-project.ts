@@ -213,6 +213,7 @@ export default {
   "private": true,
   "version": "1.0.0",
   "scripts": {
+    "dev:h5": "uni",
     "build:h5": "node build.mjs"
   },
   "dependencies": {
