@@ -70,6 +70,114 @@ const CLI = path.join(NM, '@dcloudio', 'vite-plugin-uni', 'bin', 'uni.js');
   console.log('uni build failed : ' + (err && err.stack ? err.stack : err));
 });
 `,
+  '/project/uni/dev.mjs': `// uni-app H5 dev server, running entirely inside the tab. Pick "Run dev",
+// then open the Preview tab and choose :5176.
+//
+// Unlike build.mjs, which runs the uni CLI, this drives Vite directly and
+// imports the uni plugin itself. The reason is the file watcher: the CLI always
+// installs a chokidar watcher (watch: {}), and chokidar cannot work in a tab
+// (there is no inotify) - it spins scanning the whole tree through the VFS. The
+// vite demo disables the watcher the same way (server.watch: null).
+//
+// As in the other dev servers here: a tab cannot load the native esbuild addon,
+// so 'esbuild' is aliased to its WASM build, started explicitly below; and a
+// ServiceWorker cannot proxy Vite's WebSocket, so HMR rides a BroadcastChannel.
+import fs from 'fs';
+import path from 'path';
+
+const ROOT = '/project/uni';
+const NM = path.join(ROOT, 'node_modules');
+const PORT = 5176;
+const HMR_CHANNEL = 'web-node-hmr:' + PORT;
+
+function createHmrBridge() {
+  const channel = new BroadcastChannel(HMR_CHANNEL);
+  const clients = new Set();
+  let onConnection = null;
+  channel.onmessage = function (event) {
+    const msg = event.data;
+    if (!msg) return;
+    if (msg.t === 'open') {
+      clients.add(msg.id);
+      channel.postMessage({ t: 'open', id: msg.id });
+      channel.postMessage({ t: 'message', id: msg.id, data: JSON.stringify({ type: 'connected' }) });
+      console.log('hmr         : preview connected (' + clients.size + ' client/s)');
+      if (onConnection) onConnection({ send: function () {} }, {});
+    } else if (msg.t === 'send') {
+      let parsed = null;
+      try { parsed = JSON.parse(msg.data); } catch (e) {}
+      if (parsed && parsed.type === 'ping') {
+        channel.postMessage({ t: 'message', id: msg.id, data: JSON.stringify({ type: 'pong' }) });
+      }
+    } else if (msg.t === 'close') {
+      clients.delete(msg.id);
+    }
+  };
+  return {
+    name: 'web-node-hmr',
+    get clients() { return clients; },
+    send(payload) {
+      const data = JSON.stringify(payload);
+      clients.forEach(function (id) { channel.postMessage({ t: 'message', id: id, data: data }); });
+    },
+    on(event, fn) { if (event === 'connection') onConnection = fn; },
+    off(event, fn) { if (event === 'connection' && onConnection === fn) onConnection = null; },
+    listen() {},
+    close() { clients.clear(); channel.close(); },
+    handleUpgrade() {},
+  };
+}
+
+(async function () {
+  console.log('-- uni dev (h5) --');
+  if (!fs.existsSync(path.join(NM, '@dcloudio', 'vite-plugin-uni'))) {
+    console.log('uni-app     : not installed yet - run "Install deps" first');
+    return;
+  }
+
+  const esbuild = await import('esbuild');
+  const wasm = fs.readFileSync(path.join(NM, 'esbuild-wasm', 'esbuild.wasm'));
+  const t0 = Date.now();
+  await esbuild.initialize({ wasmModule: await WebAssembly.compile(wasm), worker: false });
+  console.log('esbuild     : wasm started in ' + (Date.now() - t0) + 'ms');
+
+  // The CLI reads the project (pages.json, manifest.json, ...) from the working
+  // directory and from these env vars; initEnv is where its runDev sets them.
+  process.chdir(ROOT);
+  process.env.UNI_PLATFORM = 'h5';
+  process.env.NODE_ENV = 'development';
+  const utils = await import('@dcloudio/vite-plugin-uni/dist/cli/utils.js');
+  utils.initEnv('dev', { platform: 'h5' });
+
+  const vite = await import('vite');
+  const pluginMod = await import('@dcloudio/vite-plugin-uni');
+  const uni = typeof pluginMod.default === 'function' ? pluginMod.default : pluginMod.default.default;
+
+  const server = await vite.createServer({
+    root: ROOT,
+    configFile: false,
+    logLevel: 'error',
+    plugins: [uni()],
+    // No chokidar (see the header): a tab cannot watch the file system, and
+    // chokidar spins if it tries.
+    server: { host: '127.0.0.1', port: PORT, watch: null },
+  });
+
+  // Vite reads server.hot on every update, so swapping the reference is enough
+  // to replace its WebSocket channel with the BroadcastChannel bridge.
+  const bridge = createHmrBridge();
+  server.hot = bridge;
+  server.ws = bridge;
+
+  await server.listen();
+
+  console.log('listening   : http://127.0.0.1:' + PORT);
+  console.log('hmr         : BroadcastChannel "' + HMR_CHANNEL + '" (no WebSocket)');
+  console.log('preview     : open the Preview tab (:5176), then edit src/pages/index/index.vue');
+})().catch(function (err) {
+  console.log('uni dev failed : ' + (err && err.stack ? err.stack : err));
+});
+`,
   '/project/uni/vite.config.mjs': `// The uni-app Vite config.
 //
 // Imported by the uni CLI, which lets Vite discover this file (the bundler

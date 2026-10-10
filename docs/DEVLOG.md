@@ -246,6 +246,23 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-10 · M144 —— uni-app H5 **dev server** 在页内跑起来（Run dev + HMR）
+
+唐工确认给 uni demo 再加一个页内 dev server（H5 预览 + 热更）。目标是 `▶ Run dev` 起 Vite dev server、`🚢 Build H5` 一次性构建，且 HMR 走预览桥。
+
+**关键发现：uni CLI 的 dev 模式在页内会"空转"**。直接跑 CLI（`bin/uni.js --host ... --port ...`）时服务器能起来（`ready in ~1.3s`）但一有请求就 100%+ CPU、永不返回。用 `--inspect` + CDP `Debugger.pause` 钉死：栈停在 **chokidar** 的 `_addToNodeFs` → `_isIgnored` → `matchPatterns` → picomatch，即 **chokidar 在扫整棵树**（node_modules 884 包）——标签页没有 inotify，chokidar 经 VFS 反复扫、空转。uni 的 `runDev` 会 `extend(options,{watch:{}})`，且 `cleanOptions` 会把 `watch` 当 inline `server` 传给 `createServer`，**inline config 会覆盖 `vite.config.mjs` 里的 `server.watch`**，所以配置文件里写 `watch: null` 没用。
+
+**改法：不用 CLI，直接驱动 Vite 并自己 import uni 插件**（对比 Vite demo 的做法）：
+- `process.chdir(ROOT)`、`UNI_PLATFORM=h5`、`NODE_ENV=development`，再调 `@dcloudio/vite-plugin-uni/dist/cli/utils.js` 的 `initEnv('dev',{platform:'h5'})`（CLI 的 `runDev` 就是靠它把 `UNI_INPUT_DIR`/`VITE_ROOT_DIR`/`UNI_CLI_CONTEXT` 等设好的）。
+- `vite.createServer({ root, configFile:false, plugins:[uni()], server:{ host, port, watch:null } })`，然后 `server.hot = server.ws = createHmrBridge()`（BroadcastChannel，同 Vite demo）→ `await server.listen()`。
+- uni 插件默认导出是 CJS 互操作产物，得取 `typeof mod.default==='function' ? mod.default : mod.default.default`。
+- **不**需要关 `optimizeDeps`：M143 的 esbuild ⇄ VFS 桥已让 Vite 的依赖预打包（esbuild `build()`）能走 VFS，实测默认预打包下 Vue SFC 都能编译。
+
+**验证**（端到端 spike `test/_uni-dev-spike.test.ts`，`UNI_DEV_SPIKE=1` 才跑；跑**真** demo `dev.mjs` + 探针）：
+- `listening   : http://127.0.0.1:5176` · `/@vite/client` 200 · `/src/main.js` 200 · `/src/App.vue` 200(2793B) · `/src/pages/index/index.vue` 200(5539B) · `/` 200(509B)（uni H5 壳）。
+
+**改动**：`src/demo/uni-project.ts` 新增 `/project/uni/dev.mjs`；`src/ui/main.ts` 的 uni 分支改为 `install → dev → build`（`▶ Run dev` + `⚙ Build H5`，端口 5176）；README / README_zh / 本文件同步。
+
 ### 2026-10-10 · M143 —— uni-app demo（真 uni-app CLI 在页内构建 H5）+ esbuild ⇄ VFS 桥产品化
 
 唐工要求「demo 页面里新增 uniapp 的 demo」，并把上一轮 spike 里手动注入的 esbuild VFS 桥**产品化**——让第三方 CLI（uni 的 `bin/uni.js` 经 Vite 自动加载 `vite.config.js`）无需任何改动即可让 esbuild 的 `build()` 读到 VFS。

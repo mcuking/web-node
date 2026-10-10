@@ -542,15 +542,21 @@ function registerProject(project: DemoProject, label: string, blurp: string): vo
     };
     steps = [`${id}/install`, `${id}/run`];
   } else if (project.template === 'uni') {
-    // uni-app only exposes a build here: its H5 target emits a static site,
-    // while a mini-program target emits WeChat's wxml/wxss, which nothing in a
-    // browser can run (that needs the WeChat devtools).
+    // uni H5 can both serve a dev server and emit a static site; a mini-program
+    // target emits WeChat's wxml/wxss, which nothing in a browser can run, so
+    // only the H5 path is offered.
+    STEPS[`${id}/dev`] = {
+      label: '▶ Run dev',
+      needs: 'deps',
+      long: true,
+      exec: () => runProcess(`${project.root}/dev.mjs`, `node ${project.root}/dev.mjs`, false),
+    };
     STEPS[`${id}/build`] = {
       label: '⚙ Build H5',
       needs: 'deps',
       exec: () => runBuildIsolated(`${project.root}/build.mjs`, `node ${project.root}/build.mjs`, project.root),
     };
-    steps = [`${id}/install`, `${id}/build`];
+    steps = [`${id}/install`, `${id}/dev`, `${id}/build`];
   } else {
     STEPS[`${id}/dev`] = {
       label: '▶ Run dev',

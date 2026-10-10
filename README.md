@@ -163,7 +163,7 @@ projects**, and the second row runs the current project's steps:
 | **Vite** | Vue 3 SFC, real Vite v5 | **▶ Run dev** (HMR) · **⚙ Run build** | 5173 |
 | **Webpack** | React, real webpack 5 + JSX loader | **▶ Run dev** (watch + full-reload) · **⚙ Run build** | 5174 |
 | **Rspack** | React, real rspack 2.2.7 + swc loader | **▶ Run dev** · **⚙ Run build** | 5175 |
-| **uni-app** | cross-platform app, real uni-app CLI → H5 | **⚙ Build H5** | 5176 |
+| **uni-app** | cross-platform app, real uni-app CLI → H5 | **▶ Run dev** · **⚙ Build H5** | 5176 |
 | **Node.js** | plain `node index.js` (HTTP server) | **▶ Run** | 3000 |
 
 Every project installs its own `node_modules`, runs in the tab, and shows its
@@ -570,6 +570,13 @@ default, and Vite runs terser in a `worker_threads` Worker (`eval: true`) that a
 tab cannot spawn — `vite.config.mjs` selects the esbuild minifier instead. Only
 the H5 target is offered: a mini-program target emits WeChat's `wxml`/`wxss`,
 which nothing in a browser can run (that needs the WeChat devtools).
+
+**Run dev** serves the same project with Vite's dev server (HMR over the preview
+bridge). It drives Vite directly and imports the uni plugin itself, rather than
+running the CLI: the CLI always installs a chokidar watcher (`watch: {}`), and
+chokidar cannot work in a tab — it spins scanning the whole tree through the
+VFS. `dev.mjs` passes `server.watch: null` instead, the same way the Vite demo
+does.
 
 ## Vendored Node source
 

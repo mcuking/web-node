@@ -100,7 +100,7 @@ Demo 就是一个小型 IDE。顶栏在**五个自包含项目**间切换，第�
 | **Vite** | Vue 3 SFC，真 Vite v5 | **▶ Run dev**（HMR） · **⚙ Run build** | 5173 |
 | **Webpack** | React，真 webpack 5 + JSX loader | **▶ Run dev**（watch + full-reload） · **⚙ Run build** | 5174 |
 | **Rspack** | React，真 rspack 2.2.7 + swc loader | **▶ Run dev** · **⚙ Run build** | 5175 |
-| **uni-app** | 跨端应用，真 uni-app CLI → H5 | **⚙ Build H5** | 5176 |
+| **uni-app** | 跨端应用，真 uni-app CLI → H5 | **▶ Run dev** · **⚙ Build H5** | 5176 |
 | **Node.js** | 纯 `node index.js`（HTTP server） | **▶ Run** | 3000 |
 
 每个项目装各自的 `node_modules`、全在标签页里跑、输出进终端 / 预览。**+ New project** 可用任意模板
@@ -422,6 +422,10 @@ uni-app 比几个 bundler demo 更重：它跑的是带 `@dcloudio/vite-plugin-u
 uni 默认还走 **terser** 压缩，而 Vite 的 terser 跑在一个 `worker_threads` Worker（`eval: true`）里，
 标签页起不了——所以 `vite.config.mjs` 改用 esbuild 压缩器。这里只提供 H5 目标：小程序目标产出的是微信的
 `wxml`/`wxss`，浏览器里没有任何东西能跑它（那需要微信开发者工具）。
+
+**Run dev** 用 Vite dev server 提供同一个项目（HMR 走预览桥）。它**直接驱动 Vite 并自己 import uni 插件**，
+而不是跑 CLI：CLI 总会装一个 chokidar 监听器（`watch: {}`），而 chokidar 在标签页里根本不能用——它会
+反复扫整棵树（经 VFS）空转。`dev.mjs` 改传 `server.watch: null`，和 Vite demo 一样。
 
 ## Vendored 真源码现状
 
