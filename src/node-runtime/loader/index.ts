@@ -169,6 +169,15 @@ export class ModuleLoader {
    * `parentPort`/`workerData`), not the main thread's module.
    */
   #builtinOverrides: Record<string, unknown> = {};
+  /**
+   * `require.cache` — a live view of the user-module cache keyed by absolute
+   * path, so `delete require.cache[resolved]` really evicts (Vite does exactly
+   * this before re-requiring `@vitejs/plugin-vue` to get a fresh plugin
+   * instance). Backed by the loader's own map so the two never disagree.
+   */
+  #requireCacheFacade: Record<string, unknown>;
+  /** `require.extensions` — populated shape only; the loader owns compiling. */
+  #requireExtensions: Record<string, unknown> = Object.create(null);
   #globalNames!: string[];
   #globalValues!: unknown[];
   #paramNames!: string[];
@@ -178,6 +187,22 @@ export class ModuleLoader {
     this.#vfs = vfs;
     this.#globals = globals;
     this.#aliases = {};
+    this.#requireCacheFacade = new Proxy(Object.create(null) as Record<string, unknown>, {
+      get: (_t, key) => this.#cache.get(String(key))?.exports,
+      has: (_t, key) => this.#cache.has(String(key)),
+      set: () => true,
+      deleteProperty: (_t, key) => {
+        this.#cache.delete(String(key));
+        return true;
+      },
+      ownKeys: () => [...this.#cache.keys()],
+      getOwnPropertyDescriptor: (_t, key) => {
+        const entry = this.#cache.get(String(key));
+        return entry
+          ? { configurable: true, enumerable: true, writable: true, value: entry.exports }
+          : undefined;
+      },
+    });
     this.#syncGlobals();
   }
 
@@ -808,6 +833,13 @@ export class ModuleLoader {
           const fromDir = options?.paths?.[0] ?? dirname;
           return this.resolve(request, fromDir, reqCondition);
         },
+        // Node's `require` carries `cache`, `extensions` and `main`; bundled
+        // tooling reads them (Vite deletes `require.cache[...]` to force a
+        // fresh `@vitejs/plugin-vue`). `cache` is the loader's live view so a
+        // delete really evicts.
+        cache: this.#requireCacheFacade,
+        extensions: this.#requireExtensions,
+        main: undefined,
       },
     );
     // Dynamic `import()` resolves relative to the importing module and always
