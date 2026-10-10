@@ -6,7 +6,7 @@
 
 [English](README.md) · **简体中文**
 
-- **在线 demo**：<https://mcuking.github.io/web-node/> —— 选一个项目（**Vite** / **Webpack** / **Rspack** / **Node.js**），点 **⬇ Install deps** → **▶ Run dev** 和/或 **⚙ Run build**，全在标签页里
+- **在线 demo**：<https://mcuking.github.io/web-node/> —— 选一个项目（**Vite** / **Webpack** / **Rspack** / **Node.js** / **uni-app**），点 **⬇ Install deps** → **▶ Run dev** 和/或 **⚙ Run build**，全在标签页里
 - **开发日志 / 进度 / 下一步**：[`docs/DEVLOG.md`](docs/DEVLOG.md) ← **每次改动都往这里追加**
 - 设计文档：[`docs/superpowers/specs/2026-09-17-web-node-design.md`](docs/superpowers/specs/2026-09-17-web-node-design.md)、[`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`](docs/superpowers/specs/2026-09-23-native-to-wasm-design.md)
 - 上游源码：本地 Node.js checkout（v26.9.1-dev，`v26.9.0-1-g7a3437d`），经 `tools/` vendor
@@ -93,13 +93,14 @@ npm run deploy     # = BASE_PATH=/web-node/ tools/deploy-pages.sh
 
 ## Demo
 
-Demo 就是一个小型 IDE。顶栏在**四个自包含项目**间切换，第二栏跑当前项目的步骤：
+Demo 就是一个小型 IDE。顶栏在**五个自包含项目**间切换，第二栏跑当前项目的步骤：
 
 | 项目 | 技术栈 | 步骤 | 端口 |
 | --- | --- | --- | --- |
 | **Vite** | Vue 3 SFC，真 Vite v5 | **▶ Run dev**（HMR） · **⚙ Run build** | 5173 |
 | **Webpack** | React，真 webpack 5 + JSX loader | **▶ Run dev**（watch + full-reload） · **⚙ Run build** | 5174 |
 | **Rspack** | React，真 rspack 2.2.7 + swc loader | **▶ Run dev** · **⚙ Run build** | 5175 |
+| **uni-app** | 跨端应用，真 uni-app CLI → H5 | **⚙ Build H5** | 5176 |
 | **Node.js** | 纯 `node index.js`（HTTP server） | **▶ Run** | 3000 |
 
 每个项目装各自的 `node_modules`、全在标签页里跑、输出进终端 / 预览。**+ New project** 可用任意模板
@@ -124,7 +125,7 @@ src/
   worker/         Dedicated Worker 入口（runtime + 文件系统）
   client/         主线程 Runtime Client API（含 ServiceWorker 桥）
   ui/             Demo UI（项目步进器 / 文件树 / 编辑器 / 终端 / 预览）
-  demo/           四个 demo 项目（node / vite / webpack / rspack）
+  demo/           五个 demo 项目（node / vite / webpack / rspack / uni）
 native/           C/C++ 源码 + build.mjs（wasi-sdk → src/node-runtime/wasm/artifacts）
 examples/rspack/  自定义 rspack binding 入口（用真浏览器 Worker 承载 emnapi 线程）
 public/sw.js      ServiceWorker：/preview/<port>/ → 虚拟网络，+ COOP/COEP
@@ -404,6 +405,23 @@ gzip 141 KB）。子线程不需要 VFS——emnapi 的 `createFsProxy` 把 `fs`
 （父侧即 VFS）。前提有两个：真的 **`node:wasi`** 宿主（46 个 `wasi_snapshot_preview1` syscall、
 落在 VFS 上），以及**跨域隔离**页面（`SharedArrayBuffer` + COOP/COEP，由 `public/sw.js` 注入，
 即使在设不了响应头的静态宿主上也行，M134）。
+
+### 用 uni-app 构建 H5 站点（M143）
+
+真的 **uni-app CLI** 在标签页里跑跨端项目的 **H5 目标**，产出静态站点到 `dist/build/h5/`：
+
+```
+DONE  Build complete.
+written     : /project/uni/dist/build/h5/
+```
+
+uni-app 比几个 bundler demo 更重：它跑的是带 `@dcloudio/vite-plugin-uni` 的 Vite，而且 CLI 是
+**自动发现** `vite.config.mjs` 而非由调用方传入——于是 Vite 要用 **esbuild 打包这个配置，而 esbuild
+在标签页里没有文件系统**。这正是运行时的 **esbuild ⇄ VFS 桥**（`tooling/esbuild-bridge.ts`）的用途：
+运行时对项目代码**透明包装 `esbuild`**，让它的 `build()` 经 VFS 解析 / 载入文件，第三方 CLI 无需任何改动。
+uni 默认还走 **terser** 压缩，而 Vite 的 terser 跑在一个 `worker_threads` Worker（`eval: true`）里，
+标签页起不了——所以 `vite.config.mjs` 改用 esbuild 压缩器。这里只提供 H5 目标：小程序目标产出的是微信的
+`wxml`/`wxss`，浏览器里没有任何东西能跑它（那需要微信开发者工具）。
 
 ## Vendored 真源码现状
 

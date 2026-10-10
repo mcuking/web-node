@@ -246,6 +246,25 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-10 · M143 —— uni-app demo（真 uni-app CLI 在页内构建 H5）+ esbuild ⇄ VFS 桥产品化
+
+唐工要求「demo 页面里新增 uniapp 的 demo」，并把上一轮 spike 里手动注入的 esbuild VFS 桥**产品化**——让第三方 CLI（uni 的 `bin/uni.js` 经 Vite 自动加载 `vite.config.js`）无需任何改动即可让 esbuild 的 `build()` 读到 VFS。
+
+**背景（为什么需要桥）**：Vite 让 CLI **自动发现** `vite.config.mjs`，于是它用 **esbuild 打包这个配置**；而 `esbuild-wasm` 在标签页里**没有文件系统**，一旦解析/读取文件就报 `Cannot read directory "…": not implemented on js`。上一轮 spike 里只能由使用方手动 `runtime.loader.setBuiltinOverrides({ esbuild: wrapper })`；本里程碑把这条路径做进 runtime。
+
+**改动**：
+- 新增 `src/node-runtime/tooling/esbuild-bridge.ts`：`createToolingWrappers()` 产出 `{ esbuild: wrapEsbuild }`——`wrapEsbuild` 用 `Object.defineProperty` **覆写** 模块上的 `build`/`default`（esbuild 的这两个是 getter-only，直接赋值会 `TypeError: Cannot set property build of #<Object> which has only a getter`），把 `build()` 的 `plugins` 末尾追加一个 VFS 插件（`web-node-vfs`：`onResolve`/`onLoad` 经 VFS 解析与读取，JS/TS 仍交给调用方 loader，仅接管 JSON/CSS 等）。
+- `src/node-runtime/loader/index.ts`：新增 `setToolingWrappers(wrappers)` + `#toolingWrappers` + `#toolingCache`，按 request 名（仅 `esbuild`）对模块做**一次性包装并缓存**；`require` 拆成 `require`（含 wrapper 逻辑）+ `#requireDirect`（原逻辑）。
+- `src/node-runtime/runtime.ts`：构造时自动安装 `createToolingWrappers()`，并新增 `MODULE_ALIASES`（`rollup` → `@rollup/wasm-node`、`esbuild` → `esbuild-wasm`）。
+- `src/node-runtime/proc/host.ts` / `proc/worker.ts`：`ProcessHostDeps` / `WorkerHostDeps` 新增 `toolingWrappers()` 与 `aliases()`，让包装/别名**继承到子进程与 worker**。
+- 新增测试 `test/esbuild-bridge.test.ts`（7 项）。
+
+**uni-app demo**（新增 `src/demo/uni-project.ts`，`DEMO_FILES` 汇总、`TemplateId` 扩 `'uni'`、端口 5176、UI 的模板提示同步）：一个自包含的 uni-app 工程（`index.html` / `src/{main.js,App.vue,pages.json,manifest.json,uni.scss,pages/index/index.vue}` / `vite.config.mjs` / `build.mjs` / `package.json`）。因为 CLI 自动发现配置，这里**必须**靠 runtime 的 esbuild 桥；且 uni 默认走 **terser** 压缩，而 Vite 的 terser 跑在 `worker_threads.Worker({eval:true})` 里（标签页起不了），故 `vite.config.mjs` 显式 `build: { minify: 'esbuild' }`。**只提供 H5 目标**：小程序目标产出微信 `wxml`/`wxss`，浏览器里没有东西能跑它。UI 里 uni 只给 **⚙ Build H5** 一步（无 dev/run）。
+
+**验证**：
+- 端到端 spike（`test/_uni-demo-spike.test.ts`，前缀 `_` 被 `tsc` 排除、vitest 执行、`UNI_DEMO_SPIKE=1` 才跑）：用 `DiskVfs`（`/project` 映射真目录）+ **runtime 自带安装器** `installProject()` 装 **884 个包**，再跑 demo 的 `build.mjs` → `DONE  Build complete.` + 真产物 `dist/build/h5/index.html`（含 JS/CSS/`static/logo.png`）。
+- 全量门禁：`tsc --noEmit` 净 · `vitest run` **1245 passed / 5 skipped（152 files）** · `vite build` 绿（worker **794.45 kB** / index **29.04 kB** / css **8.72 kB**）。
+
 ### 2026-10-09 · M142 —— 动态安装：从 UI 跑 `npm install <spec>`（按需加依赖）
 
 唐工确认后实现（`feat/m142-add-packages`，**已 FF 合入 main** `31af790`，分支已删）。旧能力只能「照 `package.json` 整包安装」，现在可以像 `npm install <pkg>` 一样**往已有工程里加包**，并把解析结果写回 `package.json` + `package-lock.json`。

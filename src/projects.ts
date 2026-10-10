@@ -6,8 +6,8 @@
  * drag the (large) embedded sources into the page bundle.
  */
 
-/** The four built-in templates a project can be scaffolded from. */
-export type TemplateId = 'vite' | 'webpack' | 'rspack' | 'node';
+/** The built-in templates a project can be scaffolded from. */
+export type TemplateId = 'vite' | 'webpack' | 'rspack' | 'node' | 'uni';
 
 /**
  * A project id. The four built-ins use their template name; a project the user
@@ -39,10 +39,11 @@ export const DEMO_PROJECTS: Record<TemplateId, DemoProject> = {
   webpack: { id: 'webpack', template: 'webpack', root: '/project/webpack', entry: '/project/webpack/src/index.js', port: 5174 },
   rspack: { id: 'rspack', template: 'rspack', root: '/project/rspack', entry: '/project/rspack/src/main.mjs', port: 5175 },
   node: { id: 'node', template: 'node', root: '/project/node', entry: '/project/node/index.js', port: 3000 },
+  uni: { id: 'uni', template: 'uni', root: '/project/uni', entry: '/project/uni/src/pages/index/index.vue', port: 5176 },
 };
 
 /** Every built-in project, in the order the UI shows them. */
-export const PROJECT_ORDER: TemplateId[] = ['node', 'vite', 'webpack', 'rspack'];
+export const PROJECT_ORDER: TemplateId[] = ['node', 'vite', 'webpack', 'rspack', 'uni'];
 
 /** Template metadata: the chip label, the hover blurb, and the editor entry. */
 export const TEMPLATE_META: Record<TemplateId, { label: string; blurp: string }> = {
@@ -50,6 +51,7 @@ export const TEMPLATE_META: Record<TemplateId, { label: string; blurp: string }>
   webpack: { label: '📦 Webpack', blurp: 'React app — webpack watches and bundles; the preview full-reloads' },
   rspack: { label: '🔷 Rspack', blurp: 'React app — Rust bundler via wasm32-wasi on a real Worker thread pool' },
   node: { label: '🟢 Node.js', blurp: 'the full runtime — fs, http, crypto, streams, workers, child processes' },
+  uni: { label: '🦄 uni-app', blurp: 'a cross-platform app — the uni-app CLI builds the H5 target in the tab' },
 };
 
 /** The file the editor opens for a project scaffolded from `template` at `root`. */

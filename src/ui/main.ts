@@ -532,6 +532,7 @@ function registerProject(project: DemoProject, label: string, blurp: string): vo
   const id = project.id;
   PROJECTS.set(id, project);
   STEPS[`${id}/install`] = { label: '↓ Install deps', needs: 'none', exec: () => installDeps(project) };
+  let steps: string[];
   if (project.template === 'node') {
     STEPS[`${id}/run`] = {
       label: '▶ Run',
@@ -539,6 +540,17 @@ function registerProject(project: DemoProject, label: string, blurp: string): vo
       long: true,
       exec: () => runProcess(`${project.root}/index.js`, `node ${project.root}/index.js`, false),
     };
+    steps = [`${id}/install`, `${id}/run`];
+  } else if (project.template === 'uni') {
+    // uni-app only exposes a build here: its H5 target emits a static site,
+    // while a mini-program target emits WeChat's wxml/wxss, which nothing in a
+    // browser can run (that needs the WeChat devtools).
+    STEPS[`${id}/build`] = {
+      label: '⚙ Build H5',
+      needs: 'deps',
+      exec: () => runBuildIsolated(`${project.root}/build.mjs`, `node ${project.root}/build.mjs`, project.root),
+    };
+    steps = [`${id}/install`, `${id}/build`];
   } else {
     STEPS[`${id}/dev`] = {
       label: '▶ Run dev',
@@ -551,14 +563,10 @@ function registerProject(project: DemoProject, label: string, blurp: string): vo
       needs: 'deps',
       exec: () => runBuildIsolated(`${project.root}/build.mjs`, `node ${project.root}/build.mjs`, project.root),
     };
+    steps = [`${id}/install`, `${id}/dev`, `${id}/build`];
   }
   DEV_PORT[id] = project.port;
-  SCENARIOS.push({
-    id,
-    label,
-    blurp,
-    steps: project.template === 'node' ? [`${id}/install`, `${id}/run`] : [`${id}/install`, `${id}/dev`, `${id}/build`],
-  });
+  SCENARIOS.push({ id, label, blurp, steps });
 }
 
 for (const template of PROJECT_ORDER) {
@@ -665,11 +673,11 @@ async function createProject(): Promise<void> {
     window.alert(`A project named “${id}” already exists.`);
     return;
   }
-  const template = (window.prompt('Template? One of: node | vite | webpack | rspack', 'vite') || '')
+  const template = (window.prompt('Template? One of: node | vite | webpack | rspack | uni', 'vite') || '')
     .trim()
     .toLowerCase();
   if (!(template in DEMO_PROJECTS)) {
-    window.alert(`Unknown template “${template}”. Pick node, vite, webpack or rspack.`);
+    window.alert(`Unknown template “${template}”. Pick node, vite, webpack, rspack or uni.`);
     return;
   }
   const taken = [...PROJECTS.values()].map((p) => p.port);

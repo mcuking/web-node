@@ -6,7 +6,7 @@ Run Node.js source code in the browser — a WebContainer-style runtime.
 
 **English** · [简体中文](README_zh.md)
 
-- **Live demo**: <https://mcuking.github.io/web-node/> — pick a project (**Vite** / **Webpack** / **Rspack** / **Node.js**), then **⬇ Install deps** → **▶ Run dev** and/or **⚙ Run build**, all inside the tab
+- **Live demo**: <https://mcuking.github.io/web-node/> — pick a project (**Vite** / **Webpack** / **Rspack** / **Node.js** / **uni-app**), then **⬇ Install deps** → **▶ Run dev** and/or **⚙ Run build**, all inside the tab
 - **Dev log / progress / next steps**: [`docs/DEVLOG.md`](docs/DEVLOG.md) ← **append an entry after every change**
 - Design docs: [`docs/superpowers/specs/2026-09-17-web-node-design.md`](docs/superpowers/specs/2026-09-17-web-node-design.md) and [`docs/superpowers/specs/2026-09-23-native-to-wasm-design.md`](docs/superpowers/specs/2026-09-23-native-to-wasm-design.md)
 - Upstream sources: local checkout of Node.js (v26.9.1-dev, `v26.9.0-1-g7a3437d`), vendored via `tools/`
@@ -155,7 +155,7 @@ The site is then live at <https://mcuking.github.io/web-node/>.
 
 ## The demo
 
-The demo is a small IDE. Its top row switches between **four self-contained
+The demo is a small IDE. Its top row switches between **five self-contained
 projects**, and the second row runs the current project's steps:
 
 | project | stack | steps | port |
@@ -163,6 +163,7 @@ projects**, and the second row runs the current project's steps:
 | **Vite** | Vue 3 SFC, real Vite v5 | **▶ Run dev** (HMR) · **⚙ Run build** | 5173 |
 | **Webpack** | React, real webpack 5 + JSX loader | **▶ Run dev** (watch + full-reload) · **⚙ Run build** | 5174 |
 | **Rspack** | React, real rspack 2.2.7 + swc loader | **▶ Run dev** · **⚙ Run build** | 5175 |
+| **uni-app** | cross-platform app, real uni-app CLI → H5 | **⚙ Build H5** | 5176 |
 | **Node.js** | plain `node index.js` (HTTP server) | **▶ Run** | 3000 |
 
 Every project installs its own `node_modules`, runs in the tab, and shows its
@@ -190,7 +191,7 @@ src/
   worker/         Dedicated Worker entries (runtime + file system)
   client/         Main-thread Runtime Client API (incl. ServiceWorker bridge)
   ui/             Demo UI (project stepper / file tree / editor / terminal / preview)
-  demo/           The four demo projects (node / vite / webpack / rspack)
+  demo/           The five demo projects (node / vite / webpack / rspack / uni)
 native/           C/C++ sources + build.mjs (wasi-sdk → src/node-runtime/wasm/artifacts)
 examples/rspack/  Custom rspack binding entry (real browser Workers for emnapi threads)
 public/sw.js      ServiceWorker: /preview/<port>/ → virtual network, + COOP/COEP
@@ -547,6 +548,28 @@ message port back to the parent (the VFS). Two prerequisites make it possible: a
 real **`node:wasi`** host (46 `wasi_snapshot_preview1` syscalls backed by the
 VFS), and a **cross-origin-isolated** page (`SharedArrayBuffer` + COOP/COEP,
 which `public/sw.js` injects even on a static host that cannot set headers, M134).
+
+### Building a uni-app H5 site (M143)
+
+The real **uni-app CLI** builds a cross-platform project's **H5 target** in the
+tab, emitting a static site to `dist/build/h5/`:
+
+```
+DONE  Build complete.
+written     : /project/uni/dist/build/h5/
+```
+
+uni-app is a heavier toolchain than the bundler demos: it runs Vite with
+`@dcloudio/vite-plugin-uni`, and the CLI *discovers* `vite.config.mjs` rather
+than being handed it, so Vite bundles the config with **esbuild — which has no
+file system in a tab**. That is what the runtime's **esbuild ⇄ VFS bridge**
+(`tooling/esbuild-bridge.ts`) is for: the runtime transparently wraps `esbuild`
+for the project code so its `build()` resolves and loads files through the VFS,
+with no change to the third-party CLI. uni also minifies with **terser** by
+default, and Vite runs terser in a `worker_threads` Worker (`eval: true`) that a
+tab cannot spawn — `vite.config.mjs` selects the esbuild minifier instead. Only
+the H5 target is offered: a mini-program target emits WeChat's `wxml`/`wxss`,
+which nothing in a browser can run (that needs the WeChat devtools).
 
 ## Vendored Node source
 
