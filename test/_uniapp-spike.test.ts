@@ -122,60 +122,6 @@ class DiskVfs implements Vfs {
   }
 }
 
-/** Resolve a relative/absolute VFS path to a file, trying extensions + index. */
-function resolveVfsFile(vfs: Vfs, base: string): string | null {
-  const candidates = [base, base + '.js', base + '.mjs', base + '.cjs', base + '.json', base + '.ts', base + '.mts', base + '.cts'];
-  for (const c of candidates) {
-    if (vfs.exists(c) && vfs.stat(c).type === 'file') return c;
-  }
-  if (vfs.exists(base) && vfs.stat(base).type === 'dir') {
-    for (const idx of ['index.js', 'index.mjs', 'index.cjs', 'index.json', 'index.ts']) {
-      const c = npath.posix.join(base, idx);
-      if (vfs.exists(c) && vfs.stat(c).type === 'file') return c;
-    }
-  }
-  return null;
-}
-
-function loaderFor(path: string): string {
-  if (path.endsWith('.json')) return 'json';
-  if (path.endsWith('.css')) return 'css';
-  if (/\.(ts|mts|cts)$/.test(path)) return 'ts';
-  return 'js';
-}
-
-/** The esbuild plugin that lets `build()` resolve/load from the VFS. */
-function vfsEsbuildPlugin(vfs: Vfs) {
-  return {
-    name: 'web-node-vfs',
-    setup(build: any) {
-      build.onResolve({ filter: /.*/ }, (args: any) => {
-        if (args.kind === 'entry-point') {
-          const p = vfs.resolve(args.path);
-          const found = resolveVfsFile(vfs, p);
-          return found ? { path: found } : null;
-        }
-        if (args.path.startsWith('node:')) return null;
-        const isRelative = args.path.startsWith('.') || args.path.startsWith('/');
-        if (!isRelative) return null; // bare specifiers: let Vite's externalize plugin decide
-        const base = args.path.startsWith('/')
-          ? args.path
-          : npath.posix.join(npath.posix.dirname(args.importer || ROOT), args.path);
-        const found = resolveVfsFile(vfs, base);
-        return found ? { path: found } : null;
-      });
-      build.onLoad({ filter: /.*/ }, (args: any) => {
-        // Let Vite's `inject-file-scope-variables` plugin read + rewrite JS/TS
-        // (its fsp reads through the same VFS); only claim what it will not.
-        if (/\.[cm]?[jt]s$/.test(args.path)) return null;
-        const abs = vfs.resolve(args.path);
-        if (!vfs.exists(abs) || vfs.stat(abs).type !== 'file') return null;
-        return { contents: new TextDecoder().decode(vfs.readFile(abs)), loader: loaderFor(args.path) };
-      });
-    },
-  };
-}
-
 function boot(args: string[], env: Record<string, string> = {}): { runtime: NodeRuntime; out: string[] } {
   const vfs = new DiskVfs(UNI_ROOT);
   const out: string[] = [];
@@ -188,16 +134,8 @@ function boot(args: string[], env: Record<string, string> = {}): { runtime: Node
     onStderr: (c) => { out.push('ERR:' + c); fssync.appendFileSync('/tmp/uni-spike-live.log', 'ERR:' + c); },
   });
 
-  // Wrap the esbuild module the runtime aliases to esbuild-wasm, prepending the
-  // VFS plugin to every `build()` call. `import esbuild from 'esbuild'` and the
-  // vite chunk's named imports then all see the patched module.
-  const esbuildWasm = runtime.loader.require('/project/vite.config.js', 'esbuild-wasm') as Record<string, unknown>;
-  const wrapper: Record<string, unknown> = {};
-  for (const k of Object.getOwnPropertyNames(esbuildWasm)) wrapper[k] = esbuildWasm[k];
-  const origBuild = esbuildWasm.build as (o: any) => unknown;
-  wrapper.build = (opts: any) => origBuild({ ...opts, plugins: [vfsEsbuildPlugin(vfs), ...(opts?.plugins ?? [])] });
-  wrapper.default = wrapper;
-  runtime.loader.setBuiltinOverrides({ esbuild: wrapper });
+  // No manual override: the runtime installs the esbuild ⇄ VFS bridge itself
+  // (tooling/esbuild-bridge.ts), so `build()` already sees the VFS.
 
   return { runtime, out };
 }

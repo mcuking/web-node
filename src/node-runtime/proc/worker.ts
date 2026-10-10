@@ -101,6 +101,8 @@ export interface WorkerHostDeps {
   globals(): Record<string, unknown>;
   /** Module aliases (native → WASM shims) that workers must inherit. */
   aliases(): Record<string, string>;
+  /** Per-request module transforms (the esbuild ⇄ VFS bridge) workers inherit. */
+  toolingWrappers(): Record<string, (module: unknown) => unknown>;
   execPath: string;
   baseEnv: Record<string, string>;
   /** Defer to the next macrotask. Injectable so tests stay deterministic. */
@@ -545,6 +547,7 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
       ) => ModuleLoader;
       const loader = new Ctor(realm, deps.vfs, globals);
       loader.setAliases(deps.aliases());
+      loader.setToolingWrappers(deps.toolingWrappers());
       loader.setBuiltinOverrides({
         worker_threads: workerThreads,
         'node:worker_threads': workerThreads,

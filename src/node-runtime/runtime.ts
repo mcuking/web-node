@@ -11,6 +11,7 @@ import { Realm } from './realm';
 import { ModuleLoader } from './loader';
 import * as p from './vfs/posix';
 import { installProject, type FetchLike, type InstallResult } from './npm';
+import { createToolingWrappers } from './tooling/esbuild-bridge';
 
 /** Thrown by `process.exit()` to unwind the call stack back to the runner. */
 export class ProcessExit extends Error {
@@ -199,6 +200,7 @@ export class NodeRuntime {
       loader: () => this.loader,
       globals: () => this.sandboxGlobals,
       aliases: () => ({ ...MODULE_ALIASES }),
+      toolingWrappers: () => createToolingWrappers(opts.vfs),
       activeCount: () => this.#activeWorkCount(),
       execPath,
       baseEnv: env,
@@ -213,6 +215,7 @@ export class NodeRuntime {
       loader: () => this.loader,
       globals: () => this.sandboxGlobals,
       aliases: () => ({ ...MODULE_ALIASES }),
+      toolingWrappers: () => createToolingWrappers(opts.vfs),
       execPath,
       baseEnv: env,
     });
@@ -309,6 +312,10 @@ export class NodeRuntime {
     // resolve to the WASM builds that ship the same public API. Spawned programs
     // inherit the same aliases, which is why the map is a module constant.
     this.loader.setAliases(MODULE_ALIASES);
+    // Tools that let esbuild read the project (Vite auto-loading `vite.config.js`)
+    // need esbuild's wasm `build()` to see the VFS — it has no file system of
+    // its own. The bridge wraps the aliased `esbuild` module with a VFS plugin.
+    this.loader.setToolingWrappers(createToolingWrappers(opts.vfs));
     // `module.createRequire(...)` needs more than a lookup: bundled tooling calls
     // `require.resolve(id)` to map an id to a path without loading it.
     const loader = this.loader;

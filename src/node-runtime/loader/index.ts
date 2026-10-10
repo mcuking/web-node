@@ -169,6 +169,9 @@ export class ModuleLoader {
    * `parentPort`/`workerData`), not the main thread's module.
    */
   #builtinOverrides: Record<string, unknown> = {};
+  /** Per-request module transforms (e.g. the esbuild ⇄ VFS bridge). */
+  #toolingWrappers: Record<string, (module: unknown) => unknown> = {};
+  #toolingCache = new Map<string, unknown>();
   /**
    * `require.cache` — a live view of the user-module cache keyed by absolute
    * path, so `delete require.cache[resolved]` really evicts (Vite does exactly
@@ -214,6 +217,18 @@ export class ModuleLoader {
   /** Register worker-side replacements for core modules in this registry. */
   setBuiltinOverrides(overrides: Record<string, unknown>): void {
     this.#builtinOverrides = { ...overrides };
+  }
+
+  /**
+   * Register modules that arrive wrapped.
+   *
+   * Keyed by the *request* a module writes, so `require('esbuild')` yields the
+   * esbuild ⇄ VFS bridge (see `tooling/esbuild-bridge.ts`) without the caller
+   * knowing. Inherited by spawned programs and workers through the same
+   * context path as `aliases`.
+   */
+  setToolingWrappers(wrappers: Record<string, (module: unknown) => unknown>): void {
+    this.#toolingWrappers = { ...wrappers };
   }
 
   /**
@@ -504,6 +519,21 @@ export class ModuleLoader {
     // module or the provided builtin. See `#packageEntry` for the rationale.
     const override = this.#builtinOverrides[request];
     if (override !== undefined) return override;
+    const wrap = this.#toolingWrappers[request];
+    if (wrap !== undefined) {
+      // A tooling wrapper (e.g. the esbuild ⇄ VFS bridge) transforms the module
+      // once, then is cached: every require of that name sees the same patched
+      // namespace, and the real module is loaded directly (past this wrapper).
+      const cached = this.#toolingCache.get(request);
+      if (cached !== undefined) return cached;
+      const value = wrap(this.#requireDirect(fromFile, request, condition));
+      this.#toolingCache.set(request, value);
+      return value;
+    }
+    return this.#requireDirect(fromFile, request, condition);
+  };
+
+  #requireDirect = (fromFile: string, request: string, condition: Condition = 'require'): unknown => {
     if (this.#realm.hasBuiltin(request)) return this.#realm.require(request);
     if (request.startsWith('node:')) {
       throw notImplemented('module', request, 'Only whitelisted core modules are exposed.');

@@ -145,6 +145,8 @@ export interface ProcessHostDeps {
   globals(): Record<string, unknown>;
   /** Module aliases (native → WASM shims) that children must inherit. */
   aliases(): Record<string, string>;
+  /** Per-request module transforms (the esbuild ⇄ VFS bridge) children inherit. */
+  toolingWrappers(): Record<string, (module: unknown) => unknown>;
   /** Live timer count, used for the "did the child schedule work?" delta. */
   activeCount(): number;
   execPath: string;
@@ -573,6 +575,7 @@ export function createProcessHost(deps: ProcessHostDeps): ProcessHost {
         g: Record<string, unknown>,
       ) => ModuleLoader)(realm, deps.vfs, globals);
       loader.setAliases(deps.aliases());
+      loader.setToolingWrappers(deps.toolingWrappers());
       const clusterOverrides = this.#clusterWorkerOverrides(childProcess);
       if (clusterOverrides) loader.setBuiltinOverrides(clusterOverrides);
       loader.loadModule(filename, source);
