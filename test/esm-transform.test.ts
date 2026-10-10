@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { transformEsmToCjs } from '../src/node-runtime/loader/esm-transform';
+import { transformEsmToCjs, rewriteCjsDynamicImport } from '../src/node-runtime/loader/esm-transform';
 
 const run = (src: string) => transformEsmToCjs(src, 'file:///mod.js').code;
 
@@ -35,6 +35,31 @@ describe('esm-transform — import.meta rewrite is code-only', () => {
   it('still routes dynamic import() to the async loader', () => {
     const code = run(`const m = import('./x.js');\n`);
     expect(code).toContain('__wn_import(');
+  });
+});
+
+describe('esm-transform — CommonJS dynamic import() rewrite', () => {
+  // A CJS module may legally call `import()` (Vite's own `index.cjs` does). The
+  // CJS wrapper is compiled with `new Function`, where V8 rejects `import()`
+  // with "A dynamic import callback was not specified".
+  it('rewrites a CJS `import()` call to the async loader binding', () => {
+    expect(rewriteCjsDynamicImport(`const m = import('./x.js');\n`)).toContain('__wn_import(');
+  });
+
+  it('leaves `import(` inside strings and comments untouched', () => {
+    const code = rewriteCjsDynamicImport(`const s = "import(.js)";\n// import(commented)\n`);
+    expect(code).toContain('"import(.js)"');
+    expect(code).toContain('// import(commented)');
+  });
+
+  it('does not rewrite `import.meta` (invalid in CJS, so the compiler must reject it)', () => {
+    expect(rewriteCjsDynamicImport(`const u = import.meta.url;\n`)).toContain('import.meta.url');
+  });
+
+  it('keeps the line break of a call split across lines', () => {
+    const code = rewriteCjsDynamicImport(`const m = import\n  ('./x.js');\n`);
+    expect(code.split('\n').length).toBe(3);
+    expect(code).toContain('__wn_import');
   });
 });
 

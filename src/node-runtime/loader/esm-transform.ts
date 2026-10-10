@@ -387,6 +387,44 @@ function rewriteModuleSyntax(code: string): string {
   return out + code.slice(last);
 }
 
+/**
+ * Rewrite dynamic `import()` to the async loader binding for a **CommonJS**
+ * module.
+ *
+ * A CJS module may legally call `import()` (real Node allows it), and libraries
+ * do — Vite's own `index.cjs` entry does `import('./dist/node/index.js')` to
+ * expose `build`/`createServer`. But our CJS wrapper is compiled with `new
+ * Function`, and V8 rejects `import()` there with "A dynamic import callback was
+ * not specified" because no import callback is passed. Rewriting it to the same
+ * binding the ESM transform uses gives CJS `import()` real ESM semantics (the
+ * `import` exports condition, relative to the importing file).
+ *
+ * Unlike `rewriteModuleSyntax` this leaves `import.meta` alone: it is invalid
+ * syntax in CJS (as in real Node), so the compiler should keep rejecting it
+ * rather than us inventing a value. Like the ESM rewrite, it touches *code only*
+ * (see `codeMask`).
+ */
+export function rewriteCjsDynamicImport(code: string): string {
+  // The tokeniser pass is O(n); most CJS modules never call `import()`, so skip
+  // it when the source cannot possibly contain the expression.
+  if (!code.includes('import')) return code;
+  const mask = codeMask(code);
+  const chars = code.split('');
+  for (let k = 0; k < chars.length; k++) if (!mask[k]) chars[k] = ' ';
+  const masked = chars.join('');
+  // Replace only the `import` keyword, leaving any whitespace and the `(` in
+  // place, so a call split across lines keeps every line number intact.
+  const re = /(?<![\w$.])import(?=\s*\()/g;
+  let out = '';
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(masked)) !== null) {
+    out += code.slice(last, m.index) + IMPORT_BINDING;
+    last = m.index + m[0].length;
+  }
+  return out + code.slice(last);
+}
+
 export function transformEsmToCjs(source: string, moduleUrl: string): TransformResult {
   const imports: string[] = [];
   const out: string[] = [];

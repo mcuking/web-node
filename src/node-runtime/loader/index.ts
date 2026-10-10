@@ -1,7 +1,7 @@
 import type { Realm } from '../realm';
 import type { Vfs } from '../vfs';
 import * as p from '../vfs/posix';
-import { transformEsmToCjs, EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING, ESM_NAMESPACE_SYMBOL } from './esm-transform';
+import { transformEsmToCjs, rewriteCjsDynamicImport, EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING, ESM_NAMESPACE_SYMBOL } from './esm-transform';
 import { codeMask } from './code-mask';
 import { notImplemented } from '../errors';
 import { compileTagged } from '../vm';
@@ -736,7 +736,10 @@ export class ModuleLoader {
     const mod: UserModule = { exports: {}, state: 'loading' };
     this.#cache.set(absPath, mod);
 
-    const code = isEsm ? transformEsmToCjs(source, `file://${absPath}`).code : source;
+    // Dynamic `import()` is unavailable inside the `new Function` wrapper V8
+    // compiles for us (no import callback), so a CJS module's `import()` is
+    // rewritten to the same async loader binding the ESM transform emits.
+    const code = isEsm ? transformEsmToCjs(source, `file://${absPath}`).code : rewriteCjsDynamicImport(source);
     const dirname = p.dirname(absPath);
     // Tag the compiled unit (the post-transform text, so frame line numbers
     // line up) with a URL. This gives stack frames a real file name — instead of
@@ -755,7 +758,7 @@ export class ModuleLoader {
     // So ESM gets only the prefixed bindings the transform emits; CJS keeps the
     // Node-shaped parameter list.
     const esmParams = [EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING, ...globalNames];
-    const cjsParams = [...USER_CJS_PARAMS, ...globalNames];
+    const cjsParams = [...USER_CJS_PARAMS, IMPORT_BINDING, ...globalNames];
 
     // The shallow `topLevelLexicalBindings` scan misses destructuring-of-require
     // (`const { Buffer } = require('buffer')`) and similar, so a wrapper
@@ -791,7 +794,7 @@ export class ModuleLoader {
         esmParams.length = 0;
         esmParams.push(EXPORTS_BINDING, REQUIRE_BINDING, IMPORT_BINDING, ...globals);
         cjsParams.length = 0;
-        cjsParams.push(...USER_CJS_PARAMS, ...globals);
+        cjsParams.push(...USER_CJS_PARAMS, IMPORT_BINDING, ...globals);
       }
     }
     const moduleObj = { exports: mod.exports };
@@ -813,7 +816,7 @@ export class ModuleLoader {
       Promise.resolve().then(() => this.require(absPath, specifier, 'import'));
     try {
       if (isEsm) fn(moduleObj.exports, requireFn, dynamicImport, ...globalVals);
-      else fn(moduleObj.exports, requireFn, moduleObj, absPath, dirname, ...globalVals);
+      else fn(moduleObj.exports, requireFn, moduleObj, absPath, dirname, dynamicImport, ...globalVals);
     } catch (err) {
       this.#cache.delete(absPath);
       // eslint-disable-next-line no-console
