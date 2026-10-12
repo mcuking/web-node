@@ -59,7 +59,21 @@ class FakeReadable {
   }
 }
 const nodeRealm = (): Realm =>
-  ({ require: () => ({ Readable: FakeReadable, Writable: class {} }) }) as unknown as Realm;
+  ({
+    require: () => ({ Readable: FakeReadable, Writable: class {} }),
+    // Enough of the messaging binding for `RealWorker`: plain structured-clone
+    // messages ride as-is (the raw thread script below never transfers a port,
+    // so no real cross-realm group is needed here).
+    internalBinding: () => ({
+      __ports: {
+        connect: () => {},
+        onFrame: () => {},
+        importPort: () => ({}),
+        buildMessage: (value: unknown) => ({ data: structuredClone(value), tokens: [] }),
+        importMessage: (frame: { data: unknown }) => ({ value: frame.data, ports: [] }),
+      },
+    }),
+  }) as unknown as Realm;
 
 /** A loopback `SyncChannel` standing in for the SAB transport (Phase A's trick). */
 function loopback(vfs: MemoryVfs): SyncChannel {
@@ -393,7 +407,6 @@ parentPort.on('message', (m) => parentPort.postMessage({ got: m }));
 const { parentPort } = require('worker_threads');
 const proc = require('process');
 proc.stdin.on('data', (d) => parentPort.postMessage({ stdin: Buffer.from(d).toString().trim() }));
-proc.stdin.on('end', () => process.exit(0));
 `);
     await flush();
     port.postMessage({ t: 'stdin', data: enc('ping\n') } satisfies ParentToThread);
@@ -401,24 +414,27 @@ proc.stdin.on('end', () => process.exit(0));
     const code = await done;
     await flush();
     expect(frames).toContainEqual({ t: 'message', value: { stdin: 'ping' } });
+    // With stdin closed and no other work, the program finishes cleanly.
     expect(code).toBe(0);
   });
 
-  it('refuses a transferList over the thread boundary (Phase C)', async () => {
+  it('transfers a MessagePort across the thread boundary (Phase C)', async () => {
+    // The worker posts a fresh channel's `port1` to its parentPort. That is a
+    // cross-realm transfer: the frame that leaves is a `port` frame carrying the
+    // channel as a token, not a thrown error.
     const { frames, done } = bootWorker(`
 const { parentPort, MessageChannel } = require('worker_threads');
 const { port1 } = new MessageChannel();
-try {
-  parentPort.postMessage({ p: port1 }, [port1]);
-  parentPort.postMessage({ ok: true });
-} catch (err) {
-  parentPort.postMessage({ threw: err.code || err.name });
-}
+parentPort.postMessage({ p: port1 }, [port1]);
 `);
     await done;
     await flush();
-    const message = frames.find((f) => f.t === 'message');
-    expect((message as { value: { threw?: string } }).value.threw).toBeDefined();
+    const portFrame = frames.find((f) => f.t === 'port');
+    expect(portFrame).toBeDefined();
+    const bridge = (portFrame as { frame: { __wnPort: string; id: string; tokens: unknown[] } }).frame;
+    expect(bridge.__wnPort).toBe('msg');
+    expect(bridge.id).toBe('parent');
+    expect(bridge.tokens).toHaveLength(1);
   });
 });
 

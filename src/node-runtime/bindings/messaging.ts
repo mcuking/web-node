@@ -1,4 +1,10 @@
 import type { BindingContext, BindingFactory, BindingTable } from './context';
+import { notImplemented } from '../errors';
+import {
+  type PortBridgeApi,
+  type PortBridgeFrame,
+  type PortBridgeMessageFrame,
+} from '../../sync/port-bridge';
 
 /**
  * `messaging` binding: `MessagePort` / `MessageChannel` / `BroadcastChannel`.
@@ -47,6 +53,19 @@ interface Endpoint {
   refed: boolean;
   /** A drain task is already queued for this endpoint. */
   scheduled: boolean;
+  /**
+   * Present when this endpoint is one half of a **cross-realm** link (M147
+   * Phase C). `handle` marks a proxy whose real group lives in the peer realm;
+   * `group` marks an endpoint whose group lives here, whose settled twin is a
+   * proxy over there.
+   */
+  bridge?: Bridge;
+}
+
+/** One half of a cross-realm port link. */
+interface Bridge {
+  role: 'handle' | 'group';
+  id: string;
 }
 
 /** A `SiblingGroup`: anonymous (2 ports) or named (`BroadcastChannel`). */
@@ -111,6 +130,18 @@ export const messagingBinding: BindingFactory = (ctx: BindingContext, table: Bin
 
   const namedGroups = new Map<string, Group>();
   let tokenCounter = 0;
+
+  // -- cross-realm bridge state (M147 Phase C) -------------------------------
+
+  /** The outbound transport to the peer realm, or `null` until `connect()`. */
+  let transport: ((frame: PortBridgeFrame) => void) | null = null;
+  /** `id` → this realm's half of each cross-realm link. */
+  const bridges = new Map<string, Endpoint>();
+  /** A realm-unique prefix so the two realms never mint the same id. */
+  const realmTag = Math.random().toString(36).slice(2, 8);
+  let bridgeSeq = 0;
+  const nextBridgeId = (): string => `${realmTag}-${bridgeSeq++}`;
+  const sendBridge = (frame: PortBridgeFrame): void => transport?.(frame);
 
   const endpointOf = (port: unknown): Endpoint | null =>
     typeof port === 'object' && port !== null ? (HANDLES.get(port)?.endpoint ?? null) : null;
@@ -302,6 +333,13 @@ export const messagingBinding: BindingFactory = (ctx: BindingContext, table: Bin
     handle.endpoint = null;
     if (endpoint !== null) {
       if (endpoint.owner === port) endpoint.owner = null;
+      // A cross-realm proxy handle closing tells the peer its half is gone.
+      const bridge = endpoint.bridge;
+      if (!transfer && bridge !== undefined) {
+        bridges.delete(bridge.id);
+        endpoint.bridge = undefined;
+        sendBridge({ __wnPort: 'close', id: bridge.id });
+      }
       // On a transfer the endpoint is en route to the receiver and keeps its
       // group (`MessagePort::TransferForMessaging` moves `data_` out before
       // `OnClose` can disentangle it).
@@ -317,11 +355,27 @@ export const messagingBinding: BindingFactory = (ctx: BindingContext, table: Bin
     if (group === null) return;
     endpoint.group = null;
     group.members.delete(endpoint);
+    // Leaving a cross-realm group tells the proxy over there to close.
+    const bridge = endpoint.bridge;
+    if (bridge !== undefined && bridge.role === 'group') {
+      bridges.delete(bridge.id);
+      endpoint.bridge = undefined;
+      sendBridge({ __wnPort: 'close', id: bridge.id });
+    }
     // The leaving port gets a close message too (harmless: it is detached).
     endpoint.incoming.push({ kind: 'close' });
     if (group.members.size === 1 && group.name === '') {
-      // An anonymous group that is down to one port closes that port as well.
+      // An anonymous group that is down to one port closes that port as well —
+      // unless that port is a cross-realm proxy, which is told to close instead
+      // (it has no owner here to receive a local close envelope).
       for (const sibling of group.members) {
+        const siblingBridge = sibling.bridge;
+        if (siblingBridge !== undefined && siblingBridge.role === 'group') {
+          bridges.delete(siblingBridge.id);
+          sibling.bridge = undefined;
+          sendBridge({ __wnPort: 'close', id: siblingBridge.id });
+          continue;
+        }
         sibling.incoming.push({ kind: 'close' });
         trigger(sibling);
       }
@@ -350,13 +404,16 @@ export const messagingBinding: BindingFactory = (ctx: BindingContext, table: Bin
     return err;
   }
 
-  function dispatch(port: PortObject, value?: unknown, transferList?: unknown): boolean {
-    const handle = HANDLES.get(port);
+  /** Read + validate a transfer list into ports and buffers (shared by every send path). */
+  function collectTransferList(
+    source: PortObject | null,
+    transferList: unknown,
+  ): { ports: PortObject[]; buffers: ArrayBuffer[] } {
     const ports: PortObject[] = [];
     const buffers: ArrayBuffer[] = [];
     for (const entry of readTransferList(transferList)) {
       if (isPort(entry)) {
-        if (entry === port) dataCloneError('Transfer list contains source port');
+        if (source !== null && entry === source) dataCloneError('Transfer list contains source port');
         if (ports.includes(entry as PortObject)) {
           dataCloneError('Transfer list contains duplicate MessagePort');
         }
@@ -371,6 +428,87 @@ export const messagingBinding: BindingFactory = (ctx: BindingContext, table: Bin
       } else {
         dataCloneError('Found invalid value in transferList.');
       }
+    }
+    return { ports, buffers };
+  }
+
+  /**
+   * Serialise a message that will cross the boundary: mint a token per
+   * transmitted port, substitute them into the payload, clone it, then hand each
+   * transmitted port to the peer as the *group* half of a fresh link (which
+   * detaches the local handle, exactly as an in-realm transfer does).
+   */
+  function buildCrossRealmMessage(
+    value: unknown,
+    ports: PortObject[],
+    buffers: ArrayBuffer[],
+  ): { data: unknown; tokens: Array<{ token: string; id: string }> } {
+    const tokenOf = new Map<object, string>();
+    const tokens: Array<{ token: string; id: string }> = [];
+    for (const transferred of ports) {
+      const token = `${TOKEN_PREFIX}${tokenCounter++}\u0000`;
+      tokenOf.set(transferred, token);
+      tokens.push({ token, id: nextBridgeId() });
+    }
+    const substituted = substitutePorts(value, tokenOf, new Map());
+    const data = structuredCloneOf(substituted, buffers);
+    for (let i = 0; i < ports.length; i++) exportGroupSide(ports[i], tokens[i].id);
+    return { data, tokens };
+  }
+
+  /** Detach a local port's handle and register it as the group half of a link. */
+  function exportGroupSide(port: PortObject, id: string): void {
+    const endpoint = HANDLES.get(port)?.endpoint ?? null;
+    if (endpoint === null) return;
+    endpoint.bridge = { role: 'group', id };
+    bridges.set(id, endpoint);
+    // `MessagePort::TransferForMessaging`: the sender's handle is gone; the
+    // endpoint keeps its group so it stays entangled with local siblings.
+    closeHandle(port, true);
+  }
+
+  function dispatch(port: PortObject, value?: unknown, transferList?: unknown): boolean {
+    const handle = HANDLES.get(port);
+    const endpoint = handle?.endpoint ?? null;
+    const { ports, buffers } = collectTransferList(port, transferList);
+
+    // A proxy handle has no local group: its group lives in the peer realm, so
+    // the whole post (and any transfers it carries) crosses the boundary.
+    if (endpoint?.bridge?.role === 'handle') {
+      const { data, tokens } = buildCrossRealmMessage(value, ports, buffers);
+      sendBridge({ __wnPort: 'msg', id: endpoint.bridge.id, data, tokens });
+      return true;
+    }
+
+    const group = endpoint?.group ?? null;
+    const targets = group === null ? [] : [...group.members].filter((s) => s !== endpoint);
+    const crossed = targets.filter((s) => s.bridge?.role === 'group');
+    const local = targets.filter((s) => s.bridge?.role !== 'group');
+
+    // A message carrying ports can only be handed to one destination; exporting
+    // the same port into two realms at once has no faithful meaning.
+    if (crossed.length > 0 && local.length > 0) {
+      throw notImplemented(
+        'api',
+        'MessagePort.postMessage across realms',
+        'Delivering one message to both a local and a cross-thread port is not supported (M147 Phase C).',
+      );
+    }
+    if (ports.length > 0 && crossed.length > 1) {
+      throw notImplemented(
+        'api',
+        'MessagePort.postMessage across realms',
+        'Transferring a port to several cross-thread ports at once is not supported (M147 Phase C).',
+      );
+    }
+
+    // Cross-realm delivery to a bridged sibling.
+    if (crossed.length > 0) {
+      const { data, tokens } = buildCrossRealmMessage(value, ports, buffers);
+      for (const target of crossed) {
+        sendBridge({ __wnPort: 'msg', id: (target.bridge as Bridge).id, data, tokens });
+      }
+      return true;
     }
 
     const tokens: TokenRef[] = [];
@@ -395,12 +533,12 @@ export const messagingBinding: BindingFactory = (ctx: BindingContext, table: Bin
       closeHandle(transferred, true);
     }
 
-    const endpoint = handle.endpoint;
-    const group = endpoint.group;
-    if (group === null || group.members.size === 0) return true;
+    const source = handle.endpoint;
+    const sourceGroup = source.group;
+    if (sourceGroup === null || sourceGroup.members.size === 0) return true;
     const envelope: Envelope = { kind: 'message', data, tokens };
-    for (const sibling of [...group.members]) {
-      if (sibling === endpoint) continue;
+    for (const sibling of [...sourceGroup.members]) {
+      if (sibling === source) continue;
       // `SiblingGroup::Dispatch` drops the message for a target that is itself
       // one of the transferred ports (the channel to it is gone).
       if (tokens.some((token) => token.endpoint === sibling)) continue;
@@ -514,6 +652,74 @@ export const messagingBinding: BindingFactory = (ctx: BindingContext, table: Bin
     return value;
   }
 
+  // -- cross-realm bridges: the peer side of a port (M147 Phase C) ----------
+
+  /** Materialise a peer-owned port as a local proxy `MessagePort`. */
+  function createBridgedEndpoint(id: string): { port: PortObject; endpoint: Endpoint } {
+    const port = Object.create(MessagePort.prototype) as PortObject;
+    const endpoint: Endpoint = {
+      group: null,
+      incoming: [],
+      owner: null,
+      receiving: false,
+      refed: true,
+      scheduled: false,
+      bridge: { role: 'handle', id },
+    };
+    bridges.set(id, endpoint);
+    initHandle(port, endpoint);
+    return { port, endpoint };
+  }
+
+  /** A frame arrived from the peer realm. */
+  function onBridgeFrame(frame: PortBridgeFrame): void {
+    if (frame === null || typeof frame !== 'object') return;
+    if (frame.__wnPort === 'close') {
+      closeBridgedEndpoint(frame.id);
+      return;
+    }
+    if (frame.__wnPort !== 'msg') return;
+    const endpoint = bridges.get(frame.id);
+    if (endpoint === undefined) return;
+    const tokens: TokenRef[] = frame.tokens.map((t) => {
+      const { endpoint: peerEndpoint } = createBridgedEndpoint(t.id);
+      return { token: t.token, endpoint: peerEndpoint };
+    });
+    const envelope: Envelope = { kind: 'message', data: frame.data, tokens };
+    if (endpoint.bridge?.role === 'handle') {
+      // A message addressed to our proxy: deliver it to the local handle.
+      endpoint.incoming.push(envelope);
+      trigger(endpoint);
+      return;
+    }
+    // A message posted by the peer's proxy: dispatch it into our group, never
+    // back through the endpoint it came in on.
+    const group = endpoint.group;
+    if (group === null) return;
+    for (const sibling of [...group.members]) {
+      if (sibling === endpoint) continue;
+      sibling.incoming.push(envelope);
+      trigger(sibling);
+    }
+  }
+
+  /** The peer told us its half of the link is gone. */
+  function closeBridgedEndpoint(id: string): void {
+    const endpoint = bridges.get(id);
+    if (endpoint === undefined) return;
+    bridges.delete(id);
+    const bridge = endpoint.bridge;
+    endpoint.bridge = undefined;
+    if (endpoint.group !== null) {
+      // The group half leaves its local group (which tells any remaining proxy
+      // siblings this realm still has).
+      disentangle(endpoint);
+    } else if (endpoint.owner !== null) {
+      // The proxy half closes its local handle (emitting `close`).
+      closeHandle(endpoint.owner);
+    }
+  }
+
   // -- the binding surface ---------------------------------------------------
 
   return {
@@ -526,6 +732,27 @@ export const messagingBinding: BindingFactory = (ctx: BindingContext, table: Bin
     // exactly like `SiblingGroup::Get(name)` in Node. io.js destructures this
     // name from the binding.
     BroadcastChannel: broadcastChannel,
+    // The cross-realm bridge (M147 Phase C): the transport owner (thread
+    // bootstrap / `RealWorker`) wires this so ports can cross a thread boundary.
+    __ports: {
+      connect: (send: (frame: PortBridgeFrame) => void): void => {
+        transport = send;
+      },
+      onFrame: (frame: PortBridgeFrame): void => onBridgeFrame(frame),
+      importPort: (id: string): unknown => createBridgedEndpoint(id).port,
+      buildMessage: (value: unknown, transferList?: unknown) => {
+        const { ports, buffers } = collectTransferList(null, transferList);
+        return buildCrossRealmMessage(value, ports, buffers);
+      },
+      importMessage: (frame: PortBridgeMessageFrame) => {
+        const tokens: TokenRef[] = frame.tokens.map((t) => {
+          const { endpoint } = createBridgedEndpoint(t.id);
+          return { token: t.token, endpoint };
+        });
+        const { message, ports } = deserialize({ kind: 'message', data: frame.data, tokens });
+        return { value: message, ports };
+      },
+    } satisfies PortBridgeApi,
     // Ports are refed/unrefed as a bookkeeping flag for `hasRef()` parity. They
     // do NOT keep the simulated process alive: there is no libuv loop here, and
     // the runner ends a program once its timer queue is empty, so a refed idle

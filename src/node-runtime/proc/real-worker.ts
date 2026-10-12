@@ -20,11 +20,12 @@
 
 import type { Vfs } from '../vfs';
 import type { Realm } from '../realm';
-import { notImplemented } from '../errors';
 import type { WorkerHandle, WorkerRequest } from './worker';
 import { serveVfsChannel } from '../vfs/remote-server';
 import { CONTROL_BYTES } from '../../sync/sab-rpc';
+import { PARENT_PORT_ID, type PortBridgeApi } from '../../sync/port-bridge';
 import {
+  bridgeFrameToWire,
   type ParentToThread,
   type ThreadInitMessage,
   type ThreadToParent,
@@ -59,6 +60,8 @@ export class RealWorker implements WorkerHandle {
   #serve: (() => void) | null = null;
   /** The parent's end of the messaging/stdio port, kept to post to the thread. */
   #msgPort: MessagePort | null = null;
+  /** The messaging binding's cross-realm bridge (M147 Phase C). */
+  #ports: PortBridgeApi | null = null;
   #started = false;
   #exited = false;
   #exitCode: number | null = null;
@@ -146,6 +149,14 @@ export class RealWorker implements WorkerHandle {
     this.#msgPort.addEventListener('message', (event: MessageEvent) => this.#onFrame(event.data));
     this.#msgPort.start();
 
+    // The parent's messaging binding drives the proxy halves of the `parent`
+    // link and of any port that crosses; its frames ride the host port.
+    const messagingBinding = this.#deps.realm().internalBinding('messaging') as unknown as {
+      __ports: PortBridgeApi;
+    };
+    this.#ports = messagingBinding.__ports;
+    this.#ports.connect((frame) => this.#toThread(bridgeFrameToWire(frame)));
+
     // The parent is the single owner of the tree: every call the thread makes is
     // applied here and nowhere else (Phase A). Read-only ops bypass the write
     // queue so a lookup cannot be parked behind a slow write.
@@ -167,6 +178,11 @@ export class RealWorker implements WorkerHandle {
 
   // ---- frames from the thread ---------------------------------------------
 
+  /** Fan a message out to the parent's `on('message')` listeners. */
+  #deliver(value: unknown): void {
+    for (const cb of this.#messageCbs.slice()) cb(value);
+  }
+
   #onFrame(frame: ThreadToParent): void {
     if (!frame || typeof frame !== 'object') return;
     switch (frame.t) {
@@ -175,8 +191,19 @@ export class RealWorker implements WorkerHandle {
         for (const cb of this.#onlineCbs.splice(0)) cb();
         return;
       case 'message':
-        for (const cb of this.#messageCbs.slice()) cb(frame.value);
+        // A plain (port-free) message posted by the worker's `parentPort`.
+        this.#deliver(frame.value);
         return;
+      case 'port': {
+        const bridgeFrame = frame.frame;
+        if (bridgeFrame.__wnPort === 'msg' && bridgeFrame.id === PARENT_PORT_ID) {
+          const { value } = this.#ports!.importMessage(bridgeFrame);
+          this.#deliver(value);
+        } else {
+          this.#ports?.onFrame(bridgeFrame);
+        }
+        return;
+      }
       case 'error':
         this.#emitError(frame);
         return;
@@ -257,15 +284,11 @@ export class RealWorker implements WorkerHandle {
   }
 
   postMessage(value: unknown, transferList?: unknown): void {
-    if (this.#exited) return;
-    if (Array.isArray(transferList) && transferList.length > 0) {
-      throw notImplemented(
-        'api',
-        'worker_threads.Worker#postMessage(_, transferList)',
-        'Transferring a MessagePort across a real thread boundary (and a realm boundary) is not supported yet (M147 Phase C).',
-      );
-    }
-    this.#toThread({ t: 'message', value });
+    if (this.#exited || this.#ports === null) return;
+    // A message with a transfer list crosses the bridge (its ports are handed to
+    // the peer as proxies); a plain message rides as the classic frame.
+    const { data, tokens } = this.#ports.buildMessage(value, transferList);
+    this.#toThread(bridgeFrameToWire({ __wnPort: 'msg', id: PARENT_PORT_ID, data, tokens }));
   }
 
   eventLoopUtilization(): unknown {

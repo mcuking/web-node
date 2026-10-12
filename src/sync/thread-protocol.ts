@@ -19,6 +19,7 @@
  */
 
 import type { Dirent, MkdirOptions, ReaddirOptions, Stat, WriteOptions } from '../node-runtime/vfs/types';
+import { PARENT_PORT_ID, type PortBridgeFrame } from './port-bridge';
 
 /** Numeric op codes (the `SyncChannel.call()` argument) for each VFS method. */
 export const VFS_OP = {
@@ -155,11 +156,39 @@ export type ThreadToParent =
   | { t: 'error'; message: string; stack?: string }
   | { t: 'exit'; code: number }
   | { t: 'stdout'; data: Uint8Array }
-  | { t: 'stderr'; data: Uint8Array };
+  | { t: 'stderr'; data: Uint8Array }
+  | { t: 'port'; frame: PortBridgeFrame };
 
 /** A frame the parent sends the thread over the messaging channel. */
 export type ParentToThread =
   | { t: 'message'; value: unknown }
   | { t: 'stdin'; data: Uint8Array }
   | { t: 'stdin-end' }
-  | { t: 'terminate' };
+  | { t: 'terminate' }
+  | { t: 'port'; frame: PortBridgeFrame };
+
+/**
+ * Map a bridge frame leaving this realm onto a wire frame. A plain
+ * (port-free) message to the `parentPort` link rides as the classic
+ * `{ t: 'message' }` frame so the wire format stays compatible; anything that
+ * carries ports rides as `{ t: 'port' }`.
+ */
+export function bridgeFrameToWire(
+  frame: PortBridgeFrame,
+): { t: 'message'; value: unknown } | { t: 'port'; frame: PortBridgeFrame } {
+  if (frame.__wnPort === 'msg' && frame.id === PARENT_PORT_ID && frame.tokens.length === 0) {
+    return { t: 'message', value: frame.data };
+  }
+  return { t: 'port', frame };
+}
+
+/** The inverse of {@link bridgeFrameToWire}; `null` for frames the bridge ignores. */
+export function wireToBridgeFrame(frame: {
+  t: string;
+  value?: unknown;
+  frame?: PortBridgeFrame;
+}): PortBridgeFrame | null {
+  if (frame.t === 'message') return { __wnPort: 'msg', id: PARENT_PORT_ID, data: frame.value, tokens: [] };
+  if (frame.t === 'port') return frame.frame ?? null;
+  return null;
+}

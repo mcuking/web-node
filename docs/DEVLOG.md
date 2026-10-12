@@ -246,6 +246,23 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-12 · M147（阶段 C）—— MessagePort 跨 realm 转移
+
+**目标**：让 `postMessage(value, [port])` 在**跨线程（= 跨 realm）**时仍然成立。阶段 B 把 worker 放进了独立 realm，于是端口不能再像同 realm 那样直接交接——而 `jest-worker`（因此 terser/rspack）恰恰靠「把端口回传给池子」来复用 worker。
+
+**设计**：跨过去的不再是一个 sibling group，而是一个**小链接描述符**（`src/sync/port-bridge.ts`）：origin realm 保留端点的 group 半边，把 sibling 投递转成 `deliveries` 给对端；peer realm 拿到一个 **proxy 句柄**，它的 post 回到 origin realm 派进那个 group。一条帧格式同时服务两个方向（接收方按已注册 `id` 的 role 决定：`handle` ⇒ 投递给本地句柄，`group` ⇒ 派进本 realm 的 group）。消息带的端口以 `tokens` 随行，所以嵌套转移走同一套机器。
+
+**交付**：
+- `src/sync/port-bridge.ts`：帧类型（`PortBridgeFrame`）、`PARENT_PORT_ID`、供宿主接线用的 `PortBridgeApi`。
+- `src/sync/thread-protocol.ts`：帧新增 `{t:'port'}`（带端口的消息）；`bridgeFrameToWire`/`wireToBridgeFrame` 把**无端口的 `parent` 消息保持为旧帧**（`{t:'message'}`），带端口的走 `{t:'port'}`——线上格式向后兼容。
+- `src/node-runtime/bindings/messaging.ts`：跨 realm 桥核心。`Endpoint.bridge`（`handle`/`group`）；`dispatch` 识别 proxy 句柄（整条 post 过界，含转移）与目标里的桥接 sibling（导出 group 半边）；**一个消息同时发给本地与跨线程端口**、或**同时转移给多个跨线程端口** → 响亮 `notImplemented`（无忠实含义）；`disentangle`/`closeHandle` 在离开带桥 group 时给对端发 `close`；新增 `__ports`（`connect`/`onFrame`/`importPort`/`buildMessage`/`importMessage`）。
+- `src/node-runtime/proc/thread-bootstrap.ts`：线程侧 `parentPort` 改为 `importPort('parent')` 得到的**真 realm `MessagePort`**（`instanceof`/`receiveMessageOnPort`/`ref` 都对）——并**自动 `start()`**（Node 会替 worker 启动 parentPort，实测确认）。
+- `src/node-runtime/proc/real-worker.ts`：父侧经 `realm().internalBinding('messaging').__ports` 驱动 `parent` 链与桥接端口；`postMessage(_, [port])` 走 `buildMessage`，收到的 `parent` 帧走 `importMessage`，其余走 `onFrame`。
+
+**验证**：新增 `test/port-bridge.test.ts`（4 条）——用**两个真 `NodeRuntime` realm** 经 loopback 传输互联：普通消息跨 realm；转移一个活 `MessagePort` 并穿过它双向通信；端口回传；关闭传播到 origin group。`test/real-thread.test.ts` 更新：`postMessage(_, [port])` 现在**发出带端口的帧**（不再是抛错），stdin 测改为自然结束（不再在异步回调里 `process.exit` 触发宿主未捕获异常）。全量 `npx vitest run` **1289 passed / 6 skipped**（无未捕获错误）；typecheck 净；build 绿（`thread.worker-*.js` 677 kB）。
+
+**边界**：同一消息同时发给「本地 + 跨线程」端口、或同时转移给多个跨线程端口 → 响亮抛错；嵌套 `Worker` 仍不支持。
+
 ### 2026-10-12 · M147（阶段 B）—— `worker_threads.Worker` 跑上真 Web Worker（真并行）
 
 **目标**：把 M147 阶段 A 的同步 VFS 桥接到真线程上，让 `worker_threads.Worker` 在 `crossOriginIsolated` 下成为**真浏览器 `Worker`**（真多核），非隔离环境**如实降级**为现有协作式路径（行为不变）。

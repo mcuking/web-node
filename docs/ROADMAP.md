@@ -764,7 +764,8 @@
   - 价值：webpack/rspack 多核压缩（`jest-worker`/`terser`）、真 `fork`/`cluster` 并行——补上 WebContainer「1 进程 = 1 worker」的唯一硬优势。
   - **阶段 A ✅ 2026-10-12**（同步 VFS 桥）：`thread-protocol.ts`（帧格式 + op 码表）、`vfs/remote.ts`（`RemoteVfs implements Vfs`，线程侧，本地解析 cwd + 错误重建）、`vfs/remote-server.ts`（`serveVfsChannel` + 纯函数 `applyVfsCall`，父侧唯一 owner）。验证：`test/remote-vfs.test.ts` 18 条 + 真 `node:worker_threads` 端到端。
   - **阶段 B ✅ 2026-10-12**（真线程运行时 + 选路）：`proc/thread-bootstrap.ts`（线程侧在 `RemoteVfs` 上启独立 realm、装 worker 侧 `worker_threads` 视图、桥生命周期与 stdio）、`proc/real-worker.ts`（父侧 `RealWorker implements WorkerHandle`，`serveVfsChannel` 服务 VFS）、`proc/real-thread-spawn.ts` + `worker/thread.worker.ts`（真 worker 入口，Vite 产 `thread.worker-*.js`）、`createWorkerHost` 按 `crossOriginIsolated` 选路。验证：`test/real-thread.test.ts` 12 条（含真 `node:worker_threads` 驱动）；`vitest` **1284 passed / 6 skipped** · typecheck 净 · build 绿。**真机**：`thread.worker` 独立 worker target 存在，Node demo（里程碑 57/59）输出正确，忙 600ms 的 worker 下 runtime worker 事件循环最大延迟仅 **16ms**。
-  - 待办：阶段 C（`parentPort` 真 `MessagePort` + 跨线程端口转移）、阶段 D（每线程 realm 的内存/池上限）。
+  - **阶段 C ✅ 2026-10-12**（跨 realm 端口转移）：`sync/port-bridge.ts`（链接描述符 + `PortBridgeApi`）、`bindings/messaging.ts` 跨 realm 桥（proxy 句柄 / group 半边 / `dispatch` 分流 / 关闭传播 / `__ports`）、`thread-protocol.ts` 新增 `{t:'port'}` 帧（无端口消息保持旧帧）、线程侧 `parentPort` 变真 `MessagePort` 并自动 `start()`、`real-worker.ts` 父侧经 `__ports` 驱动。验证：`test/port-bridge.test.ts` 4 条（两个真 realm 互联：普通消息 / 转移并双向通信 / 回传 / 关闭传播）+ `real-thread.test.ts` 更新；`vitest` **1289 passed / 6 skipped**（无未捕获错误）· typecheck 净 · build 绿。
+  - 待办：阶段 D（每线程 realm 的内存/池上限）。
 
 ---
 

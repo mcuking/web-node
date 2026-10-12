@@ -14,11 +14,11 @@
  * two things a test replaces, and everything else — the worker view, the
  * lifecycle frames, the entry execution — runs unchanged.
  *
- * Scope note: `parentPort` here is a wrapper over the host port, not a realm
- * `MessagePort` (the messaging binding's ports are per-realm and cannot entangle
- * across a thread boundary). Plain structured-clone messages work both ways;
- * **port transfer across the thread boundary is Phase C** and throws loudly
- * rather than silently cloning a port to `{}`.
+ * Scope note: `parentPort` is a **real realm `MessagePort`** whose peer lives in
+ * the parent (`Worker`); port transfer across the thread boundary rides the same
+ * cross-realm bridge, so `instanceof MessagePort`, `receiveMessageOnPort` and
+ * transferring a `MessageChannel` end to the parent all behave as in Node
+ * (M147 Phase C).
  */
 
 import { NodeRuntime, ProcessExit, type RuntimeOptions } from '../runtime';
@@ -27,6 +27,12 @@ import { notImplemented } from '../errors';
 import { RemoteVfs } from '../vfs/remote';
 import { SyncChannel } from '../../sync/sab-rpc';
 import {
+  PARENT_PORT_ID,
+  type PortBridgeApi,
+} from '../../sync/port-bridge';
+import {
+  bridgeFrameToWire,
+  wireToBridgeFrame,
   type ParentToThread,
   type ThreadInitMessage,
   type ThreadToParent,
@@ -52,12 +58,6 @@ export interface ThreadBootstrapResult {
   done: Promise<number>;
 }
 
-/** A minimal `EventEmitter`-shaped surface (`parentPort`, `process.stdin`). */
-interface Emitter {
-  on(name: string, cb: (...args: unknown[]) => void): unknown;
-  emit(name: string, ...args: unknown[]): boolean;
-}
-
 /**
  * Boot a Node worker in this realm. Call from a browser worker's `onmessage`
  * once the init message (with its transferred ports) has arrived.
@@ -81,6 +81,16 @@ export function bootstrapThread(init: ThreadInitMessage, deps: ThreadBootstrapDe
     onStderr: (chunk) => send({ t: 'stderr', data: encoder.encode(chunk) }),
   });
 
+  // `parentPort` is a real realm `MessagePort` (so `instanceof`, `.on('message')`,
+  // `ref`/`unref` and `receiveMessageOnPort` all behave as in Node); it is the
+  // proxy half of the `parent` link, driven over the host port. Port transfer
+  // across the boundary rides the same machinery.
+  const messaging = runtime.realm.internalBinding('messaging') as unknown as {
+    __ports: PortBridgeApi;
+  };
+  const ports = messaging.__ports;
+  ports.connect((frame) => send(bridgeFrameToWire(frame)));
+
   // A worker's `process.execArgv` is its own, and its `process.argv0` is the
   // exec path; the runtime already set `argv`/`env` from the options above.
   const proc = runtime.process as Record<string, unknown>;
@@ -96,7 +106,13 @@ export function bootstrapThread(init: ThreadInitMessage, deps: ThreadBootstrapDe
   const stdin = new streams.Readable({ read() {} });
   proc.stdin = stdin;
 
-  const parentPort = createParentPort(runtime, send);
+  const parentPort = ports.importPort(PARENT_PORT_ID) as {
+    start(): void;
+  };
+  // Node starts the worker's `parentPort` for it, so `parentPort.on('message')`
+  // receives without an explicit `start()` (verified against real Node). The
+  // proxy we just built is a plain `MessagePort`, which needs the explicit call.
+  parentPort.start();
   const workerThreads = createWorkerThreadsView(runtime, init, parentPort);
   runtime.loader.setBuiltinOverrides({
     worker_threads: workerThreads,
@@ -112,9 +128,6 @@ export function bootstrapThread(init: ThreadInitMessage, deps: ThreadBootstrapDe
     const frame = event.data as ParentToThread | undefined;
     if (!frame || typeof frame !== 'object') return;
     switch (frame.t) {
-      case 'message':
-        parentPort.emit('message', frame.value);
-        return;
       case 'stdin':
         stdin.push(frame.data);
         return;
@@ -125,6 +138,12 @@ export function bootstrapThread(init: ThreadInitMessage, deps: ThreadBootstrapDe
         // The browser worker's own `terminate()` is authoritative; this frame is
         // a best-effort cooperative stop for hosts whose Worker has no terminate.
         return;
+      case 'message':
+      case 'port': {
+        const bridgeFrame = wireToBridgeFrame(frame);
+        if (bridgeFrame !== null) ports.onFrame(bridgeFrame);
+        return;
+      }
     }
   });
   hostPort.start?.();
@@ -158,39 +177,7 @@ export function bootstrapThread(init: ThreadInitMessage, deps: ThreadBootstrapDe
   return { runtime, done };
 }
 
-/** The worker's `parentPort`: an EventEmitter over the host messaging port. */
-function createParentPort(runtime: NodeRuntime, send: (frame: ThreadToParent) => void): Emitter & {
-  postMessage(value?: unknown, transferList?: unknown): void;
-  start(): void;
-  close(): void;
-  ref(): void;
-  unref(): void;
-  hasRef(): boolean;
-} {
-  const { EventEmitter } = runtime.realm.require('events') as {
-    EventEmitter: new () => Emitter;
-  };
-  const emitter = new EventEmitter();
-  return Object.assign(emitter, {
-    postMessage(value?: unknown, transferList?: unknown): void {
-      if (Array.isArray(transferList) && transferList.length > 0) {
-        throw notImplemented(
-          'api',
-          'worker_threads.parentPort.postMessage(_, transferList)',
-          'Transferring a MessagePort across a real thread boundary is not supported yet (M147 Phase C).',
-        );
-      }
-      send({ t: 'message', value });
-    },
-    start(): void {},
-    close(): void {},
-    ref(): void {},
-    unref(): void {},
-    hasRef(): boolean {
-      return true;
-    },
-  });
-}
+/** The worker's `parentPort` is a real realm `MessagePort` (see `bootstrapThread`). */
 
 /** The worker-side `worker_threads` module: its own `parentPort`/`workerData`. */
 function createWorkerThreadsView(

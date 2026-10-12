@@ -57,11 +57,19 @@ the caller in `Atomics.wait`; `serveSyncChannel` already serialises writers).
 - Lifecycle: `online`/`message`/`error`/`exit`/`terminate` bridged over a host
   `MessagePort`; `#activeWorkCount` counts the thread so `drain()` waits for it.
 
-### Phase C — messaging parity
+### Phase C — messaging parity  ⟨done 2026-10-12⟩
 `parentPort` as a **realm-local `MessagePort`** driven by the host port (needs a
 small binding hook), so `instanceof MessagePort`, `receiveMessageOnPort`, and
 **transferring `MessagePort`s across the thread boundary** behave as in Node.
 Until then: plain structured-clone payloads only, and a transfer → loud error.
+
+Done: the messaging binding gained a cross-realm bridge (`src/sync/port-bridge.ts`
++ `Endpoint.bridge` / `__ports`). A port crossing the boundary becomes a *link
+descriptor*; the origin keeps the group half and the peer gets a proxy. The
+thread's `parentPort` is now a real realm `MessagePort` (auto-started, as Node
+does). Verified by `test/port-bridge.test.ts` (two live realms). Remaining edges
+(one message to both a local and a cross-thread port, or one transfer to several
+cross-thread ports) throw loudly rather than guess.
 
 ### Phase D — memory & pool limits
 Each thread boots its own realm (vendored sources + wasm). A 8–16-worker
