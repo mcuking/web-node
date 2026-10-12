@@ -8,7 +8,7 @@
 
 ## 0. 一句话结论
 
-「阶段 I（借鉴 WebContainer）」的 5 条可借鉴点**已全部落地**（M113 子域路由 · M120 同步 fs · M122 出网 · M123 多进程 · M124/M127 行为门禁）。本盘点在其之外找出 **3 个值得做（1 个 P0、2 个 P1）+ 3 个明确不做**。最值钱的一条是 **`worker_threads` 换真 Web Worker → 真并行**（同时把 WebContainer「1 进程 = 1 worker」在**构建并行度**上的优势补上）；其次是 **`node:sqlite` 用真上游 C 编 wasm**（沿用现有 `wn_*` 模式，把 WebContainer「有壳无方法」的坑做成真可用）。
+「阶段 I（借鉴 WebContainer）」的 5 条可借鉴点**已全部落地**（M113 子域路由 · M120 同步 fs · M122 出网 · M123 多进程 · M124/M127 行为门禁）。本盘点在其之外找出 **3 个值得做（1 个 P0、2 个 P1）+ 3 个明确不做**。**其中 P0（真并行 = M147）与 P1 的 `node:sqlite`（= M148）已于 2026-10-12 落地**；剩余：P1 隔离模型（产品定位决定）+ 2 个 P2（npm 安装加速、浏览器兼容探测）。
 
 ---
 
@@ -31,7 +31,7 @@
 
 ## 2. 优化清单（按优先级）
 
-### 🔴 P0 · `worker_threads` 换成真 Web Worker（真并行）
+### 🔴 P0 · `worker_threads` 换成真 Web Worker（真并行）✅ 2026-10-12（M147）
 - **现状**：`builtins/worker-threads.ts` / `proc/worker.ts` 是「同事件循环第二注册表」，语义对（消息/`workerData`/退出序都对齐）但**无 CPU 并行**。`cluster` 同理。
 - **为什么是最大机会**：WebContainer 靠「1 进程 = 1 worker」拿到**真多核**；我们跑 webpack 时，**terser 压缩经 `jest-worker` 走 `worker_threads` 实际仍在同一线程**（M121 记录「minifier 在 worker 线程里跑起来了」= 跑起来了但没并行）。大项目压缩是**并行度敏感**的。
 - **为什么现在可行**：拼图**已齐**——① M125 已证明「用真浏览器 `Worker` 承载子线程」在本仓库能跑通（emnapi 线程池就是真 Worker）；② M120 已有 **SAB + `Atomics.wait` + FS-worker** 的同步 VFS 通道；③ M134 已有 `crossOriginIsolated`（真 Worker 共享内存的前置）。把两者一拼，就是 WebContainer 的「worker-per-process + 共享 FS」。
@@ -39,7 +39,7 @@
 - **解锁**：webpack/rspack 多核压缩、真 `fork`/`cluster` 并行、任何 `jest-worker`/`piscina` 负载。
 - **工作量**：中–大；**风险**：中（生命周期/退出序、stdio 复用 M120 通道）。
 
-### 🟠 P1 · `node:sqlite` → 真上游 `sqlite3.c` 编 wasm
+### 🟠 P1 · `node:sqlite` → 真上游 `sqlite3.c` 编 wasm ✅ 2026-10-12（M148）
 - **现状**：`sqlite` 在 `UNSUPPORTED_BINDINGS`（`require` 得类型化错）。WebContainer 里 `DatabaseSync` **类在、原型无方法**（`db.exec is not a function`）——**谁都没真做**。
 - **做法**：**完全复刻 `wn_zlib`/`wn_brotli`/`wn_zstd` 的既有模式**——`native/build.mjs` 登记 `wn_sqlite`（上游 `sqlite3.c` amalgamation → wasi-sdk → wasm），`bindings/sqlite.ts` 包成 `DatabaseSync`/`StatementSync` 表面，VFS 用内存（或 OPFS）。
 - **为什么值**：把对手的「半成品」做成真可用是**差异化**；解锁带本地 DB 的 demo（Drizzle/Prisma 类）。
@@ -66,6 +66,6 @@
 
 ## 3. 建议的下一步
 
-1. **先做 P0（真并行）**——它同时补上对手在「构建并行度」上的唯一硬优势，且 M120/M125/M134 已把前置铺好，是**投入产出比最高**的一条。
-2. **再做 P1 的 `node:sqlite`**——纯加法、模式已验证、能做出对手没有的真能力。
-3. P1 的隔离模型**等产品定位**：要不要跑不可信代码，决定做不做。
+1. ~~**先做 P0（真并行）**~~ ✅ 2026-10-12（M147）——真 Web Worker 并行已落地（四阶段：同步 VFS 桥 / 真线程运行时 / 跨 realm 端口转移 / 并发上限）。
+2. ~~**再做 P1 的 `node:sqlite`**~~ ✅ 2026-10-12（M148）——真上游 SQLite amalgamation 编 wasm，同步 API 真可用。
+3. **剩余候选**：P1 隔离模型（等产品定位：要不要跑不可信代码）；P2 npm 安装加速（OPFS 缓存 / 并行 tarball / 可选 proxy）；P2 浏览器兼容探测（SAB / `crossOriginIsolated` / OPFS 能力探测 + 降级提示）。
