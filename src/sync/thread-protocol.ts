@@ -136,6 +136,12 @@ export interface ThreadInitMessage {
   name: string;
   env: Record<string, string>;
   execArgv: string[];
+  /** The tree's working directory, so the thread resolves relative paths alike. */
+  cwd: string;
+  /** The worker's thread id (assigned by the parent, as Node's handle does). */
+  threadId: number;
+  /** A snapshot of `getEnvironmentData()` (a structured clone, mutations do not travel back). */
+  environmentData: Map<unknown, unknown>;
   stdin: boolean;
   stdout: boolean;
   stderr: boolean;

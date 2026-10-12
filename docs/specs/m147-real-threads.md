@@ -44,7 +44,7 @@ The correctness foundation every later phase needs, and the one piece that is
 **Reuses** (no new machinery): `src/sync/sab-rpc.ts` (`SyncChannel` already parks
 the caller in `Atomics.wait`; `serveSyncChannel` already serialises writers).
 
-### Phase B — the thread worker shell + host gate  ⟨next⟩
+### Phase B — the thread worker shell + host gate  ⟨done 2026-10-12⟩
 - `src/worker/thread.worker.ts` — a real worker entry that boots a `NodeRuntime`
   over a `RemoteVfs`, installs a worker-side `worker_threads` view, and runs the
   entry module. Bundled by Vite like `runtime.worker.ts` (same `define`s, the

@@ -246,6 +246,24 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-12 · M147（阶段 B）—— `worker_threads.Worker` 跑上真 Web Worker（真并行）
+
+**目标**：把 M147 阶段 A 的同步 VFS 桥接到真线程上，让 `worker_threads.Worker` 在 `crossOriginIsolated` 下成为**真浏览器 `Worker`**（真多核），非隔离环境**如实降级**为现有协作式路径（行为不变）。
+
+**交付**：
+- `src/node-runtime/proc/thread-bootstrap.ts`：**线程侧**启动器。在 `RemoteVfs` 上新建 `NodeRuntime`（独立 realm），装 worker 侧 `worker_threads` 视图（`isMainThread:false`、`threadId`、`parentPort`/`workerData`/`getEnvironmentData`），并把 `online`/`message`/`error`/`exit` 与 stdout/stderr/stdin 走宿主端口桥接。`deps` 可注入（`createChannel`/`createRuntime`/`egress`/`installGlobals`），故同一代码路径能在无第二线程下单测。
+- `src/node-runtime/proc/real-worker.ts`：**父侧** `RealWorker implements WorkerHandle`。建端口对 + 控制块（`CONTROL_BYTES`），`serveVfsChannel` 在父侧服务 VFS（父侧是树的**唯一 owner**），把线程的帧翻译成 `online`/`message`/`error`/`exit`；`terminate()` 关端口 + 终止宿主 worker；stdout/stderr/stdin 按 Node 语义（`stdout:true` 不自转发，否则转父进程 stdout）。`realThreadsAvailable()` 即「`crossOriginIsolated && typeof Worker === 'function'`」的门。
+- `src/node-runtime/proc/real-thread-spawn.ts`：默认宿主 worker 工厂（`new Worker(new URL('../../worker/thread.worker.ts', import.meta.url), {type:'module'})`，**options 必须静态字面量**，Vite 只重写能静态解析的 worker）。
+- `src/worker/thread.worker.ts`：真 worker 入口（`fetch` vendored 两级源 + wasm，等 init 消息后 `bootstrapThread`），Vite 打成 `thread.worker-*.js`（674 kB，懒加载）。
+- `proc/worker.ts`：`createWorkerHost` 按 `deps.realThreads ?? realThreadsAvailable()` **选路**（真线程用 `RealWorker`，否则维持协作式 `Worker`）。
+- `src/sync/thread-protocol.ts`：init 消息补 `cwd`/`threadId`/`environmentData`。
+
+**验证**：新增 `test/real-thread.test.ts`（11 条）——`realThreadsAvailable` 门；`RealWorker` 驱动**真 `node:worker_threads`** 线程（线程跑裸协议）：种子消息读父侧树 + `online`/`message`/`stdout`/`exit` 桥接、父→线程消息回环、`terminate()`；`bootstrapThread` 隔离测（视图安装 + 入口执行、`console` → stdout 帧、`process.exit(4)` → exit 帧、抛错 → error+exit 1、父→线程消息投递、transferList 响亮抛）；并顺带覆盖远端 cwd。全量 `npx vitest run` **1284 passed / 6 skipped**；`npm run typecheck` 与 `npm run build` 均绿，构建额外产出 `thread.worker-*.js` 独立 chunk。
+
+**范围边界（已文档）**：跨线程 `MessagePort` 转移 = **阶段 C**（现会**响亮抛错**，不静默克隆）；嵌套 `Worker` 不支持；`fs.watch` 在线程侧看不到父侧写入。
+
+**下一步（阶段 C）**：`parentPort` 做成线程内真 `MessagePort`、支持跨线程端口转移；阶段 D：每线程 realm 的内存/池上限。
+
 ### 2026-10-12 · M147（阶段 A）—— 真线程 VFS 桥：worker 通过共享内存同步读写父侧文件树
 
 **动因**：`docs/webcontainer-gap-analysis.md` 的 P0——WebContainer 是「1 进程 = 1 真 Web Worker」，CPU 活能跨核并行；web-node 的 `worker_threads.Worker` 是**同事件循环的第二模块注册表**（`builtins/worker-threads.ts:14-16`），`jest-worker`/`terser` 压缩**仍串行**。把 `worker_threads.Worker` 换成**真 Web Worker** 的拼图（M120 同步 VFS 通道、M125 真 Worker 承载、M134 `crossOriginIsolated`）已齐，这是该里程碑的**第一步（阶段 A）**：真线程与父侧**同一棵文件树**之间的同步桥。

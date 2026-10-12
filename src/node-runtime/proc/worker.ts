@@ -34,6 +34,8 @@ import type { Vfs } from '../vfs';
 import type { Realm } from '../realm';
 import type { ModuleLoader } from '../loader';
 import { notImplemented } from '../errors';
+import { RealWorker, realThreadsAvailable, type SpawnedThread } from './real-worker';
+import { spawnThreadWorker as defaultSpawnRealWorker } from './real-thread-spawn';
 
 /** A request to start one worker; the module and `workerData` are pre-cloned. */
 export interface WorkerRequest {
@@ -107,6 +109,14 @@ export interface WorkerHostDeps {
   baseEnv: Record<string, string>;
   /** Defer to the next macrotask. Injectable so tests stay deterministic. */
   defer?(fn: () => void): void;
+  /**
+   * Use a **real** Web Worker (real CPU parallelism) when the host supports it.
+   * Defaults to {@link realThreadsAvailable} (needs `crossOriginIsolated`).
+   * Injectable so tests can pin either path.
+   */
+  realThreads?: boolean;
+  /** Spawn the host worker for a real thread. Defaults to the bundled entry. */
+  spawnRealWorker?(request: WorkerRequest): SpawnedThread;
 }
 
 /** Thrown inside a worker by `process.exit()` to unwind its own stack. */
@@ -153,9 +163,12 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
   const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis) as (handle: unknown) => void;
   const defer = deps.defer ?? ((fn: () => void) => void nativeSetTimeout(fn, 0));
 
-  const workers = new Set<Worker>();
+  const workers = new Set<WorkerHandle>();
   const environmentData = new Map<unknown, unknown>();
   let nextThreadId = FIRST_THREAD_ID;
+  // Whether a worker is a real Web Worker (its own thread/realm) or the
+  // cooperative same-loop registry. Real threads need cross-origin isolation.
+  const realThreads = deps.realThreads ?? realThreadsAvailable();
 
   class Worker implements WorkerHandle {
     readonly threadId: number;
@@ -722,6 +735,13 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
 
   return {
     create(req: WorkerRequest): WorkerHandle {
+      if (realThreads) {
+        const spawn = deps.spawnRealWorker ?? defaultSpawnRealWorker;
+        const worker = new RealWorker(req, { vfs: deps.vfs, realm: () => deps.realm(), spawn });
+        workers.add(worker);
+        defer(() => worker.start(environmentData));
+        return worker;
+      }
       const worker = new Worker(req);
       defer(() => worker.start());
       return worker;
