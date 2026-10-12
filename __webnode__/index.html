@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>web-node preview</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0f1115;
+      }
+      iframe {
+        border: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .msg {
+        color: #c8ccd4;
+        font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+        padding: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <p class="msg" id="msg">web-node: starting preview bridge…</p>
+    <script>
+      /*
+       * The bootstrap shell for a preview served on its own subdomain (M113).
+       *
+       * A preview subdomain is a *different origin* from the app that owns the
+       * runtime, so the runtime cannot be reached directly. This document does
+       * three things and nothing else:
+       *   1. registers the preview ServiceWorker (`sw.js`) on this origin,
+       *   2. relays every `web-node:http` request the worker posts to the
+       *      top-level app page (ports transfer across origins), and
+       *   3. loads the real app in a same-origin child frame, which the worker
+       *      then serves from the virtual filesystem.
+       *
+       * It is a plain static asset (`public/__webnode__/`), so a static host
+       * serves it with no dev middleware. The app passes its base path in
+       * `?base=` because a sub-path deploy (GitHub Pages, `/web-node/`) still
+       * lives under that prefix on the subdomain.
+       */
+      (function () {
+        var msg = document.getElementById('msg');
+        function fail(text) {
+          msg.textContent = 'web-node: ' + text;
+        }
+
+        var params = new URLSearchParams(location.search);
+        var base = params.get('base') || '/';
+        if (base.charAt(0) !== '/') base = '/' + base;
+        if (base.charAt(base.length - 1) !== '/') base = base + '/';
+
+        // The wildcard domain this preview lives under, so the worker recognises
+        // `<port>.<domain>` (not only `<port>.localhost`).
+        var domain = params.get('domain') || location.hostname.split('.').slice(1).join('.');
+
+        var port = Number(location.hostname.split('.')[0]);
+        if (!port) return fail('bad preview host ' + location.hostname);
+        if (!('serviceWorker' in navigator)) return fail('this browser has no service worker');
+
+        navigator.serviceWorker
+          .register(base + 'sw.js?domain=' + encodeURIComponent(domain), { scope: base })
+          .then(function (registration) {
+            return navigator.serviceWorker.ready.then(function () {
+              return registration;
+            });
+          })
+          .then(function (registration) {
+            if (!registration.active) throw new Error('worker did not activate');
+            // The worker posts each virtual request here; hand it to the top
+            // page, which owns the runtime. Ports transfer across origins.
+            navigator.serviceWorker.addEventListener('message', function (event) {
+              var data = event.data;
+              if (!data || data.type !== 'web-node:http') return;
+              try {
+                window.top.postMessage(data, '*', event.ports);
+              } catch (err) {
+                /* top gone */
+              }
+            });
+            msg.remove();
+            var frame = document.createElement('iframe');
+            frame.title = 'web-node app :' + port;
+            frame.src = base;
+            document.body.appendChild(frame);
+            // HMR frames travel the other way: the app frame posts them to
+            // window.top (the app shell, which shares the runtime's origin),
+            // and the shell sends the runtime's replies to *this* window. Pass
+            // them down to the app frame.
+            window.addEventListener('message', function (event) {
+              if (event.data && event.data.__wnHmr && frame.contentWindow) {
+                frame.contentWindow.postMessage(event.data, '*');
+              }
+            });
+          })
+          .catch(function (err) {
+            fail((err && err.message) || String(err));
+          });
+      })();
+    </script>
+  </body>
+</html>
