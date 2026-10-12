@@ -1,6 +1,8 @@
 export * from './types';
 export type { Persistence, SnapshotSource } from './persistence';
 export { MemoryVfs } from './memory';
+export { RemoteVfs } from './remote';
+export { serveVfsChannel, applyVfsCall } from './remote-server';
 export { OpfsPersistence } from './opfs';
 export { OpfsFileStore, type DirectoryProvider } from './opfs-store';
 export { OpfsWorkerPersistence, type FsWorkerUnavailable } from './opfs-worker';

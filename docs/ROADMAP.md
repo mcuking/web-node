@@ -759,6 +759,12 @@
   - 实现：`install.ts` 增 `InstallOptions.add/save` + `parseAddSpec()` + `saveRangeFor()`（裸名/tag/精确版本 → `^<resolved>`，显式范围原样保留），装完在构建 lockfile 前写回 `rootPkg.dependencies`，结果入 `InstallResult.added`；`add`/`save` 经 runtime→worker→client 透传；UI 加「Add dependency」按钮 + `promptDialog` + 样式。
   - 验证：单测 +6（`test/npm.test.ts`，40 passed）；typecheck 净 · vitest **1228 passed / 3 skipped** · build 成功（worker 785.68 kB）；**真机**（`app60.localhost`）点按钮装 `left-pad` → `+ left-pad@1.3.0` / 写回 `^1.3.0` / reload 后仍在（OPFS）。
 
+- [~] **M147 · `worker_threads` 换真 Web Worker（真并行）** —— P0，取自 `docs/webcontainer-gap-analysis.md`
+  - 目标：让 `worker_threads.Worker` 在 `crossOriginIsolated` 下跑在**真 Web Worker**（真多核并行），非隔离环境**如实降级**为现有协作式路径。规划见 `docs/specs/m147-real-threads.md`（四阶段）。
+  - 价值：webpack/rspack 多核压缩（`jest-worker`/`terser`）、真 `fork`/`cluster` 并行——补上 WebContainer「1 进程 = 1 worker」的唯一硬优势。
+  - **阶段 A ✅ 2026-10-12**（同步 VFS 桥）：`thread-protocol.ts`（帧格式 + op 码表）、`vfs/remote.ts`（`RemoteVfs implements Vfs`，线程侧，本地解析 cwd + 错误重建）、`vfs/remote-server.ts`（`serveVfsChannel` + 纯函数 `applyVfsCall`，父侧唯一 owner）。验证：`test/remote-vfs.test.ts` 18 条 + 真 `node:worker_threads` 端到端；`vitest` **1273 passed / 6 skipped** · typecheck 净 · build 绿。
+  - 待办：阶段 B（`worker/thread.worker.ts` + `proc/real-worker.ts` + `createWorkerHost` 选路）、阶段 C（`parentPort` 消息/端口转移对等）、阶段 D（每线程 realm 的内存/池上限）。
+
 ---
 
 ## 怎么用这份文件

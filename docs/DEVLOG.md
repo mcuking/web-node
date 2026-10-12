@@ -246,6 +246,23 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-12 · M147（阶段 A）—— 真线程 VFS 桥：worker 通过共享内存同步读写父侧文件树
+
+**动因**：`docs/webcontainer-gap-analysis.md` 的 P0——WebContainer 是「1 进程 = 1 真 Web Worker」，CPU 活能跨核并行；web-node 的 `worker_threads.Worker` 是**同事件循环的第二模块注册表**（`builtins/worker-threads.ts:14-16`），`jest-worker`/`terser` 压缩**仍串行**。把 `worker_threads.Worker` 换成**真 Web Worker** 的拼图（M120 同步 VFS 通道、M125 真 Worker 承载、M134 `crossOriginIsolated`）已齐，这是该里程碑的**第一步（阶段 A）**：真线程与父侧**同一棵文件树**之间的同步桥。
+
+**为什么先做这一步**：真 Worker 是**独立 JS realm**，拿不到父侧的模块注册表、VFS 对象、binding 与 `MessagePort`。但 worker 脚本要**同步**加载自己的模块（`require`、`fs.readFileSync`），所以文件树必须能 `Atomics` 同步够到。**父侧是这棵树的唯一 owner**，故线程的读/写一律**在父侧**执行——两侧一致是**构造性的**，不需要合并协议。
+
+**交付**：
+- `src/sync/thread-protocol.ts`：op 码表 + `[u32 metaLen][meta JSON][body]` 帧格式（参数走 JSON、大字节走裸体，热读路径无 base64）；`isReadOnlyVfsOp` 标出可绕过写队列的只读 op。
+- `src/node-runtime/vfs/remote.ts`：`RemoteVfs implements Vfs`，**线程侧**客户端。路径一律**先在本线程按自身 cwd 解析成绝对路径**再发出（父侧永不需要知道对方的 cwd，`chdir` 也不会把两侧拖偏）；对端错误经 `translate()` 还原成带 `.code`/`.syscall`/`.path`/`.errno` 的 `VfsError`。
+- `src/node-runtime/vfs/remote-server.ts`：`serveVfsChannel(port, control, vfs)`，**父侧**服务端，复刻 M120 的 `serveSyncChannel`（只读 op 走旁路、写 op 走单队列）；`applyVfsCall` 是对 `Vfs` 的纯函数，可脱离 worker/浏览器单测。
+
+**验证**：新增 `test/remote-vfs.test.ts`（18 条）——帧编解码（含从 `SharedArrayBuffer` 视图里读出，规避 `TextDecoder` 拒读共享内存）；`applyVfsCall` 对真 `MemoryVfs` 的全部 op + 错误（`ENOENT`/`EISDIR`/`ENOTDIR`）；`RemoteVfs` 经**同进程回环**（真实 `applyVfsCall` + 复刻的错误信封）验证 cwd 解析、全部 op、错误重建；**真 `node:worker_threads` worker** 经共享内存读写父侧树，并断言 `ENOENT` 以解码后的错误信封（含 `syscall`/`path`）回到线程侧。全量 `npx vitest run` **1273 passed / 6 skipped**、`npm run typecheck` 与 `npm run build` 均绿。
+
+**改动**：`src/sync/thread-protocol.ts`(新)、`src/node-runtime/vfs/remote.ts`(新)、`src/node-runtime/vfs/remote-server.ts`(新)、`src/node-runtime/vfs/index.ts`(导出)、`test/remote-vfs.test.ts`(新)、`docs/specs/m147-real-threads.md`(新，四阶段规划)。
+
+**下一步（阶段 B）**：`src/worker/thread.worker.ts`（真 worker 入口，在 `RemoteVfs` 上启 `NodeRuntime`）+ `proc/real-worker.ts`（父侧 spawn 真 `Worker`、传端口对与控制块、serve VFS），`createWorkerHost` 按 `crossOriginIsolated && typeof Worker === 'function'` 选真/协作并如实降级。
+
 ### 2026-10-12 · M146 —— 修：拖拽分栏线时两根都高亮
 
 唐工反馈：拖一根分栏线时，**另一根也被点亮**。
