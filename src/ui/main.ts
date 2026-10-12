@@ -1,4 +1,5 @@
 import { RuntimeClient, type TreeEntry } from '../client';
+import { RuntimeHostBridge } from '../client/transport';
 import { selectBuildOutputs } from './build-outputs';
 import type { RuntimeInfo } from '../worker/runtime.worker';
 import {
@@ -16,6 +17,7 @@ import {
   type TemplateId,
 } from '../projects';
 import { previewUrl as buildPreviewUrl, previewPortFromHost, prefixPreviewUrl } from './preview-url';
+import { runtimeHostFrame } from './runtime-host-url';
 import {
   defaultFractions,
   fractionsFromPixels,
@@ -56,7 +58,34 @@ const bootTiming: BootTiming = {
 };
 (globalThis as { __wnBoot?: BootTiming }).__wnBoot = bootTiming;
 
-const client = new RuntimeClient();
+/**
+ * The runtime isolation host (M149).
+ *
+ * When an independent origin is available — the dev server on loopback
+ * (`rt.localhost`), or a configured wildcard domain (`rt.<domain>`) — the
+ * runtime that executes user code is moved into a `credentialless` iframe on
+ * that origin, so it cannot reach this page's cookies, storage or credentials.
+ * `RuntimeHostBridge` owns that frame and mints a transport per worker name; the
+ * app shell only ever sees the same `RuntimeClient` it always did.
+ *
+ * Without such an origin (a sub-path deploy with no DNS wildcard, e.g. GitHub
+ * Pages) the runtime stays on this origin, exactly as before.
+ */
+const hostBridge = ((): RuntimeHostBridge | null => {
+  const host = runtimeHostFrame(previewEnv());
+  return host ? new RuntimeHostBridge(host.url, host.origin) : null;
+})();
+
+/**
+ * Transport options for a `RuntimeClient`. With a host bridge the client relays
+ * through the isolation frame; otherwise it spawns a worker on this origin.
+ * `name` selects the worker (`''` shared, `web-node-build` throwaway).
+ */
+function transportOptions(): { transportFactory?: (name: string) => ReturnType<RuntimeHostBridge['transport']> } {
+  return hostBridge ? { transportFactory: (name: string) => hostBridge.transport(name) } : {};
+}
+
+const client = new RuntimeClient(transportOptions());
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -455,7 +484,7 @@ async function runBuildIsolated(entry: string, label: string, root: string): Pro
   // to be durable before it starts — otherwise it builds a debounced old copy.
   await client.flush();
 
-  const buildClient = new RuntimeClient({ name: 'web-node-build' });
+  const buildClient = new RuntimeClient({ name: 'web-node-build', ...transportOptions() });
   buildClient.on('stdout', (data) => writeTerminal(data, '', owner));
   buildClient.on('stderr', (data) => writeTerminal(data, 'err', owner));
 
@@ -1079,6 +1108,9 @@ function previewEnv() {
     // subdomain origins here too (M113) — the static-hosting counterpart of the
     // dev server's `*.localhost`.
     previewDomain: import.meta.env.VITE_WEB_NODE_PREVIEW_DOMAIN,
+    // The runtime isolation host reuses the preview wildcard by default; set
+    // this to give it a dedicated one (M149).
+    runtimeDomain: import.meta.env.VITE_WEB_NODE_RUNTIME_DOMAIN,
   };
 }
 
@@ -1091,6 +1123,11 @@ function loadPreview(): void {
   // The pop-out link uses the prefix bridge, not the subdomain: a subdomain
   // preview relays through this page, so it cannot stand alone in a new tab.
   openTab.href = prefixPreviewUrl(portSelect.value, previewEnv());
+  // `credentialless` (M149): the preview runs the project's dev server output —
+  // potentially third-party — so its cross-origin requests must not carry this
+  // origin's credentials. Honoured only under cross-origin isolation, and
+  // ignored (harmlessly) elsewhere.
+  previewFrame.setAttribute('credentialless', '');
   previewFrame.src = url;
   hmrRelay.follow(Number(portSelect.value) || null);
   writeTerminal(`[preview] ${url}\n`, 'sys');
@@ -1143,6 +1180,7 @@ client.on('ready', (runtimeInfo) => {
     `${runtimeInfo.vendoredFiles.length} vendored node files`,
     runtimeInfo.persistSupported ? 'OPFS: on' : 'OPFS: unavailable',
     runtimeInfo.persistence === 'fs-worker' ? 'sync fs: durable' : 'sync fs: async',
+    hostBridge ? (hostBridge.isolated ? 'runtime: isolated origin' : 'runtime: isolated frame (unisolated)') : 'runtime: same origin',
   ].join('  ·  ');
   writeTerminal('web-node runtime ready.\n', 'ok');
   if (runtimeInfo.wasmModules.length) {
@@ -1591,6 +1629,14 @@ async function boot(): Promise<void> {
       : 'service worker unavailable — preview routing disabled.\n',
     bridged ? 'sys' : 'err',
   );
+  if (hostBridge) {
+    writeTerminal(
+      hostBridge.isolated
+        ? 'runtime isolation: user code runs in a credentialless frame on an independent origin.\n'
+        : 'runtime isolation: frame up, but the origin is not cross-origin isolated (no SharedArrayBuffer).\n',
+      hostBridge.isolated ? 'sys' : 'err',
+    );
+  }
   writeTerminal('\nPick a project above, then follow the numbered steps.\n\n', 'sys');
   await refreshPorts();
   syncDerived();
@@ -1612,10 +1658,15 @@ window.addEventListener('unhandledrejection', (e) =>
 /**
  * Route Vite HMR frames to a preview that lives on its own subdomain.
  *
- * HMR frames travel on a same-origin `BroadcastChannel` (see `public/sw.js`).
- * A `<port>.localhost` preview is a different origin, so it cannot hear that
- * channel; its WebSocket shim posts frames to this page instead, and this page
- * — which does share the runtime's origin — relays them both ways.
+ * HMR frames travel on a `BroadcastChannel` scoped to the **runtime's** origin
+ * (`web-node-hmr:<port>`, see `public/sw.js`). A `<port>.localhost` preview is a
+ * different origin, so it cannot hear that channel; its WebSocket shim posts
+ * frames to this page instead, and this page relays them both ways.
+ *
+ * Where the runtime lives decides *how* this page reaches the channel. On this
+ * origin it opens the channel directly; on the isolated runtime origin (M149)
+ * the channel is scoped there and this page cannot hear it, so the isolation
+ * frame relays frames both ways over the bridge.
  */
 type HmrRelay = { follow: (port: number | null) => void };
 let hmrRelay: HmrRelay = { follow: () => {} };
@@ -1627,20 +1678,34 @@ let hmrRelay: HmrRelay = { follow: () => {} };
  * currently showing that port.
  */
 function installHmrRelay(): void {
-  const channels = new Map<number, BroadcastChannel>();
   let shownPort: number | null = null;
-
-  const channelFor = (port: number): BroadcastChannel => {
-    let channel = channels.get(port);
-    if (!channel) {
-      channel = new BroadcastChannel(`web-node-hmr:${port}`);
-      channel.onmessage = (event) => {
-        if (shownPort === port) previewFrame.contentWindow?.postMessage({ __wnHmr: event.data, port }, '*');
-      };
-      channels.set(port, channel);
-    }
-    return channel;
+  const deliver = (port: number, frame: unknown): void => {
+    if (shownPort === port) previewFrame.contentWindow?.postMessage({ __wnHmr: frame, port }, '*');
   };
+
+  // `publish` hands a frame from the preview back to wherever the dev server
+  // lives; `follow` subscribes so the runtime's first reply is not missed.
+  let publish: (port: number, frame: unknown) => void;
+  let follow: (port: number) => void;
+
+  if (hostBridge) {
+    hostBridge.onHmr(deliver);
+    publish = (port, frame) => hostBridge.publishHmr(port, frame);
+    follow = () => {}; // the frame subscribes on demand
+  } else {
+    const channels = new Map<number, BroadcastChannel>();
+    const channelFor = (port: number): BroadcastChannel => {
+      let channel = channels.get(port);
+      if (!channel) {
+        channel = new BroadcastChannel(`web-node-hmr:${port}`);
+        channel.onmessage = (event) => deliver(port, event.data);
+        channels.set(port, channel);
+      }
+      return channel;
+    };
+    publish = (port, frame) => channelFor(port).postMessage(frame);
+    follow = (port) => channelFor(port);
+  }
 
   window.addEventListener('message', (event) => {
     const data = event.data as { __wnHmr?: unknown; port?: number } | null;
@@ -1654,14 +1719,14 @@ function installHmrRelay(): void {
       }
     })();
     if (previewPortFromHost(host, import.meta.env.VITE_WEB_NODE_PREVIEW_DOMAIN) === null) return;
-    channelFor(data.port).postMessage(data.__wnHmr);
+    publish(data.port, data.__wnHmr);
   });
 
   hmrRelay = {
     follow: (port) => {
       shownPort = port;
       // Subscribe eagerly so the runtime's first reply is not missed.
-      if (port !== null) channelFor(port);
+      if (port !== null) follow(port);
     },
   };
 }

@@ -264,7 +264,7 @@ function portFromHost(hostname) {
 }
 
 /**
- * The preview shell is embedded by the app shell, which sets COEP: require-corp.
+ * The preview shell is embedded by the app shell, which sets COEP: credentialless.
  * An embedded cross-origin document must itself opt in with a COEP header, so
  * once this worker controls the origin we add the isolation headers a static
  * host cannot set. (The very first load, before we control the origin, still
@@ -273,7 +273,7 @@ function portFromHost(hostname) {
 async function withShellHeaders(request) {
   const res = await fetch(request);
   const headers = new Headers(res.headers);
-  headers.set('cross-origin-embedder-policy', 'require-corp');
+  headers.set('cross-origin-embedder-policy', 'credentialless');
   headers.set('cross-origin-opener-policy', 'same-origin');
   headers.set('cross-origin-resource-policy', 'cross-origin');
   headers.set('content-type', 'text/html; charset=utf-8');
@@ -307,7 +307,7 @@ async function withIsolationHeaders(request) {
   }
   const headers = new Headers(res.headers);
   headers.set('cross-origin-opener-policy', 'same-origin');
-  headers.set('cross-origin-embedder-policy', 'require-corp');
+  headers.set('cross-origin-embedder-policy', 'credentialless');
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
@@ -387,11 +387,11 @@ function buildHeaders(raw) {
     if (Array.isArray(value)) for (const v of value) headers.append(name, v);
     else headers.set(name, value);
   }
-  // The app shell is served with COOP/COEP: require-corp (so SharedArrayBuffer is
+  // The app shell is served with COOP/COEP: credentialless (so SharedArrayBuffer is
   // available). Under that policy an embedded document must opt in explicitly,
   // otherwise Chrome silently renders the iframe blank.
   headers.set('cross-origin-resource-policy', 'cross-origin');
-  headers.set('cross-origin-embedder-policy', 'require-corp');
+  headers.set('cross-origin-embedder-policy', 'credentialless');
   headers.set('cross-origin-opener-policy', 'same-origin');
   return headers;
 }
@@ -444,7 +444,7 @@ function bridgeError(message) {
     status: 502,
     headers: {
       'content-type': 'text/plain',
-      // An error inside a COEP: require-corp page must still opt in, or the
+      // An error inside a COEP: credentialless page must still opt in, or the
       // browser replaces our diagnostic with a blank "blocked" page.
       'cross-origin-resource-policy': 'cross-origin',
     },

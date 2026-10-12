@@ -1,5 +1,6 @@
 import type { RuntimeInfo } from '../worker/runtime.worker';
 import { previewPortFromHost } from '../ui/preview-url';
+import { WorkerTransport, type RuntimeTransport } from './transport';
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void };
 
@@ -56,40 +57,50 @@ export interface InstallResult {
 }
 
 /**
+ * How a `RuntimeClient` obtains its transport. The default spawns a worker on
+ * this origin; M149 passes a factory that relays through the cross-origin
+ * runtime isolation frame instead. May be sync or async — messages sent before
+ * it resolves are queued and flushed on attach.
+ */
+export type TransportFactory = (name: string) => RuntimeTransport | Promise<RuntimeTransport>;
+
+/**
  * Main-thread facade over the runtime worker.
  *
  * This is the only surface the UI is allowed to use. Every request is
- * correlated by id; streams and lifecycle events are pushed.
+ * correlated by id; streams and lifecycle events are pushed. The worker itself
+ * may live on this origin or behind the runtime isolation frame (M149); that is
+ * entirely the transport's concern.
  */
 export class RuntimeClient {
-  #worker: Worker;
+  #transport: RuntimeTransport | null = null;
+  #queued: unknown[] = [];
   #pending = new Map<number, Pending>();
   #streams = new Map<number, (msg: StreamMessage) => void>();
   #nextId = 1;
   #listeners: Partial<RuntimeEvents> = {};
 
-  constructor(opts: { name?: string } = {}) {
-    // Boot timing handshake (M107): read by the page, harmless elsewhere.
-    const boot = (globalThis as { __wnBoot?: { workerSpawnMs: number } }).__wnBoot;
-    if (boot) boot.workerSpawnMs = Math.round(performance.now());
-    // The worker's `name` is how it learns it is the throwaway **build** worker
-    // (it reports as `self.name`), switching it to a read-only store view (M139).
-    // Both options objects are static literals on purpose: Vite only rewrites a
-    // worker it can parse statically.
-    this.#worker =
-      opts.name === 'web-node-build'
-        ? new Worker(new URL('../worker/runtime.worker.ts', import.meta.url), {
-            type: 'module',
-            name: 'web-node-build',
-          })
-        : new Worker(new URL('../worker/runtime.worker.ts', import.meta.url), { type: 'module' });
-    this.#worker.onmessage = (event: MessageEvent) => this.#onMessage(event.data);
-    this.#worker.onerror = (event) => {
-      this.#listeners.stderr?.(`[worker error] ${event.message}\n`, 0);
-    };
-    this.#worker.onmessageerror = (event) => {
-      this.#listeners.stderr?.(`[worker message error] ${String(event.data)}\n`, 0);
-    };
+  constructor(opts: { name?: string; transportFactory?: TransportFactory } = {}) {
+    const name = opts.name ?? '';
+    const factory = opts.transportFactory ?? ((n: string) => new WorkerTransport(n));
+    Promise.resolve(factory(name)).then(
+      (transport) => this.#attach(transport),
+      (err: unknown) => this.#listeners.stderr?.(`[transport error] ${String(err)}\n`, 0),
+    );
+  }
+
+  #attach(transport: RuntimeTransport): void {
+    this.#transport = transport;
+    transport.onData = (data) => this.#onMessage(data as { id: number; type: string });
+    transport.onError = (message) => this.#listeners.stderr?.(message, 0);
+    const queued = this.#queued;
+    this.#queued = [];
+    for (const msg of queued) transport.post(msg);
+  }
+
+  #post(msg: unknown): void {
+    if (this.#transport) this.#transport.post(msg);
+    else this.#queued.push(msg);
   }
 
   on<K extends keyof RuntimeEvents>(event: K, handler: RuntimeEvents[K]): void {
@@ -144,7 +155,7 @@ export class RuntimeClient {
     const id = this.#nextId++;
     return new Promise<T>((resolve, reject) => {
       this.#pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-      this.#worker.postMessage({ id, ...payload });
+      this.#post({ id, ...payload });
     });
   }
 
@@ -165,7 +176,7 @@ export class RuntimeClient {
     const id = this.#nextId++;
     const done = new Promise<void>((resolve, reject) => {
       this.#pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-      this.#worker.postMessage({ id, type: 'run', entry, oneShot: opts.oneShot });
+      this.#post({ id, type: 'run', entry, oneShot: opts.oneShot });
     });
     return { id, done };
   }
@@ -333,7 +344,7 @@ export class RuntimeClient {
           return;
       }
     });
-    this.#worker.postMessage({
+    this.#post({
       id,
       type: 'httpStream',
       port: req.port,
@@ -345,6 +356,6 @@ export class RuntimeClient {
   }
 
   terminate(): void {
-    this.#worker.terminate();
+    this.#transport?.terminate();
   }
 }

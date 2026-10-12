@@ -246,6 +246,29 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-12 · M149 —— 运行时隔离模型：用户代码跑在独立 origin 的 credentialless frame
+
+**目标**：把「执行用户代码、并拥有项目 OPFS」的运行时从**应用 shell 自己的 origin** 挪到一个**独立 origin** 上——对齐 WebContainer 的 `*.webcontainer-api.io` credentialless frame。在此**之前**，运行时（及其 OPFS）与整个应用同源，用户代码能摸到 shell 的 cookie / storage / 凭证；现在不能。
+
+**架构**：`app shell ⇄ [隔离 frame] ⇄ runtime worker`。frame 是一个透明管道：原样转发 worker 的请求/响应消息（从不检查载荷），另外转发 HMR 帧（它们走**运行时 origin** 上的 `BroadcastChannel`，shell 这个别的 origin 本来听不到）。
+
+**交付**：
+- `src/ui/runtime-host-url.ts`（纯函数，可单测）：决定隔离 host 的 origin。三种情形——dev server loopback → `rt.localhost:<devport>`；配了通配域名（`VITE_WEB_NODE_RUNTIME_DOMAIN`，回退到 `VITE_WEB_NODE_PREVIEW_DOMAIN`）→ `rt.<domain>`；否则（子路径部署如 GitHub Pages，无通配 DNS）→ **返回 null，运行时留在应用 origin**（诚实降级）。
+- `src/runtime-host-protocol.ts`：桥协议（`boot`/`post`/`terminate`/`hmr` ↔ `up`/`data`/`error`/`hmr`），每条消息打 `__wnHost` 标签，避免与预览 iframe 自己的 `__wnHmr` 流量混淆。
+- `src/ui/runtime-host.ts` + `runtime-host.html`（新的 Vite HTML 入口）：frame 的 shell。**懒创建** worker（首用才建，`''` 共享 / `web-node-build` 一次性），并在建前确保自己 COI（有 SW 就注册 → 静态 host 也能拿到 COOP/COEP → 重载，最多 4 次后降级）。
+- `src/client/transport.ts`：`RuntimeTransport` 抽象（`post`/`onData`/`onError`/`terminate`）。`WorkerTransport`＝同 origin 旧路径（Pages 回退）；`RuntimeHostBridge` 持有那个 frame、按 worker 名发放 `FrameTransport`；`FrameTransport` 在 frame 「up」前缓冲消息，up 后先发 `boot` 再冲队列（同一源→目标队列，顺序有保证）。
+- `src/client/index.ts`：`RuntimeClient` 改为经 `TransportFactory` 拿传输层（同步/异步皆可，未 attach 前的消息入队）。其它一切不变。
+- `src/ui/main.ts`：有 host frame 时用桥传输（共享 + 一次性 build worker 都走同一 origin，读同一个 store）；HMR relay 按运行时所在 origin 分流（有 frame → 走桥；否则本 origin 直接开 channel）。预览 iframe 加 `credentialless`。
+- `vite.config.ts`：dev 头改 `COEP: credentialless`（仍给 SAB），`build.rollupOptions.input` 增 `runtime-host.html`；`public/sw.js`、`plugins/dev-subdomains.ts` 同步改 credentialless。
+
+**关键坑（真机取证逼出来的）**：**只给子 frame 设 COEP 不够**——跨源子 frame **不会**继承父页的「受限跨源隔离」。必须在 iframe 上再传 **Permissions-Policy** `allow="cross-origin-isolated"`，frame 内的 `self.crossOriginIsolated` 才会是 true（worker 同理）。用最小复现验证：父页 COI=true，4 种 COEP/COOP/credentialless 组合在**没有** `allow` 时全部 `coi:false`，**加上** `allow="cross-origin-isolated"` 后全部 `coi:true`（含 worker）。真 Chrome 与内置浏览器行为一致。
+
+**验证**（dev server，真机）：
+- 页面状态行：`runtime: isolated origin`、`sync fs: durable`（SAB 生效）——frame `src=http://rt.localhost:5173/runtime-host.html`，`credentialless`，`allow=cross-origin-isolated`。
+- worker 跑在 `rt.localhost`：`npm install`（vite 30 包 25.5s）、`node index.js`（含 `node:sqlite` demo）输出全对。
+- 预览 + HMR：`vite/dev` 起在运行时内（`hmr: preview connected`），预览 `http://5173.localhost:5173/__webnode__/` 渲染出真 Vite app（子 frame 标题 `Vite app · web-node`）；改 `src/App.vue` 的 `<h1>` → 预览 DOM **实时更新**为注入的 marker（HMR 帧经 桥 双向往返）。
+- 单测：`test/runtime-host-url.test.ts`（13）、`test/runtime-host-protocol.test.ts`（4）；全量 **1314 passed / 6 skipped** · typecheck 净 · build 绿（多出 `runtime-host.html` + 其 chunk）。
+
 ### 2026-10-12 · M148 —— `node:sqlite`（真上游 SQLite 编 wasm）
 
 **目标**：把最后一个「需要 bundled native」的 unsupported 模块落地——`node:sqlite` 的同步 API 跑在**真上游 SQLite amalgamation** 上（阶段 H 的同一套 native→wasm 打法）。

@@ -34,11 +34,11 @@ export function devSubdomains(): Plugin {
         const path = (request.url || '/').split('?')[0];
         if (path !== '/__webnode__/') return next();
 
-        // The embedding app shell sets COEP: require-corp. For an iframe — unlike
+        // The embedding app shell sets COEP: credentialless. For an iframe — unlike
         // a subresource — the embedded *document* must itself opt in with a COEP
         // header (CORP alone is not enough: Chrome fails the load with
         // `coep-frame-resource-needs-coep-header`).
-        res.setHeader('cross-origin-embedder-policy', 'require-corp');
+        res.setHeader('cross-origin-embedder-policy', 'credentialless');
         res.setHeader('cross-origin-opener-policy', 'same-origin');
         res.setHeader('cross-origin-resource-policy', 'cross-origin');
         res.setHeader('content-type', 'text/html; charset=utf-8');

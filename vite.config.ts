@@ -61,14 +61,29 @@ export default defineConfig(({ mode }) => {
       devSubdomains(),
     ],
     server: {
-      // COOP/COEP so SharedArrayBuffer is available (needed later for wasm/Atomics).
+      // COOP/COEP so SharedArrayBuffer is available (the wasm toolchain and the
+      // FS-worker persistence channel need it). `credentialless` gives the same
+      // cross-origin isolation as `require-corp` while still allowing
+      // credential-less third-party resources to load — which the runtime and a
+      // preview's own code rely on (M149).
       headers: {
         'Cross-Origin-Opener-Policy': 'same-origin',
-        'Cross-Origin-Embedder-Policy': 'require-corp',
+        'Cross-Origin-Embedder-Policy': 'credentialless',
       },
     },
     build: {
       target: 'es2022',
+      rollupOptions: {
+        // `runtime-host.html` is the shell for the cross-origin runtime isolation
+        // frame (M149). Building it as a second HTML entry means its asset URLs
+        // (the runtime worker, the vendored sources, the wasm modules) are
+        // rewritten for the deploy base, and the same app served on the host
+        // subdomain resolves them.
+        input: {
+          main: resolve(__dirname, 'index.html'),
+          'runtime-host': resolve(__dirname, 'runtime-host.html'),
+        },
+      },
     },
     worker: {
       format: 'es',

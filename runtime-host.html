@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>web-node runtime host</title>
+    <style>
+      /* Never visible: the app shell embeds this frame only to give the runtime
+         an origin of its own. */
+      html,
+      body {
+        margin: 0;
+        background: #0f1115;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module" src="/src/ui/runtime-host.ts"></script>
+  </body>
+</html>

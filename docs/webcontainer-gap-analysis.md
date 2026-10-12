@@ -8,7 +8,7 @@
 
 ## 0. 一句话结论
 
-「阶段 I（借鉴 WebContainer）」的 5 条可借鉴点**已全部落地**（M113 子域路由 · M120 同步 fs · M122 出网 · M123 多进程 · M124/M127 行为门禁）。本盘点在其之外找出 **3 个值得做（1 个 P0、2 个 P1）+ 3 个明确不做**。**其中 P0（真并行 = M147）与 P1 的 `node:sqlite`（= M148）已于 2026-10-12 落地**；剩余：P1 隔离模型（产品定位决定）+ 2 个 P2（npm 安装加速、浏览器兼容探测）。
+「阶段 I（借鉴 WebContainer）」的 5 条可借鉴点**已全部落地**（M113 子域路由 · M120 同步 fs · M122 出网 · M123 多进程 · M124/M127 行为门禁）。本盘点在其之外找出 **3 个值得做（1 个 P0、2 个 P1）+ 3 个明确不做**。**P0（真并行 = M147）、P1 的 `node:sqlite`（= M148）与 P1 隔离模型（= M149）均已于 2026-10-12 落地**；剩余：2 个 P2（npm 安装加速、浏览器兼容探测）。
 
 ---
 
@@ -19,7 +19,7 @@
 | **进程模型 / 真并行** | 1 进程 = 1 **真 Web Worker**，天然多核并行 | `worker_threads` 是「**同事件循环的第二模块注册表** + 真 `MessageChannel`，**无真并行**」（`builtins/worker-threads.ts:14-16`）；`fork`/`cluster` 同理 | **它领先** → 🔴 P0 |
 | **启动** | `boot()` **5.1s**；自研 runtime | `runtimeReady` 冷 ~1753ms / **暖 341–349ms**；M107/M126 已把关键载荷压到 ~gzip 418KB | **我们领先**，不必追 |
 | **JS 代码缓存 / 快照** | 编译产物 + 快照启动 | 浏览器造不出 V8 code cache：`vm.compileFunction` 的 `cachedData` 明确 `notImplemented('A page cannot consume V8 code cache.')`（`bindings/contextify.ts:279`） | 浏览器能力所限 → ⚫ 不做 |
-| **隔离模型** | 每项目 **credentialless iframe + 独立子域 origin** | 运行时跑在**主页面单 origin**（单页沙箱）；COOP/COEP 已由 `sw.js` 补（M134） | **它领先** → 🟠 P1 |
+| **隔离模型** | 每项目 **credentialless iframe + 独立子域 origin** | 运行时跑在 **`rt.localhost`/`rt.<domain>` 的 credentialless frame**（M149），子路径部署诚实降级回主 origin | **已对齐** |
 | **预览路由** | `<port>` 编进子域 + 每端口 DevServer SW（可离线） | dev `<port>.localhost` + 静态通配域（M113），路径式兜底 | **已对齐** |
 | **出网（egress）** | 宿主源 `Fetcher Worker` + 托管 proxy | `Egress` 走宿主源 worker `fetch` + 可选 proxy（M122） | **已对齐** |
 | **TLS** | 边缘终止，不做真握手 | 记录材料不握手 | 共性，不做 |
@@ -45,11 +45,11 @@
 - **为什么值**：把对手的「半成品」做成真可用是**差异化**；解锁带本地 DB 的 demo（Drizzle/Prisma 类）。
 - **工作量**：中；**风险**：低–中（SQLite 自带 VFS 接口，内存 VFS 现成）。
 
-### 🟠 P1 · 隔离模型：运行时/预览进 credentialless iframe + 独立 origin
+### 🟠 P1 · 隔离模型：运行时/预览进 credentialless iframe + 独立 origin ✅ 2026-10-12（M149）
 - **现状**：运行时在主页面单 origin；预览已有子域（M113）。
 - **对标**：WebContainer 每个项目是 **`w-credentialless` 子域的 iframe**，`COEP: credentialless` 同时满足「SAB 可用」与「能加载第三方资源」。
-- **收益/代价**：跑**不可信用户代码**时的安全性显著提升（凭据不随 iframe 带出、跨站数据隔离）；代价是**架构级改动**（消息桥、SW scope、预览转发全要走 iframe）。
-- **判断**：**产品定位决定要不要做**——若这个 demo 明确要「执行别人的代码」，值得；若只是自家 demo，可缓。
+- **本轮做了**：运行时（及项目 OPFS）搬到 **`rt.localhost`（dev）/ `rt.<domain>`（通配域名）的 credentialless frame**；`app shell ⇄ [隔离 frame] ⇄ runtime worker` 透明管道；子路径部署（无通配 DNS）**诚实降级**回主 origin。关键坑：跨源子 frame **不继承**父页的受限跨源隔离，iframe 上必须再传 `allow="cross-origin-isolated"`（最小复现已证）。详见 `docs/specs/m149-runtime-isolation.md`。
+- **收益兑现**：跑不可信用户代码时，凭据不再随 iframe 带出（credentialless），且用户代码与 shell 跨源隔离。
 
 ### 🟡 P2 · npm install 加速（可选服务端 proxy）
 - WebContainer 走「托管 proxy + server-side 加速」。我们全客户端解析。可优化：registry 元数据**缓存进 OPFS**、tarball **并行取**、可选受控 proxy（`VITE_WEB_NODE_EGRESS_PROXY` 已存在）。**收益中等、非瓶颈**，视安装耗时再定。
@@ -68,4 +68,5 @@
 
 1. ~~**先做 P0（真并行）**~~ ✅ 2026-10-12（M147）——真 Web Worker 并行已落地（四阶段：同步 VFS 桥 / 真线程运行时 / 跨 realm 端口转移 / 并发上限）。
 2. ~~**再做 P1 的 `node:sqlite`**~~ ✅ 2026-10-12（M148）——真上游 SQLite amalgamation 编 wasm，同步 API 真可用。
-3. **剩余候选**：P1 隔离模型（等产品定位：要不要跑不可信代码）；P2 npm 安装加速（OPFS 缓存 / 并行 tarball / 可选 proxy）；P2 浏览器兼容探测（SAB / `crossOriginIsolated` / OPFS 能力探测 + 降级提示）。
+3. ~~**P1 隔离模型**~~ ✅ 2026-10-12（M149）——运行时进独立 origin 的 credentialless frame，用户代码与 shell 跨源隔离。
+4. **剩余候选**：P2 npm 安装加速（OPFS 缓存 / 并行 tarball / 可选 proxy）；P2 浏览器兼容探测（SAB / `crossOriginIsolated` / OPFS 能力探测 + 降级提示）。
