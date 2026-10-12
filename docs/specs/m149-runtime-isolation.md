@@ -68,3 +68,28 @@ Confirmed on both the real Chrome build and the in-app browser.
   wildcard DNS there. They keep the prior SW-header isolation.
 - The preview iframe is marked `credentialless` too (its dev-server output is
   potentially third-party), but it stays on the preview subdomain as before.
+
+## Correction (M149.1): the frame must **not** be `credentialless`
+
+Marking the host frame `credentialless` — as the original design did, mirroring
+WebContainer — gave it an **ephemeral storage partition**. The runtime owns the
+project OPFS, so every reload discarded every project (the boot banner went back
+to "fresh project").
+
+Minimal repro (a cross-origin parent embedding a child that writes an OPFS
+marker, then reloaded): with `credentialless` the child reads `prev = null`
+every load; with a **plain cross-origin** frame that carries CORP it reads the
+previous marker back. So the fix keeps the independent origin (the frame still
+cannot reach the shell's cookies/storage/credentials) but **drops the
+`credentialless` attribute**; `allow="cross-origin-isolated"` stays (the
+delegation above is still required).
+
+A second, related fix: the host document needs `Cross-Origin-Resource-Policy` to
+be treated as cross-origin isolated when embedded. Dev adds it in
+`plugins/dev-subdomains.ts`; `public/sw.js` (`withIsolationHeaders`) adds it for
+`/runtime-host.html` on a static wildcard host. Both add it **only when absent**,
+never overwriting a host's own header.
+
+After the fix: the facts line reads `runtime: isolated origin`, the frame reports
+`crossOriginIsolated = true` **and** its OPFS marker survives a reload;
+install / run / preview / HMR all pass.

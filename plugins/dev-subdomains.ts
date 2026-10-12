@@ -10,10 +10,11 @@ import type { Plugin } from 'vite';
  * `vite preview` and builds fall back to the path-prefix bridge automatically
  * (the client gates on `import.meta.env.DEV`).
  *
- * The runtime — and the VFS and OPFS it owns — lives on the main origin, so the
- * subdomain cannot reach it directly. This middleware serves a tiny bootstrap
- * shell that registers the subdomain ServiceWorker and relays its requests to
- * the top-level page; see `public/sw.js` (`SUBDOMAIN_MODE`).
+ * The runtime — and the VFS and OPFS it owns — now lives on the runtime
+ * isolation origin (`rt.localhost`, M149), so the preview subdomain cannot reach
+ * it directly. This middleware serves a tiny bootstrap shell that registers the
+ * subdomain ServiceWorker and relays its requests to the top-level page; see
+ * `public/sw.js` (`SUBDOMAIN_MODE`).
  */
 export function devSubdomains(): Plugin {
   return {
@@ -24,6 +25,18 @@ export function devSubdomains(): Plugin {
         // `types: []` in tsconfig.json means there is no `@types/node`, so the
         // connect callback's request is untyped here. Only two fields are used.
         const request = req as unknown as { url?: string; headers: Record<string, string | string[] | undefined> };
+        const path = (request.url || '/').split('?')[0];
+
+        // The runtime isolation frame (M149). The app shell embeds it as a
+        // cross-origin iframe under its own COEP, so the response needs CORP to
+        // be embedsable — and it must carry the isolation headers itself. Without
+        // CORP the browser loads the frame but does not treat it as
+        // cross-origin isolated (its `self.crossOriginIsolated` stays false).
+        if (path === '/runtime-host.html') {
+          res.setHeader('cross-origin-resource-policy', 'cross-origin');
+          return next();
+        }
+
         const port = portFromHost(request.headers.host);
         if (port === null) return next();
 
@@ -31,7 +44,6 @@ export function devSubdomains(): Plugin {
         // the app's, and is answered by the worker from the virtual filesystem;
         // the shell deliberately lives at its own URL so the worker can let it
         // through (see SUBDOMAIN_SHELL_PATH).
-        const path = (request.url || '/').split('?')[0];
         if (path !== '/__webnode__/') return next();
 
         // The embedding app shell sets COEP: credentialless. For an iframe — unlike

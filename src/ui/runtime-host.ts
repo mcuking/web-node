@@ -1,17 +1,17 @@
 /**
  * The **runtime isolation host** (M149).
  *
- * This document is embedded by the app shell in a `credentialless` iframe on an
- * independent origin, and it is the *only* place the runtime runs. It hosts the
- * runtime worker(s) and is a transparent pipe between them and the parent:
+ * This document is embedded by the app shell in an iframe on an independent
+ * origin, and it is the *only* place the runtime runs. It hosts the runtime
+ * worker(s) and is a transparent pipe between them and the parent:
  *
  *   app shell  ⇄  [this frame]  ⇄  runtime worker
  *
  * Why a separate origin: the runtime executes user code and owns the OPFS the
  * projects persist to. On the app shell's own origin that code could reach the
  * shell's cookies, storage and credentials; on its own origin it cannot. The
- * embedder marks the frame `credentialless` so the runtime's cross-origin
- * requests carry no credentials either.
+ * frame is **not** `credentialless`: a credentialless cross-origin frame gets an
+ * ephemeral storage partition, which would discard that OPFS on every load.
  *
  * The frame also owns the HMR `BroadcastChannel` (`web-node-hmr:<port>`): the
  * dev server runs *here*, so the channel is scoped to this origin and the app

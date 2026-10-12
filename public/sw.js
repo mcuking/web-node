@@ -65,6 +65,14 @@ const SUBDOMAIN_MODE = HOST_PORT !== null;
 const SUBDOMAIN_SHELL_PATH = '/__webnode__/';
 
 /**
+ * The runtime-isolation document (M149). It is served on its own origin and is
+ * always embedded cross-origin by the app shell, so it needs
+ * `Cross-Origin-Resource-Policy` on top of the isolation headers (see
+ * `withIsolationHeaders`).
+ */
+const RUNTIME_HOST_PATH = '/runtime-host.html';
+
+/**
  * Requests that belong to the page, not the virtual server: the shell itself and
  * the worker script. Everything else on a preview subdomain is the app's.
  */
@@ -232,7 +240,7 @@ self.addEventListener('fetch', (event) => {
   // preview. They are not left alone, though — the app shell document gets the
   // cross-origin isolation headers a static host cannot send (see below).
   if (event.request.mode === 'navigate') {
-    event.respondWith(withIsolationHeaders(event.request));
+    event.respondWith(withIsolationHeaders(event.request, url.pathname === RUNTIME_HOST_PATH));
     return;
   }
   const port = previewPortByClient.get(event.clientId) ?? portFromReferrer(event.request.referrer);
@@ -300,14 +308,25 @@ async function withShellHeaders(request) {
  * that already sends the headers is left untouched (the check below), and
  * preview responses never come through here (they go through `handle`).
  */
-async function withIsolationHeaders(request) {
+async function withIsolationHeaders(request, embeddable = false) {
   const res = await fetch(request);
-  if (res.headers.has('cross-origin-opener-policy') || res.headers.has('cross-origin-embedder-policy')) {
-    return res;
-  }
   const headers = new Headers(res.headers);
-  headers.set('cross-origin-opener-policy', 'same-origin');
-  headers.set('cross-origin-embedder-policy', 'credentialless');
+  let changed = false;
+  if (!headers.has('cross-origin-opener-policy')) {
+    headers.set('cross-origin-opener-policy', 'same-origin');
+    changed = true;
+  }
+  if (!headers.has('cross-origin-embedder-policy')) {
+    headers.set('cross-origin-embedder-policy', 'credentialless');
+    changed = true;
+  }
+  // A document that is embedded cross-origin (the runtime host) additionally
+  // needs CORP, or the browser loads it without cross-origin isolation.
+  if (embeddable && !headers.has('cross-origin-resource-policy')) {
+    headers.set('cross-origin-resource-policy', 'cross-origin');
+    changed = true;
+  }
+  if (!changed) return res;
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 

@@ -100,12 +100,15 @@ export class RuntimeHostBridge {
     // The runtime executes untrusted code; keep the frame out of layout but not
     // `display:none` (browsers throttle hidden frames).
     frame.style.cssText = 'position:absolute;width:1px;height:1px;border:0;opacity:0;pointer-events:none;';
-    // `credentialless` so the runtime's cross-origin requests carry no cookies,
-    // and `allow="cross-origin-isolated"` to *delegate* cross-origin isolation
-    // to the frame. Without the delegation the frame's own COEP/COOP are not
-    // enough — `restricted` cross-origin isolation is not inherited by a
-    // cross-origin child (M149).
-    frame.setAttribute('credentialless', '');
+    // No `credentialless` here: a credentialless cross-origin frame is given an
+    // **ephemeral** storage partition, which would throw away the runtime's OPFS
+    // — and with it every project — on each load (verified with a minimal
+    // repro). The frame still gets its own origin (so it cannot read the app
+    // shell's cookies/storage), and does not send the shell's credentials on its
+    // own requests. `allow="cross-origin-isolated"` *delegates* cross-origin
+    // isolation to the frame: without it the frame's COEP/COOP are not enough,
+    // because a cross-origin child does not inherit the parent's restricted
+    // cross-origin isolation (M149).
     frame.setAttribute('allow', 'cross-origin-isolated');
     frame.src = this.url;
     this.#frame = frame;
