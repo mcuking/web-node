@@ -10,7 +10,7 @@ import type { Egress } from './net/egress';
 import { Realm } from './realm';
 import { ModuleLoader } from './loader';
 import * as p from './vfs/posix';
-import { installProject, type FetchLike, type InstallResult } from './npm';
+import { createNpmResponseCache, installProject, type FetchLike, type InstallResult, type ResponseCache } from './npm';
 import { createToolingWrappers } from './tooling/esbuild-bridge';
 
 /** Thrown by `process.exit()` to unwind the call stack back to the runner. */
@@ -179,6 +179,8 @@ export class NodeRuntime {
   #exitCode: number | null = null;
   #nextTickQueue: Array<() => void> = [];
   #nextTickScheduled = false;
+  /** Registry response cache for `npm install`; created lazily, shared by installs. */
+  #npmCache: import('./npm').ResponseCache | undefined;
 
   constructor(opts: RuntimeOptions) {
     // Must run before anything materialises a module: `internal/util.js` (a
@@ -755,11 +757,16 @@ export class NodeRuntime {
       add?: string[];
       /** Persist resolved `add` specs into package.json (default true). */
       save?: boolean;
+      /** Override the registry response cache (defaults to the worker's shared cache). */
+      cache?: ResponseCache;
     } = {},
   ): Promise<InstallResult> {
     const fetchImpl = opts.fetch ?? (typeof fetch === 'function' ? (fetch.bind(globalThis) as unknown as FetchLike) : undefined);
     if (!fetchImpl) throw new Error('npm install requires a fetch implementation');
-    return installProject(this.vfs, {
+    // One cache per runtime instance: persistent (Cache Storage) in the browser,
+    // in-memory under test. Held on the instance so successive installs share it.
+    this.#npmCache ??= opts.cache ?? createNpmResponseCache();
+    const result = await installProject(this.vfs, {
       cwd: opts.cwd ?? this.vfs.cwd,
       fetch: fetchImpl,
       includeDev: opts.includeDev ?? false,
@@ -773,7 +780,17 @@ export class NodeRuntime {
       runScripts: opts.runScripts,
       onOutput: opts.onOutput,
       concurrency: opts.concurrency,
+      cache: opts.cache ?? this.#npmCache,
     });
+    const cache = result.registryCache;
+    if (cache && (cache.hits > 0 || cache.misses > 0)) {
+      opts.onLog?.(
+        `registry cache: ${cache.hits} hit(s), ${cache.misses} miss(es)` +
+          (cache.oversize ? `, ${cache.oversize} too large to cache` : '') +
+          '\n',
+      );
+    }
+    return result;
   }
 
   /** Introspection used by the UI. */

@@ -30,6 +30,7 @@ import type { Vfs } from '../vfs';
 import type { ProcessHost } from '../proc/host';
 import * as p from '../vfs/posix';
 import { createRegistry, type FetchLike, type PackageManifest, type RegistryClient } from './registry';
+import type { ResponseCache, ResponseCacheStats } from './cache';
 import { extractTarball, extractTarballStream, streamOf } from './tarball';
 import { binEntriesFor, writeBinShims, type BinEntry } from './bin';
 import { runDependencyScripts, runRootScripts, DEFAULT_SCRIPT_TIMEOUT_MS, type ScriptOutcome } from './scripts';
@@ -61,6 +62,12 @@ export interface InstallResult {
    * and what (if anything) was written into `package.json`.
    */
   added?: Array<{ name: string; version: string; savedAs: string }>;
+  /**
+   * Registry round trips the persistence cache avoided vs. took, when a cache
+   * was supplied. `hits + misses` is the number of registry requests the install
+   * would have made without it.
+   */
+  registryCache?: ResponseCacheStats;
 }
 
 export interface InstallOptions {
@@ -93,6 +100,12 @@ export interface InstallOptions {
   scriptTimeoutMs?: number;
   /** Streamed script output. */
   onOutput?: (chunk: Uint8Array, stream: 'stdout' | 'stderr') => void;
+  /**
+   * A response cache for the registry client. Reusing packuments and tarballs
+   * across installs (and across reloads, when the store persists) is the bulk
+   * of the speed-up: resolution itself is cheap, the network is not.
+   */
+  cache?: ResponseCache;
   /**
    * How many tarballs may be in flight at once. The resolution walk stays
    * sequential (it is cheap and order-sensitive), but downloads are the slow
@@ -269,7 +282,11 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
   const client: RegistryClient =
     typeof opts.registry === 'object' && opts.registry !== null
       ? opts.registry
-      : createRegistry(opts.fetch, typeof opts.registry === 'string' ? opts.registry : undefined);
+      : createRegistry(
+          opts.fetch,
+          typeof opts.registry === 'string' ? opts.registry : undefined,
+          { cache: opts.cache },
+        );
 
   const pkgPath = p.join(opts.cwd, 'package.json');
   if (!vfs.exists(pkgPath)) throw new Error(`npm install: no package.json found in ${opts.cwd}`);
@@ -309,7 +326,6 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
     log('nothing to install — no dependencies declared');
     return { packages: 0, installed: [], warnings: [], fromLockfile: 0, binLinks: [], lifecycle: [] };
   }
-
   // A locked version that still satisfies the range is reused as-is: no
   // packument fetch, no re-resolution.
   const locked = opts.lockfile === false ? new Map<string, LockedPackage>() : lockedByName(readLockfile(vfs, opts.cwd));
@@ -742,5 +758,6 @@ export async function installProject(vfs: Vfs, opts: InstallOptions): Promise<In
     binLinks: [...bins.written.keys()].sort(),
     lifecycle,
     added,
+    registryCache: client.cacheStats,
   };
 }
