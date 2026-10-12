@@ -225,7 +225,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .resizer:hover::after,
 .resizer:focus-visible::after,
-body.resizing .resizer::after {
+.resizer.dragging::after {
   background: var(--accent);
   box-shadow: 0 0 6px -1px var(--accent);
 }

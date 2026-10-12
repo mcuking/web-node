@@ -939,7 +939,14 @@ function initPanes(): void {
 
   commit();
 
-  const drag = { active: false, kind: 'files' as 'files' | 'editor', startX: 0, startFiles: 0, startEditor: 0 };
+  const drag = {
+    active: false,
+    kind: 'files' as 'files' | 'editor',
+    el: null as HTMLElement | null,
+    startX: 0,
+    startFiles: 0,
+    startEditor: 0,
+  };
 
   const onMove = (event: PointerEvent): void => {
     if (!drag.active) return;
@@ -954,6 +961,8 @@ function initPanes(): void {
   const onUp = (): void => {
     if (!drag.active) return;
     drag.active = false;
+    drag.el?.classList.remove('dragging');
+    drag.el = null;
     document.body.classList.remove('resizing');
     persist();
   };
@@ -970,9 +979,11 @@ function initPanes(): void {
       const width = resolveWidths(fractions, available());
       drag.active = true;
       drag.kind = kind;
+      drag.el = el;
       drag.startX = event.clientX;
       drag.startFiles = width.files;
       drag.startEditor = width.editor;
+      el.classList.add('dragging');
       document.body.classList.add('resizing');
     });
 

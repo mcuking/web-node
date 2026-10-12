@@ -246,6 +246,18 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-12 · M146 —— 修：拖拽分栏线时两根都高亮
+
+唐工反馈：拖一根分栏线时，**另一根也被点亮**。
+
+**根因**：M145 的高亮选择器写的是 `body.resizing .resizer::after`——`body.resizing` 是「正在拖拽」的全局标记（为了让光标在跨过 iframe 时也保持 `col-resize`），但它会用**后代选择器命中全部 `.resizer`**，于是两根都亮。
+
+**改法**：高亮只跟**被拖的那根**绑定——`pointerdown` 时给该元素加 `.dragging`、`pointerup`/`pointercancel` 移除，CSS 改为 `.resizer.dragging::after`；`body.resizing` 只保留全局光标 + iframe `pointer-events:none` 的职责。`drag` 状态里记下当前拖拽元素（`drag.el`）好在抬起时精确摘除类名。
+
+**验证**：本地 `localhost:8111` 实机——拖左分栏线时左线 `::after` = `rgb(94,241,165)`（accent）、右线 `rgba(0,0,0,0)`；反向亦然；抬起后 `body.resizing` 与 `.dragging` 均已清除。
+
+**改动**：`src/ui/style.css`（选择器）、`src/ui/main.ts`（`initPanes` 的 drag 状态 + `.dragging` 类增删）。
+
 ### 2026-10-10 · M145 —— 预览界面三栏可拖拽（文件树 / 编辑器 / 预览区）
 
 唐工要求「demo 里文件树、代码编辑区、右侧预览区，三个地方支持拖拽」。
