@@ -246,6 +246,18 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-12 · M147（阶段 D）—— 并发真线程上限（先取证）
+
+**先取证（真实 Chrome，经 CDP）**：① 每个真线程 boot 自己的 realm，`Runtime.getHeapUsage` 实测 **~4.95 MB JS 堆**（两个线程一致）；runtime worker 自身 9.0MB。② 六个 wasm 模块的**冷编译总耗时 ~3.3ms**（最大的 `wn_openssl` 2.4MB → 1.93ms；`wn_brotli` 828KB → 0.42ms；其余 <0.2ms），`structuredClone(module)` ~0.02ms。→ **“共享已编译的 `WebAssembly.Module` 不划算”用数据排除**（省不到 2ms/线程）；真正的乘数是**内存**（8–16 池 = 40–80MB）。
+
+**交付**：`proc/worker.ts` 新增**并发真线程上限** —— `createWorkerHost` 记录 `liveRealThreads`，达到 `maxRealThreads` 后新 `Worker` **如实降级**为协作式（语义/API 完全相同，只是不并行，与 `crossOriginIsolated` 门同一套哲学）。
+- 默认上限 `defaultMaxRealThreads()` = **`navigator.hardwareConcurrency`**（超核数的线程不增并行度、只增 ~5MB，下限 1）；可用全局 `__WEB_NODE_MAX_THREADS__` 覆盖。
+- `WorkerHost` 暴露 `liveRealThreads`/`maxRealThreads`；`reset()` 归零计数。
+
+**验证**：新增 `test/thread-cap.test.ts`（3 条）——满员后新 worker 走协作式（`constructor.name === 'Worker'`）、真 worker 退出后释放名额、默认上限与全局覆盖。全量 `npx vitest run` **1292 passed / 6 skipped**；typecheck 净；build 绿。
+
+**下一步**：P1 的 `node:sqlite`（真上游 C → wasm）。
+
 ### 2026-10-12 · M147（阶段 C）—— MessagePort 跨 realm 转移
 
 **目标**：让 `postMessage(value, [port])` 在**跨线程（= 跨 realm）**时仍然成立。阶段 B 把 worker 放进了独立 realm，于是端口不能再像同 realm 那样直接交接——而 `jest-worker`（因此 terser/rspack）恰恰靠「把端口回传给池子」来复用 worker。

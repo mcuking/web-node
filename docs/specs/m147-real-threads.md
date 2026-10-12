@@ -71,10 +71,18 @@ does). Verified by `test/port-bridge.test.ts` (two live realms). Remaining edges
 (one message to both a local and a cross-thread port, or one transfer to several
 cross-thread ports) throw loudly rather than guess.
 
-### Phase D — memory & pool limits
+### Phase D — memory & pool limits  ⟨done 2026-10-12⟩
 Each thread boots its own realm (vendored sources + wasm). A 8–16-worker
 `jest-worker` pool would multiply that. Options: share the compiled
 `WebAssembly.Module`s, cap the pool, or lazily boot. Measure first.
+
+Measured (real Chrome, CDP): **~4.95 MB JS heap per thread**; all six wasm
+modules compile cold in **~3.3 ms total** (2.4 MB openssl = 1.93 ms). So sharing
+compiled `WebAssembly.Module`s saves ~2 ms/thread — **ruled out by data**. The
+multiplier is memory, so the lever shipped is a **concurrent real-thread cap**:
+`createWorkerHost` tracks `liveRealThreads` and, past `maxRealThreads` (default
+`navigator.hardwareConcurrency`, overridable via `__WEB_NODE_MAX_THREADS__`),
+routes new `Worker`s to the cooperative path — correct, just not parallel.
 
 ## Risks
 

@@ -89,6 +89,10 @@ export interface WorkerHost {
   create(req: WorkerRequest): WorkerHandle;
   /** Live, ref'd workers — they keep the run alive, like a ref'd thread. */
   readonly activeWorkers: number;
+  /** How many workers are currently running on a **real** thread (see the cap). */
+  readonly liveRealThreads: number;
+  /** The concurrent real-thread ceiling this host was built with. */
+  readonly maxRealThreads: number;
   /** `setEnvironmentData`/`getEnvironmentData` storage, shared per process. */
   readonly environmentData: Map<unknown, unknown>;
   /** Stop every worker (called between runs, like tearing a process down). */
@@ -115,6 +119,15 @@ export interface WorkerHostDeps {
    * Injectable so tests can pin either path.
    */
   realThreads?: boolean;
+  /**
+   * Upper bound on **concurrently live** real threads. Each real thread boots its
+   * own realm (~5 MB of JS heap measured; wasm compile is negligible), so an
+   * unbounded `jest-worker`/`terser` pool would multiply that. Beyond the cap a
+   * `Worker` falls back to the cooperative same-loop path (correct, just not
+   * parallel) — the same honest degradation as the isolation gate. Defaults to
+   * {@link defaultMaxRealThreads}.
+   */
+  maxRealThreads?: number;
   /** Spawn the host worker for a real thread. Defaults to the bundled entry. */
   spawnRealWorker?(request: WorkerRequest): SpawnedThread;
 }
@@ -131,6 +144,19 @@ class WorkerExit extends Error {
 
 /** Node's first worker thread id is 2 (0 is the main thread, 1 is reserved). */
 const FIRST_THREAD_ID = 2;
+
+/**
+ * Default ceiling on live real threads: the core count (a thread past it adds
+ * ~5 MB of realm but no parallelism), with a floor of 1 for tiny/unknown hosts.
+ */
+export function defaultMaxRealThreads(): number {
+  const override = (globalThis as { __WEB_NODE_MAX_THREADS__?: unknown }).__WEB_NODE_MAX_THREADS__;
+  if (typeof override === 'number' && Number.isFinite(override) && override >= 1) {
+    return Math.floor(override);
+  }
+  const cores = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator?.hardwareConcurrency;
+  return Math.max(1, typeof cores === 'number' && cores > 0 ? cores : 4);
+}
 
 /**
  * How long the exit check waits after the last port/stdin activity. Port
@@ -169,6 +195,9 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
   // Whether a worker is a real Web Worker (its own thread/realm) or the
   // cooperative same-loop registry. Real threads need cross-origin isolation.
   const realThreads = deps.realThreads ?? realThreadsAvailable();
+  const maxRealThreads = deps.maxRealThreads ?? defaultMaxRealThreads();
+  /** Live real threads; the cap keeps a runaway pool from multiplying realms. */
+  let liveRealThreads = 0;
 
   class Worker implements WorkerHandle {
     readonly threadId: number;
@@ -735,13 +764,19 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
 
   return {
     create(req: WorkerRequest): WorkerHandle {
-      if (realThreads) {
+      if (realThreads && liveRealThreads < maxRealThreads) {
         const spawn = deps.spawnRealWorker ?? defaultSpawnRealWorker;
         const worker = new RealWorker(req, { vfs: deps.vfs, realm: () => deps.realm(), spawn });
+        liveRealThreads += 1;
+        worker.onExit(() => {
+          liveRealThreads = Math.max(0, liveRealThreads - 1);
+        });
         workers.add(worker);
         defer(() => worker.start(environmentData));
         return worker;
       }
+      // At the cap (or not isolated): the cooperative same-loop path. Correct and
+      // API-identical, just not parallel — the same degradation as the gate.
       const worker = new Worker(req);
       defer(() => worker.start());
       return worker;
@@ -751,10 +786,15 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
       for (const w of workers) if (w.refed && !w.exited) n += 1;
       return n;
     },
+    get liveRealThreads(): number {
+      return liveRealThreads;
+    },
+    maxRealThreads,
     environmentData,
     reset(): void {
       for (const w of [...workers]) w.terminate();
       workers.clear();
+      liveRealThreads = 0;
     },
   };
 }
