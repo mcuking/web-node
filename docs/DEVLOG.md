@@ -262,6 +262,10 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 **范围边界（已文档）**：跨线程 `MessagePort` 转移 = **阶段 C**（现会**响亮抛错**，不静默克隆）；嵌套 `Worker` 不支持；`fs.watch` 在线程侧看不到父侧写入。
 
+**真机验证（`http://localhost:8123/`，`python3 -m http.server` serve `dist/`，无 COOP/COEP，由 SW 注入隔离）**：① 页面 `crossOriginIsolated=true`；② CDP `/json/list` 看到 **`thread.worker-*.js` 独立 worker target**（= 真线程）；③ Node demo（`worker_threads.Worker` 里程碑 57 + stdio 里程碑 59）输出正确：`events : online message:{...isMainThread:false...} re:ping exit:0`、`stdio : stdin:ping to the worker`、`worker: hi over stdout`；④ **并行证据**：在隔立的 runtime worker 里起一个忙 600ms 的 worker，runtime worker 自身事件循环最大延迟仅 **16ms**（单线程则应为 ~600ms）。
+
+**真机修复**：首轮真机发现里程碑 59 的 stdin 无输出——线程侧未建 `process.stdin`，父侧 `stdin` 帧被丢。修法：在 `bootstrapThread` 用 realm 的 `stream.Readable` 建 stdin 并 `proc.stdin=`，把 `stdin`/`stdin-end` 帧 push 进去（与协作式 worker 同构）；补 1 条隔离测。
+
 **下一步（阶段 C）**：`parentPort` 做成线程内真 `MessagePort`、支持跨线程端口转移；阶段 D：每线程 realm 的内存/池上限。
 
 ### 2026-10-12 · M147（阶段 A）—— 真线程 VFS 桥：worker 通过共享内存同步读写父侧文件树

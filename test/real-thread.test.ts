@@ -388,6 +388,22 @@ parentPort.on('message', (m) => parentPort.postMessage({ got: m }));
     expect(code === 0 || code === -1).toBe(true);
   });
 
+  it('delivers parent stdin into the worker process.stdin', async () => {
+    const { frames, done, port } = bootWorker(`
+const { parentPort } = require('worker_threads');
+const proc = require('process');
+proc.stdin.on('data', (d) => parentPort.postMessage({ stdin: Buffer.from(d).toString().trim() }));
+proc.stdin.on('end', () => process.exit(0));
+`);
+    await flush();
+    port.postMessage({ t: 'stdin', data: enc('ping\n') } satisfies ParentToThread);
+    port.postMessage({ t: 'stdin-end' } satisfies ParentToThread);
+    const code = await done;
+    await flush();
+    expect(frames).toContainEqual({ t: 'message', value: { stdin: 'ping' } });
+    expect(code).toBe(0);
+  });
+
   it('refuses a transferList over the thread boundary (Phase C)', async () => {
     const { frames, done } = bootWorker(`
 const { parentPort, MessageChannel } = require('worker_threads');

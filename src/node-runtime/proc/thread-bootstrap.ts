@@ -86,6 +86,16 @@ export function bootstrapThread(init: ThreadInitMessage, deps: ThreadBootstrapDe
   const proc = runtime.process as Record<string, unknown>;
   proc.execArgv = init.execArgv;
 
+  // The worker's stdin: a Readable that the parent's `worker.stdin` feeds over
+  // the host port. `process.stdout`/`stderr` are already wired to the onStdout
+  // / onStderr callbacks above, so only stdin needs building here — the runtime
+  // gives a plain `process` no per-thread stdin.
+  const streams = runtime.realm.require('stream') as {
+    Readable: new (opts: { read(): void }) => Record<string, unknown> & { push(chunk: unknown): boolean };
+  };
+  const stdin = new streams.Readable({ read() {} });
+  proc.stdin = stdin;
+
   const parentPort = createParentPort(runtime, send);
   const workerThreads = createWorkerThreadsView(runtime, init, parentPort);
   runtime.loader.setBuiltinOverrides({
@@ -94,7 +104,6 @@ export function bootstrapThread(init: ThreadInitMessage, deps: ThreadBootstrapDe
   });
 
   // The parent's frames arrive on the same host port the worker posts on.
-  const stdin = proc.stdin as (Emitter & { push?: (c: unknown) => void }) | undefined;
   const hostPort = init.messagePort as unknown as {
     addEventListener(type: 'message', cb: (event: { data: unknown }) => void): void;
     start?: () => void;
@@ -107,10 +116,10 @@ export function bootstrapThread(init: ThreadInitMessage, deps: ThreadBootstrapDe
         parentPort.emit('message', frame.value);
         return;
       case 'stdin':
-        stdin?.push?.(frame.data);
+        stdin.push(frame.data);
         return;
       case 'stdin-end':
-        stdin?.push?.(null);
+        stdin.push(null);
         return;
       case 'terminate':
         // The browser worker's own `terminate()` is authoritative; this frame is
