@@ -246,6 +246,38 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-12 · M151 —— 浏览器能力探测 + 降级提示（P2b）
+
+**目标**（P2b，取自 `docs/webcontainer-gap-analysis.md`）：不再在缺特性的浏览器上**不透明失败**——探测 `crossOriginIsolated` / `SharedArrayBuffer` / OPFS，把当前模式**说清楚**，缺什么就给什么降级提示。
+
+**交付**：`src/ui/capabilities.ts`——`detectCapabilities(scope = globalThis)`（纯函数，可单测）、`capabilityIssues(caps)`、`capabilityMessage(issue)`。`realParallelism = crossOriginIsolated && typeof SharedArrayBuffer === 'function'`（**只查构造函数不够**——非隔离 realm 的 `SharedArrayBuffer` 构造函数即便存在，构造时也会抛）；`persistence = typeof navigator.storage.getDirectory === 'function'`。缺失隔离 → 明说 SAB 不可用、rspack/worker_threads 无真并行；缺失 OPFS → 明说项目不持久（仅内存）。`src/ui/main.ts` 在 `ready` 后把 `SAB: on/off` 追加到 `id="facts"` 状态行，并对每个缺失能力往终端写一条 `[capability] …` 警示。
+
+**验证**：dev 状态行 → `… · runtime: isolated origin · SAB: on`（无警示）；单测 `test/capabilities.test.ts`（6）覆盖全能力 / 仅缺隔离 / 仅缺 OPFS / 全缺 / 默认 scope 不抛 / 每条 issue 都有文案。
+
+### 2026-10-12 · M150 —— npm registry 响应缓存（`Cache Storage`，持久、跨 reload）
+
+**目标**（P2a，取自 `docs/webcontainer-gap-analysis.md`）：npm 安装每次都把 110 个请求（packument + tarball）全量打网络。给同一 registry 的响应加**持久缓存**，把重复安装（和 reload 后重装）的耗时从 ~20s 压到亚秒级。
+
+**设计**：缓存放进 `FetchLike` 缝隙**之后**——`createRegistry(fetchImpl, registry, { cache })`：命中缓存直接返回，否则 fetch 后写回。backend 是 **Cache Storage API**（`caches.open('web-node-npm')`），不存在时退化为内存 `Map`。TTL：packument 默认 5 分钟（可配 `packumentTtlMs`）；**tarball 永不失效**（URL 钉了版本、内容不可变，TTL=0）。单条 body 超上限（默认 8 MiB）不入库但仍返回。缓存 **per-runtime-instance**（`createNpmResponseCache`）——不共享全局单例，避免跨 runtime/跨测试污染。
+
+**关键坑（真机 vs 单测不一致逼出）**：Cache Storage API **只接受合法的绝对 URL 作 key**，不接受自定义 scheme（原用 `tgz:<url>` / `pkg:<name>`），`put` 会抛异常——而 `put` 的 try/catch 把它静默吞了，于是「看着有缓存名、命中恒 0」。修：把逻辑 key 映到合成的 `https://web-node-npm.invalid/<encodeURIComponent(key)>`，`put`/`match` 都用它；单测加断言该 key 可 `new URL()` 解析。
+
+**验证**（dev server，真机）：首次 install `22457ms`（`0 hit / 110 miss`）→ 立刻再装 `817ms`（`80 hit / 0 miss`，80 = tarball 数）；**reload 后再装仍 `80 hit / 0 miss`**（`~800ms`）。缓存名 `web-node-npm` 跨 reload 存活。
+
+**单测**：`test/npm-cache.test.ts`（7）——第二 client 命中不重取、packument TTL 过期、tarball 永不过期、超上限不入库、无 store 时完全不缓存、Cache-Storage-like 往返（并断言 key 是合法绝对 URL）、无 API 时降级为 no-op。
+
+### 2026-10-12 · M149.1 —— 修正：隔离 frame 不能用 `credentialless`（会让 OPFS 变成临时的）
+
+**症状**：M149 的隔离 frame 上线后，**只要走隔离运行时，项目就不持久**——每次 reload 都回到 fresh project，OPFS 里的 `web-node-project` 目录消失。同一 origin（Pages 回退路径）下正常。
+
+**根因（最小复现逼出）**：**`credentialless` 的跨源 iframe 拿到的是「临时（ephemeral）存储分区」**。往 OPFS 写完，同一次加载内读得到；reload 后整个分区被丢弃。运行时恰恰把项目 OPFS 放在这个 frame 里，于是每次加载都被清空。最小复现（父页嵌跨源子页，子页写 OPFS marker）：`credentialless` → 每次 `prev=null`；**普通跨源**（带 CORP）→ `prev` 跨加载保留。
+
+**修**：
+- 隔离 frame **去掉 `credentialless` 属性**（`src/client/transport.ts`）。仍保留 `allow="cross-origin-isolated"`（跨源子 frame 不继承父页的受限跨源隔离，必须显式委派；M149 已证）。frame 依旧在自己的 origin 上（读不到 shell 的 cookie/storage/凭证），只是不再被临时分区。
+- 隔离 host 文档（`/runtime-host.html`）在**静态宿主**上缺 `Cross-Origin-Resource-Policy` → 浏览器虽加载 frame 但不视为跨源隔离（`frame.crossOriginIsolated=false`）。dev 由 `plugins/dev-subdomains.ts` 补 CORP；`public/sw.js` 的 `withIsolationHeaders` 对 `/runtime-host.html` 也补 CORP（自托管通配域名部署时需要）。两处都**只在缺失时补**，不覆盖宿主已有的头。
+
+**修正后语义**：`id="facts"` 行 → `runtime: isolated origin`；frame `crossOriginIsolated=true` 且 OPFS marker 跨 reload 保留；`npm install` → `node index.js`（含 sqlite）→ 预览 + HMR（改 `src/App.vue` 实时生效）全通。
+
 ### 2026-10-12 · M149 —— 运行时隔离模型：用户代码跑在独立 origin 的 credentialless frame
 
 **目标**：把「执行用户代码、并拥有项目 OPFS」的运行时从**应用 shell 自己的 origin** 挪到一个**独立 origin** 上——对齐 WebContainer 的 `*.webcontainer-api.io` credentialless frame。在此**之前**，运行时（及其 OPFS）与整个应用同源，用户代码能摸到 shell 的 cookie / storage / 凭证；现在不能。

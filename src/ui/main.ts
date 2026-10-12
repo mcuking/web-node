@@ -17,6 +17,7 @@ import {
   type TemplateId,
 } from '../projects';
 import { previewUrl as buildPreviewUrl, previewPortFromHost, prefixPreviewUrl } from './preview-url';
+import { capabilityIssues, capabilityMessage, detectCapabilities } from './capabilities';
 import { runtimeHostFrame } from './runtime-host-url';
 import {
   defaultFractions,
@@ -63,10 +64,14 @@ const bootTiming: BootTiming = {
  *
  * When an independent origin is available — the dev server on loopback
  * (`rt.localhost`), or a configured wildcard domain (`rt.<domain>`) — the
- * runtime that executes user code is moved into a `credentialless` iframe on
- * that origin, so it cannot reach this page's cookies, storage or credentials.
- * `RuntimeHostBridge` owns that frame and mints a transport per worker name; the
- * app shell only ever sees the same `RuntimeClient` it always did.
+ * runtime that executes user code is moved into an iframe on that origin, so it
+ * cannot reach this page's cookies, storage or credentials. `RuntimeHostBridge`
+ * owns that frame and mints a transport per worker name; the app shell only ever
+ * sees the same `RuntimeClient` it always did.
+ *
+ * The frame is deliberately **not** `credentialless`: that would give it an
+ * ephemeral storage partition and throw away the runtime's OPFS (every project)
+ * on each load. A plain separate origin keeps OPFS durable. See `transport.ts`.
  *
  * Without such an origin (a sub-path deploy with no DNS wildcard, e.g. GitHub
  * Pages) the runtime stays on this origin, exactly as before.
@@ -1174,6 +1179,7 @@ client.on('ready', (runtimeInfo) => {
     bootTiming.realmMs = runtimeInfo.timing.realmMs;
   }
   bootEl.textContent = runtimeInfo.restored ? 'runtime ready (restored from OPFS)' : 'runtime ready (fresh project)';
+  const caps = detectCapabilities();
   factsEl.textContent = [
     `${runtimeInfo.bindings.length} bindings`,
     `${runtimeInfo.wasmModules.length + (runtimeInfo.deferredWasmModules?.length ?? 0)} wasm modules`,
@@ -1181,7 +1187,14 @@ client.on('ready', (runtimeInfo) => {
     runtimeInfo.persistSupported ? 'OPFS: on' : 'OPFS: unavailable',
     runtimeInfo.persistence === 'fs-worker' ? 'sync fs: durable' : 'sync fs: async',
     hostBridge ? (hostBridge.isolated ? 'runtime: isolated origin' : 'runtime: isolated frame (unisolated)') : 'runtime: same origin',
+    `SAB: ${caps.realParallelism ? 'on' : 'off'}`,
   ].join('  ·  ');
+  // Degraded-mode notices (P2b): name the missing capability instead of failing
+  // opaquely. The runtime reports what *it* can do, but the shell realm decides
+  // SharedArrayBuffer and drives which mode the app is in.
+  for (const issue of capabilityIssues(caps)) {
+    writeTerminal(`[capability] ${capabilityMessage(issue)}\n`, 'err');
+  }
   writeTerminal('web-node runtime ready.\n', 'ok');
   if (runtimeInfo.wasmModules.length) {
     writeTerminal('native→wasm modules: ' + runtimeInfo.wasmModules.join(', ') + '\n', 'sys');
@@ -1632,7 +1645,7 @@ async function boot(): Promise<void> {
   if (hostBridge) {
     writeTerminal(
       hostBridge.isolated
-        ? 'runtime isolation: user code runs in a credentialless frame on an independent origin.\n'
+        ? 'runtime isolation: user code runs in an iframe on an independent origin.\n'
         : 'runtime isolation: frame up, but the origin is not cross-origin isolated (no SharedArrayBuffer).\n',
       hostBridge.isolated ? 'sys' : 'err',
     );
