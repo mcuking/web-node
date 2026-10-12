@@ -25,6 +25,7 @@ import { workerThreadsSpec } from './worker-threads';
 import { cryptoSpec } from './crypto';
 import { dnsSpec, dnsPromisesSpec } from './dns';
 import { zlibSpec } from './zlib';
+import { sqliteSpec } from './sqlite';
 import { unsupportedSpecs } from './unsupported';
 import { processSpec } from './process';
 import { moduleSpec } from './module';
@@ -70,6 +71,8 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   dnsSpec,
   dnsPromisesSpec,
   zlibSpec,
+  // M148: `node:sqlite` — the real upstream SQLite amalgamation compiled to wasm
+  sqliteSpec,
   // `internal/deps/undici/undici` is a two-line shim: only
   // `createFastMessageEvent` is reachable from the vendored graph.
   undiciSpec,

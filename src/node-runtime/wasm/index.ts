@@ -14,6 +14,7 @@ import wnZlibUrl from './artifacts/wn_zlib.wasm?url';
 import wnHistogramUrl from './artifacts/wn_histogram.wasm?url';
 import wnBrotliUrl from './artifacts/wn_brotli.wasm?url';
 import wnZstdUrl from './artifacts/wn_zstd.wasm?url';
+import wnSqliteUrl from './artifacts/wn_sqlite.wasm?url';
 import { instantiateWasm, type WasmExports } from './loader';
 import { installWasm, wasmLoaded } from './registry';
 
@@ -45,6 +46,12 @@ export const DEFERRED_WASM_MODULES: Record<string, string> = {
   wn_histogram: wnHistogramUrl,
   wn_brotli: wnBrotliUrl,
   wn_zstd: wnZstdUrl,
+  // `node:sqlite` (M148): the real upstream amalgamation (~1.8 MB raw / 677 KB
+  // gzip). Its API is synchronous, so it is loaded in the background at boot and
+  // awaited before any user code runs (see the worker), never on the critical
+  // path. Not installed ⇒ `node:sqlite` throws a typed error instead of a half-
+  // initialised database.
+  wn_sqlite: wnSqliteUrl,
 };
 
 export interface LoadWasmOptions {

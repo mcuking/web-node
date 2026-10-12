@@ -246,6 +246,26 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-12 · M148 —— `node:sqlite`（真上游 SQLite 编 wasm）
+
+**目标**：把最后一个「需要 bundled native」的 unsupported 模块落地——`node:sqlite` 的同步 API 跑在**真上游 SQLite amalgamation** 上（阶段 H 的同一套 native→wasm 打法）。
+
+**为什么可行**：Node 的 `node:sqlite` 就是 `deps/sqlite/sqlite3.c` 上的一层壳。把**同一份未改动的 amalgamation** 用 wasi-sdk 编成 wasm（`native/src/wn_sqlite.c` 提供薄 ABI），SQL 语义（亲和性、类型、约束、`STRICT` 表、JSON/日期函数、FTS5/RTREE）就与真 Node 逐字一致。
+
+**交付**：
+- `native/src/wn_sqlite.c` + `native/build.mjs`（注册 `wn_sqlite`；defines 对齐 `deps/sqlite/sqlite.gyp`：`SQLITE_OS_OTHER=1`（自带内存 VFS）、`SQLITE_THREADSAFE=0`、FTS3/FTS5/RTREE/GEOPOLY/MATH/PERCENTILE/DBSTAT/COLUMN_METADATA、`SQLITE_OMIT_LOAD_EXTENSION` 等）→ `wasm/artifacts/wn_sqlite.wasm`（**1842 KB / gzip 677 KB**，浏览器按内容哈希懒加载，独立 chunk）。
+- `bindings/sqlite.ts`：`wn_sqlite` 的 TS 包装（打开/准备/绑定/步进/取列，scratch 缓冲往返，`bind*`/`column*`/`changes`/`lastInsertRowid`/`file` 镜像），并把 `sqlite` 从 `UNSUPPORTED_BINDINGS` 移入 `REGISTRY`。
+- `builtins/sqlite.ts`：面向用户的 `DatabaseSync`/`StatementSync`（`exec`/`prepare`/`run`/`get`/`all`/`iterate`、命名与匿名参数、`setReadBigInts`/`setAllowBareNamedParameters`、事务跟踪、`constants`）；会话/变更集、`backup`、用户自定义函数一律**响亮抛错**。
+- **持久化**：浏览器没有 POSIX 文件系统，数据库落在模块内存 VFS；打开/关闭时按路径和**运行时 VFS 文件**互转，于是 `new DatabaseSync('/project/app.db')` 是真文件、reload 后仍在。
+
+**对齐细节（差分语料逼出来的）**：
+- 错误一律是**普通 `Error`**（`name='Error'`）+ `code='ERR_SQLITE_ERROR'`（Node 不导出 `SqliteError` 类）；未知命名参数是 `ERR_INVALID_STATE`。
+- `setReadBigInts`/`setAllowBareNamedParameters` **返回 `undefined`**（不是 `this`），链式 `.all()` 会炸 —— 与真 Node 一致。
+- 每个 JS `number` 都用 `sqlite3_bind_double` 绑（不是 int64）；行对象是 **null 原型**。
+- `close()` 走 `sqlite3_close_v2`（有未 finalize 的语句也能关，Node 即如此）——`sqlite3_close` 会返 `SQLITE_BUSY`。
+
+**验证**：新差分语料 `tools/sqlite-probe.cjs`（版本、类型往返、命名参数、聚合/JSON/字符串函数、事务、bigint、iterate、错误码、唯一约束、FTS5、JSON round-trip）先在真 Node v26.9.0 产出 `test/fixtures/sqlite.json`，再在 web-node 里跑同一程序——**逐字段一致**（`test/sqlite.test.ts` 5 条，含 4 条聚焦断言）。`behavior-smoke` 的 sqlite 偏差项删除（现已实现、不再抛错）。`npx vitest run` **1297 passed / 6 skipped** · `npm run typecheck` 净 · `npm run build` 绿（`wn_sqlite-*.wasm` 1.88MB 独立 chunk、`thread.worker-*.js` 689 kB）。
+
 ### 2026-10-12 · M147（阶段 D）—— 并发真线程上限（先取证）
 
 **先取证（真实 Chrome，经 CDP）**：① 每个真线程 boot 自己的 realm，`Runtime.getHeapUsage` 实测 **~4.95 MB JS 堆**（两个线程一致）；runtime worker 自身 9.0MB。② 六个 wasm 模块的**冷编译总耗时 ~3.3ms**（最大的 `wn_openssl` 2.4MB → 1.93ms；`wn_brotli` 828KB → 0.42ms；其余 <0.2ms），`structuredClone(module)` ~0.02ms。→ **“共享已编译的 `WebAssembly.Module` 不划算”用数据排除**（省不到 2ms/线程）；真正的乘数是**内存**（8–16 池 = 40–80MB）。

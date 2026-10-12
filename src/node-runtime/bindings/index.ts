@@ -39,6 +39,7 @@ import { heapUtilsBinding, profilerBinding, v8Binding } from './v8';
 import { contextifyBinding } from './contextify';
 import { wnStubBinding } from './wn_stub';
 import { zlibBinding } from './zlib';
+import { sqliteBinding } from './sqlite';
 
 /** The whitelist of internal bindings this runtime implements. */
 const REGISTRY: Record<string, BindingFactory> = {
@@ -85,6 +86,8 @@ const REGISTRY: Record<string, BindingFactory> = {
   wn_stub: wnStubBinding,
   // 真 deps/zlib 编 wasm（M116）：deflate/gzip/inflate + 编解码参数。
   zlib: zlibBinding,
+  // 真 deps/sqlite 编 wasm（M148）：`node:sqlite` 的同步 API。
+  sqlite: sqliteBinding,
 };
 
 /**
@@ -132,7 +135,6 @@ export const UNSUPPORTED_BINDINGS = new Set([
   'block_list',
   'crypto',
   'ffi',
-  'sqlite',
   'wasi',
   'wasm_web_api',
   'webstorage',

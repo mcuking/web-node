@@ -23,14 +23,12 @@ import { NodeRuntime } from '../src/node-runtime/runtime';
 
 /** observation key -> why web-node legitimately differs from real Node. */
 const DEVIATIONS: Record<string, string> = {
-  // No HTTP/2 stack (HPACK + frames/streams) and no bundled native SQLite. Both
-  // modules still *load* (safe for side-effect imports) and throw a typed
-  // ERR_WEB_NODE_NOT_IMPLEMENTED on use — see builtins/unsupported.ts. If either
-  // is ever implemented these entries stop matching and the third test fails,
-  // forcing the deviation to be deleted.
+  // No HTTP/2 stack (HPACK + frames/streams). It still *loads* (safe for
+  // side-effect imports) and throws a typed ERR_WEB_NODE_NOT_IMPLEMENTED on use
+  // — see builtins/unsupported.ts. If it is ever implemented this entry stops
+  // matching and the third test fails, forcing the deviation to be deleted.
   'http2:createServer:call': 'node:http2 is not implemented in the tab',
   'http2:getDefaultSettings:call': 'node:http2 is not implemented in the tab',
-  'sqlite:DatabaseSync:new': 'node:sqlite needs a bundled native SQLite',
   'trace_events:createTracing': 'V8 tracing does not exist in the tab (node:trace_events loads, throws typed on use)',
 };
 

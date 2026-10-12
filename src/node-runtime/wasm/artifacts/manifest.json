@@ -10,9 +10,9 @@
     "openssl": "3.5.8"
   },
   "modules": {
-    "wn_openssl.wasm": {
-      "bytes": 2483145,
-      "sha256": "ca01076df0cb7b5ff622ff23b6291fa769b77e69d139c85a99ca70881fb0e4b8"
+    "wn_sqlite.wasm": {
+      "bytes": 1885989,
+      "sha256": "0f3079002f957b7c831c7da3380bd973359d5ab02b3c98b613e0d1bfa5d44caf"
     }
   }
 }

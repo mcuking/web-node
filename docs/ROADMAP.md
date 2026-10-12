@@ -759,7 +759,7 @@
   - 实现：`install.ts` 增 `InstallOptions.add/save` + `parseAddSpec()` + `saveRangeFor()`（裸名/tag/精确版本 → `^<resolved>`，显式范围原样保留），装完在构建 lockfile 前写回 `rootPkg.dependencies`，结果入 `InstallResult.added`；`add`/`save` 经 runtime→worker→client 透传；UI 加「Add dependency」按钮 + `promptDialog` + 样式。
   - 验证：单测 +6（`test/npm.test.ts`，40 passed）；typecheck 净 · vitest **1228 passed / 3 skipped** · build 成功（worker 785.68 kB）；**真机**（`app60.localhost`）点按钮装 `left-pad` → `+ left-pad@1.3.0` / 写回 `^1.3.0` / reload 后仍在（OPFS）。
 
-- [~] **M147 · `worker_threads` 换真 Web Worker（真并行）** —— P0，取自 `docs/webcontainer-gap-analysis.md`
+- [x] **M147 · `worker_threads` 换真 Web Worker（真并行）** ✅ 2026-10-12 —— P0，取自 `docs/webcontainer-gap-analysis.md`
   - 目标：让 `worker_threads.Worker` 在 `crossOriginIsolated` 下跑在**真 Web Worker**（真多核并行），非隔离环境**如实降级**为现有协作式路径。规划见 `docs/specs/m147-real-threads.md`（四阶段）。
   - 价值：webpack/rspack 多核压缩（`jest-worker`/`terser`）、真 `fork`/`cluster` 并行——补上 WebContainer「1 进程 = 1 worker」的唯一硬优势。
   - **阶段 A ✅ 2026-10-12**（同步 VFS 桥）：`thread-protocol.ts`（帧格式 + op 码表）、`vfs/remote.ts`（`RemoteVfs implements Vfs`，线程侧，本地解析 cwd + 错误重建）、`vfs/remote-server.ts`（`serveVfsChannel` + 纯函数 `applyVfsCall`，父侧唯一 owner）。验证：`test/remote-vfs.test.ts` 18 条 + 真 `node:worker_threads` 端到端。
@@ -767,6 +767,11 @@
   - **阶段 C ✅ 2026-10-12**（跨 realm 端口转移）：`sync/port-bridge.ts`（链接描述符 + `PortBridgeApi`）、`bindings/messaging.ts` 跨 realm 桥（proxy 句柄 / group 半边 / `dispatch` 分流 / 关闭传播 / `__ports`）、`thread-protocol.ts` 新增 `{t:'port'}` 帧（无端口消息保持旧帧）、线程侧 `parentPort` 变真 `MessagePort` 并自动 `start()`、`real-worker.ts` 父侧经 `__ports` 驱动。验证：`test/port-bridge.test.ts` 4 条（两个真 realm 互联：普通消息 / 转移并双向通信 / 回传 / 关闭传播）+ `real-thread.test.ts` 更新；`vitest` **1289 passed / 6 skipped**（无未捕获错误）· typecheck 净 · build 绿。
   - **阶段 D ✅ 2026-10-12**（并发真线程上限，先取证）：实测每线程 realm ~**4.95MB** JS 堆、六个 wasm 冷编译共 ~3.3ms（→ 共享已编译 Module 用数据排除）；`createWorkerHost` 增 `liveRealThreads` 计数与 `maxRealThreads` 上限（默认 `navigator.hardwareConcurrency`，可用 `__WEB_NODE_MAX_THREADS__` 覆盖），超限新 `Worker` 如实降级为协作式。验证：`test/thread-cap.test.ts` 3 条；`vitest` **1292 passed / 6 skipped** · typecheck 净 · build 绿。
   - 状态：四阶段全部完成。
+
+- [x] **M148 · `node:sqlite`（真上游 SQLite 编 wasm）** ✅ 2026-10-12
+  - 目标：把最后一个「需要 bundled native」的 unsupported 模块落地——`node:sqlite` 的同步 API 跑在**真上游 SQLite amalgamation** 上（阶段 H 的 native→wasm 打法）。
+  - 实现：`native/src/wn_sqlite.c`（薄 ABI）+ `native/build.mjs` 注册 `wn_sqlite`（defines 对齐 `deps/sqlite/sqlite.gyp`），`bindings/sqlite.ts`（wasm 包装，并把 `sqlite` 从 `UNSUPPORTED_BINDINGS` 移入 `REGISTRY`），`builtins/sqlite.ts`（`DatabaseSync`/`StatementSync` 同步面；会话/变更集、`backup`、用户自定义函数响亮抛错）。浏览器无 POSIX 文件系统 → 数据库落模块内存 VFS，打开/关闭时与运行时 VFS 文件互转（命名库 reload 后仍在）。
+  - 验证：差分语料 `tools/sqlite-probe.cjs` 在真 Node v26.9.0 产出 `test/fixtures/sqlite.json`，web-node 跑同一程序**逐字段一致**（`test/sqlite.test.ts` 5 条）；`vitest` **1297 passed / 6 skipped** · typecheck 净 · build 绿（`wn_sqlite-*.wasm` 1.88MB 独立 chunk）。
 
 ---
 

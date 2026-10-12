@@ -76,6 +76,7 @@ const zlibDir = join(nodeSrc, 'deps', 'zlib');
 const histogramDir = join(nodeSrc, 'deps', 'histogram');
 const brotliDir = join(nodeSrc, 'deps', 'brotli');
 const zstdDir = join(nodeSrc, 'deps', 'zstd');
+const sqliteDir = join(nodeSrc, 'deps', 'sqlite');
 const opensslSrcDir = join(nodeSrc, 'deps', 'openssl', 'openssl');
 /** OpenSSL must be configured+made, so it builds in a scratch dir (gitignored). */
 const opensslBuildDir = join(here, '.openssl-build');
@@ -219,6 +220,34 @@ const MODULES = {
     // 会写 19）。wasm 模块没有 OS 身份，就固定用 zlib 自己的默认值；探针在比对时
     // 会把这一字节归一（它是平台元数据，不是数据）。
     defines: ['-DDYNAMIC_CRC_TABLE', '-DZLIB_CONST', '-DOS_CODE=3'],
+  },
+  wn_sqlite: {
+    // `native/src/wn_sqlite.c` 是薄包装（+ 纯内存 VFS）；其余是**原封不动的上游
+    // `deps/sqlite/sqlite3.c`**（官方 amalgamation，与 Node 同一份）。宏与 Node 的
+    // `deps/sqlite/sqlite.gyp` 逐条对齐，于是 SQL 语义与真 Node 一致。
+    //
+    // `SQLITE_OS_OTHER=1`：不编 unix VFS，改由包装里的 `sqlite3_os_init()` 注册
+    // 内存 VFS（SQLITE_OS_OTHER 的契约）。`SQLITE_THREADSAFE=0`：wasm 单线程。
+    sources: [join(srcDir, 'wn_sqlite.c'), join(sqliteDir, 'sqlite3.c')],
+    include: [sqliteDir, srcDir],
+    defines: [
+      '-DSQLITE_OS_OTHER=1',
+      '-DSQLITE_THREADSAFE=0',
+      '-DSQLITE_OMIT_LOAD_EXTENSION',
+      '-DSQLITE_DEFAULT_MEMSTATUS=0',
+      '-DSQLITE_ENABLE_COLUMN_METADATA',
+      '-DSQLITE_ENABLE_DBSTAT_VTAB',
+      '-DSQLITE_ENABLE_FTS3',
+      '-DSQLITE_ENABLE_FTS3_PARENTHESIS',
+      '-DSQLITE_ENABLE_FTS5',
+      '-DSQLITE_ENABLE_GEOPOLY',
+      '-DSQLITE_ENABLE_MATH_FUNCTIONS',
+      '-DSQLITE_ENABLE_PERCENTILE',
+      '-DSQLITE_ENABLE_PREUPDATE_HOOK',
+      '-DSQLITE_ENABLE_RBU',
+      '-DSQLITE_ENABLE_RTREE',
+      '-DSQLITE_ENABLE_SESSION',
+    ],
   },
   wn_openssl: {
     // OpenSSL (M119). Unlike the other modules this is not a flat source list:
