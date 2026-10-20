@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>OPFS inspector / clear</title>
+<pre id="out">working…</pre>
+<script type="module">
+  const out = document.getElementById('out');
+  const log = (...a) => { out.textContent += '\n' + a.join(' '); };
+  const root = await navigator.storage.getDirectory();
+
+  async function du(dir, prefix = '') {
+    let total = 0, files = 0, dirs = 0;
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind === 'file') {
+        const f = await handle.getFile();
+        total += f.size; files++;
+      } else {
+        const sub = await du(handle, prefix + name + '/');
+        total += sub.total; files += sub.files; dirs += sub.dirs + 1;
+      }
+    }
+    return { total, files, dirs };
+  }
+
+  const before = await du(root);
+  log('BEFORE bytes=' + before.total + ' files=' + before.files + ' dirs=' + before.dirs);
+  log('root entries: ' + (await Array.fromAsync(root.keys())).join(', '));
+
+  // Break down the store: the `.wvm.json` index vs the mirrored file bodies.
+  // The index is supposed to be a *structure* index (paths + sizes); if it is
+  // large, it is carrying file contents too, and boot has to decode all of them.
+  try {
+    const top = [];
+    const walk = async (dir, path) => {
+      for await (const [name, handle] of dir.entries()) {
+        if (handle.kind === 'file') { const f = await handle.getFile(); top.push([path + name, f.size]); }
+        else await walk(handle, path + name + '/');
+      }
+    };
+    await walk(root, '');
+    top.sort((a, b) => b[1] - a[1]);
+    log('largest:');
+    for (const [p, s] of top.slice(0, 12)) log('  ' + (s / 1048576).toFixed(2) + 'MB  ' + p);
+  } catch (e) { log('breakdown failed: ' + e.message); }
+
+  if (location.search.includes('clear=1')) {
+    for await (const name of await Array.fromAsync(root.keys())) {
+      await root.removeEntry(name, { recursive: true });
+    }
+    const after = await du(root);
+    log('CLEARED -> bytes=' + after.total + ' files=' + after.files);
+  }
+  log('DONE');
+</script>
