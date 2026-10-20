@@ -204,6 +204,34 @@ const FILES = [
   // from `internalBinding('performance')`, which now points at the wasm-backed
   // hdr_histogram (native/src/wn_histogram.cc).
   'internal/histogram.js',
+  // milestone 152: the real `node:test`. The harness, the tree of suites/tests,
+  // the reporters and the mock tracker are plain JS; only the CLI runner
+  // (`runner.js`) and coverage are ours, because both are built around spawning
+  // child processes and a V8 coverage collector that a tab cannot host.
+  'test.js',
+  'test/reporters.js',
+  'internal/test_runner/assert.js',
+  'internal/test_runner/harness.js',
+  'internal/test_runner/test.js',
+  'internal/test_runner/utils.js',
+  'internal/test_runner/tag_filter.js',
+  'internal/test_runner/tests_stream.js',
+  'internal/test_runner/snapshot.js',
+  'internal/test_runner/mock/loader.js',
+  'internal/test_runner/mock/mock.js',
+  'internal/test_runner/mock/mock_timers.js',
+  'internal/test_runner/reporter/dot.js',
+  'internal/test_runner/reporter/junit.js',
+  'internal/test_runner/reporter/lcov.js',
+  'internal/test_runner/reporter/rerun.js',
+  'internal/test_runner/reporter/spec.js',
+  'internal/test_runner/reporter/tap.js',
+  'internal/test_runner/reporter/utils.js',
+  'internal/test_runner/reporter/v8-serializer.js',
+  // `test/reporters.js` builds the builtin reporter table from these; the
+  // v8-serializer reporter needs `internal/error_serdes`, which is itself pure
+  // JS over `v8` (our `v8` is real, see M54).
+  'internal/error_serdes.js',
 ];
 
 /**

@@ -158,6 +158,10 @@ export const ERROR_CODES: Record<string, string> = {
   // Message body lives in CUSTOM_FORMATTERS (it is built conditionally).
   ERR_REQUIRE_ASYNC_MODULE:
     'require() cannot be used on an ESM graph with top-level await. Use import() instead.',
+  // `ERR_TEST_FAILURE`'s message IS the first constructor argument (Node
+  // declares it with a class, not a format string); `formatError` therefore
+  // passes it through untouched.
+  ERR_TEST_FAILURE: '%s',
 };
 
 /**
@@ -324,6 +328,12 @@ const CUSTOM_FORMATTERS: Record<string, (args: unknown[]) => string> = {
   ERR_INVALID_URL: () => 'Invalid URL',
   ERR_FALSY_VALUE_REJECTION: () => 'Promise was rejected with falsy value',
   ERR_INVALID_FILE_URL_PATH: (args) => `File URL path ${args[0]}`,
+  // `ERR_TEST_FAILURE(message, failureType)` is constructed with either a string
+  // or the thrown error itself (`new ERR_TEST_FAILURE(err, kTestCodeFailure)`),
+  // and Node uses the error's own message in the latter case — verified against
+  // v26.9.0: `message` is `'inner boom'` and `cause === inner`.
+  ERR_TEST_FAILURE: (args) =>
+    args[0] instanceof Error ? args[0].message : String(args[0]),
   // Node: `ERR_BUFFER_OUT_OF_BOUNDS('offset')` reads '"offset" is outside of
   // buffer bounds'; with no name it is the plain memory-bounds sentence.
   ERR_BUFFER_OUT_OF_BOUNDS: (args) => {
@@ -518,6 +528,15 @@ const CUSTOM_PROPS: Record<string, (err: Record<string, unknown>, args: unknown[
   ERR_ACCESS_DENIED: (err, args) => {
     err.permission = args[1] ?? '';
     err.resource = args[2] ?? '';
+  },
+  // `ERR_TEST_FAILURE(message, failureType)` — the test runner tags every
+  // failure with the phase it happened in (`'subtest'`, `'hook'`, …) and the
+  // reporters key off it. `cause` is always the first argument, which is how a
+  // reporter reaches the user's own error (`reporter/utils.formatError`
+  // inspects `error.cause` for this code).
+  ERR_TEST_FAILURE: (err, args) => {
+    err.failureType = args[1];
+    err.cause = args[0];
   },
 };
 
@@ -717,6 +736,14 @@ function makeErrorClass(
     code = code;
     constructor(...args: unknown[]) {
       super(formatError(code, args));
+      // `internal/errors`'s `isNodeError()` gate: every generated code carries
+      // it (verified against v26.9.0's `internal/errors`). The test runner uses
+      // it to tell its own failures from user errors.
+      Object.defineProperty(this, kIsNodeError, {
+        value: true,
+        enumerable: false,
+        configurable: true,
+      });
       if (initProps) initProps(this as unknown as Record<string, unknown>, args);
     }
   }
@@ -904,6 +931,20 @@ function createErrorsBindingContext(ctx: BuiltinInitContext): Record<string, unk
     })(),
     aggregateTwoErrors: (innerError: unknown, outerError: unknown) => outerError ?? innerError,
     isErrorStackTraceLimitWritable: () => false,
+    /**
+     * `inspect()` that retries without custom inspectors
+     * (`lib/internal/errors.js`). Reporters use it to render an error, and a
+     * throwing `util.inspect.custom` must not take the reporter down with it.
+     */
+    inspectWithNoCustomRetry: (obj: unknown, options?: Record<string, unknown>): string => {
+      const utilInspect = lazyUtilInspect();
+      if (utilInspect === null) return String(obj);
+      try {
+        return utilInspect.inspect(obj, options);
+      } catch {
+        return utilInspect.inspect(obj, { ...options, customInspect: false });
+      }
+    },
     uvException: (e: { errno?: number; code?: string; syscall?: string; path?: string; message?: string }) =>
       new NodeError(e.code ?? 'EIO', e.message ?? 'Unknown error'),
     errnoException: (err: unknown) => (err instanceof Error ? err : new Error(String(err))),
@@ -1152,6 +1193,52 @@ const OPTION_DEFAULTS: Record<string, unknown> = {
   // not ship the ESM vm bridge, so the flag is off (its absence would make
   // `getOptionValue` throw the moment a custom callback is passed).
   '--experimental-vm-modules': false,
+
+  // --- `node:test` (M152) --------------------------------------------------
+  // A tab has no CLI, so every test flag reports the *default* a plain
+  // `node --test` would see. `internal/test_runner/*` reads all of these while
+  // `node:test` is being loaded, so a missing key throws before any test runs.
+  '--test': false,
+  '--test-only': false,
+  '--test-force-exit': false,
+  '--test-update-snapshots': false,
+  '--test-randomize': false,
+  '--test-random-seed': 0,
+  // Node's option parser exposes a synthetic "was the flag given" bit under
+  // this bracket name; `parseCommandLine()` reads it to decide whether to draw a
+  // random seed. We never pass one, so it is false.
+  '[has_test_random_seed]': false,
+  '--test-concurrency': false,
+  '--test-timeout': 0,
+  '--test-isolation': 'none', // no process to spawn; see `test-runner-shims.ts`
+  '--test-name-pattern': [],
+  '--test-skip-pattern': [],
+  '--test-shard': null,
+  '--test-reporter': [],
+  '--test-reporter-destination': [],
+  '--test-global-setup': undefined,
+  '--test-rerun-failures': false,
+  // Coverage and module mocks are off: neither can work in a page (V8's
+  // process-wide collector and a custom ESM loader respectively).
+  '--experimental-test-coverage': false,
+  '--experimental-test-module-mocks': false,
+  '--experimental-test-tag-filter': '',
+  '--test-coverage-branches': 0,
+  '--test-coverage-functions': 0,
+  '--test-coverage-lines': 0,
+  '--test-coverage-include': [],
+  '--test-coverage-exclude': [],
+  '--test-coverage-include-all': false,
+  // `--watch` drives `internal/watch_mode/files_watcher`, which needs `fs.watch`
+  // on a real filesystem.
+  '--watch': false,
+  // TypeScript type stripping is a compile-time transform in Node's loader; our
+  // loader compiles TS itself, so the flag is not consulted.
+  '--strip-types': false,
+  // Source maps are always honoured by the loader (`module.setSourceMapsSupport`),
+  // so the flag that would otherwise gate them reports off while the maps still
+  // resolve.
+  '--enable-source-maps': false,
 };
 
 export const internalOptionsSpec: BuiltinSpec = {

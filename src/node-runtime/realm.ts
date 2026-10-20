@@ -55,6 +55,16 @@ export class Realm {
   #records = new Map<string, ModuleRecord>();
   #byAlias = new Map<string, string>();
   #ctx: BuiltinInitContext;
+  /**
+   * Sandbox globals bound as parameters on every vendored module body.
+   *
+   * Node's CJS wrapper exposes only `exports`/`require`/`module`/`__filename`/
+   * `__dirname`; `process` and friends are real globals. We share the ambient
+   * realm with the host, so those names must be bound explicitly or vendored
+   * code picks up the host's objects (see `compileCjs`).
+   */
+  #moduleGlobals: Record<string, unknown> = {};
+  #moduleGlobalNames: string[] = [];
 
   constructor(bindingCtx: BindingContext) {
     this.#bindings = createBindingTable(bindingCtx);
@@ -82,6 +92,16 @@ export class Realm {
   /** Wire the loader in so `module.createRequire` can resolve user files. */
   setUserRequire(fn: UserRequireFn): void {
     this.#ctx.userRequire = fn;
+  }
+
+  /**
+   * Bind the sandbox's globals into vendored module bodies (see
+   * `#moduleGlobals`). Modules already evaluated keep what they captured, so
+   * the runtime calls this as early as the globals exist.
+   */
+  setModuleGlobals(globals: Record<string, unknown>): void {
+    this.#moduleGlobals = { ...globals };
+    this.#moduleGlobalNames = Object.keys(globals);
   }
 
   /** Wire the loader in so `module.registerHooks` can drive the loader. */
@@ -161,7 +181,7 @@ export class Realm {
       if (src === undefined) {
         throw notImplemented('module', key, `Vendored file vendor/node-lib/${rec.spec.vendorPath} is missing. Run \`npm run vendor\`.`);
       }
-      const fn = compileCjs(src, rec.spec.vendorPath);
+      const fn = compileCjs(src, rec.spec.vendorPath, this.#moduleGlobalNames);
       const moduleObj = { exports: rec.exports };
       rec.moduleObj = moduleObj;
       const dirname = key.startsWith('internal/') ? `internal/${key.split('/').slice(1, -1).join('/')}` : '/';
@@ -175,6 +195,7 @@ export class Realm {
         this.primordials,
         this.privateSymbols,
         this.perIsolateSymbols,
+        ...this.#moduleGlobalNames.map((name) => this.#moduleGlobals[name]),
       );
       rec.exports = moduleObj.exports as Record<string, unknown>;
     } else if (rec.spec.init) {

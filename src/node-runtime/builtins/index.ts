@@ -24,6 +24,8 @@ import { undiciSpec } from './undici';
 import { workerThreadsSpec } from './worker-threads';
 import { cryptoSpec } from './crypto';
 import { dnsSpec, dnsPromisesSpec } from './dns';
+// M152: the `internal/*` modules the vendored `node:test` reaches.
+import { testRunnerInternalSpecs } from './test-runner-shims';
 import { zlibSpec } from './zlib';
 import { sqliteSpec } from './sqlite';
 import { unsupportedSpecs } from './unsupported';
@@ -54,6 +56,8 @@ export const ALL_BUILTINS: BuiltinSpec[] = [
   internalEventsSymbolsSpec,
   internalStreamIterSpec,
   internalStreamIterTypesSpec,
+  // M152: everything `node:test` needs from `internal/*` that we do not vendor
+  ...testRunnerInternalSpecs,
   // vendored real Node source
   ...vendoredBuiltins,
   // milestone 49: Node's virtual file system module (MemoryProvider-backed)

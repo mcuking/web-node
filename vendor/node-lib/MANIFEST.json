@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-23T12:51:26.541Z",
+  "generatedAt": "2026-10-20T02:54:44.497Z",
   "nodeSource": "/Users/tangjianghong/Downloads/node",
   "nodeRevision": "7a3437d9986c4a591084520537720adeb493e6f9",
   "files": [
@@ -1146,6 +1146,153 @@
       "sha256": "4a55f6befca8833c9b2f7ccc298a79258f90d8cadc8e6d705a54ed45b23c0a99",
       "upstreamSha256": "4a55f6befca8833c9b2f7ccc298a79258f90d8cadc8e6d705a54ed45b23c0a99",
       "bytes": 23153,
+      "patches": []
+    },
+    {
+      "path": "test.js",
+      "sha256": "16c12ad39a8b7b41044b31902785d2451deeb0e006e38c951f39b11bbe1ca1f2",
+      "upstreamSha256": "16c12ad39a8b7b41044b31902785d2451deeb0e006e38c951f39b11bbe1ca1f2",
+      "bytes": 1566,
+      "patches": []
+    },
+    {
+      "path": "test/reporters.js",
+      "sha256": "e4dee73334fdd5ceeb6f672128a247060c6ea4440edf0f854064d06f1bb75043",
+      "upstreamSha256": "e4dee73334fdd5ceeb6f672128a247060c6ea4440edf0f854064d06f1bb75043",
+      "bytes": 1211,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/assert.js",
+      "sha256": "b1735a595c16a11071da65b0421077aee078311db4638653d37caf46c374d8f9",
+      "upstreamSha256": "b1735a595c16a11071da65b0421077aee078311db4638653d37caf46c374d8f9",
+      "bytes": 934,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/harness.js",
+      "sha256": "61038f76fac819889060054aff83e10e9087104716270ab8f816a12ff019176b",
+      "upstreamSha256": "61038f76fac819889060054aff83e10e9087104716270ab8f816a12ff019176b",
+      "bytes": 13823,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/test.js",
+      "sha256": "3190b1f181a179e9c7c876999837861be2818861ab3a0148cb977ac1b751a5f3",
+      "upstreamSha256": "3190b1f181a179e9c7c876999837861be2818861ab3a0148cb977ac1b751a5f3",
+      "bytes": 55748,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/utils.js",
+      "sha256": "bdc5b17e4b6549ac851f813ccf088ac9f73d6a0d50a35c52fd08b9eeb34a1279",
+      "upstreamSha256": "bdc5b17e4b6549ac851f813ccf088ac9f73d6a0d50a35c52fd08b9eeb34a1279",
+      "bytes": 23267,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/tag_filter.js",
+      "sha256": "94deae8774460ce1bae171e2ae8981e98b8f0baed68084d5a871ca9bd9e5f20d",
+      "upstreamSha256": "94deae8774460ce1bae171e2ae8981e98b8f0baed68084d5a871ca9bd9e5f20d",
+      "bytes": 14973,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/tests_stream.js",
+      "sha256": "0ddef67b9d250ce914a0733e56af9e7ff334106a083f8bb6c05caad84859a2b3",
+      "upstreamSha256": "0ddef67b9d250ce914a0733e56af9e7ff334106a083f8bb6c05caad84859a2b3",
+      "bytes": 4413,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/snapshot.js",
+      "sha256": "8dd698b2ef8b6f43aca31b2317dc4cb06b7853f0fdc0e88168ee75bbbfaf8c16",
+      "upstreamSha256": "8dd698b2ef8b6f43aca31b2317dc4cb06b7853f0fdc0e88168ee75bbbfaf8c16",
+      "bytes": 8341,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/mock/loader.js",
+      "sha256": "c55296a4ee64a8cc8a6298244f04e84e31cb88a224810d78f6e9ef71619f7654",
+      "upstreamSha256": "c55296a4ee64a8cc8a6298244f04e84e31cb88a224810d78f6e9ef71619f7654",
+      "bytes": 4203,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/mock/mock.js",
+      "sha256": "cc6bd26d9087e175671911108d989a5dee3a1edcb3904110f5919c24da16d745",
+      "upstreamSha256": "cc6bd26d9087e175671911108d989a5dee3a1edcb3904110f5919c24da16d745",
+      "bytes": 32175,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/mock/mock_timers.js",
+      "sha256": "c39c649b64feaf48026c5cd4d97dbba98884767b85fe450cf22b93e9efa2541a",
+      "upstreamSha256": "c39c649b64feaf48026c5cd4d97dbba98884767b85fe450cf22b93e9efa2541a",
+      "bytes": 22806,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/reporter/dot.js",
+      "sha256": "ab82cbe06c52059ee7559beb0433b98a4c2775b4f378f1a59880d477bf6d3505",
+      "upstreamSha256": "ab82cbe06c52059ee7559beb0433b98a4c2775b4f378f1a59880d477bf6d3505",
+      "bytes": 1889,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/reporter/junit.js",
+      "sha256": "2ed2cdbfde3f7d53eb693dc184af48ca04e99d656ea7b7dd1e1adab6934fca64",
+      "upstreamSha256": "2ed2cdbfde3f7d53eb693dc184af48ca04e99d656ea7b7dd1e1adab6934fca64",
+      "bytes": 6093,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/reporter/lcov.js",
+      "sha256": "3347e1c043f70aba7605cbcb228ca2a0066e612de6244be65963c7fb58e89df0",
+      "upstreamSha256": "3347e1c043f70aba7605cbcb228ca2a0066e612de6244be65963c7fb58e89df0",
+      "bytes": 4316,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/reporter/rerun.js",
+      "sha256": "11a0159c0b6d435c73208b57cddd13556ec121f3ec2fc69e3fc7579a7d3d5aa4",
+      "upstreamSha256": "11a0159c0b6d435c73208b57cddd13556ec121f3ec2fc69e3fc7579a7d3d5aa4",
+      "bytes": 2513,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/reporter/spec.js",
+      "sha256": "e4b4523c0b6f2762d14f5a3c19267241fe8ad3a11144a526b9b06134eb9bce09",
+      "upstreamSha256": "e4b4523c0b6f2762d14f5a3c19267241fe8ad3a11144a526b9b06134eb9bce09",
+      "bytes": 4754,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/reporter/tap.js",
+      "sha256": "3aadb6a08fab850e8dc365cc14432fa77464c2b7f794b934c91426bc5c513f3b",
+      "upstreamSha256": "3aadb6a08fab850e8dc365cc14432fa77464c2b7f794b934c91426bc5c513f3b",
+      "bytes": 8809,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/reporter/utils.js",
+      "sha256": "8972181c8d7d9ca5041d79035f791ae9de0bb3d1696fd6cd42dd900e289ac1cc",
+      "upstreamSha256": "8972181c8d7d9ca5041d79035f791ae9de0bb3d1696fd6cd42dd900e289ac1cc",
+      "bytes": 3030,
+      "patches": []
+    },
+    {
+      "path": "internal/test_runner/reporter/v8-serializer.js",
+      "sha256": "703c91cd034964dfb41deed5e79971fe061ab154220d8a8bb5adcc9af48b06bc",
+      "upstreamSha256": "703c91cd034964dfb41deed5e79971fe061ab154220d8a8bb5adcc9af48b06bc",
+      "bytes": 1459,
+      "patches": []
+    },
+    {
+      "path": "internal/error_serdes.js",
+      "sha256": "a5dd5c2259cf8f3a4431901329329eebf742ada048f4b67bfadee082a470a4bd",
+      "upstreamSha256": "a5dd5c2259cf8f3a4431901329329eebf742ada048f4b67bfadee082a470a4bd",
+      "bytes": 6071,
       "patches": []
     }
   ]

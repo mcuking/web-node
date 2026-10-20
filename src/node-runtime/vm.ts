@@ -46,12 +46,31 @@ export class CompileError extends Error {
   }
 }
 
-/** Wrap CJS source into a function. The generic parameter list keeps the shape identical to Node. */
-export function compileCjs(source: string, filename: string): CjsFunction {
+/**
+ * Wrap CJS source into a function. The generic parameter list keeps the shape identical to Node.
+ *
+ * `extraParams` binds further free variables for the module body. Node's real
+ * CJS wrapper only receives the five locals, and everything else (`process`,
+ * `console`, timers) is a genuine global of the Node process. Here the module
+ * body shares the ambient JS realm with the host page (a browser worker, or the
+ * test runner under Vitest), so a bare `process` would resolve to whatever the
+ * host happens to define — in Vitest that is the *host* Node process, and
+ * `node:test`'s reporter then writes its report to the host's stdout instead of
+ * the sandbox's. Binding these names as parameters makes the vendored code see
+ * the sandbox's own globals wherever it runs.
+ */
+export function compileCjs(
+  source: string,
+  filename: string,
+  extraParams: readonly string[] = [],
+): (...args: unknown[]) => void {
   // Tag the unit with a `node:`-style URL so stack frames read like Node's
   // (`node:internal/util/inspect`) and remember the text for source-line recovery.
   try {
-    return compileTagged(CJS_PARAMS, source, `node:${filename}`) as unknown as CjsFunction;
+    const params = extraParams.length > 0 ? [...CJS_PARAMS, ...extraParams] : CJS_PARAMS;
+    return compileTagged(params, source, `node:${filename}`) as unknown as (
+      ...args: unknown[]
+    ) => void;
   } catch (err) {
     throw new CompileError(filename, err);
   }

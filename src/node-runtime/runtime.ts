@@ -27,6 +27,25 @@ export class ProcessExit extends Error {
 // our timer bindings would call themselves through globalThis.setTimeout.
 const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
 
+/**
+ * Idle macrotask turns to allow after `beforeExit` before emitting `exit`.
+ *
+ * An async `beforeExit` listener's continuation runs on the microtask queue,
+ * which `#activeWorkCount()` cannot see; several turns let that chain settle so
+ * its final writes (Node's test reporter is exactly this) are not cut off. Node
+ * itself gets the same effect from re-checking the loop between listener
+ * phases.
+ */
+const IDLE_TURNS_BEFORE_EXIT = 8;
+
+/**
+ * Wall-clock quiet period required after `beforeExit` when something is
+ * listening. A stream destination (Node's test reporters pipe into
+ * `process.stdout`) flushes on its own schedule, so counting macrotasks alone
+ * races with it; this is the bound that makes the last writes observable.
+ */
+const BEFORE_EXIT_SETTLE_MS = 60;
+
 /** A node in the vendored `internal/timers.js` linked lists (only what reset needs). */
 interface TimerNode {
   _idleNext: TimerNode | null;
@@ -177,6 +196,18 @@ export class NodeRuntime {
   #hostGeneration = 0;
   #nextTimerId = 1;
   #exitCode: number | null = null;
+  /**
+   * `beforeExit` / `exit` fire at most once per run. Node emits `beforeExit`
+   * whenever the loop empties (and again if a listener gives it work), then
+   * `exit` for real. Each `runMain` is a fresh process, so both reset with it.
+   */
+  #beforeExitEmitted = false;
+  #exitEmitted = false;
+  /** Consecutive idle macrotasks seen since `beforeExit`; see `drain()`. */
+  #idleTurnsAfterBeforeExit = 0;
+  /** When `beforeExit` was emitted, and whether anyone was listening. */
+  #beforeExitAt = 0;
+  #hadBeforeExitListeners = false;
   #nextTickQueue: Array<() => void> = [];
   #nextTickScheduled = false;
   /** Registry response cache for `npm install`; created lazily, shared by installs. */
@@ -238,6 +269,9 @@ export class NodeRuntime {
       writeStderr: onStderr,
       exit: (code: number) => {
         this.#exitCode = code;
+        // Real Node runs the `exit` listeners synchronously inside `process.exit()`
+        // before it terminates, and they see the final code.
+        this.#emitExit(code);
         throw new ProcessExit(code);
       },
       // Node's `process.nextTick` is its own queue that drains to exhaustion
@@ -451,6 +485,11 @@ export class NodeRuntime {
     if (sandboxGlobal.self === undefined) sandboxGlobal.self = globalThis;
     this.loader.setGlobals(sandboxGlobal);
     this.sandboxGlobals = sandboxGlobal;
+    // Vendored modules are compiled as plain function bodies in this same JS
+    // realm, so their bare `process` would be the *host's* (Node's, under
+    // Vitest; absent in a browser). Bind ours as a parameter instead, which is
+    // what a real Node build gives them through the real global.
+    this.realm.setModuleGlobals({ process: this.process });
 
     if (opts.installGlobals !== false) {
       this.#installGlobals(sandboxGlobal);
@@ -650,8 +689,73 @@ export class NodeRuntime {
       await new Promise<void>((resolve) => {
         nativeSetTimeout(resolve, 0);
       });
-      if (this.#activeWorkCount() === 0) return true;
+      if (this.#activeWorkCount() === 0) {
+        // The loop is empty: this is where Node emits `beforeExit`. A listener
+        // may schedule more work (that is the documented way to use it), so the
+        // answer is only final on the *next* idle check. Emitting once and
+        // looping keeps that contract without spinning forever.
+        if (!this.#beforeExitEmitted) {
+          this.#beforeExitEmitted = true;
+          this.#idleTurnsAfterBeforeExit = 0;
+          this.#beforeExitAt = performance.now();
+          this.#hadBeforeExitListeners = this.#emitBeforeExit() > 0;
+          continue;
+        }
+        // An async `beforeExit` listener (Node's own test runner has one) keeps
+        // working across microtask turns *after* our emit returns, and that work
+        // is invisible to `#activeWorkCount()`. Its last writes may also go
+        // through a stream, which flushes a few macrotasks later still. Require
+        // both a few idle turns *and* a quiet spell in wall-clock time, or the
+        // final report is cut off.
+        if (++this.#idleTurnsAfterBeforeExit < IDLE_TURNS_BEFORE_EXIT) continue;
+        if (
+          this.#hadBeforeExitListeners &&
+          performance.now() - this.#beforeExitAt < BEFORE_EXIT_SETTLE_MS
+        ) {
+          continue;
+        }
+        // Truly nothing left: run the `exit` listeners, as a real process does.
+        this.#emitExit(this.#exitCode ?? 0);
+        return true;
+      }
+      this.#idleTurnsAfterBeforeExit = 0;
       if (timeoutMs > 0 && performance.now() - start >= timeoutMs) return false;
+    }
+  }
+
+  /**
+   * Emit `process`'s `beforeExit` event. Node passes the code the process would
+   * exit with (the current `exitCode`).
+   */
+  #emitBeforeExit(): number {
+    try {
+      const proc = this.realm?.require('process') as
+        | {
+            emit?: (event: string, ...args: unknown[]) => unknown;
+            listenerCount?: (event: string) => number;
+          }
+        | undefined;
+      const listeners = proc?.listenerCount?.('beforeExit') ?? 0;
+      proc?.emit?.('beforeExit', this.#exitCode ?? 0);
+      return listeners;
+    } catch {
+      // No process view (or a listener threw): Node would report the throw and
+      // still exit, so exiting is the right outcome here too.
+      return 0;
+    }
+  }
+
+  /** Emit `process`'s `exit` event, at most once. */
+  #emitExit(code: number): void {
+    if (this.#exitEmitted) return;
+    this.#exitEmitted = true;
+    try {
+      const proc = this.realm?.require('process') as
+        | { emit?: (event: string, ...args: unknown[]) => unknown }
+        | undefined;
+      proc?.emit?.('exit', code);
+    } catch {
+      // `exit` listeners are synchronous and cannot change the outcome.
     }
   }
 
@@ -701,6 +805,11 @@ export class NodeRuntime {
     this.spawn.reset();
     this.workers.reset();
     this.#exitCode = null;
+    this.#beforeExitEmitted = false;
+    this.#exitEmitted = false;
+    this.#idleTurnsAfterBeforeExit = 0;
+    this.#beforeExitAt = 0;
+    this.#hadBeforeExitListeners = false;
   }
 
   #clearAllTimers(): void {

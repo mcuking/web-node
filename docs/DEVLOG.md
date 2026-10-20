@@ -246,6 +246,27 @@ node tools/vendor.mjs                 # 重新 vendor 真 Node 源码
 
 ## 变更记录
 
+### 2026-10-20 · M152 —— `node:test` + `node:test/reporters`
+
+**改了什么**
+
+- vendor 真 `test.js` / `test/reporters.js` / `internal/test_runner/**`（harness、测试树、tests_stream、tag_filter、snapshot、assert、`mock/*`、7 个 reporter、`internal/error_serdes`），注册 **29 个 builtin**（MANIFEST +28）。
+- 自写三个页面专属内部模块（`builtins/test-runner-shims.ts`）：`internal/test_runner/runner`（不 spawn，`isolation:'none'` 在本 realm 逐个 `require` 文件）、`internal/test_runner/coverage`（无 V8 覆盖率收集器 → 报「无覆盖率」而非失败）、`internal/modules/*`+`source_map_cache`（转发给已有 `module` builtin）。
+- `bindings/util.ts` 补 `getCallerLocation()`（`Error.captureStackTrace` + 帧解析），`node:test` 用它记录每个测试的声明位置。
+- `internal/errors` 补 **`ERR_TEST_FAILURE`**（`message = 首参 instanceof Error ? 首参.message : String(首参)`、`cause = 首参`、`failureType = 次参`），并给**所有** `codes.X` 实例加 `kIsNodeError`。
+- `drain()` 补上真进程退出语义：发一次 `beforeExit`、8 个空闲宏任务轮 + 60ms 静默窗口后再发 `exit`。
+
+**为什么**
+
+`node:test` 是公共内建里唯一「纯 JS、价值高」的缺口，也是用户把项目搬进标签页后第一个想跑的东西。落地过程暴露两个通用问题：
+
+1. **vendored 模块的裸 `process` 解析到宿主全局**。`internal/test_runner/utils.js` 在模块顶层抓 `process.stdout` 当 reporter 目的地；浏览器 worker 里我们装了沙箱全局所以没事，但 Vitest（`installGlobals:false`）下它拿到宿主 Node 的 process —— 报告写进了宿主 stdout，web-node 的 `onStdout` 一个字节都收不到。修法：`compileCjs(src, filename, extraParams)` + `Realm.setModuleGlobals({ process })`，把沙箱 `process` 绑成形参（= 真 Node 里它是真全局）。
+2. **异步 `beforeExit` 监听器的工作对 `activeWorkCount()` 不可见**。Node 的 node:test 正是在 `beforeExit` 里等 `root.subtestsPromise` 并刷 reporter；原来 `drain()` 一空闲就返回，摘要/失败详情被截断。60ms 静默窗口是因为 reporter 是流，最后一笔写入比监听器 promise 更晚。
+
+**涉及文件**：`src/node-runtime/vm.ts`、`realm.ts`、`runtime.ts`、`bindings/util.ts`、`builtins/{index,internal-shims,vendored-builtins,test-runner-shims}.ts`、`tools/vendor.mjs`、`vendor/node-lib/MANIFEST.json`（+ vendored 文件）、`test/node-test.test.ts`、`docs/specs/m152-node-test.md`。
+
+**验证**：`npx vitest run` **158 文件 / 1333 通过、6 skip**（净增 6）；`npm run build` 通过。
+
 ### 2026-10-12 · M151 —— 浏览器能力探测 + 降级提示（P2b）
 
 **目标**（P2b，取自 `docs/webcontainer-gap-analysis.md`）：不再在缺特性的浏览器上**不透明失败**——探测 `crossOriginIsolated` / `SharedArrayBuffer` / OPFS，把当前模式**说清楚**，缺什么就给什么降级提示。

@@ -165,6 +165,44 @@ export function parseEnv(input: string): Record<string, string> {
   return store;
 }
 
+/**
+ * `internalBinding('util').getCallerLocation()` — `[line, column, filename]` of
+ * the *caller*, or `undefined` when there is no caller frame. Node implements
+ * this in C++ (`src/node_util.cc`) over `StackTrace::CurrentStackTrace`; the same
+ * information is on a captured `Error` stack, so the JS equivalent is exact as
+ * long as the frame is parsed the way V8 formats it.
+ *
+ * `node:test` calls this on every `test()`/`describe()`/hook to record where the
+ * test was declared (it is what the spec reporter prints for a failure).
+ */
+function getCallerLocation(): [number, number, string] | undefined {
+  const holder: { stack?: string } = {};
+  // `stackTraceLimit` / `captureStackTrace` are V8 extensions that the TS lib
+  // here does not declare (`types: []`), so reach them through a narrow cast.
+  const errorCtor = Error as unknown as {
+    stackTraceLimit: number;
+    captureStackTrace: (target: object, constructorOpt?: unknown) => void;
+  };
+  const previousLimit = errorCtor.stackTraceLimit;
+  errorCtor.stackTraceLimit = 1;
+  try {
+    // Omitting this function means frame 0 is the caller — the C++ version's
+    // "frame zero is this function, frame one is the caller" mapping.
+    errorCtor.captureStackTrace(holder, getCallerLocation);
+  } finally {
+    errorCtor.stackTraceLimit = previousLimit;
+  }
+  const frame = holder.stack?.split('\n')[0]?.trim();
+  if (!frame) return undefined;
+  // `    at fn (file:line:col)` or `    at file:line:col`.
+  const match = /\(?((?:[a-zA-Z]+:\/\/)?[^()\s]+):(\d+):(\d+)\)?$/.exec(frame);
+  if (!match) return undefined;
+  const line = Number(match[2]);
+  const column = Number(match[3]);
+  if (!Number.isFinite(line) || !Number.isFinite(column)) return undefined;
+  return [line, column, match[1]];
+}
+
 export const utilBinding: BindingFactory = (ctx: BindingContext) => ({
   constants: {
     kPending,
@@ -211,6 +249,11 @@ export const utilBinding: BindingFactory = (ctx: BindingContext) => ({
     }
     return result;
   },
+  /**
+   * `[line, column, filename]` of the calling frame (see `getCallerLocation`
+   * above). `node:test` records this at declaration time.
+   */
+  getCallerLocation,
   getConstructorName: (obj: object): string => {
     if (obj === null || obj === undefined) return String(obj);
     const proto = Object.getPrototypeOf(obj);
